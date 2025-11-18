@@ -1,8 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { User, Role, Prisma } from '@prisma/client';
-import { CreateUserDto } from './dto/create-user.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
+import { CreateResidentDto } from './dto/create-resident.dto';
+import { UpdateResidentDto } from './dto/update-resident.dto';
 import * as bcrypt from 'bcrypt';
 
 // Define a type for a User object that includes units and leases (or whatever you need)
@@ -15,17 +15,25 @@ type UserWithRelations = Prisma.UserGetPayload<{
 }>;
 
 @Injectable()
-export class UsersService {
+export class ResidentService {
   constructor(private prisma: PrismaService) {}
 
   // POST /users: Create User (Admin action)
-  async create(data: CreateUserDto): Promise<User> {
-    const passwordHash = data.password ? await bcrypt.hash(data.password, 10) : undefined;
+  async create(data: CreateResidentDto): Promise<User> {
+    // 1. Destructure to extract 'password' and put everything else into 'restOfData'
+    const { password, ...restOfData } = data;
+
+    let passwordHash: string | undefined;
+
+    // 2. Hash the password if provided
+    if (password) {
+      passwordHash = await bcrypt.hash(password, 10);
+    }
 
     return this.prisma.user.create({
       data: {
-        ...data,
-        passwordHash,
+        ...restOfData, // <-- Only the fields that exist in the DB model
+        passwordHash,    // <-- The computed, hashed field
         userStatus: 'ACTIVE', 
         origin: 'dashboard',
       },
@@ -41,7 +49,7 @@ export class UsersService {
       },
       skip, 
       take,
-      orderBy: { nameEN: 'asc' },
+      orderBy: { name: 'asc' },
     });
   }
 
@@ -66,7 +74,7 @@ async findOne(id: string): Promise<UserWithRelations> { // <-- Use the new type 
 
 
   // PATCH /users/:id: Update User Info
-  async update(id: string, data: UpdateUserDto): Promise<User> {
+  async update(id: string, data: UpdateResidentDto): Promise<User> {
     const updateData: any = { ...data };
     
     // Handle password update separately

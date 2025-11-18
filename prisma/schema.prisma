@@ -166,7 +166,7 @@ model User {
   email          String?   @unique
   phone          String?
   phoneVerified  Boolean   @default(false)
-  nameEN         String?
+  name           String?   @map("nameEN")
   nameAR         String?
   role           Role      @default(RESIDENT)
   origin         String    @default("dashboard") // "community" or "dashboard"

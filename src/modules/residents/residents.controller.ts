@@ -1,20 +1,20 @@
 import { Controller, Get, Post, Body, Patch, Param, Delete, HttpCode, HttpStatus, Query } from '@nestjs/common';
-import { UsersService } from './users.service';
-import { CreateUserDto } from './dto/create-user.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
+import { ResidentService } from './residents.service';
+import { CreateResidentDto } from './dto/create-resident.dto';
+import { UpdateResidentDto } from './dto/update-resident.dto';
 import { ApiTags, ApiQuery } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 
 @ApiTags('users')
 @Controller('users')
-export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+export class ResidentController {
+  constructor(private readonly residentService: ResidentService) {}
 
   // POST /users
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  create(@Body() createUserDto: CreateUserDto) {
-    return this.usersService.create(createUserDto);
+  create(@Body() createUserDto: CreateResidentDto) {
+    return this.residentService.create(createUserDto);
   }
 
   // GET /users (List with filtering/pagination)
@@ -31,32 +31,32 @@ export class UsersController {
     const skipNum = skip ? parseInt(skip, 10) : 0;
     const takeNum = take ? parseInt(take, 10) : 20;
 
-    return this.usersService.findAll(role, skipNum, takeNum);
+    return this.residentService.findAll(role, skipNum, takeNum);
   }
 
   // GET /users/:id
   @Get(':id')
   findOne(@Param('id') id: string) {
-    return this.usersService.findOne(id);
+    return this.residentService.findOne(id);
   }
 
   // PATCH /users/:id
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateData: UpdateUserDto) {
-    return this.usersService.update(id, updateData);
+  update(@Param('id') id: string, @Body() updateData: UpdateResidentDto) {
+    return this.residentService.update(id, updateData);
   }
 
   // DELETE /users/:id (Deactivate)
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   deactivate(@Param('id') id: string) {
-    return this.usersService.deactivate(id);
+    return this.residentService.deactivate(id);
   }
   
   // Endpoint to list units assigned to the user (uses the findOne service method's included data)
   @Get(':id/units')
   async listUnits(@Param('id') id: string) {
-    const user = await this.usersService.findOne(id);
+    const user = await this.residentService.findOne(id);
     return user.residentUnits; // Returns the nested units data
   }
 }

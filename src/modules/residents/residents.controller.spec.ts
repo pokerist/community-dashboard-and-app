@@ -1,30 +1,30 @@
 // src/modules/users/users.controller.spec.ts
 
 import { Test, TestingModule } from '@nestjs/testing';
-import { UsersController } from './users.controller';
-import { UsersService } from './users.service';
+import { ResidentController } from './residents.controller';
+import { ResidentService } from './residents.service';
 
-// Mock the UsersService
-const mockUsersService = {
+// Mock the ResidentService
+const mockResidentService = {
   findAll: jest.fn(),
   // Add mocks for create, findOne, update, deactivate if needed later
 };
 
-describe('UsersController', () => {
-  let controller: UsersController;
+describe('ResidentController', () => {
+  let controller: ResidentController;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      controllers: [UsersController],
+      controllers: [ResidentController],
       providers: [
         {
-          provide: UsersService,
-          useValue: mockUsersService, // Use our mock
+          provide: ResidentService,
+          useValue: mockResidentService, // Use our mock
         },
       ],
     }).compile();
 
-    controller = module.get<UsersController>(UsersController);
+    controller = module.get<ResidentController>(ResidentController);
     jest.clearAllMocks();
   });
 
@@ -39,13 +39,13 @@ describe('UsersController', () => {
     const querySkip = '5';
     const queryTake = '15';
     
-    mockUsersService.findAll.mockResolvedValue([]); // Mock return value
+    mockResidentService.findAll.mockResolvedValue([]); // Mock return value
 
     // 2. Act: Call the controller method with string parameters
     await controller.findAll(queryRole as any, querySkip, queryTake); 
 
     // 3. Assert: Check if the service was called with correct types (number)
-    expect(mockUsersService.findAll).toHaveBeenCalledWith(
+    expect(mockResidentService.findAll).toHaveBeenCalledWith(
       queryRole,
       5,  // Should be parsed to number
       15 // Should be parsed to number
@@ -53,13 +53,13 @@ describe('UsersController', () => {
   });
   
   it('should use default skip and take values when parameters are missing', async () => {
-    mockUsersService.findAll.mockResolvedValue([]); 
+    mockResidentService.findAll.mockResolvedValue([]); 
 
     // Call the controller without skip/take parameters
     await controller.findAll(undefined, undefined, undefined); 
 
     // Verify defaults were used
-    expect(mockUsersService.findAll).toHaveBeenCalledWith(
+    expect(mockResidentService.findAll).toHaveBeenCalledWith(
       undefined,
       0,  // Default skip
       20 // Default take

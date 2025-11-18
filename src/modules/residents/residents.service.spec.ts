@@ -1,6 +1,6 @@
 // src/modules/users/users.service.spec.ts
 import { Test, TestingModule } from '@nestjs/testing';
-import { UsersService } from './users.service';
+import { ResidentService } from './residents.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import * as bcrypt from 'bcrypt'; // Import bcrypt for mocking
 
@@ -19,13 +19,13 @@ const mockPrismaService = {
   },
 };
 
-describe('UsersService', () => {
-  let service: UsersService;
+describe('ResidentService', () => {
+  let service: ResidentService;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
-        UsersService,
+        ResidentService,
         {
           provide: PrismaService,
           useValue: mockPrismaService,
@@ -33,7 +33,7 @@ describe('UsersService', () => {
       ],
     }).compile();
 
-    service = module.get<UsersService>(UsersService);
+    service = module.get<ResidentService>(ResidentService);
     // Reset mocks before each test
     jest.clearAllMocks();
   });
