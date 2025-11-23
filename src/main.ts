@@ -24,6 +24,8 @@ async function bootstrap() {
     .setVersion('1.0')
     .addTag('users', 'Endpoints for user, resident, and contractor management.')
     .addTag('units', 'Endpoints for managing unit inventory and summaries.')
+    .addTag('leases', 'Lease agreements and rental contract workflows.')
+
     // This decorator is essential if you plan to use JWT authentication later.
     .addBearerAuth() 
     .build();

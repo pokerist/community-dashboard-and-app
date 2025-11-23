@@ -2,19 +2,13 @@
 generator client {
   provider = "prisma-client-js"
 }
-
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
-        
 
-/**
- * -------------------------
- * ENUMS
- * -------------------------
- */
+
 enum Role {
   SUPER_ADMIN
   MANAGER
@@ -23,12 +17,14 @@ enum Role {
   RESIDENT
   CONTRACTOR
   OWNER
+  TENANT
 }
 
 enum UnitStatus {
-  OCCUPIED
-  UNDER_MAINTENANCE
   AVAILABLE
+  OCCUPIED
+  LEASED
+  UNDER_MAINTENANCE
   UNDER_CONSTRUCTION
 }
 
@@ -155,11 +151,6 @@ enum Channel {
   EMAIL
 }
 
-/**
- * -------------------------
- * CORE MODELS (User + Unit + etc)
- * -------------------------
- */
 
 model User {
   id             String    @id @default(uuid())
@@ -272,12 +263,6 @@ model Attachment {
   createdAt DateTime @default(now())
 }
 
-/**
- * -------------------------
- * Services + Service Requests
- * -------------------------
- */
-
 model Service {
   id              String           @id @default(uuid())
   name            String
@@ -338,11 +323,6 @@ model ServiceRequestFieldValue {
   fileAttachmentId String?
 }
 
-/**
- * -------------------------
- * Access / QR
- * -------------------------
- */
 
 model AccessQRCode {
   id            String       @id @default(uuid())
@@ -365,11 +345,6 @@ model AccessQRCode {
   @@index([createdAt])
 }
 
-/**
- * -------------------------
- * Leases, Invoices, Complaints, Violations, Banner
- * -------------------------
- */
 
 model Lease {
   id               String      @id @default(uuid())
@@ -466,11 +441,6 @@ model Banner {
   createdAt       DateTime @default(now())
 }
 
-/**
- * -------------------------
- * Security / Incidents / Facilities / Devices / Reports
- * -------------------------
- */
 
 model Incident {
   id             String           @id @default(uuid())
@@ -556,12 +526,6 @@ model ScheduledReport {
   createdAt      DateTime       @default(now())
 }
 
-/**
- * -------------------------
- * Notifications & Logs
- * -------------------------
- */
-
 model Notification {
   id             String            @id @default(uuid())
   title          String
@@ -592,11 +556,6 @@ model NotificationLog {
   createdAt        DateTime      @default(now())
 }
 
-/**
- * -------------------------
- * NEW: Pending registrations + status logs for onboarding flow
- * -------------------------
- */
 
 model PendingRegistration {
   id               String   @id @default(uuid())
