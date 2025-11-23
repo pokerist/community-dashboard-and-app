@@ -18,15 +18,26 @@ async function bootstrap() {
   }));
 
   // --- 2. Swagger (OpenAPI) Configuration ---
-  const config = new DocumentBuilder()
-    .setTitle('Community App Dashboard API')
-    .setDescription('The API documentation for the PMS/Community App backend.')
-    .setVersion('1.0')
-    .addTag('users', 'Endpoints for user, resident, and contractor management.')
-    .addTag('units', 'Endpoints for managing unit inventory and summaries.')
-    // This decorator is essential if you plan to use JWT authentication later.
-    .addBearerAuth() 
-    .build();
+const config = new DocumentBuilder()
+  .setTitle('Community App Dashboard API')
+  .setDescription('API documentation for the PMS/Community App backend.')
+  .setVersion('1.0')
+  .addBearerAuth()
+
+  .addTag('Users', 'User, resident, and contractor management.')
+  .addTag('Units', 'Unit inventory, ownership, and summary endpoints.')
+  .addTag('Leases', 'Lease agreements and rental contract workflows.')
+  .addTag('Invoices', 'Billing, charges, and payment workflows.')
+  .addTag('Complaints', 'Resident complaint submission and handling.')
+  .addTag('Violations', 'Community violations, penalties, and appeals.')
+  .addTag('Facilities', 'Facility creation and management.')
+  .addTag('Bookings', 'Facility booking requests and schedules.')
+  .addTag('Devices', 'Smart device registration and integration.')
+  .addTag('AccessControl', 'QR codes and access authorization flows.')
+  .addTag('Notifications', 'In-app and external notification management.')
+  .addTag('Registrations', 'Pending user registrations and verification.')
+
+  .build();
 
   const document = SwaggerModule.createDocument(app, config);
   // Serve the documentation at http://localhost:3000/api
