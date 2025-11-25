@@ -1,13 +1,12 @@
-
 generator client {
   provider = "prisma-client-js"
 }
+
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
-
 
 enum Role {
   SUPER_ADMIN
@@ -151,7 +150,6 @@ enum Channel {
   EMAIL
 }
 
-
 model User {
   id             String    @id @default(uuid())
   email          String?   @unique
@@ -218,6 +216,7 @@ model Unit {
   complaints      Complaint[]
   violations      Violation[]
   incidents       Incident[]
+  unitFees        UnitFee[]
 }
 
 model ResidentUnit {
@@ -306,6 +305,7 @@ model ServiceRequest {
   attachments  Attachment[]               @relation("ServiceRequestAttachments")
   requestedAt  DateTime                   @default(now())
   updatedAt    DateTime                   @updatedAt
+  invoices     Invoice[]
 
   @@index([requestedAt])
 }
@@ -322,7 +322,6 @@ model ServiceRequestFieldValue {
   valueDate        DateTime?
   fileAttachmentId String?
 }
-
 
 model AccessQRCode {
   id            String       @id @default(uuid())
@@ -344,7 +343,6 @@ model AccessQRCode {
 
   @@index([createdAt])
 }
-
 
 model Lease {
   id               String      @id @default(uuid())
@@ -382,6 +380,15 @@ model Invoice {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
   documents     Attachment[]  @relation("InvoiceDocuments")
+
+  // tracks the invoice source (violation/service request)
+  violationId String?
+  violation   Violation? @relation(fields: [violationId], references: [id])
+
+  serviceRequestId String?
+  serviceRequest   ServiceRequest? @relation(fields: [serviceRequestId], references: [id])
+
+  unitFee UnitFee? @relation("FeeInvoices")
 
   @@index([createdAt])
 }
@@ -421,6 +428,7 @@ model Violation {
   residentId      String?
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
+  invoices        Invoice[]
 }
 
 model Banner {
@@ -440,7 +448,6 @@ model Banner {
   clicks          Int      @default(0)
   createdAt       DateTime @default(now())
 }
-
 
 model Incident {
   id             String           @id @default(uuid())
@@ -556,7 +563,6 @@ model NotificationLog {
   createdAt        DateTime      @default(now())
 }
 
-
 model PendingRegistration {
   id               String   @id @default(uuid())
   phone            String   @unique
@@ -580,4 +586,21 @@ model UserStatusLog {
   source    String? // "signup_auto" | "admin" | "manual"
   note      String?
   createdAt DateTime @default(now())
+}
+
+model UnitFee {
+  id           String   @id @default(uuid())
+  unit         Unit     @relation(fields: [unitId], references: [id])
+  unitId       String
+  type         String // e.g., "Electricity", "Water", "A/C Service"
+  amount       Decimal  @db.Decimal(12, 2)
+  billingMonth DateTime // Use the first day of the month being billed (e.g., 2025-11-01)
+
+  // Links to the generated invoice
+  invoiceId String?  @unique
+  invoice   Invoice? @relation("FeeInvoices", fields: [invoiceId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([unitId, type, billingMonth])
 }
