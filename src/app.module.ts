@@ -1,12 +1,14 @@
 import { Module } from '@nestjs/common';
-import { InvoicesModule } from './modules/invoices/invoices.module';
 import { PrismaModule } from '../prisma/prisma.module'
+import { InvoicesModule } from './modules/invoices/invoices.module';
 import { ViolationsModule } from './modules/violations/violations.module';
 
 @Module({
   imports: [
     PrismaModule,
-    InvoicesModule, ViolationsModule],
+    InvoicesModule,
+    ViolationsModule
+  ],
   controllers: [],
   providers: [],
 })
