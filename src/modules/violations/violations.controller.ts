@@ -4,7 +4,7 @@ import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { ViolationsService } from './violations.service';
 import { CreateViolationDto, UpdateViolationDto } from './dto/violations.dto';
 
-@ApiTags('violations')
+@ApiTags('Violations')
 @Controller('violations')
 export class ViolationsController {
   constructor(private readonly violationsService: ViolationsService) {}

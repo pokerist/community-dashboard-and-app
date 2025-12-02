@@ -482,7 +482,7 @@ model Booking {
   bookingNumber String        @unique
   resident      User          @relation(fields: [residentId], references: [id])
   residentId    String
-  facility      Facility      @relation(fields: [facilityId], references: [id])
+  facmodel Violility      Facility      @relation(fields: [facilityId], references: [id])
   facilityId    String
   unit          Unit          @relation(fields: [unitId], references: [id])
   unitId        String

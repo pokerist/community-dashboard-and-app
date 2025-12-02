@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { PrismaExceptionFilter } from './core/filters/prisma-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -43,6 +44,9 @@ const config = new DocumentBuilder()
   // Serve the documentation at http://localhost:3000/api
   SwaggerModule.setup('api', app, document);
   // ------------------------------------------
+
+  // Apply the global filter to catch all Prisma errors application-wide
+  app.useGlobalFilters(new PrismaExceptionFilter());
 
   // Enable CORS if you are running a frontend on a different port (e.g., React on 3001)
   // app.enableCors(); 

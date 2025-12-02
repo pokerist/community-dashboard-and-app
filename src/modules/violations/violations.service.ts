@@ -9,17 +9,18 @@ import { ViolationStatus, InvoiceStatus } from '@prisma/client';
 export class ViolationsService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly invoicesService: InvoicesService, // Inject it
+    private readonly invoicesService: InvoicesService,
   ) {}
 
   // Helper to generate sequential numbers (VIO-00001)
   private async generateViolationNumber(): Promise<string> {
-    const last = await this.prisma.violation.findFirst({
+    const lastViolation = await this.prisma.violation.findFirst({
       orderBy: { createdAt: 'desc' },
       select: { violationNumber: true },
     });
-    const num = last?.violationNumber ? parseInt(last.violationNumber.split('-')[1]) : 0;
-    return `VIO-${(num + 1).toString().padStart(5, '0')}`;
+    const lastNumber = lastViolation?.violationNumber ? parseInt(lastViolation.violationNumber.substring(4)) : 0;
+    const newNumber = lastNumber + 1
+    return `VIO-${newNumber.toString().padStart(5, '0')}`;
   }
 
   async create(dto: CreateViolationDto) {
@@ -44,10 +45,10 @@ export class ViolationsService {
       await this.invoicesService.create({
         unitId: dto.unitId,
         residentId: dto.residentId,
-        type: `Violation: ${dto.type}`, // e.g., "Violation: Noise Complaint"
+        type: `Violation: ${dto.type}`,
         amount: dto.fineAmount,
-        dueDate: dto.dueDate, // <--- Using the admin-provided date
-        violationId: violation.id, // Linking back to source
+        dueDate: dto.dueDate,
+        violationId: violation.id,
         status: InvoiceStatus.PENDING,
       });
     }
@@ -60,19 +61,23 @@ export class ViolationsService {
       include: {
         unit: { select: { unitNumber: true, projectName: true } },
         resident: { select: { nameEN: true, email: true } },
-        invoice: { select: { id: true, status: true, invoiceNumber: true } }, // Show linked invoice status
+        invoices: { select: { id: true, status: true, invoiceNumber: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
   }
 
+  // NOTE: findOne must include 'invoices' to support the remove check.
   async findOne(id: string) {
     const violation = await this.prisma.violation.findUnique({
       where: { id },
       include: {
         unit: true,
         resident: true,
-        invoice: true, // Full invoice details
+        // CRITICAL: Ensure invoices includes status and id for the check in remove()
+        invoices: { 
+            select: { id: true, status: true, invoiceNumber: true } 
+        }, 
         issuedBy: { select: { nameEN: true } }
       },
     });
@@ -89,16 +94,23 @@ export class ViolationsService {
   }
 
   async remove(id: string) {
+    // CRITICAL: findOne must be called here to include the invoices array!
     const violation = await this.findOne(id);
+    
+    // Find the first (and likely only) linked invoice
+    const linkedInvoice = violation.invoices?.[0];
 
-    // If there is an invoice, we must cancel it first (Transactional logic)
+    // If there is an invoice, we must handle it (Transactional logic)
     return this.prisma.$transaction(async (tx) => {
-      if (violation.invoice) {
-        if (violation.invoice.status === InvoiceStatus.PAID) {
+      if (linkedInvoice) {
+        if (linkedInvoice.status === InvoiceStatus.PAID) {
            throw new BadRequestException('Cannot delete a violation that has already been paid.');
         }
-        // Cancel or Delete the invoice
-        await tx.invoice.delete({ where: { id: violation.invoice.id } });
+        
+        // Action: Cancel or Delete the invoice. 
+        // Deleting the invoice is safe here since the violation is also being deleted.
+        // We use the Prisma client within the transaction (tx.invoice.delete)
+        await tx.invoice.delete({ where: { id: linkedInvoice.id } });
       }
       
       return tx.violation.delete({ where: { id } });
