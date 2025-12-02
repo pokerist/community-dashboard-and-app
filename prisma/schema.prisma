@@ -404,6 +404,8 @@ model Complaint {
   description     String
   priority        Priority        @default(MEDIUM)
   status          ComplaintStatus @default(NEW)
+  resolutionNotes String?
+  resolvedAt      DateTime?
   assignedToId    String?
   assignedTo      User?           @relation("complaint_assignee", fields: [assignedToId], references: [id])
   createdAt       DateTime        @default(now())
