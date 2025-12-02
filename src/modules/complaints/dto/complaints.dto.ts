@@ -29,15 +29,6 @@ export class CreateComplaintDto {
   unitId?: string;
 
   @ApiProperty({
-    example: 'Excessive Noise',
-    description: 'The title of the complaint.',
-  })
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(100)
-  title: string;
-
-  @ApiProperty({
     example: 'Loud music past 11 PM.',
     description: 'Detailed description of the issue.',
   })

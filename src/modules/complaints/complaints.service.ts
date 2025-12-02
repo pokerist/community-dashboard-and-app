@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateComplaintDto, UpdateComplaintDto } from './dto/complaints.dto';
 import { ComplaintStatus, Priority } from '@prisma/client';
@@ -21,6 +25,19 @@ export class ComplaintsService {
     const newNumber = lastNumber + 1;
     return `CMP-${newNumber.toString().padStart(5, '0')}`;
   }
+  
+  /**
+   * Helper to calculate resolvedAt based on status change.
+   */
+  private getResolutionTimestamp(status: ComplaintStatus): Date | null {
+    if (
+      status === ComplaintStatus.RESOLVED ||
+      status === ComplaintStatus.CLOSED
+    ) {
+      return new Date(); // Set resolvedAt when closing/resolving
+    }
+    return null; // Clear resolvedAt for any other status change
+  }
 
   // --- 1. CREATE ---
   async create(dto: CreateComplaintDto) {
@@ -35,7 +52,7 @@ export class ComplaintsService {
       },
     });
   }
-  
+
   // --- 2. READ (FIND ALL) ---
   async findAll() {
     return this.prisma.complaint.findMany({
@@ -62,57 +79,80 @@ export class ComplaintsService {
     return complaint;
   }
 
-  // --- 4. UPDATE ---
+  // --- 4. UPDATE (Handles all patching, including status and assignedToId) ---
   async update(id: string, dto: UpdateComplaintDto) {
-    await this.findOne(id); // Check existence
+    await this.findOne(id);
 
-    // Add logic for status updates that require additional fields/checks
-    if (dto.status) {
-      if (dto.status === ComplaintStatus.RESOLVED || dto.status === ComplaintStatus.CLOSED) {
-        // Business Rule: Ensure resolution notes are present when closing
-        if (!dto.resolutionNotes) {
-          throw new BadRequestException('Resolution notes are required to RESOLVE or CLOSE a complaint.');
-        }
+    const dataToUpdate: any = { ...dto };
+
+    // 1. Enforce business rule: Resolution notes are required to close/resolve.
+    if (
+      dataToUpdate.status === ComplaintStatus.RESOLVED ||
+      dataToUpdate.status === ComplaintStatus.CLOSED
+    ) {
+      if (!dataToUpdate.resolutionNotes) {
+        throw new BadRequestException(
+          'Resolution notes are required to RESOLVE or CLOSE a complaint.',
+        );
       }
     }
+
+    // 2. Auto-calculate resolvedAt timestamp if status is being updated
+    if (dataToUpdate.status) {
+      dataToUpdate.resolvedAt = this.getResolutionTimestamp(dataToUpdate.status);
+    }
     
+    // 3. Send the merged data to Prisma (handles assignedToId, status, notes, and timestamp)
     return this.prisma.complaint.update({
       where: { id },
-      data: dto,
+      data: dataToUpdate,
     });
   }
 
   // --- 5. DELETE ---
   async remove(id: string) {
-    const complaint = await this.findOne(id); // Check existence
+    const complaint = await this.findOne(id);
 
     // Business Rule: Prevent deletion of resolved/closed complaints to maintain history
-    if (complaint.status === ComplaintStatus.RESOLVED || complaint.status === ComplaintStatus.CLOSED) {
-        throw new BadRequestException(`Cannot delete a ${complaint.status} complaint.`);
+    if (
+      complaint.status === ComplaintStatus.RESOLVED ||
+      complaint.status === ComplaintStatus.CLOSED
+    ) {
+      throw new BadRequestException(
+        `Cannot delete a ${complaint.status} complaint.`,
+      );
     }
-    
+
     return this.prisma.complaint.delete({
       where: { id },
     });
   }
 
-  // --- 6. Helper: Change Status (Used internally or by a dedicated status route) ---
-  async updateStatus(id: string, status: ComplaintStatus, resolutionNotes?: string) {
+  // --- 6. Helper: Change Status (Optional dedicated route for status quick updates) ---
+  async updateStatus(
+    id: string,
+    status: ComplaintStatus,
+    resolutionNotes?: string,
+  ) {
     await this.findOne(id);
 
+    // Enforce business rule for closing/resolving
     if (
-        (status === ComplaintStatus.RESOLVED || status === ComplaintStatus.CLOSED) &&
-        !resolutionNotes
+      (status === ComplaintStatus.RESOLVED ||
+        status === ComplaintStatus.CLOSED) &&
+      !resolutionNotes
     ) {
-        throw new BadRequestException('Resolution notes are required to transition to RESOLVED or CLOSED status.');
+      throw new BadRequestException(
+        'Resolution notes are required to transition to RESOLVED or CLOSED status.',
+      );
     }
 
+    const dataToUpdate: any = { status, resolutionNotes };
+    dataToUpdate.resolvedAt = this.getResolutionTimestamp(status);
+
     return this.prisma.complaint.update({
-        where: { id },
-        data: {
-            status,
-            resolutionNotes,
-            resolvedAt
+      where: { id },
+      data: dataToUpdate,
     });
   }
 }

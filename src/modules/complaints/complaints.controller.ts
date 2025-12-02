@@ -12,6 +12,7 @@ import { ComplaintsService } from './complaints.service';
 import { CreateComplaintDto, UpdateComplaintDto } from './dto/complaints.dto';
 import { ApiTags, ApiResponse } from '@nestjs/swagger';
 import { ComplaintStatus } from '@prisma/client';
+import { UpdateComplaintStatusDto } from './dto/update-status.dto';
 
 @ApiTags('Complaints')
 @Controller('complaints')
@@ -19,7 +20,10 @@ export class ComplaintsController {
   constructor(private readonly complaintsService: ComplaintsService) {}
 
   @Post()
-  @ApiResponse({ status: HttpStatus.CREATED, description: 'Complaint successfully reported.' })
+  @ApiResponse({
+    status: HttpStatus.CREATED,
+    description: 'Complaint successfully reported.',
+  })
   create(@Body() createComplaintDto: CreateComplaintDto) {
     return this.complaintsService.create(createComplaintDto);
   }
@@ -35,6 +39,10 @@ export class ComplaintsController {
   }
 
   @Patch(':id')
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Complaint updated. Handles status/assignedTo/notes.',
+  })
   update(
     @Param('id') id: string,
     @Body() updateComplaintDto: UpdateComplaintDto,
@@ -42,18 +50,27 @@ export class ComplaintsController {
     return this.complaintsService.update(id, updateComplaintDto);
   }
 
-  // Optional: Dedicated route for simple status update
   @Patch(':id/status')
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Quick status change. Requires notes for resolve/close.',
+  })
   updateStatus(
     @Param('id') id: string,
-    @Body('status') status: ComplaintStatus,
-    @Body('resolutionNotes') notes: string,
+    @Body() dto: UpdateComplaintStatusDto,
   ) {
-    return this.complaintsService.updateStatus(id, status, notes);
+    return this.complaintsService.updateStatus(
+      id,
+      dto.status,
+      dto.resolutionNotes,
+    );
   }
 
   @Delete(':id')
-  @ApiResponse({ status: HttpStatus.OK, description: 'Complaint successfully deleted if not resolved/closed.' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Complaint deleted (only allowed for NEW or IN_PROGRESS).',
+  })
   remove(@Param('id') id: string) {
     return this.complaintsService.remove(id);
   }
