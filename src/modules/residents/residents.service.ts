@@ -49,7 +49,7 @@ export class ResidentService {
       },
       skip, 
       take,
-      orderBy: { name: 'asc' },
+      orderBy: { nameEN: 'asc' },
     });
   }
 
@@ -89,7 +89,7 @@ async findOne(id: string): Promise<UserWithRelations> { // <-- Use the new type 
     });
   }
 
-  // DELETE /users/:id: Deactivate User (Soft Delete)
+  // DELETE /users/:id: Delete User
   async deactivate(id: string): Promise<User> {
     return this.prisma.user.update({
       where: { id },
