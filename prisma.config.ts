@@ -2,12 +2,13 @@ import * as dotenv from 'dotenv';
 dotenv.config();
 
 export default {
-  schema: "prisma/schema.prisma",
+  schema: 'prisma/schema.prisma',
   migrations: {
-    path: "prisma/migrations",
+    path: 'prisma/migrations',
   },
-  engine: "classic",
+  engine: 'classic',
   datasource: {
     url: process.env.DATABASE_URL,
+    directUrl: process.env.DIRECT_URL,
   },
 };
