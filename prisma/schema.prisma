@@ -97,18 +97,18 @@ enum ComplaintStatus {
   CLOSED
 }
 
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
 enum ViolationStatus {
   PENDING
   PAID
   APPEALED
   CANCELLED
-}
-
-enum IncidentPriority {
-  LOW
-  MEDIUM
-  HIGH
-  CRITICAL
 }
 
 enum BookingStatus {
@@ -299,7 +299,7 @@ model ServiceRequest {
   createdById  String
   assignedToId String?
   status       String                     @default("NEW")
-  priority     String?
+  priority     Priority                   @default(MEDIUM)
   description  String?
   fieldValues  ServiceRequestFieldValue[]
   attachments  Attachment[]               @relation("ServiceRequestAttachments")
@@ -402,8 +402,10 @@ model Complaint {
   unitId          String?
   category        String
   description     String
-  priority        String
+  priority        Priority        @default(MEDIUM)
   status          ComplaintStatus @default(NEW)
+  resolutionNotes String?
+  resolvedAt      DateTime?
   assignedToId    String?
   assignedTo      User?           @relation("complaint_assignee", fields: [assignedToId], references: [id])
   createdAt       DateTime        @default(now())
@@ -443,7 +445,7 @@ model Banner {
   startDate       DateTime
   endDate         DateTime
   status          String   @default("ACTIVE")
-  displayPriority String? // low/medium/high
+  displayPriority Priority @default(MEDIUM)
   views           Int      @default(0)
   clicks          Int      @default(0)
   createdAt       DateTime @default(now())
@@ -456,7 +458,7 @@ model Incident {
   location       String?
   residentName   String?
   description    String
-  priority       IncidentPriority @default(MEDIUM)
+  priority       Priority         @default(MEDIUM)
   status         String           @default("OPEN")
   responseTime   Int? // seconds or minutes
   reportedAt     DateTime         @default(now())
@@ -482,7 +484,7 @@ model Booking {
   bookingNumber String        @unique
   resident      User          @relation(fields: [residentId], references: [id])
   residentId    String
-  facmodel Violility      Facility      @relation(fields: [facilityId], references: [id])
+  facility      Facility      @relation(fields: [facilityId], references: [id])
   facilityId    String
   unit          Unit          @relation(fields: [unitId], references: [id])
   unitId        String
