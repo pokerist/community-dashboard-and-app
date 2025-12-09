@@ -80,7 +80,11 @@ export class InvoicesController {
   // POST /invoices (Admin: Manual invoice creation)
   @Post()
   create(@Body() createInvoiceDto: CreateInvoiceDto) {
-    return this.invoicesService.create(createInvoiceDto);
+    const payload: CreateInvoiceDto = {
+      ...createInvoiceDto,
+      dueDate: new Date(createInvoiceDto.dueDate as unknown as string),
+    };
+    return this.invoicesService.create(payload);
   }
 
   // PATCH /invoices/:id (Admin: Update details like due date or amount)

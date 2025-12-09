@@ -1,5 +1,5 @@
-import { Injectable } from '@nestjs/common';
-import { IFileStorageAdapter } from '../../common/interfaces/file-storage.interface';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { FileUploadResult, IFileStorageAdapter } from '../../common/interfaces/file-storage.interface';
 import { SupabaseStorageAdapter } from './adapters/supabase-storage.adapter';
 import { PrismaService } from '../../../prisma/prisma.service';
 
@@ -27,8 +27,36 @@ export class FileService {
     });
 
     // Return the full record for the module to use its ID (e.g., set profilePhotoId)
-    return fileRecord; 
+return {
+      id: fileRecord.id,
+      key: fileRecord.key,
+      name: fileRecord.name,
+      mimeType: fileRecord.mimeType ?? 'application/octet-stream',
+      size: fileRecord.size ?? 0,
+    };
   }
 
-  // ... methods for deleteFile, getFileStream, etc., implemented similarly
+  async deleteFile(fileId: string, bucket: string): Promise<void> {
+    const file = await this.prisma.file.findUnique({ where: { id: fileId } });
+    if (!file) {
+      throw new NotFoundException('File not found');
+    }
+
+    await this.storageAdapter.deleteFile(file.key, bucket);
+
+    await this.prisma.$transaction([
+      this.prisma.attachment.deleteMany({ where: { fileId } }),
+      this.prisma.user.updateMany({ where: { profilePhotoId: fileId }, data: { profilePhotoId: null } }),
+      this.prisma.lease.updateMany({ where: { contractFileId: fileId }, data: { contractFileId: null } }),
+      this.prisma.file.delete({ where: { id: fileId } }),
+    ]);
+  }
+
+  async getFileStream(fileId: string, bucket: string): Promise<NodeJS.ReadableStream> {
+    const file = await this.prisma.file.findUnique({ where: { id: fileId } });
+    if (!file) {
+      throw new NotFoundException('File not found');
+    }
+    return this.storageAdapter.getFileStream(file.key, bucket);
+  }
 }

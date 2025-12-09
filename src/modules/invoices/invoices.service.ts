@@ -6,19 +6,19 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateInvoiceDto, UpdateInvoiceDto } from './dto/invoices.dto';
-import {
-  Prisma,
-  Invoice,
-  InvoiceStatus,
-  ViolationStatus,
-} from '@prisma/client';
+import { Prisma, Invoice, InvoiceStatus, ViolationStatus, InvoiceType } from '@prisma/client';
 import { CreateUnitFeeDto, UpdateUnitFeeDto } from './dto/unit-fees.dto';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { InvoiceCreatedEvent } from '../../events/contracts/invoice-created.event';
 
 @Injectable()
 export class InvoicesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService, 
+    private readonly eventEmitter: EventEmitter2
+  ) {}
 
-  // Helper to generate a sequential invoice number (PLACEHOLDER)
+  // Helper to generate a sequential invoice number (PLACEHOLDER)F
   private async generateInvoiceNumber(): Promise<string> {
     // NOTE: In a production environment, this should be done in a database transaction
     // with locking to guarantee uniqueness and sequential order.
@@ -38,12 +38,26 @@ export class InvoicesService {
     const invoiceNumber =
       dto.invoiceNumber || (await this.generateInvoiceNumber());
 
-    return this.prisma.invoice.create({
+    const newInvoice = await this.prisma.invoice.create({
       data: {
         ...dto,
         invoiceNumber,
       },
     });
+
+    this.eventEmitter.emit(
+      'invoice.created',
+      new InvoiceCreatedEvent(
+        newInvoice.id,
+        newInvoice.unitId,
+        newInvoice.residentId,
+        newInvoice.amount.toNumber(),
+        newInvoice.dueDate,
+        newInvoice.type,
+      ),
+    );
+
+    return newInvoice;
   }
 
   async findAll() {
@@ -226,9 +240,9 @@ export class InvoicesService {
       const newInvoice = await this.create({
         unitId: unitId,
         residentId: group.residentId,
-        type: `Monthly Utility Fees (${billingMonth.toISOString().substring(0, 7)})`,
+        type: InvoiceType.UTILITY,
         amount: group.total,
-        dueDate: this.calculateUtilityDueDate(billingMonth), // Define this helper
+        dueDate: this.calculateUtilityDueDate(billingMonth),
       });
 
       // Link all individual fees to the new Invoice ID (Critical Step!)
