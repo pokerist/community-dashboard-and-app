@@ -1,5 +1,6 @@
 // src/modules/invoices/dto/unit-fees.dto.ts
 import { IsUUID, IsNotEmpty, IsDateString, IsNumber, Min, IsString } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, PartialType } from '@nestjs/swagger';
 
 export class CreateUnitFeeDto {
@@ -14,6 +15,7 @@ export class CreateUnitFeeDto {
   type: string;
 
   @ApiProperty({ example: 150.75, description: 'The amount charged for this specific fee.' })
+  @Type(() => Number)
   @IsNumber()
   @Min(0.01)
   @IsNotEmpty()

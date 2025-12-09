@@ -1,5 +1,7 @@
 import { INestApplication, Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
+import * as dotenv from 'dotenv';
+dotenv.config({ override: true });
 
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
@@ -7,7 +9,12 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   // 1. Initialize the client
   constructor() {
     super({
-      log: ['query', 'info', 'warn', 'error'], // Good for debugging SQL queries
+      log: ['query', 'info', 'warn', 'error'],
+      datasources: {
+        db: {
+          url: process.env.DATABASE_URL as string,
+        },
+      },
     });
   }
 

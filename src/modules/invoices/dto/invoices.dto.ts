@@ -9,6 +9,7 @@ import {
   IsEnum,
   IsString,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, PartialType } from '@nestjs/swagger';
 import { InvoiceStatus, InvoiceType } from '@prisma/client';
 
@@ -39,6 +40,7 @@ export class CreateInvoiceDto {
   @IsNotEmpty()
   type: InvoiceType;
 
+  @Type(() => Number)
   @ApiProperty({
     example: 18000.0,
     description: 'The total amount of the invoice.',
