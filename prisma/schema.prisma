@@ -3,8 +3,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
 }
 
@@ -17,6 +17,13 @@ enum Role {
   CONTRACTOR
   OWNER
   TENANT
+}
+
+enum UserStatusEnum {
+  INVITED
+  ACTIVE
+  SUSPENDED
+  DISABLED
 }
 
 enum UnitStatus {
@@ -33,6 +40,12 @@ enum UnitType {
   PENTHOUSE
   DUPLEX
   TOWNHOUSE
+}
+
+enum FinishingStatus {
+  NOT_STARTED
+  UNDER_FINISHING
+  MOVED_IN
 }
 
 enum EligibilityType {
@@ -64,7 +77,7 @@ enum ServiceFieldType {
 enum QRType {
   VISITOR
   DELIVERY
-  CONTRACTOR
+  WORKER
   SERVICE_PROVIDER
   RIDESHARE
 }
@@ -92,25 +105,25 @@ enum InvoiceStatus {
 
 enum InvoiceType {
   // 1. RECURRING CHARGES (Tenant/Resident)
-  RENT              // Primary monthly/periodic rent charges.
-  SERVICE_FEE       // Recurring general service or maintenance charges (e.g., annual service fee, common area utilities).
-  UTILITY           // Recurring charges for specific utilities (electricity, water, AC, etc.).
+  RENT // Primary monthly/periodic rent charges.
+  SERVICE_FEE // Recurring general service or maintenance charges (e.g., annual service fee, common area utilities).
+  UTILITY // Recurring charges for specific utilities (electricity, water, AC, etc.).
 
   // 2. ONE-TIME CHARGES (Tenant/Resident)
-  FINE                // A fine generated directly from a recorded Violation.
-  MAINTENANCE_FEE   // A one-time charge resulting from a ServiceRequest (e.g., fixing a non-warranty item).
-  BOOKING_FEE       // A charge for booking a facility or amenity (e.g., club room rental fee).
-  SETUP_FEE         // Initial fees, such as lease initiation or application fees.
-  LATE_FEE          // Penalty applied for delayed payment of another invoice.
-  MISCELLANEOUS     // For charges that don't fit specific categories.
+  FINE // A fine generated directly from a recorded Violation.
+  MAINTENANCE_FEE // A one-time charge resulting from a ServiceRequest (e.g., fixing a non-warranty item).
+  BOOKING_FEE // A charge for booking a facility or amenity (e.g., club room rental fee).
+  SETUP_FEE // Initial fees, such as lease initiation or application fees.
+  LATE_FEE // Penalty applied for delayed payment of another invoice.
+  MISCELLANEOUS // For charges that don't fit specific categories.
 
   // 3. OWNER/MANAGEMENT CHARGES
-  OWNER_EXPENSE   // General expense billed directly to a property owner (e.g., major repair costs).
-  MANAGEMENT_FEE  // The property management service fee charged to the owner.
+  OWNER_EXPENSE // General expense billed directly to a property owner (e.g., major repair costs).
+  MANAGEMENT_FEE // The property management service fee charged to the owner.
 
   // 4. ADJUSTMENTS (Crucial for accounting accuracy)
-  CREDIT_MEMO     // An adjustment that reduces the resident's or owner's balance (a refund or discount).
-  DEBIT_MEMO      // An adjustment that increases the resident's or owner's balance (a missed charge).
+  CREDIT_MEMO // An adjustment that reduces the resident's or owner's balance (a refund or discount).
+  DEBIT_MEMO // An adjustment that increases the resident's or owner's balance (a missed charge).
 }
 
 enum ComplaintStatus {
@@ -174,21 +187,21 @@ enum Channel {
 }
 
 model User {
-  id             String    @id @default(uuid())
-  email          String?   @unique
+  id             String         @id @default(uuid())
+  email          String?        @unique
   phone          String?
-  phoneVerified  Boolean   @default(false)
+  phoneVerified  Boolean        @default(false)
   nameEN         String?
   nameAR         String?
-  role           Role      @default(RESIDENT)
-  origin         String    @default("dashboard") // "community" or "dashboard"
-  userStatus     String    @default("INVITED") // INVITED | ACTIVE | SUSPENDED | DISABLED
-  passwordHash   String? // for custom auth; Supabase may manage its own
-  nationalId     String?   @unique
+  role           Role           @default(RESIDENT)
+  origin         String         @default("dashboard") // "community" or "dashboard"
+  userStatus     UserStatusEnum @default(INVITED)
+  passwordHash   String?
+  nationalId     String?        @unique
   dateOfBirth    DateTime?
-  profilePhotoId String?   @unique
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  profilePhotoId String?        @unique
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 
   // Relations
   profilePhoto  File?          @relation("file_profile_photo", fields: [profilePhotoId], references: [id])
@@ -213,6 +226,8 @@ model User {
   devices           SmartDevice[]
   notificationsSent Notification[]   @relation("sender")
   statusLogs        UserStatusLog[]
+
+  referrals Referral[] @relation("referrer")
 }
 
 model Unit {
@@ -243,13 +258,14 @@ model Unit {
 }
 
 model ResidentUnit {
-  id         String   @id @default(uuid())
-  user       User     @relation(fields: [userId], references: [id])
-  userId     String
-  unit       Unit     @relation(fields: [unitId], references: [id])
-  unitId     String
-  assignedAt DateTime @default(now())
-  isPrimary  Boolean  @default(false)
+  id              String          @id @default(uuid())
+  user            User            @relation(fields: [userId], references: [id])
+  userId          String
+  unit            Unit            @relation(fields: [unitId], references: [id])
+  unitId          String
+  assignedAt      DateTime        @default(now())
+  isPrimary       Boolean         @default(false)
+  finishingStatus FinishingStatus @default(NOT_STARTED)
 
   @@unique([userId, unitId])
   @@index([unitId])
@@ -293,6 +309,7 @@ model Service {
   processingTime  Int?
   description     String?
   status          Boolean          @default(true)
+  startingPrice   Decimal?         @db.Decimal(12, 2)
   formFields      ServiceField[]
   requests        ServiceRequest[]
   totalRequests   Int?             @default(0)
@@ -323,7 +340,7 @@ model ServiceRequest {
   assignedToId String?
   status       String                     @default("NEW")
   priority     Priority                   @default(MEDIUM)
-  description  String?
+  description  String
   fieldValues  ServiceRequestFieldValue[]
   attachments  Attachment[]               @relation("ServiceRequestAttachments")
   requestedAt  DateTime                   @default(now())
@@ -428,7 +445,7 @@ model Complaint {
   priority        Priority        @default(MEDIUM)
   status          ComplaintStatus @default(NEW)
   resolutionNotes String?
-  resolvedAt      DateTime?
+  resolvedAt      DateTime?
   assignedToId    String?
   assignedTo      User?           @relation("complaint_assignee", fields: [assignedToId], references: [id])
   createdAt       DateTime        @default(now())
@@ -475,19 +492,19 @@ model Banner {
 }
 
 model Incident {
-  id             String           @id @default(uuid())
-  incidentNumber String           @unique
+  id             String    @id @default(uuid())
+  incidentNumber String    @unique
   type           String
   location       String?
   residentName   String?
   description    String
-  priority       Priority         @default(MEDIUM)
-  status         String           @default("OPEN")
+  priority       Priority  @default(MEDIUM)
+  status         String    @default("OPEN")
   responseTime   Int? // seconds or minutes
-  reportedAt     DateTime         @default(now())
+  reportedAt     DateTime  @default(now())
   resolvedAt     DateTime?
-  createdAt      DateTime         @default(now())
-  unit           Unit?            @relation(fields: [unitId], references: [id])
+  createdAt      DateTime  @default(now())
+  unit           Unit?     @relation(fields: [unitId], references: [id])
   unitId         String?
 }
 
@@ -628,4 +645,28 @@ model UnitFee {
   createdAt DateTime @default(now())
 
   @@unique([unitId, type, billingMonth])
+}
+
+// Model for "Alkarma Projects" Section
+model Project {
+  id            String   @id @default(uuid())
+  nameEn        String   @unique // e.g., AlKarma Kay, ALkarma Gates
+  nameAr        String?
+  descriptionEn String
+  descriptionAr String?
+  mobileNumber  String // number to be auto-filled for "Get in touch"
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// Model for "Choose your neighbor" Section
+model Referral {
+  id             String   @id @default(uuid())
+  referrer       User     @relation("referrer", fields: [referrerId], references: [id])
+  referrerId     String
+  friendFullName String
+  friendMobile   String
+  message        String? // Free text box message
+  status         String   @default("NEW") // NEW | CONTACTED | CONVERTED | REJECTED
+  createdAt      DateTime @default(now())
 }
