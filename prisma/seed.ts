@@ -1,97 +1,249 @@
-import { PrismaClient } from "@prisma/client"
+import { PrismaClient } from '@prisma/client';
 
-const prisma = new PrismaClient()
+const prisma = new PrismaClient();
 
 const PERMISSIONS = [
-  "auth.login",
-  "auth.refresh",
-  "auth.logout",
-  "auth.impersonate",
+  // Authentication
+  'auth.login',
+  'auth.refresh',
+  'auth.logout',
+  'auth.impersonate',
 
-  "user.read",
-  "user.update",
-  "user.suspend",
-  "user.invite",
-  "user.assign_role",
-  "user.view_activity",
+  // Users
+  'user.read',
+  'user.update',
+  'user.suspend',
+  'user.invite',
+  'user.assign_role',
+  'user.view_activity',
 
-  "resident.view",
-  "resident.create",
-  "resident.update",
-  "resident.assign_unit",
-  "resident.remove_unit",
+  // Residents
+  'resident.view',
+  'resident.create',
+  'resident.update',
+  'resident.assign_unit',
+  'resident.remove_unit',
 
-  "unit.view",
-  "unit.create",
-  "unit.update",
-  "unit.assign_resident",
-  "unit.remove_resident",
+  // Units
+  'unit.view',
+  'unit.create',
+  'unit.update',
+  'unit.assign_resident',
+  'unit.remove_resident',
 
-  "project.manage",
+  // Projects
+  'project.view',
+  'project.manage',
 
-  "invoice.view_all",
-  "invoice.view_own",
-  "invoice.create",
-  "invoice.update",
-  "invoice.mark_paid",
-  "invoice.cancel",
+  // Invoices
+  'invoice.view_all',
+  'invoice.view_own',
+  'invoice.create',
+  'invoice.update',
+  'invoice.mark_paid',
+  'invoice.cancel',
 
-  "fee.manage",
+  // Fees
+  'fee.manage',
 
-  "service_request.view_all",
-  "service_request.view_own",
-  "service_request.create",
-  "service_request.assign",
-  "service_request.resolve",
-  "service_request.close",
+  // Service Requests
+  'service_request.view_all',
+  'service_request.view_own',
+  'service_request.create',
+  'service_request.assign',
+  'service_request.resolve',
+  'service_request.close',
 
-  "complaint.view_all",
-  "complaint.view_own",
-  "complaint.report",
-  "complaint.assign",
-  "complaint.resolve",
-  "complaint.close",
+  // Complaints
+  'complaint.view_all',
+  'complaint.view_own',
+  'complaint.report',
+  'complaint.assign',
+  'complaint.resolve',
+  'complaint.close',
 
-  "violation.issue",
-  "violation.view_all",
-  "violation.view_own",
-  "violation.update",
-  "violation.cancel",
+  // Violations
+  'violation.issue',
+  'violation.view_all',
+  'violation.view_own',
+  'violation.update',
+  'violation.cancel',
 
-  "qr.generate",
-  "qr.view_all",
-  "qr.view_own",
-  "qr.cancel",
+  // QR Codes
+  'qr.generate',
+  'qr.view_all',
+  'qr.view_own',
+  'qr.cancel',
 
-  "facility.manage",
+  // Facilities
+  'facility.view',
+  'facility.manage',
 
-  "booking.view_all",
-  "booking.view_own",
-  "booking.create",
-  "booking.cancel",
+  // Bookings
+  'booking.view_all',
+  'booking.view_own',
+  'booking.create',
+  'booking.cancel',
 
-  "smart_device.manage",
-  "smart_device.view_own",
+  // Smart Devices
+  'smart_device.manage',
+  'smart_device.view_own',
 
-  "notification.send",
-  "notification.schedule",
-  "notification.view",
+  // Notifications
+  'notification.send',
+  'notification.schedule',
+  'notification.view',
 
-  "banner.manage",
+  // Banners
+  'banner.manage',
+  'banner.view',
 
-  "referral.create",
-  "referral.view_all",
-]
+  // Referrals
+  'referral.create',
+  'referral.view_all',
+];
 
-async function main() {
-  await prisma.permission.createMany({
-    data: PERMISSIONS.map((key) => ({ key })),
-    skipDuplicates: true,
-  })
+const ROLES = {
+  SUPER_ADMIN: PERMISSIONS,
 
-  console.log("✅ Permissions seeded")
+  MANAGER: [
+    'user.read',
+    'user.update',
+
+    'resident.view',
+    'resident.assign_unit',
+    'resident.remove_unit',
+
+    'unit.view',
+    'unit.create',
+    'unit.update',
+    'project.manage',
+
+    'invoice.view_all',
+    'invoice.create',
+    'invoice.mark_paid',
+    'fee.manage',
+
+    'service_request.view_all',
+    'service_request.assign',
+    'service_request.resolve',
+
+    'complaint.view_all',
+    'complaint.resolve',
+
+    'violation.issue',
+    'violation.view_all',
+
+    'qr.view_all',
+    'qr.cancel',
+
+    'booking.view_all',
+
+    'facility.manage',
+
+    'notification.send',
+    'notification.schedule',
+
+    'banner.manage',
+    'referral.view_all',
+  ],
+
+  OPERATOR: [
+    'service_request.view_all',
+    'service_request.assign',
+    'service_request.resolve',
+
+    'complaint.view_all',
+    'complaint.resolve',
+
+    'violation.issue',
+
+    'qr.view_all',
+    'booking.view_all',
+  ],
+
+  SUPPORT: [
+    'service_request.view_all',
+    'complaint.view_all',
+    'complaint.resolve',
+    'qr.view_all',
+  ],
+
+  COMMUNITY_USER: [
+    'unit.view', // Critical for "My Unit" section
+    'project.view', // For the "Alkarma Projects" section
+    'banner.view', // For the home screen carousel
+    'facility.view', // To see what they are booking
+    'invoice.view_own',
+    'service_request.view_own',
+    'service_request.create',
+    'complaint.view_own',
+    'complaint.report',
+    'violation.view_own',
+    'qr.generate',
+    'qr.view_own',
+    'qr.cancel',
+    'booking.view_own',
+    'booking.create',
+    'booking.cancel',
+    'smart_device.view_own',
+    'referral.create',
+  ],
+} as const;
+
+async function seed() {
+  console.log('🌱 Seeding permissions...');
+
+  for (const key of PERMISSIONS) {
+    await prisma.permission.upsert({
+      where: { key },
+      update: {},
+      create: { key },
+    });
+  }
+
+  console.log('🌱 Seeding roles & mappings...');
+
+  for (const [roleName, permissionKeys] of Object.entries(ROLES)) {
+    const role = await prisma.role.upsert({
+      where: { name: roleName },
+      update: {},
+      create: { name: roleName },
+    });
+
+    for (const key of permissionKeys) {
+      const permission = await prisma.permission.findUnique({
+        where: { key },
+      });
+
+      if (!permission) {
+        throw new Error(`Missing permission: ${key}`);
+      }
+
+      await prisma.rolePermission.upsert({
+        where: {
+          roleId_permissionId: {
+            roleId: role.id,
+            permissionId: permission.id,
+          },
+        },
+        update: {},
+        create: {
+          roleId: role.id,
+          permissionId: permission.id,
+        },
+      });
+    }
+  }
+
+  console.log('✅ Seeding complete');
 }
 
-main()
-  .catch(console.error)
-  .finally(() => prisma.$disconnect())
+seed()
+  .catch((e) => {
+    console.error(e);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });

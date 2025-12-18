@@ -3,8 +3,11 @@ import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { loadPermissionsIntoCache } from './auth/permission-cache';
 
 async function bootstrap() {
+  await loadPermissionsIntoCache();
+
   const app = await NestFactory.create(AppModule);
 
   // --- 1. Global Validation Pipe (Crucial for DTOs) ---
