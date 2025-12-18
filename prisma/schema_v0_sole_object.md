@@ -8,18 +8,22 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+enum Role {
+  SUPER_ADMIN
+  MANAGER
+  OPERATOR
+  SUPPORT
+  RESIDENT
+  CONTRACTOR
+  OWNER
+  TENANT
+}
+
 enum UserStatusEnum {
   INVITED
   ACTIVE
   SUSPENDED
   DISABLED
-}
-
-enum RegistrationStatus {
-  PENDING
-  VERIFIED
-  REJECTED
-  EXPIRED
 }
 
 enum UnitStatus {
@@ -182,85 +186,26 @@ enum Channel {
   EMAIL
 }
 
-enum ReferralStatus {
-  NEW
-  CONTACTED
-  CONVERTED
-  REJECTED
-}
-
-enum NotificationLogStatus {
-  SENT
-  FAILED
-  DELIVERED
-  READ
-}
-
-enum SmartDeviceStatus {
-  ONLINE
-  OFFLINE
-  ERROR
-}
-
-enum IncidentStatus {
-  OPEN
-  RESOLVED
-  CLOSED
-}
-
-enum BannerStatus {
-  ACTIVE
-  INACTIVE
-  EXPIRED
-}
-
-enum ServiceRequestStatus {
-  NEW
-  IN_PROGRESS
-  RESOLVED
-  CLOSED
-}
-
-enum UserStatusLogSource {
-  SIGNUP_AUTO
-  ADMIN
-  MANUAL
-}
-
 model User {
   id             String         @id @default(uuid())
   email          String?        @unique
-  passwordHash   String?
+  phone          String?
+  phoneVerified  Boolean        @default(false)
   nameEN         String?
   nameAR         String?
-  userStatus     UserStatusEnum @default(ACTIVE)
-  phone          String?
-  signupSource   String         @default("dashboard") // "community" or "dashboard"
+  role           Role           @default(RESIDENT)
+  origin         String         @default("dashboard") // "community" or "dashboard"
+  userStatus     UserStatusEnum @default(INVITED)
+  passwordHash   String?
+  nationalId     String?        @unique
+  dateOfBirth    DateTime?
   profilePhotoId String?        @unique
-  profilePhoto   File?          @relation("file_profile_photo", fields: [profilePhotoId], references: [id])
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
-  // Authentication
-  passwordResetToken          String?
-  passwordResetTokenExpiresAt DateTime?
-
-  emailVerificationToken          String?
-  emailVerificationTokenExpiresAt DateTime?
-
-  phoneVerificationToken          String?
-  phoneVerificationTokenExpiresAt DateTime?
-
-  emailVerifiedAt DateTime?
-  phoneVerifiedAt DateTime?
-
-  lastLoginAt   DateTime?
-  loginAttempts Int       @default(0)
-  lockedUntil   DateTime?
-
   // Relations
-  // Roles
-  roles UserRole[]
+  profilePhoto  File?          @relation("file_profile_photo", fields: [profilePhotoId], references: [id])
+  residentUnits ResidentUnit[]
 
   // Leases (owner/tenant)
   leasesAsOwner  Lease[] @relation("owner_leases")
@@ -283,79 +228,6 @@ model User {
   statusLogs        UserStatusLog[]
 
   referrals Referral[] @relation("referrer")
-
-  admin    Admin?
-  resident Resident?
-  owner    Owner?
-  tenant   Tenant?
-
-  residentUnits ResidentUnit[]
-
-  @@index([email])
-  @@index([phone])
-  @@index([createdAt])
-}
-
-model Role {
-  id          String           @id @default(uuid())
-  name        String           @unique
-  permissions RolePermission[]
-  users       UserRole[]
-}
-
-model UserRole {
-  userId String
-  roleId String
-
-  user User @relation(fields: [userId], references: [id])
-  role Role @relation(fields: [roleId], references: [id])
-
-  @@id([userId, roleId])
-}
-
-model Admin {
-  id        String         @id @default(uuid())
-  userId    String         @unique
-  user      User           @relation(fields: [userId], references: [id])
-  status    UserStatusEnum @default(ACTIVE)
-  createdAt DateTime       @default(now())
-}
-
-model Resident {
-  id          String    @id @default(uuid())
-  userId      String    @unique
-  user        User      @relation(fields: [userId], references: [id])
-  nationalId  String?
-  dateOfBirth DateTime?
-}
-
-model Owner {
-  id     String @id @default(uuid())
-  userId String @unique
-  user   User   @relation(fields: [userId], references: [id])
-}
-
-model Tenant {
-  id     String @id @default(uuid())
-  userId String @unique
-  user   User   @relation(fields: [userId], references: [id])
-}
-
-model Permission {
-  id  String @id @default(uuid())
-  key String @unique // billing.create_invoice
-
-  rolePermissions RolePermission[]
-}
-
-model RolePermission {
-  roleId       String
-  permissionId String
-
-  role       Role       @relation(fields: [roleId], references: [id])
-  permission Permission @relation(fields: [permissionId], references: [id])
-
-  @@id([roleId, permissionId])
 }
 
 model Unit {
@@ -387,7 +259,7 @@ model Unit {
 
 model ResidentUnit {
   id              String          @id @default(uuid())
-  occupant        User            @relation(fields: [userId], references: [id])
+  user            User            @relation(fields: [userId], references: [id])
   userId          String
   unit            Unit            @relation(fields: [unitId], references: [id])
   unitId          String
@@ -398,7 +270,6 @@ model ResidentUnit {
   @@unique([userId, unitId])
   @@index([unitId])
   @@index([userId])
-  @@index([userId, isPrimary])
 }
 
 model File {
@@ -467,7 +338,7 @@ model ServiceRequest {
   createdBy    User                       @relation("creator_requests", fields: [createdById], references: [id])
   createdById  String
   assignedToId String?
-  status       ServiceRequestStatus       @default(NEW)
+  status       String                     @default("NEW")
   priority     Priority                   @default(MEDIUM)
   description  String
   fieldValues  ServiceRequestFieldValue[]
@@ -603,37 +474,37 @@ model Violation {
 }
 
 model Banner {
-  id              String       @id @default(uuid())
+  id              String   @id @default(uuid())
   titleEn         String
   titleAr         String?
   imageFileId     String?
   description     String?
   ctaText         String?
   ctaUrl          String?
-  targetAudience  Audience     @default(ALL)
+  targetAudience  Audience @default(ALL)
   startDate       DateTime
   endDate         DateTime
-  status          BannerStatus @default(ACTIVE)
-  displayPriority Priority     @default(MEDIUM)
-  views           Int          @default(0)
-  clicks          Int          @default(0)
-  createdAt       DateTime     @default(now())
+  status          String   @default("ACTIVE")
+  displayPriority Priority @default(MEDIUM)
+  views           Int      @default(0)
+  clicks          Int      @default(0)
+  createdAt       DateTime @default(now())
 }
 
 model Incident {
-  id             String         @id @default(uuid())
-  incidentNumber String         @unique
+  id             String    @id @default(uuid())
+  incidentNumber String    @unique
   type           String
   location       String?
   residentName   String?
   description    String
-  priority       Priority       @default(MEDIUM)
-  status         IncidentStatus @default(OPEN)
+  priority       Priority  @default(MEDIUM)
+  status         String    @default("OPEN")
   responseTime   Int? // seconds or minutes
-  reportedAt     DateTime       @default(now())
+  reportedAt     DateTime  @default(now())
   resolvedAt     DateTime?
-  createdAt      DateTime       @default(now())
-  unit           Unit?          @relation(fields: [unitId], references: [id])
+  createdAt      DateTime  @default(now())
+  unit           Unit?     @relation(fields: [unitId], references: [id])
   unitId         String?
 }
 
@@ -668,17 +539,17 @@ model Booking {
 }
 
 model SmartDevice {
-  id              String            @id @default(uuid())
+  id              String     @id @default(uuid())
   name            String
   type            DeviceType
-  status          SmartDeviceStatus @default(ONLINE)
+  status          String // ONLINE | OFFLINE | ERROR
   lastActive      DateTime?
   integrationInfo Json?
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
-  user            User?             @relation(fields: [userId], references: [id])
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  user            User?      @relation(fields: [userId], references: [id])
   userId          String?
-  unit            Unit?             @relation(fields: [unitId], references: [id])
+  unit            Unit?      @relation(fields: [unitId], references: [id])
   unitId          String?
 }
 
@@ -724,39 +595,39 @@ model Notification {
 }
 
 model NotificationLog {
-  id               String                @id @default(uuid())
-  notification     Notification?         @relation(fields: [notificationId], references: [id])
+  id               String        @id @default(uuid())
+  notification     Notification? @relation(fields: [notificationId], references: [id])
   notificationId   String?
   channel          Channel
   recipient        String // phone or email or userId
-  status           NotificationLogStatus @default(SENT)
+  status           String // SENT | FAILED | DELIVERED | READ
   providerResponse Json?
-  createdAt        DateTime              @default(now())
+  createdAt        DateTime      @default(now())
 }
 
 model PendingRegistration {
-  id               String             @id @default(uuid())
-  phone            String             @unique
+  id               String   @id @default(uuid())
+  phone            String   @unique
   email            String?
   name             String?
   passwordHash     String?
-  origin           String             @default("community")
+  origin           String   @default("community")
   lookupResult     Json? // store PMS lookup response for debugging
-  createdAt        DateTime           @default(now())
+  createdAt        DateTime @default(now())
   expiresAt        DateTime
-  status           RegistrationStatus @default(PENDING)
+  status           String   @default("PENDING") // PENDING | VERIFIED | REJECTED | EXPIRED
   verificationCode String? // optional for OTP flow
 }
 
 model UserStatusLog {
-  id        String               @id @default(uuid())
-  user      User                 @relation(fields: [userId], references: [id])
+  id        String   @id @default(uuid())
+  user      User     @relation(fields: [userId], references: [id])
   userId    String
   oldStatus String
   newStatus String
-  source    UserStatusLogSource?
+  source    String? // "signup_auto" | "admin" | "manual"
   note      String?
-  createdAt DateTime             @default(now())
+  createdAt DateTime @default(now())
 }
 
 model UnitFee {
@@ -790,12 +661,12 @@ model Project {
 
 // Model for "Choose your neighbor" Section
 model Referral {
-  id             String         @id @default(uuid())
-  referrer       User           @relation("referrer", fields: [referrerId], references: [id])
+  id             String   @id @default(uuid())
+  referrer       User     @relation("referrer", fields: [referrerId], references: [id])
   referrerId     String
   friendFullName String
   friendMobile   String
   message        String? // Free text box message
-  status         ReferralStatus @default(NEW)
-  createdAt      DateTime       @default(now())
+  status         String   @default("NEW") // NEW | CONTACTED | CONVERTED | REJECTED
+  createdAt      DateTime @default(now())
 }
