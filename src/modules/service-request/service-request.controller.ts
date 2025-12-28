@@ -43,7 +43,7 @@ export class ServiceRequestController {
   @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('service_request.create')
   create(
-    @Body() createServiceRequestDto: CreateServiceReqgit commit -m "uestDto,
+    @Body() createServiceRequestDto: CreateServiceRequestDto,
     @Req() req: any,
   ) {
     const createdById = req.user.id;
@@ -109,4 +109,6 @@ export class ServiceRequestController {
     @Param('id') id: string,
     @Body() updateServiceRequestDto: UpdateServiceRequestInternalDto, // CHANGE DTO HERE
   ) {
-    return this.serviceRequestService.update(id, updateServiceRequest
+    return this.serviceRequestService.update(id, updateServiceRequestDto);
+  }
+}
