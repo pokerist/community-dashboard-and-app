@@ -6,59 +6,70 @@ import {
   Patch,
   Param,
   Delete,
-  HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { ComplaintsService } from './complaints.service';
 import { CreateComplaintDto, UpdateComplaintDto } from './dto/complaints.dto';
-import { ApiTags, ApiResponse } from '@nestjs/swagger';
-import { ComplaintStatus } from '@prisma/client';
+import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { UpdateComplaintStatusDto } from './dto/update-status.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { Permissions } from '../auth/decorators/permissions.decorator';
 
+@ApiBearerAuth()
 @ApiTags('Complaints')
 @Controller('complaints')
 export class ComplaintsController {
   constructor(private readonly complaintsService: ComplaintsService) {}
 
+  // ---------------------------
+  // RESIDENT: CREATE
+  // ---------------------------
   @Post()
-  @ApiResponse({
-    status: HttpStatus.CREATED,
-    description: 'Complaint successfully reported.',
-  })
-  create(@Body() createComplaintDto: CreateComplaintDto) {
-    return this.complaintsService.create(createComplaintDto);
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @Permissions('complaint.report')
+  create(@Body() dto: CreateComplaintDto) {
+    return this.complaintsService.create(dto);
   }
 
+  // ---------------------------
+  // STAFF: VIEW ALL
+  // ---------------------------
   @Get()
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @Permissions('complaint.view_all')
   findAll() {
     return this.complaintsService.findAll();
   }
 
+  // ---------------------------
+  // RESIDENT OR STAFF: VIEW SPECIFIC
+  // ---------------------------
   @Get(':id')
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @Permissions('complaint.view_own', 'complaint.view_all')
   findOne(@Param('id') id: string) {
     return this.complaintsService.findOne(id);
   }
 
+  // ---------------------------
+  // STAFF: UPDATE COMPLAINT DETAILS
+  // (status/assignedTo/notes)
+  // ---------------------------
   @Patch(':id')
-  @ApiResponse({
-    status: HttpStatus.OK,
-    description: 'Complaint updated. Handles status/assignedTo/notes.',
-  })
-  update(
-    @Param('id') id: string,
-    @Body() updateComplaintDto: UpdateComplaintDto,
-  ) {
-    return this.complaintsService.update(id, updateComplaintDto);
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @Permissions('complaint.manage')
+  update(@Param('id') id: string, @Body() dto: UpdateComplaintDto) {
+    return this.complaintsService.update(id, dto);
   }
 
+  // ---------------------------
+  // STAFF: UPDATE STATUS ONLY
+  // ---------------------------
   @Patch(':id/status')
-  @ApiResponse({
-    status: HttpStatus.OK,
-    description: 'Quick status change. Requires notes for resolve/close.',
-  })
-  updateStatus(
-    @Param('id') id: string,
-    @Body() dto: UpdateComplaintStatusDto,
-  ) {
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @Permissions('complaint.manage')
+  updateStatus(@Param('id') id: string, @Body() dto: UpdateComplaintStatusDto) {
     return this.complaintsService.updateStatus(
       id,
       dto.status,
@@ -66,12 +77,15 @@ export class ComplaintsController {
     );
   }
 
+  // ---------------------------
+  // RESIDENT: DELETE OWN
+  // ADMIN: DELETE ANY
+  // ---------------------------
   @Delete(':id')
-  @ApiResponse({
-    status: HttpStatus.OK,
-    description: 'Complaint deleted (only allowed for NEW or IN_PROGRESS).',
-  })
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @Permissions('complaint.delete_own', 'complaint.delete_all')
   remove(@Param('id') id: string) {
     return this.complaintsService.remove(id);
   }
 }
+

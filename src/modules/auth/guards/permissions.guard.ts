@@ -32,6 +32,6 @@ export class PermissionsGuard implements CanActivate {
 
     // Fallback to checking explicit permissions on the user
     const userPerms = Array.isArray(user?.permissions) ? user.permissions : [];
-    return required.every((p) => userPerms.includes(p));
+    return required.some((p) => userPerms.includes(p));
   }
 }

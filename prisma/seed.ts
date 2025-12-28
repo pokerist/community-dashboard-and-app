@@ -46,18 +46,18 @@ const PERMISSIONS = [
   // Fees
   'fee.manage',
 
-  // Services 
+  // Services
   'service.create',
   'service.read',
   'service.update',
   'service.delete',
-  
+
   // Service Fields
   'service_field.create',
   'service_field.read',
   'service_field.update',
   'service_field.delete',
-  
+
   // Service Requests
   'service_request.view_all',
   'service_request.view_own',
@@ -67,12 +67,15 @@ const PERMISSIONS = [
   'service_request.close',
 
   // Complaints
-  'complaint.view_all',
-  'complaint.view_own',
   'complaint.report',
+  'complaint.view_own',
+  'complaint.update_own',
+  'complaint.delete_own',
+  'complaint.view_all',
+  'complaint.manage',
+  'complaint.delete_all',
   'complaint.assign',
-  'complaint.resolve',
-  'complaint.close',
+  'complaint.manage_status',
 
   // Violations
   'violation.issue',
