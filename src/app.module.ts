@@ -8,6 +8,8 @@ import { ServiceModule } from './modules/service/service.module';
 import { ServiceFieldModule } from './modules/service-field/service-field.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { ComplaintsModule } from './modules/complaints/complaints.module';
+import { ViolationsModule } from './modules/violations/violations.module';
+
 @Module({
   imports: [
     PrismaModule,
@@ -19,6 +21,7 @@ import { ComplaintsModule } from './modules/complaints/complaints.module';
     ServiceFieldModule,
     AuthModule,
     ComplaintsModule,
+    ViolationsModule
   ],
   controllers: [],
   providers: [],
