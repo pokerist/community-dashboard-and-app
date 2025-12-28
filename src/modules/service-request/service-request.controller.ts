@@ -7,19 +7,16 @@ import {
   Body,
   Patch,
   Param,
-  Headers,
   Req,
   UseGuards,
 } from '@nestjs/common';
 import {
-  ApiHeader,
   ApiOperation,
   ApiTags,
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { ServiceRequestService } from './service-request.service';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
-import { User as UserModel } from '@prisma/client';
 import { UpdateServiceRequestInternalDto } from './dto/update-service-request-internal.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';

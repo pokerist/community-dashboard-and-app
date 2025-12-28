@@ -46,6 +46,18 @@ const PERMISSIONS = [
   // Fees
   'fee.manage',
 
+  // Services 
+  'service.create',
+  'service.read',
+  'service.update',
+  'service.delete',
+  
+  // Service Fields
+  'service_field.create',
+  'service_field.read',
+  'service_field.update',
+  'service_field.delete',
+  
   // Service Requests
   'service_request.view_all',
   'service_request.view_own',

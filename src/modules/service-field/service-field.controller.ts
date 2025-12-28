@@ -8,30 +8,34 @@ import {
   Patch,
   Param,
   Delete,
-  UseGuards,
   Query,
-  BadRequestException
+  BadRequestException,
+  UseGuards
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { AuthGuard } from '@nestjs/passport'; // Placeholder
+import { ApiOperation, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ServiceFieldService } from './service-field.service';
 import { CreateServiceFieldDto } from './dto/create-service-field.dto';
 import { UpdateServiceFieldDto } from './dto/update-service-field.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { Permissions } from '../auth/decorators/permissions.decorator';
 
 // Use a nested routing structure: /services/:serviceId/fields
+@ApiBearerAuth()
 @ApiTags('Service Fields')
 @Controller('service-fields') // Base controller path (can be changed to 'services/:serviceId/fields' if preferred)
 export class ServiceFieldController {
   constructor(private readonly serviceFieldService: ServiceFieldService) {}
 
   // POST /service-fields (Admin: Create a new field)
-  // @UseGuards(AuthGuard('jwt'))
   @Post()
   @ApiOperation({
     summary: 'Create a service form field',
     description:
       'Creates a dynamic form field configuration for a service (label, type, required, order, etc.).',
   })
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @Permissions('service_field.create')
   create(@Body() createServiceFieldDto: CreateServiceFieldDto) {
     // This endpoint allows creating a field for any service by requiring serviceId in the DTO
     return this.serviceFieldService.create(createServiceFieldDto);
@@ -44,6 +48,8 @@ export class ServiceFieldController {
     description:
       'Returns the dynamic form fields for the given `serviceId`. Used by the Community App to render service request forms.',
   })
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @Permissions('service_field.read')
   findByService(@Query('serviceId') serviceId: string) {
     if (!serviceId) {
       // For Admin, you might want to fetch all fields, but for app, filter by service is key
@@ -54,9 +60,10 @@ export class ServiceFieldController {
   }
 
   // PATCH /service-fields/:id (Admin: Update a field)
-  // @UseGuards(AuthGuard('jwt'))
   @Patch(':id')
   @ApiOperation({ summary: 'Update a service form field' })
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @Permissions('service_field.update')
   update(
     @Param('id') id: string,
     @Body() updateServiceFieldDto: UpdateServiceFieldDto,
@@ -65,9 +72,10 @@ export class ServiceFieldController {
   }
 
   // DELETE /service-fields/:id (Admin: Delete a field)
-  // @UseGuards(AuthGuard('jwt'))
   @Delete(':id')
   @ApiOperation({ summary: 'Delete a service form field' })
+  @UseGuards(JwtAuthGuard, PermissionsGuard)
+  @Permissions('service_field.delete')
   remove(@Param('id') id: string) {
     return this.serviceFieldService.remove(id);
   }

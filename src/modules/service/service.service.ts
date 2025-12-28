@@ -28,8 +28,9 @@ export class ServiceService {
    * Community App/Admin: Retrieves all active services.
    * Can be filtered for dashboard by status/category.
    */
-  async findAll(onlyActive: boolean = true) {
-    const whereCondition = onlyActive ? { status: true } : {};
+  async findAll(status: boolean | undefined) {
+    const whereCondition =
+    status === undefined ? {} : { status };
 
     return this.prisma.service.findMany({
       where: whereCondition,
