@@ -290,6 +290,7 @@ model User {
   tenant   Tenant?
 
   residentUnits ResidentUnit[]
+  refreshTokens RefreshToken[]
 
   @@index([email])
   @@index([phone])
@@ -798,4 +799,18 @@ model Referral {
   message        String? // Free text box message
   status         ReferralStatus @default(NEW)
   createdAt      DateTime       @default(now())
+}
+
+// Authentication
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String
+  revoked   Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
 }

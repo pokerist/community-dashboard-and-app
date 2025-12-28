@@ -3,11 +3,8 @@ import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
-import { loadPermissionsIntoCache } from './auth/permission-cache';
 
 async function bootstrap() {
-  await loadPermissionsIntoCache();
-
   const app = await NestFactory.create(AppModule);
 
   // --- 1. Global Validation Pipe (Crucial for DTOs) ---
@@ -41,14 +38,20 @@ async function bootstrap() {
     .addTag('Violations', 'Community violations, penalties, and appeals.')
     .addTag('Facilities', 'Facility creation and management.')
     .addTag('Bookings', 'Facility booking requests and schedules.')
-    .addTag('Services', 'Service catalog (types), availability, eligibility, and pricing.')
+    .addTag(
+      'Services',
+      'Service catalog (types), availability, eligibility, and pricing.',
+    )
     .addTag('Service Fields', 'Dynamic form fields configuration per service.')
-    .addTag('Service Requests', 'Resident service requests, attachments, and staff processing workflows.')
+    .addTag(
+      'Service Requests',
+      'Resident service requests, attachments, and staff processing workflows.',
+    )
     .addTag('Devices', 'Smart device registration and integration.')
     .addTag('AccessControl', 'QR codes and access authorization flows.')
     .addTag('Notifications', 'In-app and external notification management.')
     .addTag('Registrations', 'Pending user registrations and verification.')
-
+    .addTag('Auth', 'Authentication, roles, and permissions management.')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);

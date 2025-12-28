@@ -236,6 +236,36 @@ async function seed() {
     }
   }
 
+  // // Create an initial super admin user
+  // const adminEmail = 'test@admin.com';
+  // const existingAdmin = await prisma.user.findUnique({
+  //   where: { email: adminEmail },
+  // });
+
+  // if (!existingAdmin) {
+  //   const bcrypt = require('bcrypt');
+  //   const hashedPassword = await bcrypt.hash('Admin@123', 12);
+  //   const superAdminRole = await prisma.role.findUnique({
+  //     where: { name: 'SUPER_ADMIN' },
+  //   });
+  //   const adminUser = await prisma.user.create({
+  //     data: {
+  //       email: adminEmail,
+  //       passwordHash: hashedPassword,
+  //       nameEN: 'Super Admin',
+  //       roles: {
+  //         connect: [{ id: superAdminRole!.id }],
+  //       },
+  //     },
+  //   });
+
+  //   console.log(
+  //     `🌱 Created initial super admin user: ${adminEmail} / Admin@123`,
+  //   );
+  // } else {
+  //   console.log(`🌱 Super admin user already exists: ${adminEmail}`);
+  // }
+
   console.log('✅ Seeding complete');
 }
 

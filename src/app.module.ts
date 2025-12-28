@@ -6,6 +6,7 @@ import { FileModule } from './modules/file/file.module';
 import { ServiceRequestModule } from './modules/service-request/service-request.module';
 import { ServiceModule } from './modules/service/service.module';
 import { ServiceFieldModule } from './modules/service-field/service-field.module';
+import { AuthModule } from './modules/auth/auth.module';
 
 @Module({
   imports: [
@@ -15,7 +16,8 @@ import { ServiceFieldModule } from './modules/service-field/service-field.module
     FileModule,
     ServiceRequestModule,
     ServiceModule,
-    ServiceFieldModule
+    ServiceFieldModule,
+    AuthModule
   ],
   controllers: [],
   providers: [],
