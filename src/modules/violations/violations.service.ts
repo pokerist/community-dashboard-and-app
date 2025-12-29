@@ -1,9 +1,13 @@
 // src/modules/violations/violations.service.ts
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateViolationDto, UpdateViolationDto } from './dto/violations.dto';
 import { InvoicesService } from '../invoices/invoices.service';
-import { ViolationStatus, InvoiceStatus } from '@prisma/client';
+import { ViolationStatus, InvoiceStatus, InvoiceType } from '@prisma/client';
 
 @Injectable()
 export class ViolationsService {
@@ -18,8 +22,10 @@ export class ViolationsService {
       orderBy: { createdAt: 'desc' },
       select: { violationNumber: true },
     });
-    const lastNumber = lastViolation?.violationNumber ? parseInt(lastViolation.violationNumber.substring(4)) : 0;
-    const newNumber = lastNumber + 1
+    const lastNumber = lastViolation?.violationNumber
+      ? parseInt(lastViolation.violationNumber.substring(4))
+      : 0;
+    const newNumber = lastNumber + 1;
     return `VIO-${newNumber.toString().padStart(5, '0')}`;
   }
 
@@ -45,7 +51,8 @@ export class ViolationsService {
       await this.invoicesService.create({
         unitId: dto.unitId,
         residentId: dto.residentId,
-        type: `Violation: ${dto.type}`,
+        // Violations are billed as a FINE invoice type
+        type: InvoiceType.FINE,
         amount: dto.fineAmount,
         dueDate: dto.dueDate,
         violationId: violation.id,
@@ -75,10 +82,10 @@ export class ViolationsService {
         unit: true,
         resident: true,
         // CRITICAL: Ensure invoices includes status and id for the check in remove()
-        invoices: { 
-            select: { id: true, status: true, invoiceNumber: true } 
-        }, 
-        issuedBy: { select: { nameEN: true } }
+        invoices: {
+          select: { id: true, status: true, invoiceNumber: true },
+        },
+        issuedBy: { select: { nameEN: true } },
       },
     });
     if (!violation) throw new NotFoundException(`Violation ${id} not found`);
@@ -96,7 +103,7 @@ export class ViolationsService {
   async remove(id: string) {
     // CRITICAL: findOne must be called here to include the invoices array!
     const violation = await this.findOne(id);
-    
+
     // Find the first (and likely only) linked invoice
     const linkedInvoice = violation.invoices?.[0];
 
@@ -104,15 +111,17 @@ export class ViolationsService {
     return this.prisma.$transaction(async (tx) => {
       if (linkedInvoice) {
         if (linkedInvoice.status === InvoiceStatus.PAID) {
-           throw new BadRequestException('Cannot delete a violation that has already been paid.');
+          throw new BadRequestException(
+            'Cannot delete a violation that has already been paid.',
+          );
         }
-        
-        // Action: Cancel or Delete the invoice. 
+
+        // Action: Cancel or Delete the invoice.
         // Deleting the invoice is safe here since the violation is also being deleted.
         // We use the Prisma client within the transaction (tx.invoice.delete)
         await tx.invoice.delete({ where: { id: linkedInvoice.id } });
       }
-      
+
       return tx.violation.delete({ where: { id } });
     });
   }

@@ -5,9 +5,10 @@ import { ViolationsController } from './violations.controller';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { InvoicesModule } from '../invoices/invoices.module';
 import { InvoicesService } from '../invoices/invoices.service';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports: [PrismaModule, InvoicesModule],
+  imports: [PrismaModule, InvoicesModule, AuthModule],
   controllers: [ViolationsController],
   providers: [InvoicesService, ViolationsService],
 })

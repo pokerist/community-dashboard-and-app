@@ -77,6 +77,15 @@ export class CreateInvoiceDto {
   @IsEnum(InvoiceStatus)
   @IsOptional()
   status?: InvoiceStatus;
+
+  @ApiProperty({
+    example: 'd290f1ee-6c54-4b01-90e6-d701748f0851',
+    description: 'The UUID of the linked violation (if applicable).',
+    required: false,
+  })
+  @IsUUID()
+  @IsOptional()
+  violationId?: string;
 }
 
 export class UpdateInvoiceDto extends PartialType(CreateInvoiceDto) {

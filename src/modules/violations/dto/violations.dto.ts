@@ -39,6 +39,7 @@ export class CreateViolationDto {
   @IsString()
   @IsOptional()
   issuedById?: string;
+
 }
 
 export class UpdateViolationDto extends PartialType(CreateViolationDto) {

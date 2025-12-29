@@ -2,8 +2,8 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ViolationsService } from './violations.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { InvoicesService } from '../invoices/invoices.service';
-import { NotFoundException, BadRequestException } from '@nestjs/common';
-import { ViolationStatus, InvoiceStatus } from '@prisma/client';
+import { BadRequestException } from '@nestjs/common';
+import { ViolationStatus, InvoiceStatus, InvoiceType } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
 
 const mockPrismaService = {
@@ -78,8 +78,10 @@ describe('ViolationsService (Unit)', () => {
   describe('create', () => {
     it('should create a violation and a linked invoice if fineAmount > 0', async () => {
       // Mock sequential number generation (if it was a separate private function)
-      const generateSpy = jest.spyOn(service as any, 'generateViolationNumber').mockResolvedValue('VIO-00002');
-      
+      const generateSpy = jest
+        .spyOn(service as any, 'generateViolationNumber')
+        .mockResolvedValue('VIO-00002');
+
       // Mock the Prisma call to return the created violation
       prisma.violation.create.mockResolvedValue({
         ...mockViolation,
@@ -104,7 +106,7 @@ describe('ViolationsService (Unit)', () => {
       expect(invoicesService.create).toHaveBeenCalledWith({
         unitId: UNIT_ID,
         residentId: RES_ID,
-        type: `Violation: ${mockCreateDto.type}`,
+        type: InvoiceType.FINE,
         amount: mockCreateDto.fineAmount,
         dueDate: mockCreateDto.dueDate,
         violationId: 'new-vio-id', // CRITICAL: Check the link
@@ -114,7 +116,10 @@ describe('ViolationsService (Unit)', () => {
 
     it('should create a violation but NOT create an invoice if fineAmount is 0', async () => {
       const dtoNoFine = { ...mockCreateDto, fineAmount: 0.0 };
-      prisma.violation.create.mockResolvedValue({ ...mockViolation, fineAmount: new Decimal(0) });
+      prisma.violation.create.mockResolvedValue({
+        ...mockViolation,
+        fineAmount: new Decimal(0),
+      });
 
       await service.create(dtoNoFine as any);
 
@@ -131,7 +136,10 @@ describe('ViolationsService (Unit)', () => {
       status: InvoiceStatus.PENDING,
       invoiceNumber: 'INV-00005',
     };
-    const mockPaidInvoice = { ...mockLinkedInvoice, status: InvoiceStatus.PAID };
+    const mockPaidInvoice = {
+      ...mockLinkedInvoice,
+      status: InvoiceStatus.PAID,
+    };
 
     // Utility to mock findOne result with specific invoices
     const mockFindOneWithInvoices = (invoices) => {
@@ -173,13 +181,14 @@ describe('ViolationsService (Unit)', () => {
       mockFindOneWithInvoices([mockPaidInvoice]);
 
       await expect(service.remove(VIO_ID)).rejects.toThrow(
-        new BadRequestException('Cannot delete a violation that has already been paid.'),
+        new BadRequestException(
+          'Cannot delete a violation that has already been paid.',
+        ),
       );
 
       expect(prisma.$transaction).toHaveBeenCalled(); // The error prevents transaction start
-      expect(prisma.invoice.delete).not.toHaveBeenCalled(); 
+      expect(prisma.invoice.delete).not.toHaveBeenCalled();
       expect(prisma.violation.delete).not.toHaveBeenCalled();
-    
     });
   });
 });
