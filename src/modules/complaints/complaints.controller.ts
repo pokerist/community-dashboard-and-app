@@ -19,6 +19,7 @@ import { Permissions } from '../auth/decorators/permissions.decorator';
 @ApiBearerAuth()
 @ApiTags('Complaints')
 @Controller('complaints')
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class ComplaintsController {
   constructor(private readonly complaintsService: ComplaintsService) {}
 
@@ -26,7 +27,6 @@ export class ComplaintsController {
   // RESIDENT: CREATE
   // ---------------------------
   @Post()
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('complaint.report')
   create(@Body() dto: CreateComplaintDto) {
     return this.complaintsService.create(dto);
@@ -36,7 +36,6 @@ export class ComplaintsController {
   // STAFF: VIEW ALL
   // ---------------------------
   @Get()
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('complaint.view_all')
   findAll() {
     return this.complaintsService.findAll();
@@ -46,7 +45,6 @@ export class ComplaintsController {
   // RESIDENT OR STAFF: VIEW SPECIFIC
   // ---------------------------
   @Get(':id')
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('complaint.view_own', 'complaint.view_all')
   findOne(@Param('id') id: string) {
     return this.complaintsService.findOne(id);
@@ -57,7 +55,6 @@ export class ComplaintsController {
   // (status/assignedTo/notes)
   // ---------------------------
   @Patch(':id')
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('complaint.manage')
   update(@Param('id') id: string, @Body() dto: UpdateComplaintDto) {
     return this.complaintsService.update(id, dto);
@@ -67,7 +64,6 @@ export class ComplaintsController {
   // STAFF: UPDATE STATUS ONLY
   // ---------------------------
   @Patch(':id/status')
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('complaint.manage')
   updateStatus(@Param('id') id: string, @Body() dto: UpdateComplaintStatusDto) {
     return this.complaintsService.updateStatus(
@@ -82,7 +78,6 @@ export class ComplaintsController {
   // ADMIN: DELETE ANY
   // ---------------------------
   @Delete(':id')
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('complaint.delete_own', 'complaint.delete_all')
   remove(@Param('id') id: string) {
     return this.complaintsService.remove(id);

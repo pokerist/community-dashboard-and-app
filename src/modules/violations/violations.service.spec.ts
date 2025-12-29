@@ -21,9 +21,9 @@ const mockPrismaService = {
   $transaction: jest.fn((callback) => callback(mockPrismaService)), // Mock transaction
 };
 
-// Mock InvoicesService to check if create is called
+// Mock InvoicesService to check if generateInvoice is called
 const mockInvoicesService = {
-  create: jest.fn(),
+  generateInvoice: jest.fn(),
 };
 
 describe('ViolationsService (Unit)', () => {
@@ -103,13 +103,13 @@ describe('ViolationsService (Unit)', () => {
       );
 
       // Check 2: Invoice was created with the correct link and data
-      expect(invoicesService.create).toHaveBeenCalledWith({
+      expect(invoicesService.generateInvoice).toHaveBeenCalledWith({
         unitId: UNIT_ID,
         residentId: RES_ID,
         type: InvoiceType.FINE,
         amount: mockCreateDto.fineAmount,
         dueDate: mockCreateDto.dueDate,
-        violationId: 'new-vio-id', // CRITICAL: Check the link
+        sources: { violationIds: ['new-vio-id'] }, // CRITICAL: Check the link
         status: InvoiceStatus.PENDING,
       });
     });
@@ -124,7 +124,7 @@ describe('ViolationsService (Unit)', () => {
       await service.create(dtoNoFine as any);
 
       expect(prisma.violation.create).toHaveBeenCalled();
-      expect(invoicesService.create).not.toHaveBeenCalled();
+      expect(invoicesService.generateInvoice).not.toHaveBeenCalled();
     });
   });
 

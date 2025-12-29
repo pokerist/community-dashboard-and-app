@@ -558,7 +558,17 @@ model Invoice {
   serviceRequestId String?
   serviceRequest   ServiceRequest? @relation(fields: [serviceRequestId], references: [id])
 
-  unitFee UnitFee? @relation("FeeInvoices")
+  // Optional links to other potential sources
+  complaintId String?
+  complaint   Complaint? @relation(fields: [complaintId], references: [id])
+
+  bookingId String?
+  booking   Booking? @relation(fields: [bookingId], references: [id])
+
+  incidentId String?
+  incident   Incident? @relation(fields: [incidentId], references: [id])
+
+  unitFees UnitFee[] @relation("FeeInvoices")
 
   @@index([createdAt])
 }
@@ -580,6 +590,7 @@ model Complaint {
   assignedTo      User?           @relation("complaint_assignee", fields: [assignedToId], references: [id])
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
+  invoices        Invoice[]
 
   @@index([createdAt])
 }
@@ -636,6 +647,7 @@ model Incident {
   createdAt      DateTime       @default(now())
   unit           Unit?          @relation(fields: [unitId], references: [id])
   unitId         String?
+  invoices       Invoice[]
 }
 
 model Facility {
@@ -666,6 +678,7 @@ model Booking {
   status        BookingStatus @default(PENDING)
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
+  invoices      Invoice[]
 }
 
 model SmartDevice {
@@ -769,12 +782,18 @@ model UnitFee {
   billingMonth DateTime // Use the first day of the month being billed (e.g., 2025-11-01)
 
   // Links to the generated invoice
-  invoiceId String?  @unique
+  invoiceId String?
   invoice   Invoice? @relation("FeeInvoices", fields: [invoiceId], references: [id])
 
   createdAt DateTime @default(now())
 
   @@unique([unitId, type, billingMonth])
+}
+
+// --- Invoice Sequence for DB-backed invoice numbers ---
+model InvoiceSequence {
+  name    String @id
+  counter BigInt @default(0)
 }
 
 // Model for "Alkarma Projects" Section

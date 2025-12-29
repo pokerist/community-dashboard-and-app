@@ -23,6 +23,7 @@ import { Permissions } from '../auth/decorators/permissions.decorator';
 // Use a nested routing structure: /services/:serviceId/fields
 @ApiBearerAuth()
 @ApiTags('Service Fields')
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @Controller('service-fields') // Base controller path (can be changed to 'services/:serviceId/fields' if preferred)
 export class ServiceFieldController {
   constructor(private readonly serviceFieldService: ServiceFieldService) {}
@@ -34,7 +35,6 @@ export class ServiceFieldController {
     description:
       'Creates a dynamic form field configuration for a service (label, type, required, order, etc.).',
   })
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('service_field.create')
   create(@Body() createServiceFieldDto: CreateServiceFieldDto) {
     // This endpoint allows creating a field for any service by requiring serviceId in the DTO
@@ -48,7 +48,6 @@ export class ServiceFieldController {
     description:
       'Returns the dynamic form fields for the given `serviceId`. Used by the Community App to render service request forms.',
   })
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('service_field.read')
   findByService(@Query('serviceId') serviceId: string) {
     if (!serviceId) {
@@ -62,7 +61,6 @@ export class ServiceFieldController {
   // PATCH /service-fields/:id (Admin: Update a field)
   @Patch(':id')
   @ApiOperation({ summary: 'Update a service form field' })
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('service_field.update')
   update(
     @Param('id') id: string,
@@ -74,7 +72,6 @@ export class ServiceFieldController {
   // DELETE /service-fields/:id (Admin: Delete a field)
   @Delete(':id')
   @ApiOperation({ summary: 'Delete a service form field' })
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('service_field.delete')
   remove(@Param('id') id: string) {
     return this.serviceFieldService.remove(id);

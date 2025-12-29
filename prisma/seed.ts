@@ -36,6 +36,7 @@ const PERMISSIONS = [
   'project.manage',
 
   // Invoices
+  'invoice.generate',
   'invoice.view_all',
   'invoice.view_own',
   'invoice.create',
@@ -44,6 +45,11 @@ const PERMISSIONS = [
   'invoice.cancel',
 
   // Fees
+  'unit_fee.view_all', 
+  'unit_fee.view_own',
+  'unit_fee.create',
+  'unit_fee.update',
+  'unit_fee.delete',
   'fee.manage',
 
   // Services

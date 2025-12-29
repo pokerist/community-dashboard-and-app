@@ -25,6 +25,7 @@ import { Permissions } from '../auth/decorators/permissions.decorator';
 @ApiBearerAuth()
 @ApiTags('Service Requests')
 @Controller('service-requests')
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class ServiceRequestController {
   constructor(private readonly serviceRequestService: ServiceRequestService) {}
 
@@ -37,7 +38,6 @@ export class ServiceRequestController {
     description:
       'Creates a resident service request, optionally linking attachments and submitting dynamic field values.',
   })
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('service_request.create')
   create(
     @Body() createServiceRequestDto: CreateServiceRequestDto,
@@ -60,7 +60,6 @@ export class ServiceRequestController {
     description:
       'Returns the authenticated user’s service requests ordered by most recent first.',
   })
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('service_request.view_own')
   findByUser(@Req() req: any) {
     const createdById = req.user.id;

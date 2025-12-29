@@ -5,9 +5,10 @@ import { ServiceRequestService } from './service-request.service';
 import { ServiceRequestController } from './service-request.controller';
 import { PrismaModule } from '../../../prisma/prisma.module'; // Import the Prisma module
 import { AuthModule } from '../auth/auth.module';
+import { InvoicesModule } from '../invoices/invoices.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule],
+  imports: [PrismaModule, AuthModule, InvoicesModule],
   controllers: [ServiceRequestController],
   providers: [ServiceRequestService],
   exports: [ServiceRequestService],

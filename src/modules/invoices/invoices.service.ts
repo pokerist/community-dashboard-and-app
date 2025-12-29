@@ -6,32 +6,107 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateInvoiceDto, UpdateInvoiceDto } from './dto/invoices.dto';
-import { Prisma, Invoice, InvoiceStatus, ViolationStatus, InvoiceType } from '@prisma/client';
+import {
+  Prisma,
+  Invoice,
+  InvoiceStatus,
+  ViolationStatus,
+  InvoiceType,
+  ServiceRequestStatus,
+  ComplaintStatus,
+  BookingStatus,
+  IncidentStatus,
+} from '@prisma/client';
 import { CreateUnitFeeDto, UpdateUnitFeeDto } from './dto/unit-fees.dto';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InvoiceCreatedEvent } from '../../events/contracts/invoice-created.event';
 
+// --- Types for the new generic invoice generator ---
+export type InvoiceSources = {
+  unitFeeIds?: string[];
+  violationIds?: string[];
+  serviceRequestIds?: string[];
+  complaintIds?: string[];
+  bookingIds?: string[];
+  incidentIds?: string[];
+};
+
+export interface GenerateInvoiceDto {
+  unitId: string;
+  residentId?: string;
+  amount: number;
+  dueDate: Date;
+  type: InvoiceType;
+  sources?: InvoiceSources;
+  invoiceNumber?: string;
+  status?: InvoiceStatus;
+}
+
 @Injectable()
 export class InvoicesService {
   constructor(
-    private readonly prisma: PrismaService, 
-    private readonly eventEmitter: EventEmitter2
+    private readonly prisma: PrismaService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
-  // Helper to generate a sequential invoice number (PLACEHOLDER)F
+  // Helper to generate the next invoice number using a DB-backed sequence
+  // This uses an atomic increment on the InvoiceSequence model to guarantee
+  // unique, sequential numbers even under concurrent requests.
   private async generateInvoiceNumber(): Promise<string> {
-    // NOTE: In a production environment, this should be done in a database transaction
-    // with locking to guarantee uniqueness and sequential order.
-    const lastInvoice = await this.prisma.invoice.findFirst({
-      orderBy: { createdAt: 'desc' },
-      select: { invoiceNumber: true },
+    // We wrap the sequence increment in a transaction in case we want to extend
+    // the logic later (e.g., support multiple named sequences).
+    const seq = await this.prisma.$transaction(async (tx) => {
+      // Ensure a sequence row exists (upsert is safe)
+      await tx.invoiceSequence.upsert({
+        where: { name: 'invoices' },
+        update: {},
+        create: { name: 'invoices', counter: BigInt(0) },
+      });
+
+      // Atomically increment the counter and return the updated row
+      const updated = await tx.invoiceSequence.update({
+        where: { name: 'invoices' },
+        data: { counter: { increment: BigInt(1) } },
+      });
+
+      return updated;
     });
 
-    const lastNumber = lastInvoice?.invoiceNumber
-      ? parseInt(lastInvoice.invoiceNumber.substring(4))
-      : 0;
-    const newNumber = lastNumber + 1;
-    return `INV-${newNumber.toString().padStart(5, '0')}`;
+    // Use a stable prefix and fixed width for invoice numbers.
+    const prefix = 'INV-';
+    const counter =
+      typeof seq.counter === 'bigint'
+        ? seq.counter
+        : BigInt(seq.counter as any);
+    const width = 5;
+    return `${prefix}${counter.toString().padStart(width, '0')}`;
+  }
+
+  // Transactional invoice number generator that uses the provided TransactionClient
+  // This ensures the sequence increment participates in the same transaction as the
+  // created invoice and will be rolled back if the transaction aborts, preventing
+  // gaps in the invoice sequence caused by failed attempts.
+  private async generateInvoiceNumberTx(
+    tx: Prisma.TransactionClient,
+  ): Promise<string> {
+    await tx.invoiceSequence.upsert({
+      where: { name: 'invoices' },
+      update: {},
+      create: { name: 'invoices', counter: BigInt(0) },
+    });
+
+    const updated = await tx.invoiceSequence.update({
+      where: { name: 'invoices' },
+      data: { counter: { increment: BigInt(1) } },
+    });
+
+    const prefix = 'INV-';
+    const counter =
+      typeof updated.counter === 'bigint'
+        ? updated.counter
+        : BigInt(updated.counter as any);
+    const width = 5;
+    return `${prefix}${counter.toString().padStart(width, '0')}`;
   }
 
   async create(dto: CreateInvoiceDto) {
@@ -45,6 +120,169 @@ export class InvoicesService {
       },
     });
 
+    this.eventEmitter.emit(
+      'invoice.created',
+      new InvoiceCreatedEvent(
+        newInvoice.id,
+        newInvoice.unitId,
+        newInvoice.residentId,
+        newInvoice.amount.toNumber(),
+        newInvoice.dueDate,
+        newInvoice.type,
+      ),
+    );
+
+    return newInvoice;
+  }
+
+  /**
+   * Generate an invoice and atomically link provided sources (e.g., UnitFees).
+   * NOTE: Current schema supports linking UnitFees (by setting invoiceId on the UnitFee)
+   * and a single Violation via invoice.violationId. Supporting multiple-source links
+   * or a fully polymorphic approach will require a schema migration (InvoiceSource).
+   */
+  async generateInvoice(dto: GenerateInvoiceDto) {
+    const {
+      unitId,
+      residentId,
+      amount,
+      dueDate,
+      type,
+      sources,
+      invoiceNumber,
+    } = dto;
+
+    const newInvoice = await this.prisma.$transaction(async (tx) => {
+      const maxAttempts = 5;
+      let lastError: any = null;
+
+      // Validate UnitFees belong to the same unit and match provided unitId (if provided)
+      if (sources?.unitFeeIds && sources.unitFeeIds.length > 0) {
+        const fees = await tx.unitFee.findMany({
+          where: { id: { in: sources.unitFeeIds } },
+          select: { unitId: true, id: true },
+        });
+
+        if (fees.length !== sources.unitFeeIds.length) {
+          throw new NotFoundException('Some UnitFees were not found.');
+        }
+
+        const uniqueUnits = new Set(fees.map((f) => f.unitId));
+        if (uniqueUnits.size > 1) {
+          throw new BadRequestException('UnitFees belong to multiple units.');
+        }
+
+        const onlyUnitId = fees[0].unitId;
+        if (onlyUnitId !== unitId) {
+          throw new BadRequestException(
+            'UnitFees do not belong to the provided unitId.',
+          );
+        }
+      }
+
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const finalInvoiceNumber =
+          invoiceNumber ?? (await this.generateInvoiceNumberTx(tx));
+
+        const createData: Prisma.InvoiceUncheckedCreateInput = {
+          unitId,
+          residentId,
+          amount,
+          dueDate,
+          type,
+          invoiceNumber: finalInvoiceNumber,
+        };
+
+        if (dto.status) {
+          // small, explicit cast because Prisma's create input types are nested complex types
+          (createData as any).status = dto.status;
+        }
+
+        if (sources?.violationIds && sources.violationIds.length > 0) {
+          if (sources.violationIds.length > 1) {
+            throw new BadRequestException(
+              'Multiple violations per invoice are not supported by the current schema. Consider migrating to an InvoiceSource table.',
+            );
+          }
+          (createData as any).violationId = sources.violationIds[0];
+        }
+
+        // Service Requests: only single serviceRequestId per invoice supported by schema
+        if (
+          sources?.serviceRequestIds &&
+          sources.serviceRequestIds.length > 0
+        ) {
+          if (sources.serviceRequestIds.length > 1) {
+            throw new BadRequestException(
+              'Multiple service requests per invoice are not supported by the current schema. Consider migrating to an InvoiceSource table.',
+            );
+          }
+          (createData as any).serviceRequestId = sources.serviceRequestIds[0];
+        }
+
+        // Complaints
+        if (sources?.complaintIds && sources.complaintIds.length > 0) {
+          if (sources.complaintIds.length > 1) {
+            throw new BadRequestException(
+              'Multiple complaints per invoice are not supported by the current schema. Consider migrating to an InvoiceSource table.',
+            );
+          }
+          (createData as any).complaintId = sources.complaintIds[0];
+        }
+
+        // Bookings
+        if (sources?.bookingIds && sources.bookingIds.length > 0) {
+          if (sources.bookingIds.length > 1) {
+            throw new BadRequestException(
+              'Multiple bookings per invoice are not supported by the current schema. Consider migrating to an InvoiceSource table.',
+            );
+          }
+          (createData as any).bookingId = sources.bookingIds[0];
+        }
+
+        // Incidents
+        if (sources?.incidentIds && sources.incidentIds.length > 0) {
+          if (sources.incidentIds.length > 1) {
+            throw new BadRequestException(
+              'Multiple incidents per invoice are not supported by the current schema. Consider migrating to an InvoiceSource table.',
+            );
+          }
+          (createData as any).incidentId = sources.incidentIds[0];
+        }
+
+        try {
+          const created = await tx.invoice.create({ data: createData });
+
+          // Bulk-link UnitFees (if provided)
+          if (sources?.unitFeeIds && sources.unitFeeIds.length > 0) {
+            await tx.unitFee.updateMany({
+              where: { id: { in: sources.unitFeeIds } },
+              data: { invoiceId: created.id },
+            });
+          }
+
+          return created;
+        } catch (err: any) {
+          lastError = err;
+          if (
+            err instanceof Prisma.PrismaClientKnownRequestError &&
+            err.code === 'P2002'
+          ) {
+            const target = (err.meta?.target as string[]) ?? [];
+            if (target.includes('invoiceNumber')) {
+              if (attempt === maxAttempts - 1) throw err;
+              // collision - try again
+              continue;
+            }
+          }
+          throw err;
+        }
+      }
+
+      throw lastError;
+    });
+
+    // Emit event outside the transaction
     this.eventEmitter.emit(
       'invoice.created',
       new InvoiceCreatedEvent(
@@ -137,6 +375,36 @@ export class InvoicesService {
           data: { status: ViolationStatus.PAID },
         });
       }
+
+      // Expand to update related sources (serviceRequest, complaint, booking, incident)
+      if (updatedInvoice.serviceRequestId) {
+        await tx.serviceRequest.update({
+          where: { id: updatedInvoice.serviceRequestId },
+          data: { status: ServiceRequestStatus.RESOLVED },
+        });
+      }
+
+      if (updatedInvoice.complaintId) {
+        await tx.complaint.update({
+          where: { id: updatedInvoice.complaintId },
+          data: { status: ComplaintStatus.RESOLVED },
+        });
+      }
+
+      if (updatedInvoice.bookingId) {
+        await tx.booking.update({
+          where: { id: updatedInvoice.bookingId },
+          data: { status: BookingStatus.CONFIRMED },
+        });
+      }
+
+      if (updatedInvoice.incidentId) {
+        await tx.incident.update({
+          where: { id: updatedInvoice.incidentId },
+          data: { status: IncidentStatus.RESOLVED },
+        });
+      }
+
       return updatedInvoice;
     });
   }
@@ -210,7 +478,7 @@ export class InvoicesService {
         const unitId = fee.unitId;
         if (!acc[unitId]) {
           acc[unitId] = {
-            fees: [],
+            fees: [] as (typeof feesToInvoice)[number][],
             total: 0,
             residentId: fee.unit.residents[0]?.userId,
           };
@@ -221,41 +489,36 @@ export class InvoicesService {
       },
       {} as Record<
         string,
-        { fees: typeof feesToInvoice; total: number; residentId?: string }
+        {
+          fees: (typeof feesToInvoice)[number][];
+          total: number;
+          residentId?: string;
+        }
       >,
     );
 
-    const newInvoices: Invoice[] = [];
-    // 3. Create Invoices Transactionally
-    for (const unitId in groupedFees) {
-      const group = groupedFees[unitId];
+    // 3. Create Invoices concurrently (batches) using the new generator that links UnitFees
+    const createPromises: Promise<Invoice | null>[] = Object.entries(
+      groupedFees,
+    ).map(([unitId, group]) => {
       if (!group.residentId) {
         console.warn(
           `Skipping unit ${unitId}: No primary resident found for billing.`,
         );
-        continue;
+        return Promise.resolve(null);
       }
-
-      // Create the Invoice
-      const newInvoice = await this.create({
+      return this.generateInvoice({
         unitId: unitId,
         residentId: group.residentId,
         type: InvoiceType.UTILITY,
         amount: group.total,
         dueDate: this.calculateUtilityDueDate(billingMonth),
+        sources: { unitFeeIds: group.fees.map((f) => f.id) },
       });
+    });
 
-      // Link all individual fees to the new Invoice ID (Critical Step!)
-      const feeUpdates = group.fees.map((fee) =>
-        this.prisma.unitFee.update({
-          where: { id: fee.id },
-          data: { invoiceId: newInvoice.id },
-        }),
-      );
-      await this.prisma.$transaction(feeUpdates);
-
-      newInvoices.push(newInvoice);
-    }
+    const results = await Promise.all(createPromises);
+    const newInvoices = results.filter((r): r is Invoice => r !== null);
 
     return newInvoices;
   }

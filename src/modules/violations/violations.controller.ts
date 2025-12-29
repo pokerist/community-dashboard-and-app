@@ -19,6 +19,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 @ApiBearerAuth()
 @ApiTags('Violations')
 @Controller('violations')
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class ViolationsController {
   constructor(private readonly violationsService: ViolationsService) {}
 
@@ -26,7 +27,6 @@ export class ViolationsController {
   @ApiOperation({
     summary: 'Issue a new violation and generate a fine invoice.',
   })
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('violation.issue')
   create(@Body() createViolationDto: CreateViolationDto) {
     return this.violationsService.create(createViolationDto);
@@ -34,14 +34,12 @@ export class ViolationsController {
 
   @Get()
   @ApiOperation({ summary: 'List all violations.' })
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('violation.view_all')
   findAll() {
     return this.violationsService.findAll();
   }
 
   @Get(':id')
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('violation.view_own', 'violation.view_all')
   findOne(@Param('id') id: string) {
     return this.violationsService.findOne(id);
@@ -49,7 +47,6 @@ export class ViolationsController {
 
   @Patch(':id')
   @ApiOperation({ summary: 'Update violation status (e.g., Appeal).' })
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('violation.update')
   update(
     @Param('id') id: string,
@@ -62,7 +59,6 @@ export class ViolationsController {
   @ApiOperation({
     summary: 'Cancel/Delete a violation and its pending invoice.',
   })
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('violation.cancel')
   remove(@Param('id') id: string) {
     return this.violationsService.remove(id);

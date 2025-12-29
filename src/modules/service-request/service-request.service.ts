@@ -8,10 +8,15 @@ import {
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestInternalDto } from './dto/update-service-request-internal.dto';
+import { InvoicesService } from '../invoices/invoices.service';
+import { InvoiceType } from '@prisma/client';
 
 @Injectable()
 export class ServiceRequestService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private invoicesService: InvoicesService,
+  ) {}
 
   /**
    * Creates a new Service Request, including attachments and dynamic field values,
@@ -105,6 +110,55 @@ export class ServiceRequestService {
         fieldValues: { include: { field: true } }, // Include the saved field values
       },
     });
+  }
+
+  /**
+   * Create an invoice for a Service Request (e.g., maintenance charge).
+   * This method is intentionally lightweight and delegates invoice creation to InvoicesService.generateInvoice
+   */
+  async createInvoiceForRequest(
+    requestId: string,
+    amount: number,
+    dueDate: Date,
+    type: InvoiceType = InvoiceType.MAINTENANCE_FEE,
+  ) {
+    const request = await this.prisma.serviceRequest.findUnique({
+      where: { id: requestId },
+      include: {
+        unit: {
+          select: {
+            id: true,
+            residents: {
+              where: { isPrimary: true },
+              select: { userId: true },
+              take: 1,
+            },
+          },
+        },
+      },
+    });
+    if (!request)
+      throw new NotFoundException(`Service Request ${requestId} not found`);
+
+    // Resolve primary resident: prefer creator, otherwise use primary resident on unit
+    let residentId = request.createdById;
+    const unitId = request.unitId ?? request.unit?.id;
+
+    if (!unitId)
+      throw new BadRequestException('Service Request has no associated unit.');
+
+    if (!residentId) residentId = request.unit?.residents?.[0]?.userId;
+
+    const invoice = await this.invoicesService.generateInvoice({
+      unitId,
+      residentId,
+      amount,
+      dueDate,
+      type,
+      sources: { serviceRequestIds: [requestId] },
+    });
+
+    return invoice;
   }
 
   /**

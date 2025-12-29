@@ -5,11 +5,15 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateComplaintDto, UpdateComplaintDto } from './dto/complaints.dto';
-import { ComplaintStatus, Priority } from '@prisma/client';
+import { ComplaintStatus, Priority, InvoiceType } from '@prisma/client';
+import { InvoicesService } from '../invoices/invoices.service';
 
 @Injectable()
 export class ComplaintsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private invoicesService: InvoicesService,
+  ) {}
 
   /**
    * Generates the next sequential complaint number (e.g., CMP-00001)
@@ -25,7 +29,7 @@ export class ComplaintsService {
     const newNumber = lastNumber + 1;
     return `CMP-${newNumber.toString().padStart(5, '0')}`;
   }
-  
+
   /**
    * Helper to calculate resolvedAt based on status change.
    */
@@ -99,9 +103,11 @@ export class ComplaintsService {
 
     // 2. Auto-calculate resolvedAt timestamp if status is being updated
     if (dataToUpdate.status) {
-      dataToUpdate.resolvedAt = this.getResolutionTimestamp(dataToUpdate.status);
+      dataToUpdate.resolvedAt = this.getResolutionTimestamp(
+        dataToUpdate.status,
+      );
     }
-    
+
     // 3. Send the merged data to Prisma (handles assignedToId, status, notes, and timestamp)
     return this.prisma.complaint.update({
       where: { id },
@@ -126,6 +132,52 @@ export class ComplaintsService {
     return this.prisma.complaint.delete({
       where: { id },
     });
+  }
+
+  /**
+   * Create an invoice for a complaint (e.g., damage fine).
+   */
+  async createInvoiceForComplaint(
+    complaintId: string,
+    amount: number,
+    dueDate: Date,
+    type: InvoiceType = InvoiceType.FINE,
+  ) {
+    const complaint = await this.findOne(complaintId);
+    if (!complaint)
+      throw new NotFoundException(`Complaint ${complaintId} not found`);
+
+    // Resolve primary resident: prefer explicit reporterId, otherwise find primary resident on the unit
+    let residentId = complaint.reporterId;
+    const unitId = complaint.unitId ?? complaint.unit?.id;
+
+    if (!unitId)
+      throw new BadRequestException('Complaint has no associated unit.');
+
+    if (!residentId) {
+      const unit = await this.prisma.unit.findUnique({
+        where: { id: unitId },
+        include: {
+          residents: {
+            where: { isPrimary: true },
+            select: { userId: true },
+            take: 1,
+          },
+        },
+      });
+      residentId = unit?.residents?.[0]?.userId;
+    }
+
+    const invoice = await this.invoicesService.generateInvoice({
+      unitId,
+      residentId,
+      amount,
+      dueDate,
+      type,
+      sources: { complaintIds: [complaintId] },
+    });
+
+    return invoice;
   }
 
   // --- 6. Helper: Change Status (Optional dedicated route for status quick updates) ---

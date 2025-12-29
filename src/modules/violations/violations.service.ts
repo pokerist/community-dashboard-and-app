@@ -48,14 +48,13 @@ export class ViolationsService {
 
     // 2. Automatically Create the Invoice (Financial Consequence)
     if (dto.fineAmount > 0) {
-      await this.invoicesService.create({
+      await this.invoicesService.generateInvoice({
         unitId: dto.unitId,
         residentId: dto.residentId,
-        // Violations are billed as a FINE invoice type
         type: InvoiceType.FINE,
         amount: dto.fineAmount,
         dueDate: dto.dueDate,
-        violationId: violation.id,
+        sources: { violationIds: [violation.id] },
         status: InvoiceStatus.PENDING,
       });
     }

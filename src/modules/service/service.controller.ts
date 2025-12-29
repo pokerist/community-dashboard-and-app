@@ -22,6 +22,7 @@ import { Permissions } from '../auth/decorators/permissions.decorator';
 @ApiBearerAuth()
 @ApiTags('Services')
 @Controller('services')
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class ServiceController {
   constructor(private readonly serviceService: ServiceService) {}
 
@@ -32,7 +33,6 @@ export class ServiceController {
     description:
       'Creates a new service in the catalog (name, category, eligibility, visibility status, pricing, etc.).',
   })
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('service.create')
   create(@Body() createServiceDto: CreateServiceDto) {
     return this.serviceService.create(createServiceDto);
@@ -45,7 +45,6 @@ export class ServiceController {
     description:
       'Lists service types. Use `status=active` (default) for active only, `status=inactive` for inactive only, or `status=all` for both active and inactive services.',
   })
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('service.read')
   findAll(@Query('status') status?: string) {
     let filter: boolean | undefined;
@@ -60,7 +59,6 @@ export class ServiceController {
   // GET /services/:id (Admin: View details)
   @Get(':id')
   @ApiOperation({ summary: 'Get a service by id' })
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('service.read')
   findOne(@Param('id') id: string) {
     return this.serviceService.findOne(id);
@@ -73,7 +71,6 @@ export class ServiceController {
     description:
       'Updates service properties such as visibility (status), processing time, description, or pricing.',
   })
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('service.update')
   update(@Param('id') id: string, @Body() updateServiceDto: UpdateServiceDto) {
     return this.serviceService.update(id, updateServiceDto);
@@ -82,7 +79,6 @@ export class ServiceController {
   // DELETE /services/:id (Admin: Remove a service)
   @Delete(':id')
   @ApiOperation({ summary: 'Delete a service' })
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('service.delete')
   remove(@Param('id') id: string) {
     return this.serviceService.remove(id);
