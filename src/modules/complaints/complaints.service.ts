@@ -148,7 +148,7 @@ export class ComplaintsService {
       throw new NotFoundException(`Complaint ${complaintId} not found`);
 
     // Resolve primary resident: prefer explicit reporterId, otherwise find primary resident on the unit
-    let residentId = complaint.reporterId;
+    let residentId: string | undefined = complaint.reporterId;
     const unitId = complaint.unitId ?? complaint.unit?.id;
 
     if (!unitId)

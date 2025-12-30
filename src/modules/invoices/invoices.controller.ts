@@ -30,15 +30,13 @@ export class InvoicesController {
 
   // POST /invoices/generate (Admin: Manually trigger monthly utility billing)
   @Post('generate')
-  @Permissions('invoices.generate')
+  @Permissions('invoice.generate')
   @ApiOperation({
     summary: 'Generates invoices for all un-invoiced fees for a given month.',
     description:
       'Trigger the monthly utility billing job based on UnitFee records.',
   })
-  // FIX: Use the new DTO for the request body
   generateUtilityInvoices(@Body() dto: GenerateUtilityInvoicesDto) {
-    // FIX: Convert the DTO string to a Date object before passing to the service
     return this.invoicesService.generateMonthlyUtilityInvoices(
       new Date(dto.billingMonth),
     );
@@ -46,7 +44,7 @@ export class InvoicesController {
 
   // GET /invoices/resident/:residentId (Community App: Resident view)
   @Get('resident/:residentId')
-  @Permissions('invoices.view_all', 'invoices.view_own')
+  @Permissions('invoice.view_all', 'invoice.view_own')
   findByResident(@Param('residentId') residentId: string) {
     return this.invoicesService.findByResident(residentId);
   }
@@ -89,7 +87,7 @@ export class InvoicesController {
     return this.invoicesService.findOne(id);
   }
 
-  // POST /invoices (Admin: Manual invoice creation)
+  // POST /invoices (Admin: Manual invoice creation) 
   @Post()
   @Permissions('invoice.create')
   create(@Body() createInvoiceDto: CreateInvoiceDto) {

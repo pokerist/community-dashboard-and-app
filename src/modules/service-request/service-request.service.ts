@@ -141,7 +141,7 @@ export class ServiceRequestService {
       throw new NotFoundException(`Service Request ${requestId} not found`);
 
     // Resolve primary resident: prefer creator, otherwise use primary resident on unit
-    let residentId = request.createdById;
+    let residentId: string | undefined = request.createdById;
     const unitId = request.unitId ?? request.unit?.id;
 
     if (!unitId)

@@ -17,7 +17,7 @@ export class CreateComplaintDto {
   })
   @IsUUID()
   @IsNotEmpty()
-  reporterId: string; // Matches your schema
+  reporterId: string;
 
   @ApiProperty({
     example: 'a01a01a0-b1b1-c2c2-d3d3-e4e4e4e4e4e4',
