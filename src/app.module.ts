@@ -9,6 +9,8 @@ import { ServiceFieldModule } from './modules/service-field/service-field.module
 import { AuthModule } from './modules/auth/auth.module';
 import { ComplaintsModule } from './modules/complaints/complaints.module';
 import { ViolationsModule } from './modules/violations/violations.module';
+import { FacilitiesModule } from './modules/facilities/facilities.module';
+import { BookingsModule } from './modules/bookings/bookings.module';
 
 @Module({
   imports: [
@@ -21,7 +23,9 @@ import { ViolationsModule } from './modules/violations/violations.module';
     ServiceFieldModule,
     AuthModule,
     ComplaintsModule,
-    ViolationsModule
+    ViolationsModule,
+    FacilitiesModule,
+    BookingsModule,
   ],
   controllers: [],
   providers: [],
