@@ -1,48 +1,64 @@
-import { IsNotEmpty, IsNumber, IsString, IsOptional, IsPositive, IsIn } from 'class-validator';
-import { UnitType } from '@prisma/client'; // Import enums from Prisma
+import {
+  IsNotEmpty,
+  IsString,
+  IsOptional,
+  IsNumber,
+  IsPositive,
+  IsEnum,
+  Min,
+  IsInt,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { UnitType } from '@prisma/client';
 
 export class CreateUnitDto {
   @ApiProperty({ example: 'A-504' })
   @IsNotEmpty()
   @IsString()
-  unitNumber: string; // e.g., A-504
+  unitNumber: string;
 
+  @ApiProperty({ example: 'Sunrise Residences' })
   @IsNotEmpty()
   @IsString()
   projectName: string;
 
-  @IsNotEmpty()
-  @IsString()
-  block: string; // e.g., Block A
-
-  @IsNotEmpty()
-  @IsString()
-  @IsIn(Object.values(UnitType)) // Enforce type safety using Prisma enum
-  type: UnitType; // villa, apt, penthouse, duplex
-
+  @ApiProperty({ example: 'Block A', required: false })
   @IsOptional()
-  @IsNumber()
-  @IsPositive()
+  @IsString()
+  block?: string;
+
+  @ApiProperty({ example: 'APARTMENT', enum: UnitType })
+  @IsNotEmpty()
+  @IsEnum(UnitType)
+  type: UnitType;
+
+  @ApiProperty({ example: 2, required: false })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
   floors?: number;
 
+  @ApiProperty({ example: 3, required: false })
   @IsOptional()
-  @IsNumber()
-  @IsPositive()
+  @IsInt()
+  @Min(0)
   bedrooms?: number;
 
+  @ApiProperty({ example: 2, required: false })
   @IsOptional()
-  @IsNumber()
-  @IsPositive()
+  @IsInt()
+  @Min(0)
   bathrooms?: number;
 
+  @ApiProperty({ example: 120.5 })
   @IsNotEmpty()
   @IsNumber()
   @IsPositive()
   sizeSqm: number;
 
+  @ApiProperty({ example: 1500000.0, required: false })
   @IsOptional()
   @IsNumber()
   @IsPositive()
-  price?: number; // Lease/Sale price
+  price?: number;
 }

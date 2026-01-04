@@ -1,63 +1,87 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { Unit } from '@prisma/client';
 import { CreateUnitDto } from './dto/create-unit.dto';
-// Assuming UpdateUnitDto extends CreateUnitDto and makes fields optional
+import { UpdateUnitDto } from './dto/update-unit.dto';
+import { UnitType, UnitStatus } from '@prisma/client';
 
 @Injectable()
 export class UnitsService {
   constructor(private prisma: PrismaService) {}
 
-  // READ: List all Units (for the UNITS page list)
-  async findAll(): Promise<Unit[]> {
+  // CRUD
+  async findAll(filters?: any) {
     return this.prisma.unit.findMany({
-      orderBy: { unitNumber: 'asc' },
-      // Include residents count for quick dashboard data
-      include: {
-        residents: true
-      }
+      where: { ...filters },
+      include: { residents: true, leases: true },
     });
   }
 
-  // CREATE: Add Unit (from the 'Add Unit' button)
-  async create(data: CreateUnitDto): Promise<Unit> {
-    // Default status when creating a new unit
-    return this.prisma.unit.create({
+  async findOne(id: string) {
+    const unit = await this.prisma.unit.findUnique({
+      where: { id },
+      include: { residents: true, leases: true },
+    });
+    if (!unit) throw new NotFoundException('Unit not found');
+    return unit;
+  }
+
+  async create(dto: CreateUnitDto) {
+    return this.prisma.unit.create({ data: dto });
+  }
+
+  async update(id: string, dto: UpdateUnitDto) {
+    await this.findOne(id);
+    return this.prisma.unit.update({ where: { id }, data: dto });
+  }
+
+  async remove(id: string) {
+    await this.findOne(id);
+    return this.prisma.unit.delete({ where: { id } });
+  }
+
+  // Assignment
+  async assignUser(
+    unitId: string,
+    userId: string,
+    role: 'OWNER' | 'TENANT' | 'FAMILY',
+  ) {
+    return this.prisma.residentUnit.create({
       data: {
-        ...data,
-        status: 'AVAILABLE',
+        unitId,
+        userId,
+        isPrimary: role === 'OWNER',
       },
     });
   }
 
-  // READ: Get a single Unit by ID
-  async findOne(id: string): Promise<Unit> {
-    const unit = await this.prisma.unit.findUnique({
-      where: { id },
-      include: { 
-          residents: { include: { user: true } }, // Show who lives there
-          leases: true
-      }
+  async removeUser(unitId: string, userId: string) {
+    return this.prisma.residentUnit.delete({
+      where: { userId_unitId: { userId, unitId } },
     });
-    if (!unit) {
-      throw new NotFoundException(`Unit with ID ${id} not found.`);
-    }
+  }
+
+  async getUsers(unitId: string) {
+    return this.prisma.residentUnit.findMany({
+      where: { unitId },
+      include: { occupant: true },
+    });
+  }
+
+  // Status
+  async updateStatus(unitId: string, status: UnitStatus) {
+    await this.findOne(unitId);
+    return this.prisma.unit.update({ where: { id: unitId }, data: { status } });
+  }
+
+  // Lease info
+  async getLeases(unitId: string) {
+    return this.prisma.lease.findMany({ where: { unitId } });
+  }
+
+  // By number
+  async getByNumber(unitNumber: string) {
+    const unit = await this.prisma.unit.findFirst({ where: { unitNumber } });
+    if (!unit) throw new NotFoundException('Unit not found');
     return unit;
-  }
-
-  // UPDATE: Update Unit details
-  async update(id: string, data: Partial<CreateUnitDto>): Promise<Unit> {
-    return this.prisma.unit.update({
-      where: { id },
-      data,
-    });
-  }
-
-  // DELETE: Remove a Unit
-  async remove(id: string): Promise<Unit> {
-    // Note: Add logic/guard here to prevent deletion if unit is occupied or has active leases
-    return this.prisma.unit.delete({
-      where: { id },
-    });
   }
 }

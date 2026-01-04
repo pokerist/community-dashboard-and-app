@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { InvoicesModule } from './modules/invoices/invoices.module';
-import { UsersModule } from './modules/users/users.module';
 import { UnitsModule } from './modules/units/units.module';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { FileModule } from './modules/file/file.module';
@@ -15,7 +14,6 @@ import { AuthModule } from './modules/auth/auth.module';
     PrismaModule,
     InvoicesModule,
     UnitsModule,
-    UsersModule,
     InvoicesModule,
     EventEmitterModule.forRoot(),
     FileModule,
