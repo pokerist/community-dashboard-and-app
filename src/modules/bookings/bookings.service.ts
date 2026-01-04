@@ -142,10 +142,71 @@ export class BookingsService {
     });
   }
 
+  async findOne(id: string) {
+    const booking = await this.prisma.booking.findUnique({
+      where: { id },
+      include: { facility: true, user: true, resident: true, unit: true },
+    });
+    if (!booking) throw new NotFoundException('Booking not found');
+    return booking;
+  }
+
   async updateStatus(id: string, dto: UpdateBookingStatusDto) {
     return this.prisma.booking.update({
       where: { id },
       data: { status: dto.status },
+    });
+  }
+
+  async findByFacility(facilityId: string) {
+    const facility = await this.prisma.facility.findUnique({
+      where: { id: facilityId },
+    });
+
+    if (!facility) throw new NotFoundException('Facility not found');
+
+    return this.prisma.booking.findMany({
+      where: { facilityId },
+      include: { facility: true, user: true, resident: true, unit: true },
+      orderBy: { date: 'asc' },
+    });
+  }
+
+  async findByUser(userId: string) {
+    return this.prisma.booking.findMany({
+      where: { userId },
+      include: { facility: true, resident: true, unit: true },
+      orderBy: [{ date: 'desc' }, { startTime: 'desc' }],
+    });
+  }
+
+  async cancelOwn(id: string, userId: string) {
+    const booking = await this.prisma.booking.findUnique({
+      where: { id },
+    });
+
+    if (!booking) throw new NotFoundException('Booking not found');
+
+    if (booking.userId !== userId) {
+      throw new BadRequestException('You cannot cancel someone else’s booking');
+    }
+
+    if (booking.cancelledAt) {
+      throw new BadRequestException('Booking already cancelled');
+    }
+
+    return this.prisma.booking.update({
+      where: { id },
+      data: {
+        status: BookingStatus.CANCELLED,
+        cancelledAt: new Date(),
+      },
+    });
+  }
+
+  async remove(id: string) {
+    return this.prisma.booking.delete({
+      where: { id },
     });
   }
 }

@@ -1,4 +1,4 @@
-import { IsString, IsDateString, IsEnum } from 'class-validator';
+import { IsString, IsDateString, IsOptional, IsEnum } from 'class-validator';
 
 export class CreateBookingDto {
   @IsString()
@@ -16,6 +16,7 @@ export class CreateBookingDto {
   @IsString()
   userId: string;
 
+  @IsOptional()
   @IsString()
   residentId?: string;
 

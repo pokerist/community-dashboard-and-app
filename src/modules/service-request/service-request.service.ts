@@ -130,7 +130,7 @@ export class ServiceRequestService {
             id: true,
             residents: {
               where: { isPrimary: true },
-              select: { userId: true },
+              select: { residentId: true },
               take: 1,
             },
           },
@@ -147,7 +147,7 @@ export class ServiceRequestService {
     if (!unitId)
       throw new BadRequestException('Service Request has no associated unit.');
 
-    if (!residentId) residentId = request.unit?.residents?.[0]?.userId;
+    if (!residentId) residentId = request.unit?.residents?.[0]?.residentId ?? undefined;
 
     const invoice = await this.invoicesService.generateInvoice({
       unitId,

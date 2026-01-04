@@ -394,7 +394,7 @@ export class InvoicesService {
       if (updatedInvoice.bookingId) {
         await tx.booking.update({
           where: { id: updatedInvoice.bookingId },
-          data: { status: BookingStatus.CONFIRMED },
+          data: { status: BookingStatus.APPROVED },
         });
       }
 
@@ -462,7 +462,7 @@ export class InvoicesService {
             // Crucial: Find the current primary resident for this unit to bill them
             residents: {
               where: { isPrimary: true },
-              select: { userId: true },
+              select: { residentId: true },
               take: 1,
             },
           },
@@ -480,7 +480,7 @@ export class InvoicesService {
           acc[unitId] = {
             fees: [] as (typeof feesToInvoice)[number][],
             total: 0,
-            residentId: fee.unit.residents[0]?.userId,
+            residentId: fee.unit.residents[0]?.residentId,
           };
         }
         acc[unitId].fees.push(fee);

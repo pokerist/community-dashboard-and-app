@@ -97,15 +97,21 @@ const PERMISSIONS = [
   'qr.cancel',
 
   // Facilities
-  'facility.view',
-  'facility.manage',
+  'facility.create',
+  'facility.view_all',
+  'facility.view_own',
+  'facility.update',
+  'facility.delete',
 
   // Bookings
   'booking.view_all',
   'booking.view_own',
   'booking.create',
-  'booking.cancel',
-
+  'booking.update',
+  'booking.view_by_facility',
+  'booking.cancel_own',
+  'booking.delete',
+  
   // Smart Devices
   'smart_device.manage',
   'smart_device.view_own',

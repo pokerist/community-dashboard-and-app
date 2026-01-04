@@ -667,7 +667,7 @@ model Incident {
 }
 
 model Facility {
-  id          String       @id @default(cuid())
+  id          String       @id @default(uuid())
   name        String
   description String?
   type        FacilityType @default(CUSTOM)
@@ -697,7 +697,7 @@ model Facility {
 }
 
 model FacilitySlotConfig {
-  id String @id @default(cuid())
+  id String @id @default(uuid())
 
   facilityId String
   facility   Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
@@ -717,7 +717,7 @@ model FacilitySlotConfig {
 }
 
 model FacilitySlotException {
-  id String @id @default(cuid())
+  id String @id @default(uuid())
 
   facilityId String
   facility   Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
@@ -737,10 +737,7 @@ model FacilitySlotException {
 }
 
 model Booking {
-  id String @id @default(cuid())
-
-  userId String // you connect your existing User table
-  // user            User?         @relation(fields: [userId], references: [id])
+  id String @id @default(uuid())
 
   facilityId String
   facility   Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
@@ -757,6 +754,7 @@ model Booking {
 
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
+  userId     String 
   user       User      @relation(fields: [userId], references: [id])
   resident   Resident? @relation(fields: [residentId], references: [id])
   residentId String?

@@ -3,9 +3,11 @@ import {
   Get,
   Post,
   Patch,
+  Delete,
   Param,
   Body,
   UseGuards,
+  Request,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { BookingsService } from './bookings.service';
@@ -37,13 +39,42 @@ export class BookingsController {
     return this.bookingsService.findAll();
   }
 
+  @Get('me')
+  @Permissions('booking.view_own')
+  findMyBookings(@Request() req) {
+    return this.bookingsService.findByUser(req.user.id);
+  }
+
+  @Get(':id')
+  @Permissions('booking.view_all', 'booking.view_own')
+  @ApiOperation({ summary: 'Get booking by ID' })
+  findOne(@Param('id') id: string) {
+    return this.bookingsService.findOne(id);
+  }
+
   @Patch(':id/status')
   @Permissions('booking.update')
   @ApiOperation({ summary: 'Admin updates booking status (approve/cancel)' })
-  updateStatus(
-    @Param('id') id: string,
-    @Body() dto: UpdateBookingStatusDto,
-  ) {
+  updateStatus(@Param('id') id: string, @Body() dto: UpdateBookingStatusDto) {
     return this.bookingsService.updateStatus(id, dto);
+  }
+
+  @Get('facility/:facilityId')
+  @Permissions('booking.view_by_facility')
+  getFacilityBookings(@Param('facilityId') id: string) {
+    return this.bookingsService.findByFacility(id);
+  }
+
+  @Patch(':id/cancel')
+  @Permissions('booking.cancel_own')
+  cancelMyBooking(@Param('id') id: string, @Request() req) {
+    return this.bookingsService.cancelOwn(id, req.user.id);
+  }
+
+  @Delete(':id')
+  @Permissions('booking.delete')
+  @ApiOperation({ summary: 'Admin deletes a booking' })
+  removeBooking(@Param('id') id: string) {
+    return this.bookingsService.remove(id);
   }
 }

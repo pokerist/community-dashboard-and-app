@@ -160,12 +160,12 @@ export class ComplaintsService {
         include: {
           residents: {
             where: { isPrimary: true },
-            select: { userId: true },
+            select: { residentId: true },
             take: 1,
           },
         },
       });
-      residentId = unit?.residents?.[0]?.userId;
+      residentId = unit?.residents?.[0]?.residentId;
     }
 
     const invoice = await this.invoicesService.generateInvoice({
