@@ -25,12 +25,17 @@ const PERMISSIONS = [
   'resident.remove_unit',
 
   // Units
-  'unit.view',
+  'unit.view_all',
+  'unit.view_own',
   'unit.create',
   'unit.update',
+  'unit.delete',
   'unit.assign_resident',
-  'unit.remove_resident',
-
+  'unit.remove_resident_from_unit',
+  'unit.view_assigned_residents',
+  'unit.update_status',
+  'unit.view_leases',
+  
   // Projects
   'project.view',
   'project.manage',

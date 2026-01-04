@@ -42,28 +42,28 @@ export class UnitsService {
   // Assignment
   async assignUser(
     unitId: string,
-    userId: string,
+    residentId: string,
     role: 'OWNER' | 'TENANT' | 'FAMILY',
   ) {
     return this.prisma.residentUnit.create({
       data: {
         unitId,
-        userId,
+        residentId,
         isPrimary: role === 'OWNER',
       },
     });
   }
 
-  async removeUser(unitId: string, userId: string) {
+  async removeUser(unitId: string, residentId: string) {
     return this.prisma.residentUnit.delete({
-      where: { userId_unitId: { userId, unitId } },
+      where: { residentId_unitId: { residentId, unitId } },
     });
   }
 
   async getUsers(unitId: string) {
     return this.prisma.residentUnit.findMany({
       where: { unitId },
-      include: { occupant: true },
+      include: { resident: true },
     });
   }
 
