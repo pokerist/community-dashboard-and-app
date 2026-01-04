@@ -1,4 +1,3 @@
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -8,16 +7,18 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+enum UserStatusEnum {
+  INVITED
+  ACTIVE
+  SUSPENDED
+  DISABLED
+}
 
-enum Role {
-  SUPER_ADMIN
-  MANAGER
-  OPERATOR
-  SUPPORT
-  RESIDENT
-  CONTRACTOR
-  OWNER
-  TENANT
+enum RegistrationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  EXPIRED
 }
 
 enum UnitStatus {
@@ -34,6 +35,12 @@ enum UnitType {
   PENTHOUSE
   DUPLEX
   TOWNHOUSE
+}
+
+enum FinishingStatus {
+  NOT_STARTED
+  UNDER_FINISHING
+  MOVED_IN
 }
 
 enum EligibilityType {
@@ -65,7 +72,7 @@ enum ServiceFieldType {
 enum QRType {
   VISITOR
   DELIVERY
-  CONTRACTOR
+  WORKER
   SERVICE_PROVIDER
   RIDESHARE
 }
@@ -91,11 +98,41 @@ enum InvoiceStatus {
   CANCELLED
 }
 
+enum InvoiceType {
+  // 1. RECURRING CHARGES (Tenant/Resident)
+  RENT // Primary monthly/periodic rent charges.
+  SERVICE_FEE // Recurring general service or maintenance charges (e.g., annual service fee, common area utilities).
+  UTILITY // Recurring charges for specific utilities (electricity, water, AC, etc.).
+
+  // 2. ONE-TIME CHARGES (Tenant/Resident)
+  FINE // A fine generated directly from a recorded Violation.
+  MAINTENANCE_FEE // A one-time charge resulting from a ServiceRequest (e.g., fixing a non-warranty item).
+  BOOKING_FEE // A charge for booking a facility or amenity (e.g., club room rental fee).
+  SETUP_FEE // Initial fees, such as lease initiation or application fees.
+  LATE_FEE // Penalty applied for delayed payment of another invoice.
+  MISCELLANEOUS // For charges that don't fit specific categories.
+
+  // 3. OWNER/MANAGEMENT CHARGES
+  OWNER_EXPENSE // General expense billed directly to a property owner (e.g., major repair costs).
+  MANAGEMENT_FEE // The property management service fee charged to the owner.
+
+  // 4. ADJUSTMENTS (Crucial for accounting accuracy)
+  CREDIT_MEMO // An adjustment that reduces the resident's or owner's balance (a refund or discount).
+  DEBIT_MEMO // An adjustment that increases the resident's or owner's balance (a missed charge).
+}
+
 enum ComplaintStatus {
   NEW
   IN_PROGRESS
   RESOLVED
   CLOSED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
 }
 
 enum ViolationStatus {
@@ -105,18 +142,26 @@ enum ViolationStatus {
   CANCELLED
 }
 
-enum IncidentPriority {
-  LOW
-  MEDIUM
-  HIGH
-  CRITICAL
+enum FacilityType {
+  GYM
+  POOL
+  TENNIS_COURT
+  MULTIPURPOSE_HALL
+  CUSTOM
 }
 
 enum BookingStatus {
   PENDING
-  CONFIRMED
+  APPROVED
   CANCELLED
-  COMPLETED
+  REJECTED
+}
+
+enum BillingCycle {
+  NONE
+  PER_HOUR
+  PER_SLOT
+  PER_USE
 }
 
 enum DeviceType {
@@ -151,27 +196,85 @@ enum Channel {
   EMAIL
 }
 
+enum ReferralStatus {
+  NEW
+  CONTACTED
+  CONVERTED
+  REJECTED
+}
+
+enum NotificationLogStatus {
+  SENT
+  FAILED
+  DELIVERED
+  READ
+}
+
+enum SmartDeviceStatus {
+  ONLINE
+  OFFLINE
+  ERROR
+}
+
+enum IncidentStatus {
+  OPEN
+  RESOLVED
+  CLOSED
+}
+
+enum BannerStatus {
+  ACTIVE
+  INACTIVE
+  EXPIRED
+}
+
+enum ServiceRequestStatus {
+  NEW
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum UserStatusLogSource {
+  SIGNUP_AUTO
+  ADMIN
+  MANUAL
+}
 
 model User {
-  id             String    @id @default(uuid())
-  email          String?   @unique
-  phone          String?
-  phoneVerified  Boolean   @default(false)
+  id             String         @id @default(uuid())
+  email          String?        @unique
+  passwordHash   String?
   nameEN         String?
   nameAR         String?
-  role           Role      @default(RESIDENT)
-  origin         String    @default("dashboard") // "community" or "dashboard"
-  userStatus     String    @default("INVITED") // INVITED | ACTIVE | SUSPENDED | DISABLED
-  passwordHash   String? // for custom auth; Supabase may manage its own
-  nationalId     String?   @unique
-  dateOfBirth    DateTime?
-  profilePhotoId String?   @unique
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  userStatus     UserStatusEnum @default(ACTIVE)
+  phone          String?
+  signupSource   String         @default("dashboard") // "community" or "dashboard"
+  profilePhotoId String?        @unique
+  profilePhoto   File?          @relation("file_profile_photo", fields: [profilePhotoId], references: [id])
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  // Authentication
+  passwordResetToken          String?
+  passwordResetTokenExpiresAt DateTime?
+
+  emailVerificationToken          String?
+  emailVerificationTokenExpiresAt DateTime?
+
+  phoneVerificationToken          String?
+  phoneVerificationTokenExpiresAt DateTime?
+
+  emailVerifiedAt DateTime?
+  phoneVerifiedAt DateTime?
+
+  lastLoginAt   DateTime?
+  loginAttempts Int       @default(0)
+  lockedUntil   DateTime?
 
   // Relations
-  profilePhoto  File?          @relation("file_profile_photo", fields: [profilePhotoId], references: [id])
-  residentUnits ResidentUnit[]
+  // Roles
+  roles UserRole[]
 
   // Leases (owner/tenant)
   leasesAsOwner  Lease[] @relation("owner_leases")
@@ -192,6 +295,83 @@ model User {
   devices           SmartDevice[]
   notificationsSent Notification[]   @relation("sender")
   statusLogs        UserStatusLog[]
+
+  referrals Referral[] @relation("referrer")
+
+  admin    Admin?
+  resident Resident?
+  owner    Owner?
+  tenant   Tenant?
+
+  residentUnits ResidentUnit[]
+  refreshTokens RefreshToken[]
+
+  @@index([email])
+  @@index([phone])
+  @@index([createdAt])
+}
+
+model Role {
+  id          String           @id @default(uuid())
+  name        String           @unique
+  permissions RolePermission[]
+  users       UserRole[]
+}
+
+model UserRole {
+  userId String
+  roleId String
+
+  user User @relation(fields: [userId], references: [id])
+  role Role @relation(fields: [roleId], references: [id])
+
+  @@id([userId, roleId])
+}
+
+model Admin {
+  id        String         @id @default(uuid())
+  userId    String         @unique
+  user      User           @relation(fields: [userId], references: [id])
+  status    UserStatusEnum @default(ACTIVE)
+  createdAt DateTime       @default(now())
+}
+
+model Resident {
+  id          String    @id @default(uuid())
+  userId      String    @unique
+  user        User      @relation(fields: [userId], references: [id])
+  nationalId  String?
+  dateOfBirth DateTime?
+  bookings    Booking[]
+}
+
+model Owner {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+}
+
+model Tenant {
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id])
+}
+
+model Permission {
+  id  String @id @default(uuid())
+  key String @unique // billing.create_invoice
+
+  rolePermissions RolePermission[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id])
+  permission Permission @relation(fields: [permissionId], references: [id])
+
+  @@id([roleId, permissionId])
 }
 
 model Unit {
@@ -218,20 +398,23 @@ model Unit {
   complaints      Complaint[]
   violations      Violation[]
   incidents       Incident[]
+  unitFees        UnitFee[]
 }
 
 model ResidentUnit {
-  id         String   @id @default(uuid())
-  user       User     @relation(fields: [userId], references: [id])
-  userId     String
-  unit       Unit     @relation(fields: [unitId], references: [id])
-  unitId     String
-  assignedAt DateTime @default(now())
-  isPrimary  Boolean  @default(false)
+  id              String          @id @default(uuid())
+  resident        User            @relation(fields: [residentId], references: [id])
+  residentId      String
+  unit            Unit            @relation(fields: [unitId], references: [id])
+  unitId          String
+  assignedAt      DateTime        @default(now())
+  isPrimary       Boolean         @default(false)
+  finishingStatus FinishingStatus @default(NOT_STARTED)
 
-  @@unique([userId, unitId])
+  @@unique([residentId, unitId])
   @@index([unitId])
-  @@index([userId])
+  @@index([residentId])
+  @@index([residentId, isPrimary])
 }
 
 model File {
@@ -271,6 +454,7 @@ model Service {
   processingTime  Int?
   description     String?
   status          Boolean          @default(true)
+  startingPrice   Decimal?         @db.Decimal(12, 2)
   formFields      ServiceField[]
   requests        ServiceRequest[]
   totalRequests   Int?             @default(0)
@@ -299,13 +483,14 @@ model ServiceRequest {
   createdBy    User                       @relation("creator_requests", fields: [createdById], references: [id])
   createdById  String
   assignedToId String?
-  status       String                     @default("NEW")
-  priority     String?
-  description  String?
+  status       ServiceRequestStatus       @default(NEW)
+  priority     Priority                   @default(MEDIUM)
+  description  String
   fieldValues  ServiceRequestFieldValue[]
   attachments  Attachment[]               @relation("ServiceRequestAttachments")
   requestedAt  DateTime                   @default(now())
   updatedAt    DateTime                   @updatedAt
+  invoices     Invoice[]
 
   @@index([requestedAt])
 }
@@ -322,7 +507,6 @@ model ServiceRequestFieldValue {
   valueDate        DateTime?
   fileAttachmentId String?
 }
-
 
 model AccessQRCode {
   id            String       @id @default(uuid())
@@ -344,7 +528,6 @@ model AccessQRCode {
 
   @@index([createdAt])
 }
-
 
 model Lease {
   id               String      @id @default(uuid())
@@ -374,7 +557,7 @@ model Invoice {
   unitId        String
   resident      User?         @relation("user_invoices", fields: [residentId], references: [id])
   residentId    String?
-  type          String
+  type          InvoiceType
   amount        Decimal       @db.Decimal(12, 2)
   dueDate       DateTime
   status        InvoiceStatus @default(PENDING)
@@ -382,6 +565,25 @@ model Invoice {
   createdAt     DateTime      @default(now())
   updatedAt     DateTime      @updatedAt
   documents     Attachment[]  @relation("InvoiceDocuments")
+
+  // tracks the invoice source (violation/service request)
+  violationId String?
+  violation   Violation? @relation(fields: [violationId], references: [id])
+
+  serviceRequestId String?
+  serviceRequest   ServiceRequest? @relation(fields: [serviceRequestId], references: [id])
+
+  // Optional links to other potential sources
+  complaintId String?
+  complaint   Complaint? @relation(fields: [complaintId], references: [id])
+
+  bookingId String?
+  booking   Booking? @relation(fields: [bookingId], references: [id])
+
+  incidentId String?
+  incident   Incident? @relation(fields: [incidentId], references: [id])
+
+  unitFees UnitFee[] @relation("FeeInvoices")
 
   @@index([createdAt])
 }
@@ -395,12 +597,15 @@ model Complaint {
   unitId          String?
   category        String
   description     String
-  priority        String
+  priority        Priority        @default(MEDIUM)
   status          ComplaintStatus @default(NEW)
+  resolutionNotes String?
+  resolvedAt      DateTime?
   assignedToId    String?
   assignedTo      User?           @relation("complaint_assignee", fields: [assignedToId], references: [id])
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
+  invoices        Invoice[]
 
   @@index([createdAt])
 }
@@ -421,86 +626,154 @@ model Violation {
   residentId      String?
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
+  invoices        Invoice[]
 }
 
 model Banner {
-  id              String   @id @default(uuid())
+  id              String       @id @default(uuid())
   titleEn         String
   titleAr         String?
   imageFileId     String?
   description     String?
   ctaText         String?
   ctaUrl          String?
-  targetAudience  Audience @default(ALL)
+  targetAudience  Audience     @default(ALL)
   startDate       DateTime
   endDate         DateTime
-  status          String   @default("ACTIVE")
-  displayPriority String? // low/medium/high
-  views           Int      @default(0)
-  clicks          Int      @default(0)
-  createdAt       DateTime @default(now())
+  status          BannerStatus @default(ACTIVE)
+  displayPriority Priority     @default(MEDIUM)
+  views           Int          @default(0)
+  clicks          Int          @default(0)
+  createdAt       DateTime     @default(now())
 }
 
-
 model Incident {
-  id             String           @id @default(uuid())
-  incidentNumber String           @unique
+  id             String         @id @default(uuid())
+  incidentNumber String         @unique
   type           String
   location       String?
   residentName   String?
   description    String
-  priority       IncidentPriority @default(MEDIUM)
-  status         String           @default("OPEN")
+  priority       Priority       @default(MEDIUM)
+  status         IncidentStatus @default(OPEN)
   responseTime   Int? // seconds or minutes
-  reportedAt     DateTime         @default(now())
+  reportedAt     DateTime       @default(now())
   resolvedAt     DateTime?
-  createdAt      DateTime         @default(now())
-  unit           Unit?            @relation(fields: [unitId], references: [id])
+  createdAt      DateTime       @default(now())
+  unit           Unit?          @relation(fields: [unitId], references: [id])
   unitId         String?
+  invoices       Invoice[]
 }
 
 model Facility {
-  id        String    @id @default(uuid())
-  name      String
-  type      String
-  capacity  Int?
-  openTime  String? // "08:00"
-  closeTime String?
-  createdAt DateTime  @default(now())
-  bookings  Booking[]
+  id          String       @id @default(uuid())
+  name        String
+  description String?
+  type        FacilityType @default(CUSTOM)
+
+  isActive Boolean @default(true)
+
+  // General capacity (max people inside)
+  capacity Int?
+
+  // Pricing model
+  price        Float? // optional
+  billingCycle BillingCycle @default(NONE)
+
+  // Limits
+  maxReservationsPerDay Int? // per user
+  cooldownMinutes       Int? // user must wait X min after booking
+
+  // Slot-based configs
+  slotConfig     FacilitySlotConfig[]
+  slotExceptions FacilitySlotException[]
+
+  // Bookings
+  bookings Booking[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model FacilitySlotConfig {
+  id String @id @default(uuid())
+
+  facilityId String
+  facility   Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+
+  dayOfWeek Int // 0 = Sunday, 6 = Saturday
+
+  startTime String // "08:00"
+  endTime   String // "22:00"
+
+  slotDurationMinutes Int // 30, 60, 90... fully dynamic
+
+  // Optional per-slot capacity
+  slotCapacity Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model FacilitySlotException {
+  id String @id @default(uuid())
+
+  facilityId String
+  facility   Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+
+  date DateTime // overrides slot config only for this day
+
+  isClosed Boolean @default(false)
+
+  // Optional override slot hours for this specific day
+  startTime           String?
+  endTime             String?
+  slotDurationMinutes Int?
+  slotCapacity        Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Booking {
-  id            String        @id @default(uuid())
-  bookingNumber String        @unique
-  resident      User          @relation(fields: [residentId], references: [id])
-  residentId    String
-  facility      Facility      @relation(fields: [facilityId], references: [id])
-  facilityId    String
-  unit          Unit          @relation(fields: [unitId], references: [id])
-  unitId        String
-  date          DateTime
-  timeStart     DateTime
-  timeEnd       DateTime
-  guests        Int?
-  purpose       String?
-  status        BookingStatus @default(PENDING)
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  id String @id @default(uuid())
+
+  facilityId String
+  facility   Facility @relation(fields: [facilityId], references: [id], onDelete: Cascade)
+
+  // Slot assigned after generation
+  date      DateTime
+  startTime String // "18:00"
+  endTime   String // "19:00"
+
+  status BookingStatus @default(PENDING)
+
+  // Soft delete if needed  
+  cancelledAt DateTime?
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  userId     String 
+  user       User      @relation(fields: [userId], references: [id])
+  resident   Resident? @relation(fields: [residentId], references: [id])
+  residentId String?
+  unit       Unit?     @relation(fields: [unitId], references: [id])
+  unitId     String?
+  invoices   Invoice[]
 }
 
 model SmartDevice {
-  id              String     @id @default(uuid())
+  id              String            @id @default(uuid())
   name            String
   type            DeviceType
-  status          String // ONLINE | OFFLINE | ERROR
+  status          SmartDeviceStatus @default(ONLINE)
   lastActive      DateTime?
   integrationInfo Json?
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
-  user            User?      @relation(fields: [userId], references: [id])
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  user            User?             @relation(fields: [userId], references: [id])
   userId          String?
-  unit            Unit?      @relation(fields: [unitId], references: [id])
+  unit            Unit?             @relation(fields: [unitId], references: [id])
   unitId          String?
 }
 
@@ -546,38 +819,98 @@ model Notification {
 }
 
 model NotificationLog {
-  id               String        @id @default(uuid())
-  notification     Notification? @relation(fields: [notificationId], references: [id])
+  id               String                @id @default(uuid())
+  notification     Notification?         @relation(fields: [notificationId], references: [id])
   notificationId   String?
   channel          Channel
   recipient        String // phone or email or userId
-  status           String // SENT | FAILED | DELIVERED | READ
+  status           NotificationLogStatus @default(SENT)
   providerResponse Json?
-  createdAt        DateTime      @default(now())
+  createdAt        DateTime              @default(now())
 }
 
-
 model PendingRegistration {
-  id               String   @id @default(uuid())
-  phone            String   @unique
+  id               String             @id @default(uuid())
+  phone            String             @unique
   email            String?
   name             String?
   passwordHash     String?
-  origin           String   @default("community")
+  origin           String             @default("community")
   lookupResult     Json? // store PMS lookup response for debugging
-  createdAt        DateTime @default(now())
+  createdAt        DateTime           @default(now())
   expiresAt        DateTime
-  status           String   @default("PENDING") // PENDING | VERIFIED | REJECTED | EXPIRED
+  status           RegistrationStatus @default(PENDING)
   verificationCode String? // optional for OTP flow
 }
 
 model UserStatusLog {
-  id        String   @id @default(uuid())
-  user      User     @relation(fields: [userId], references: [id])
+  id        String               @id @default(uuid())
+  user      User                 @relation(fields: [userId], references: [id])
   userId    String
   oldStatus String
   newStatus String
-  source    String? // "signup_auto" | "admin" | "manual"
+  source    UserStatusLogSource?
   note      String?
+  createdAt DateTime             @default(now())
+}
+
+model UnitFee {
+  id           String   @id @default(uuid())
+  unit         Unit     @relation(fields: [unitId], references: [id])
+  unitId       String
+  type         String // e.g., "Electricity", "Water", "A/C Service"
+  amount       Decimal  @db.Decimal(12, 2)
+  billingMonth DateTime // Use the first day of the month being billed (e.g., 2025-11-01)
+
+  // Links to the generated invoice
+  invoiceId String?
+  invoice   Invoice? @relation("FeeInvoices", fields: [invoiceId], references: [id])
+
   createdAt DateTime @default(now())
+
+  @@unique([unitId, type, billingMonth])
+}
+
+// --- Invoice Sequence for DB-backed invoice numbers ---
+model InvoiceSequence {
+  name    String @id
+  counter BigInt @default(0)
+}
+
+// Model for "Alkarma Projects" Section
+model Project {
+  id            String   @id @default(uuid())
+  nameEn        String   @unique // e.g., AlKarma Kay, ALkarma Gates
+  nameAr        String?
+  descriptionEn String
+  descriptionAr String?
+  mobileNumber  String // number to be auto-filled for "Get in touch"
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// Model for "Choose your neighbor" Section
+model Referral {
+  id             String         @id @default(uuid())
+  referrer       User           @relation("referrer", fields: [referrerId], references: [id])
+  referrerId     String
+  friendFullName String
+  friendMobile   String
+  message        String? // Free text box message
+  status         ReferralStatus @default(NEW)
+  createdAt      DateTime       @default(now())
+}
+
+// Authentication
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String
+  revoked   Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
 }

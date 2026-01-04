@@ -1,0 +1,672 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  MANAGER
+  OPERATOR
+  SUPPORT
+  RESIDENT
+  CONTRACTOR
+  OWNER
+  TENANT
+}
+
+enum UserStatusEnum {
+  INVITED
+  ACTIVE
+  SUSPENDED
+  DISABLED
+}
+
+enum UnitStatus {
+  AVAILABLE
+  OCCUPIED
+  LEASED
+  UNDER_MAINTENANCE
+  UNDER_CONSTRUCTION
+}
+
+enum UnitType {
+  VILLA
+  APARTMENT
+  PENTHOUSE
+  DUPLEX
+  TOWNHOUSE
+}
+
+enum FinishingStatus {
+  NOT_STARTED
+  UNDER_FINISHING
+  MOVED_IN
+}
+
+enum EligibilityType {
+  ALL
+  DELIVERED_ONLY
+  NON_DELIVERED_ONLY
+}
+
+enum ServiceCategory {
+  MAINTENANCE
+  RECREATION
+  FITNESS
+  SECURITY
+  ADMIN
+  FACILITIES
+  OTHER
+}
+
+enum ServiceFieldType {
+  TEXT
+  TEXTAREA
+  NUMBER
+  DATE
+  BOOLEAN
+  MEMBER_SELECTOR
+  FILE
+}
+
+enum QRType {
+  VISITOR
+  DELIVERY
+  WORKER
+  SERVICE_PROVIDER
+  RIDESHARE
+}
+
+enum AccessStatus {
+  ACTIVE
+  EXPIRED
+  USED
+  CANCELLED
+}
+
+enum LeaseStatus {
+  ACTIVE
+  EXPIRING_SOON
+  EXPIRED
+  TERMINATED
+}
+
+enum InvoiceStatus {
+  PAID
+  PENDING
+  OVERDUE
+  CANCELLED
+}
+
+enum InvoiceType {
+  // 1. RECURRING CHARGES (Tenant/Resident)
+  RENT // Primary monthly/periodic rent charges.
+  SERVICE_FEE // Recurring general service or maintenance charges (e.g., annual service fee, common area utilities).
+  UTILITY // Recurring charges for specific utilities (electricity, water, AC, etc.).
+
+  // 2. ONE-TIME CHARGES (Tenant/Resident)
+  FINE // A fine generated directly from a recorded Violation.
+  MAINTENANCE_FEE // A one-time charge resulting from a ServiceRequest (e.g., fixing a non-warranty item).
+  BOOKING_FEE // A charge for booking a facility or amenity (e.g., club room rental fee).
+  SETUP_FEE // Initial fees, such as lease initiation or application fees.
+  LATE_FEE // Penalty applied for delayed payment of another invoice.
+  MISCELLANEOUS // For charges that don't fit specific categories.
+
+  // 3. OWNER/MANAGEMENT CHARGES
+  OWNER_EXPENSE // General expense billed directly to a property owner (e.g., major repair costs).
+  MANAGEMENT_FEE // The property management service fee charged to the owner.
+
+  // 4. ADJUSTMENTS (Crucial for accounting accuracy)
+  CREDIT_MEMO // An adjustment that reduces the resident's or owner's balance (a refund or discount).
+  DEBIT_MEMO // An adjustment that increases the resident's or owner's balance (a missed charge).
+}
+
+enum ComplaintStatus {
+  NEW
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ViolationStatus {
+  PENDING
+  PAID
+  APPEALED
+  CANCELLED
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+enum DeviceType {
+  THERMOSTAT
+  SMART_LOCK
+  LIGHT
+  CAMERA
+  SPEAKER
+  DOORBELL
+  OTHER
+}
+
+enum Audience {
+  ALL
+  SPECIFIC_RESIDENCES
+  SPECIFIC_BLOCKS
+  SPECIFIC_UNITS
+}
+
+enum NotificationType {
+  ANNOUNCEMENT
+  PAYMENT_REMINDER
+  MAINTENANCE_ALERT
+  EVENT_NOTIFICATION
+  EMERGENCY_ALERT
+}
+
+enum Channel {
+  PUSH
+  SMS
+  IN_APP
+  EMAIL
+}
+
+model User {
+  id             String         @id @default(uuid())
+  email          String?        @unique
+  phone          String?
+  phoneVerified  Boolean        @default(false)
+  nameEN         String?
+  nameAR         String?
+  role           Role           @default(RESIDENT)
+  origin         String         @default("dashboard") // "community" or "dashboard"
+  userStatus     UserStatusEnum @default(INVITED)
+  passwordHash   String?
+  nationalId     String?        @unique
+  dateOfBirth    DateTime?
+  profilePhotoId String?        @unique
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  // Relations
+  profilePhoto  File?          @relation("file_profile_photo", fields: [profilePhotoId], references: [id])
+  residentUnits ResidentUnit[]
+
+  // Leases (owner/tenant)
+  leasesAsOwner  Lease[] @relation("owner_leases")
+  leasesAsTenant Lease[] @relation("tenant_leases")
+
+  // Complaints (issued/targeted)
+  complaintsReported Complaint[] @relation("reporter")
+  complaintsAssigned Complaint[] @relation("complaint_assignee")
+
+  // Violations (issued/targeted)
+  violationsIssued   Violation[] @relation("issued_by")
+  violationsTargeted Violation[] @relation("violation_target")
+
+  invoices          Invoice[]        @relation("user_invoices")
+  serviceRequests   ServiceRequest[] @relation("creator_requests")
+  qrCodesGenerated  AccessQRCode[]   @relation("generated_by")
+  bookings          Booking[]
+  devices           SmartDevice[]
+  notificationsSent Notification[]   @relation("sender")
+  statusLogs        UserStatusLog[]
+
+  referrals Referral[] @relation("referrer")
+}
+
+model Unit {
+  id              String           @id @default(uuid())
+  projectName     String
+  block           String?
+  unitNumber      String
+  type            UnitType
+  floors          Int?
+  bedrooms        Int?
+  bathrooms       Int?
+  sizeSqm         Float?
+  price           Decimal?         @db.Decimal(12, 2)
+  status          UnitStatus       @default(AVAILABLE)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  serviceRequests ServiceRequest[]
+  residents       ResidentUnit[]
+  leases          Lease[]
+  invoices        Invoice[]
+  bookings        Booking[]
+  smartDevices    SmartDevice[]
+  accessQRCodes   AccessQRCode[]
+  complaints      Complaint[]
+  violations      Violation[]
+  incidents       Incident[]
+  unitFees        UnitFee[]
+}
+
+model ResidentUnit {
+  id              String          @id @default(uuid())
+  user            User            @relation(fields: [userId], references: [id])
+  userId          String
+  unit            Unit            @relation(fields: [unitId], references: [id])
+  unitId          String
+  assignedAt      DateTime        @default(now())
+  isPrimary       Boolean         @default(false)
+  finishingStatus FinishingStatus @default(NOT_STARTED)
+
+  @@unique([userId, unitId])
+  @@index([unitId])
+  @@index([userId])
+}
+
+model File {
+  id        String   @id @default(uuid())
+  key       String   @unique // storage path or supabase file key
+  name      String
+  mimeType  String?
+  size      Int?
+  createdAt DateTime @default(now())
+
+  // optional polymorphic relations
+  profilePhotoOf User?        @relation("file_profile_photo")
+  attachments    Attachment[]
+  leaseContract  Lease?       @relation("lease_contract")
+}
+
+model Attachment {
+  id     String @id @default(uuid())
+  file   File   @relation(fields: [fileId], references: [id])
+  fileId String
+
+  serviceRequestId String?
+  invoiceId        String?
+
+  // Explicit relations
+  serviceRequest ServiceRequest? @relation("ServiceRequestAttachments", fields: [serviceRequestId], references: [id])
+  invoice        Invoice?        @relation("InvoiceDocuments", fields: [invoiceId], references: [id])
+
+  createdAt DateTime @default(now())
+}
+
+model Service {
+  id              String           @id @default(uuid())
+  name            String
+  category        ServiceCategory
+  unitEligibility EligibilityType  @default(ALL)
+  processingTime  Int?
+  description     String?
+  status          Boolean          @default(true)
+  startingPrice   Decimal?         @db.Decimal(12, 2)
+  formFields      ServiceField[]
+  requests        ServiceRequest[]
+  totalRequests   Int?             @default(0)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+}
+
+model ServiceField {
+  id          String                     @id @default(uuid())
+  service     Service                    @relation(fields: [serviceId], references: [id])
+  serviceId   String
+  label       String
+  type        ServiceFieldType
+  placeholder String?
+  required    Boolean                    @default(false)
+  order       Int?                       @default(0)
+  fieldValues ServiceRequestFieldValue[]
+}
+
+model ServiceRequest {
+  id           String                     @id @default(uuid())
+  service      Service                    @relation(fields: [serviceId], references: [id])
+  serviceId    String
+  unit         Unit?                      @relation(fields: [unitId], references: [id])
+  unitId       String?
+  createdBy    User                       @relation("creator_requests", fields: [createdById], references: [id])
+  createdById  String
+  assignedToId String?
+  status       String                     @default("NEW")
+  priority     Priority                   @default(MEDIUM)
+  description  String
+  fieldValues  ServiceRequestFieldValue[]
+  attachments  Attachment[]               @relation("ServiceRequestAttachments")
+  requestedAt  DateTime                   @default(now())
+  updatedAt    DateTime                   @updatedAt
+  invoices     Invoice[]
+
+  @@index([requestedAt])
+}
+
+model ServiceRequestFieldValue {
+  id               String         @id @default(uuid())
+  request          ServiceRequest @relation(fields: [requestId], references: [id])
+  requestId        String
+  field            ServiceField   @relation(fields: [fieldId], references: [id])
+  fieldId          String
+  valueText        String?
+  valueNumber      Float?
+  valueBool        Boolean?
+  valueDate        DateTime?
+  fileAttachmentId String?
+}
+
+model AccessQRCode {
+  id            String       @id @default(uuid())
+  qrId          String       @unique
+  type          QRType
+  generatedBy   User         @relation("generated_by", fields: [generatedById], references: [id])
+  generatedById String
+  forUnit       Unit?        @relation(fields: [unitId], references: [id])
+  unitId        String?
+  visitorName   String?
+  validFrom     DateTime
+  validTo       DateTime
+  gate          String?
+  scans         Int          @default(0)
+  status        AccessStatus @default(ACTIVE) // ACTIVE | EXPIRED | USED
+  notes         String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([createdAt])
+}
+
+model Lease {
+  id               String      @id @default(uuid())
+  unit             Unit        @relation(fields: [unitId], references: [id])
+  unitId           String
+  owner            User        @relation("owner_leases", fields: [ownerId], references: [id])
+  ownerId          String
+  tenant           User?       @relation("tenant_leases", fields: [tenantId], references: [id])
+  tenantId         String?
+  tenantNationalId String?
+  tenantEmail      String?
+  startDate        DateTime
+  endDate          DateTime
+  monthlyRent      Decimal     @db.Decimal(12, 2)
+  securityDeposit  Decimal?    @db.Decimal(12, 2)
+  contractFileId   String?     @unique
+  contractFile     File?       @relation("lease_contract", fields: [contractFileId], references: [id])
+  status           LeaseStatus @default(ACTIVE)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+}
+
+model Invoice {
+  id            String        @id @default(uuid())
+  invoiceNumber String        @unique
+  unit          Unit          @relation(fields: [unitId], references: [id])
+  unitId        String
+  resident      User?         @relation("user_invoices", fields: [residentId], references: [id])
+  residentId    String?
+  type          InvoiceType
+  amount        Decimal       @db.Decimal(12, 2)
+  dueDate       DateTime
+  status        InvoiceStatus @default(PENDING)
+  paidDate      DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  documents     Attachment[]  @relation("InvoiceDocuments")
+
+  // tracks the invoice source (violation/service request)
+  violationId String?
+  violation   Violation? @relation(fields: [violationId], references: [id])
+
+  serviceRequestId String?
+  serviceRequest   ServiceRequest? @relation(fields: [serviceRequestId], references: [id])
+
+  unitFee UnitFee? @relation("FeeInvoices")
+
+  @@index([createdAt])
+}
+
+model Complaint {
+  id              String          @id @default(uuid())
+  complaintNumber String          @unique
+  reporter        User            @relation("reporter", fields: [reporterId], references: [id])
+  reporterId      String
+  unit            Unit?           @relation(fields: [unitId], references: [id])
+  unitId          String?
+  category        String
+  description     String
+  priority        Priority        @default(MEDIUM)
+  status          ComplaintStatus @default(NEW)
+  resolutionNotes String?
+  resolvedAt      DateTime?
+  assignedToId    String?
+  assignedTo      User?           @relation("complaint_assignee", fields: [assignedToId], references: [id])
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([createdAt])
+}
+
+model Violation {
+  id              String          @id @default(uuid())
+  violationNumber String          @unique
+  unit            Unit            @relation(fields: [unitId], references: [id])
+  unitId          String
+  type            String
+  description     String
+  fineAmount      Decimal         @db.Decimal(12, 2)
+  status          ViolationStatus @default(PENDING)
+  appealStatus    String?
+  issuedBy        User?           @relation("issued_by", fields: [issuedById], references: [id])
+  issuedById      String?
+  resident        User?           @relation("violation_target", fields: [residentId], references: [id])
+  residentId      String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  invoices        Invoice[]
+}
+
+model Banner {
+  id              String   @id @default(uuid())
+  titleEn         String
+  titleAr         String?
+  imageFileId     String?
+  description     String?
+  ctaText         String?
+  ctaUrl          String?
+  targetAudience  Audience @default(ALL)
+  startDate       DateTime
+  endDate         DateTime
+  status          String   @default("ACTIVE")
+  displayPriority Priority @default(MEDIUM)
+  views           Int      @default(0)
+  clicks          Int      @default(0)
+  createdAt       DateTime @default(now())
+}
+
+model Incident {
+  id             String    @id @default(uuid())
+  incidentNumber String    @unique
+  type           String
+  location       String?
+  residentName   String?
+  description    String
+  priority       Priority  @default(MEDIUM)
+  status         String    @default("OPEN")
+  responseTime   Int? // seconds or minutes
+  reportedAt     DateTime  @default(now())
+  resolvedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  unit           Unit?     @relation(fields: [unitId], references: [id])
+  unitId         String?
+}
+
+model Facility {
+  id        String    @id @default(uuid())
+  name      String
+  type      String
+  capacity  Int?
+  openTime  String? // "08:00"
+  closeTime String?
+  createdAt DateTime  @default(now())
+  bookings  Booking[]
+}
+
+model Booking {
+  id            String        @id @default(uuid())
+  bookingNumber String        @unique
+  resident      User          @relation(fields: [residentId], references: [id])
+  residentId    String
+  facility      Facility      @relation(fields: [facilityId], references: [id])
+  facilityId    String
+  unit          Unit          @relation(fields: [unitId], references: [id])
+  unitId        String
+  date          DateTime
+  timeStart     DateTime
+  timeEnd       DateTime
+  guests        Int?
+  purpose       String?
+  status        BookingStatus @default(PENDING)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+}
+
+model SmartDevice {
+  id              String     @id @default(uuid())
+  name            String
+  type            DeviceType
+  status          String // ONLINE | OFFLINE | ERROR
+  lastActive      DateTime?
+  integrationInfo Json?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  user            User?      @relation(fields: [userId], references: [id])
+  userId          String?
+  unit            Unit?      @relation(fields: [unitId], references: [id])
+  unitId          String?
+}
+
+model ReportTemplate {
+  id               String            @id @default(uuid())
+  name             String
+  description      String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  scheduledReports ScheduledReport[]
+}
+
+model ScheduledReport {
+  id             String         @id @default(uuid())
+  template       ReportTemplate @relation(fields: [templateId], references: [id])
+  templateId     String
+  dateRangeStart DateTime
+  dateRangeEnd   DateTime
+  format         String // pdf, excel, csv
+  scheduleCron   String? // cron or interval string
+  lastRunAt      DateTime?
+  nextRunAt      DateTime?
+  createdAt      DateTime       @default(now())
+}
+
+model Notification {
+  id             String            @id @default(uuid())
+  title          String
+  type           NotificationType
+  channels       Channel[]
+  sender         User?             @relation("sender", fields: [senderId], references: [id])
+  senderId       String?
+  targetAudience Audience
+  audienceMeta   Json?
+  messageEn      String
+  messageAr      String?
+  scheduledAt    DateTime?
+  sentAt         DateTime?
+  deliveredCount Int?              @default(0)
+  readCount      Int?              @default(0)
+  createdAt      DateTime          @default(now())
+  logs           NotificationLog[]
+}
+
+model NotificationLog {
+  id               String        @id @default(uuid())
+  notification     Notification? @relation(fields: [notificationId], references: [id])
+  notificationId   String?
+  channel          Channel
+  recipient        String // phone or email or userId
+  status           String // SENT | FAILED | DELIVERED | READ
+  providerResponse Json?
+  createdAt        DateTime      @default(now())
+}
+
+model PendingRegistration {
+  id               String   @id @default(uuid())
+  phone            String   @unique
+  email            String?
+  name             String?
+  passwordHash     String?
+  origin           String   @default("community")
+  lookupResult     Json? // store PMS lookup response for debugging
+  createdAt        DateTime @default(now())
+  expiresAt        DateTime
+  status           String   @default("PENDING") // PENDING | VERIFIED | REJECTED | EXPIRED
+  verificationCode String? // optional for OTP flow
+}
+
+model UserStatusLog {
+  id        String   @id @default(uuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  oldStatus String
+  newStatus String
+  source    String? // "signup_auto" | "admin" | "manual"
+  note      String?
+  createdAt DateTime @default(now())
+}
+
+model UnitFee {
+  id           String   @id @default(uuid())
+  unit         Unit     @relation(fields: [unitId], references: [id])
+  unitId       String
+  type         String // e.g., "Electricity", "Water", "A/C Service"
+  amount       Decimal  @db.Decimal(12, 2)
+  billingMonth DateTime // Use the first day of the month being billed (e.g., 2025-11-01)
+
+  // Links to the generated invoice
+  invoiceId String?  @unique
+  invoice   Invoice? @relation("FeeInvoices", fields: [invoiceId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([unitId, type, billingMonth])
+}
+
+// Model for "Alkarma Projects" Section
+model Project {
+  id            String   @id @default(uuid())
+  nameEn        String   @unique // e.g., AlKarma Kay, ALkarma Gates
+  nameAr        String?
+  descriptionEn String
+  descriptionAr String?
+  mobileNumber  String // number to be auto-filled for "Get in touch"
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// Model for "Choose your neighbor" Section
+model Referral {
+  id             String   @id @default(uuid())
+  referrer       User     @relation("referrer", fields: [referrerId], references: [id])
+  referrerId     String
+  friendFullName String
+  friendMobile   String
+  message        String? // Free text box message
+  status         String   @default("NEW") // NEW | CONTACTED | CONVERTED | REJECTED
+  createdAt      DateTime @default(now())
+}
