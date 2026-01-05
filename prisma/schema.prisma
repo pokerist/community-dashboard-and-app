@@ -430,6 +430,8 @@ model File {
   profilePhotoOf User?        @relation("file_profile_photo")
   attachments    Attachment[]
   leaseContract  Lease?       @relation("lease_contract")
+
+  pendingRegistrations PendingRegistration[]
 }
 
 model Attachment {
@@ -837,6 +839,10 @@ model PendingRegistration {
   name             String?
   passwordHash     String?
   origin           String             @default("community")
+  nationalId       String  // PIC
+  personalPhotoId  String  // File ID (stored in File table)
+  personalPhoto    File    @relation(fields: [personalPhotoId], references: [id])
+
   lookupResult     Json? // store PMS lookup response for debugging
   createdAt        DateTime           @default(now())
   expiresAt        DateTime

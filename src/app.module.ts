@@ -13,6 +13,7 @@ import { ViolationsModule } from './modules/violations/violations.module';
 import { FacilitiesModule } from './modules/facilities/facilities.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
 import { UsersModule } from './modules/residents/residents.module';
+import { PendingRegistrationsModule } from './modules/pending-registrations/pending-registrations.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { UsersModule } from './modules/residents/residents.module';
     FacilitiesModule,
     BookingsModule,
     UsersModule,
+    PendingRegistrationsModule,
   ],
   controllers: [],
   providers: [],

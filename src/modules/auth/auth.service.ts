@@ -19,11 +19,30 @@ export class AuthService {
   ) {}
 
   // ================= LOGIN =================
-  async login(email: string, password: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { email },
-      include: { roles: { include: { role: true } } }, // only need role names
+  async login(identifier: string, password: string) {
+    // Look for user in Users table by email or phone
+    const user = await this.prisma.user.findFirst({
+      where: {
+        OR: [{ email: identifier }, { phone: identifier }],
+      },
+      include: { roles: { include: { role: true } } },
     });
+
+    // Check if still pending registration (email OR phone)
+    const pending = await this.prisma.pendingRegistration.findFirst({
+      where: {
+        OR: [
+          { email: identifier, status: 'PENDING' },
+          { phone: identifier, status: 'PENDING' },
+        ],
+      },
+    });
+
+    if (pending) {
+      throw new UnauthorizedException(
+        'Your registration is not approved yet. Please wait for admin approval.',
+      );
+    }
 
     if (!user) throw new UnauthorizedException('Invalid credentials');
 
@@ -54,7 +73,9 @@ export class AuthService {
       data: { loginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() },
     });
 
-    console.log('User permissions:', Array.from(PermissionCacheService.prototype.resolveUserPermissions.call(this.permissionCache, user.roles.map((ur) => ur.role.name))));
+    const permissions = this.permissionCache.resolveUserPermissions(
+      user.roles.map((ur) => ur.role.name),
+    );
 
     return this.generateTokens(user);
   }
