@@ -44,46 +44,48 @@ describe('ResidentService', () => {
 
   // --- Verification 1: Create User ---
   it('should call prisma.user.create and hash the password', async () => {
-    const createDto = { 
-        name: 'John Doe', 
-        phone: '+966501234567', 
-        role: 'RESIDENT', 
-        password: 'testpassword' 
+    const createDto = {
+      name: 'John Doe',
+      phone: '+966501234567',
+      role: 'RESIDENT',
+      password: 'testpassword',
     } as any;
-    
-    mockPrismaService.user.create.mockResolvedValue({ id: 'u1', ...createDto, passwordHash: 'hashedPassword123' });
 
-    await service.create(createDto);
+    mockPrismaService.user.create.mockResolvedValue({
+      id: 'u1',
+      ...createDto,
+      passwordHash: 'hashedPassword123',
+    });
+
+    await service.createUser(createDto);
 
     // Verify bcrypt was called
     expect(bcrypt.hash).toHaveBeenCalledWith('testpassword', 10);
-    
+
     // Verify Prisma was called with the hashed password
     expect(mockPrismaService.user.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         phone: createDto.phone,
-        role: createDto.role,
-        passwordHash: 'hashedPassword123', // Check for the hashed value
+        passwordHash: 'hashedPassword123',
         userStatus: 'ACTIVE',
-        origin: 'dashboard',
+        signupSource: 'dashboard',
       }),
+      include: expect.any(Object),
     });
-  });
-  
-  // --- Verification 2: Deactivate User ---
-  it('should call prisma.user.update to set status to INACTIVE', async () => {
-    const userId = 'user-to-deactivate';
-    mockPrismaService.user.update.mockResolvedValue({ userStatus: 'INACTIVE' });
 
-    await service.deactivate(userId);
+    // --- Verification 2: Deactivate User ---
+    it('should call prisma.user.update to set status to INACTIVE', async () => {
+      const userId = 'user-to-deactivate';
+      mockPrismaService.user.update.mockResolvedValue({
+        userStatus: 'DISABLED',
+      });
 
-    // Verify Prisma was called to update the userStatus
-    expect(mockPrismaService.user.update).toHaveBeenCalledWith({
-      where: { id: userId },
-      data: { 
-        userStatus: 'INACTIVE', 
-        updatedAt: expect.any(Date) 
-      },
+      await service.deactivateUser(userId);
+
+      expect(mockPrismaService.user.update).toHaveBeenCalledWith({
+        where: { id: userId },
+        data: { userStatus: 'DISABLED', updatedAt: expect.any(Date) },
+      });
     });
   });
 });
