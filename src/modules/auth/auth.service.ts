@@ -1,0 +1,152 @@
+import {
+  Injectable,
+  UnauthorizedException,
+  ForbiddenException,
+  BadRequestException,
+} from '@nestjs/common';
+import { PrismaService } from '../../../prisma/prisma.service';
+import { JwtService } from '@nestjs/jwt';
+import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
+import { PermissionCacheService } from './permission-cache.service';
+
+@Injectable()
+export class AuthService {
+  constructor(
+    private prisma: PrismaService,
+    private jwtService: JwtService,
+    private permissionCache: PermissionCacheService,
+  ) {}
+
+  // ================= LOGIN =================
+  async login(email: string, password: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      include: { roles: { include: { role: true } } }, // only need role names
+    });
+
+    if (!user) throw new UnauthorizedException('Invalid credentials');
+
+    if (user.lockedUntil && user.lockedUntil > new Date()) {
+      throw new ForbiddenException(
+        'Account temporarily locked. Try again later.',
+      );
+    }
+
+    if (
+      !user.passwordHash ||
+      !(await bcrypt.compare(password, user.passwordHash))
+    ) {
+      const attempts = user.loginAttempts + 1;
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          loginAttempts: attempts,
+          lockedUntil:
+            attempts >= 5 ? new Date(Date.now() + 15 * 60 * 1000) : null,
+        },
+      });
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { loginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() },
+    });
+
+    console.log('User permissions:', Array.from(PermissionCacheService.prototype.resolveUserPermissions.call(this.permissionCache, user.roles.map((ur) => ur.role.name))));
+
+    return this.generateTokens(user);
+  }
+
+  // ================= REGISTER =================
+  async register(
+    email: string,
+    password: string,
+    nameEN: string,
+    nameAR?: string,
+  ) {
+    const existing = await this.prisma.user.findUnique({ where: { email } });
+    if (existing) throw new BadRequestException('Email already in use');
+
+    const hashed = await bcrypt.hash(password, 12);
+
+    const user = await this.prisma.user.create({
+      data: { email, passwordHash: hashed, nameEN, nameAR },
+      include: { roles: { include: { role: true } } },
+    });
+
+    return this.generateTokens(user);
+  }
+
+  // ================= GENERATE TOKENS =================
+  async generateTokens(user: any) {
+    // Roles of the user
+    const roles = user.roles.map((ur) => ur.role.name);
+
+    // Permissions resolved via cache service
+    const permissions = this.permissionCache.resolveUserPermissions(roles);
+
+    const payload = {
+      sub: user.id,
+      roles,
+      permissions: Array.from(permissions), // convert Set to array for JWT
+    };
+
+    const accessToken = this.jwtService.sign(payload, { expiresIn: '15m' });
+
+    // Refresh token
+    const rawRefreshToken = crypto.randomUUID();
+    const tokenHash = await bcrypt.hash(rawRefreshToken, 12);
+
+    await this.prisma.refreshToken.create({
+      data: {
+        userId: user.id,
+        tokenHash,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      },
+    });
+
+    return { accessToken, refreshToken: rawRefreshToken };
+  }
+
+  // ================= REFRESH TOKEN =================
+  async refresh(userId: string, incomingToken: string) {
+    const stored = await this.prisma.refreshToken.findFirst({
+      where: { userId, revoked: false },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!stored || stored.expiresAt < new Date()) {
+      await this.prisma.refreshToken.updateMany({
+        where: { userId },
+        data: { revoked: true },
+      });
+      throw new UnauthorizedException('Session expired. Please login again.');
+    }
+
+    const isValid = await bcrypt.compare(incomingToken, stored.tokenHash);
+    if (!isValid) {
+      await this.prisma.refreshToken.updateMany({
+        where: { userId },
+        data: { revoked: true },
+      });
+      throw new UnauthorizedException(
+        'Compromised session. Please login again.',
+      );
+    }
+
+    await this.prisma.refreshToken.update({
+      where: { id: stored.id },
+      data: { revoked: true },
+    });
+
+    // Fetch user with roles only, no need to fetch permissions manually
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { roles: { include: { role: true } } },
+    });
+
+    return this.generateTokens(user);
+  }
+}
