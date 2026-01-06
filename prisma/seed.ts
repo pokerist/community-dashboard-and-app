@@ -24,6 +24,25 @@ const PERMISSIONS = [
   'resident.assign_unit',
   'resident.remove_unit',
 
+  // Owners
+  'owner.create',
+  'owner.view',
+  'owner.update',
+  'owner.delete',
+
+  // Tenants
+  'tenant.create',
+  'tenant.view',
+  'tenant.update',
+  'tenant.delete',
+
+  // Admins
+  'admin.create',
+  'admin.view',
+  'admin.update',
+  'admin.delete',
+  'admin.assign_role',
+  
   // Units
   'unit.view_all',
   'unit.view_own',
