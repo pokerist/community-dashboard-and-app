@@ -1,10 +1,12 @@
 import { Module } from '@nestjs/common';
 import { ResidentService } from './residents.service';
-import { ResidentController } from './residents.controller';
+import { AdminUsersController } from './residents.controller';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  controllers: [ResidentController],
+  imports: [AuthModule],
+  controllers: [AdminUsersController],
   providers: [ResidentService, PrismaService],
   exports: [ResidentService], // Export for use in other modules
 })

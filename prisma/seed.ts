@@ -9,20 +9,26 @@ const PERMISSIONS = [
   'auth.logout',
   'auth.impersonate',
 
+  // Registrations
+  'pending_registration.create',
+  'pending_registration.view_all',
+  'pending_registration.view_own',
+  'pending_registration.update',
+  'pending_registration.reject',
+  'pending_registration.approve',
+
   // Users
   'user.read',
   'user.update',
-  'user.suspend',
-  'user.invite',
-  'user.assign_role',
-  'user.view_activity',
+  'user.delete',
+  'user.create',
+  'user.create.direct', // Special permission to create users without going through pending registration
 
   // Residents
   'resident.view',
   'resident.create',
   'resident.update',
-  'resident.assign_unit',
-  'resident.remove_unit',
+  'resident.delete',
 
   // Owners
   'owner.create',
@@ -42,7 +48,7 @@ const PERMISSIONS = [
   'admin.update',
   'admin.delete',
   'admin.assign_role',
-  
+
   // Units
   'unit.view_all',
   'unit.view_own',
@@ -54,7 +60,7 @@ const PERMISSIONS = [
   'unit.view_assigned_residents',
   'unit.update_status',
   'unit.view_leases',
-  
+
   // Projects
   'project.view',
   'project.manage',
@@ -135,7 +141,7 @@ const PERMISSIONS = [
   'booking.view_by_facility',
   'booking.cancel_own',
   'booking.delete',
-  
+
   // Smart Devices
   'smart_device.manage',
   'smart_device.view_own',

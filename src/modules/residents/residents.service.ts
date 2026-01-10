@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { Prisma, UserStatusEnum } from '@prisma/client';
@@ -52,25 +53,37 @@ type AdminWithUser = Prisma.AdminGetPayload<{
 export class ResidentService {
   constructor(private prisma: PrismaService) {}
 
+  private enforceDirectCreationPolicy(options?: { permissions?: string[] }) {
+    if (!options?.permissions?.includes('user.create.direct')) {
+      throw new ForbiddenException(
+        'Direct creation requires user.create.direct permission',
+      );
+    }
+  }
+
   // ===== USER MANAGEMENT =====
 
   /**
    * Create a new user (base user without profile type)
    */
-  async createUser(data: CreateUserDto): Promise<UserWithRelations> {
-    const { password, roles: roleIds, ...restOfData } = data;
-
-    let passwordHash: string | undefined;
-    if (password) {
-      passwordHash = await bcrypt.hash(password, 10);
+  async createUser(
+    data: CreateUserDto,
+    options?: { actorUserId?: string; permissions?: string[] },
+  ): Promise<UserWithRelations> {
+    if (data.signupSource === 'dashboard') {
+      this.enforceDirectCreationPolicy(options);
     }
+
+    const { password, roles: roleIds, ...rest } = data;
+
+    const passwordHash = password ? await bcrypt.hash(password, 10) : undefined;
 
     const user = await this.prisma.user.create({
       data: {
-        ...restOfData,
+        ...rest,
         passwordHash,
         userStatus: UserStatusEnum.ACTIVE,
-        signupSource: data.signupSource || 'dashboard',
+        signupSource: data.signupSource ?? 'dashboard',
       },
       include: {
         roles: { include: { role: true } },
@@ -85,18 +98,14 @@ export class ResidentService {
       },
     });
 
-    // Assign roles if provided
-    if (roleIds && roleIds.length > 0) {
-      for (const roleId of roleIds) {
-        await this.prisma.userRole.create({
-          data: {
-            userId: user.id,
-            roleId,
-          },
-        });
-      }
-
-      // Re-fetch user with updated roles
+    if (roleIds?.length) {
+      await Promise.all(
+        roleIds.map((roleId) =>
+          this.prisma.userRole.create({
+            data: { userId: user.id, roleId },
+          }),
+        ),
+      );
       return this.getUserWithRelations(user.id);
     }
 
@@ -112,7 +121,13 @@ export class ResidentService {
     take: number = 20,
   ): Promise<UserWithRelations[]> {
     const where: Prisma.UserWhereInput = {
-      userStatus: { in: [UserStatusEnum.ACTIVE, UserStatusEnum.SUSPENDED, UserStatusEnum.INVITED] },
+      userStatus: {
+        in: [
+          UserStatusEnum.ACTIVE,
+          UserStatusEnum.SUSPENDED,
+          UserStatusEnum.INVITED,
+        ],
+      },
     };
 
     // Filter by user type if provided
@@ -186,6 +201,41 @@ export class ResidentService {
       delete updateData.password;
     }
 
+    // Handle roles update
+    if (data.roles !== undefined) {
+      // Delete existing roles
+      await this.prisma.userRole.deleteMany({
+        where: { userId: id },
+      });
+
+      // Create new roles if provided
+      if (data.roles.length > 0) {
+        // If roles are objects with 'role' property (role names), convert to role IDs
+        let roleIds: string[] = [];
+        if (typeof (data.roles as any)[0] === 'object' && (data.roles as any)[0].role) {
+          const roleNames = (data.roles as any[]).map((r: any) => r.role);
+          const roles = await this.prisma.role.findMany({
+            where: { name: { in: roleNames } },
+          });
+          roleIds = roles.map(r => r.id);
+        } else {
+          // Assume roles are already IDs
+          roleIds = data.roles as string[];
+        }
+
+        await Promise.all(
+          roleIds.map((roleId) =>
+            this.prisma.userRole.create({
+              data: { userId: id, roleId },
+            }),
+          ),
+        );
+      }
+
+      // Remove roles from updateData since we've handled it separately
+      delete updateData.roles;
+    }
+
     // Verify user exists
     await this.getUserWithRelations(id);
 
@@ -236,11 +286,14 @@ export class ResidentService {
   /**
    * Create a resident profile for an existing user
    */
-  async createResident(data: CreateResidentDto): Promise<ResidentWithUser> {
-    // Verify user exists
+  async createResident(
+    data: CreateResidentDto,
+    options?: { permissions?: string[] },
+  ): Promise<ResidentWithUser> {
+    this.enforceDirectCreationPolicy(options);
+
     await this.getUserWithRelations(data.userId);
 
-    // Check if resident already exists
     const existing = await this.prisma.resident.findUnique({
       where: { userId: data.userId },
     });
@@ -340,7 +393,12 @@ export class ResidentService {
   /**
    * Create an owner profile for an existing user
    */
-  async createOwner(data: CreateOwnerDto): Promise<OwnerWithUser> {
+  async createOwner(
+    data: CreateOwnerDto,
+    options?: { permissions?: string[] },
+  ): Promise<OwnerWithUser> {
+    this.enforceDirectCreationPolicy(options);
+
     await this.getUserWithRelations(data.userId);
 
     const existing = await this.prisma.owner.findUnique({
@@ -436,7 +494,12 @@ export class ResidentService {
   /**
    * Create a tenant profile for an existing user
    */
-  async createTenant(data: CreateTenantDto): Promise<TenantWithUser> {
+  async createTenant(
+    data: CreateTenantDto,
+    options?: { permissions?: string[] },
+  ): Promise<TenantWithUser> {
+    this.enforceDirectCreationPolicy(options);
+
     await this.getUserWithRelations(data.userId);
 
     const existing = await this.prisma.tenant.findUnique({
@@ -537,7 +600,9 @@ export class ResidentService {
   /**
    * Create an admin profile for an existing user
    */
-  async createAdmin(data: CreateAdminDto): Promise<AdminWithUser> {
+  async createAdmin(data: CreateAdminDto, options?: { permissions?: string[] }): Promise<AdminWithUser> {
+    this.enforceDirectCreationPolicy(options);
+
     await this.getUserWithRelations(data.userId);
 
     const existing = await this.prisma.admin.findUnique({
@@ -553,7 +618,9 @@ export class ResidentService {
     return this.prisma.admin.create({
       data: {
         userId: data.userId,
-        status: data.status ? (data.status as UserStatusEnum) : UserStatusEnum.ACTIVE,
+        status: data.status
+          ? (data.status as UserStatusEnum)
+          : UserStatusEnum.ACTIVE,
       },
       include: { user: true },
     });

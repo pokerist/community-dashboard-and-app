@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsEnum } from 'class-validator';
+import { IsNotEmpty, IsString, IsEnum, IsBoolean } from 'class-validator';
 
 export enum RegistrationApprovalRole {
   OWNER = 'OWNER',
@@ -9,10 +9,6 @@ export enum RegistrationApprovalRole {
 export class ApprovePendingRegistrationDto {
   @IsNotEmpty()
   @IsString()
-  userId: string; // will be created User ID after approval
-
-  @IsNotEmpty()
-  @IsString()
   unitId: string; // admin assigns unit
 
   @IsNotEmpty()
@@ -20,5 +16,6 @@ export class ApprovePendingRegistrationDto {
   role: RegistrationApprovalRole;
 
   @IsNotEmpty()
+  @IsBoolean()
   isPrimary: boolean; // admin decides if this is primary resident
 }

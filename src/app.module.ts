@@ -12,8 +12,9 @@ import { ComplaintsModule } from './modules/complaints/complaints.module';
 import { ViolationsModule } from './modules/violations/violations.module';
 import { FacilitiesModule } from './modules/facilities/facilities.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
-import { UsersModule } from './modules/residents/residents.module';
+import { ResidentModule } from './modules/residents/residents.module';
 import { PendingRegistrationsModule } from './modules/pending-registrations/pending-registrations.module';
+import { EventsModule } from './events/events.module';
 
 @Module({
   imports: [
@@ -31,8 +32,9 @@ import { PendingRegistrationsModule } from './modules/pending-registrations/pend
     ViolationsModule,
     FacilitiesModule,
     BookingsModule,
-    UsersModule,
+    ResidentModule,
     PendingRegistrationsModule,
+    EventsModule,
   ],
   controllers: [],
   providers: [],

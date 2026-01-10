@@ -17,6 +17,7 @@ enum UserStatusEnum {
 
 enum RegistrationStatus {
   PENDING
+  PROCESSING
   VERIFIED
   REJECTED
   EXPIRED
@@ -835,13 +836,15 @@ model NotificationLog {
 model PendingRegistration {
   id               String             @id @default(uuid())
   phone            String             @unique
-  email            String?
+  email            String?        
   name             String?
   passwordHash     String?
   origin           String             @default("community")
   nationalId       String  // PIC
   personalPhotoId  String  // File ID (stored in File table)
   personalPhoto    File    @relation(fields: [personalPhotoId], references: [id])
+
+  roleIntent       String? // OWNER, TENANT, FAMILY
 
   lookupResult     Json? // store PMS lookup response for debugging
   createdAt        DateTime           @default(now())

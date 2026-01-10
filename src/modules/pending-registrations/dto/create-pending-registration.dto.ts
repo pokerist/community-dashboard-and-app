@@ -4,6 +4,7 @@ import {
   IsOptional,
   IsString,
   Matches,
+  IsIn,
 } from 'class-validator';
 
 export class CreatePendingRegistrationDto {
@@ -26,6 +27,10 @@ export class CreatePendingRegistrationDto {
   @IsNotEmpty()
   @IsString()
   personalPhotoId: string; // uploaded file ID
+
+  @IsOptional()
+  @IsIn(['OWNER', 'TENANT', 'FAMILY'])
+  roleIntent?: string; // role intent
 
   @IsOptional()
   @IsString()

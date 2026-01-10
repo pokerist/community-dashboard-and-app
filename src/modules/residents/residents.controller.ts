@@ -5,6 +5,7 @@ import {
   Body,
   Patch,
   Param,
+  Request,
   Delete,
   HttpCode,
   HttpStatus,
@@ -42,12 +43,13 @@ export class AdminUsersController {
   // ============================================
   //                 USERS
   // ============================================
-
   @Post()
-  @HttpCode(HttpStatus.CREATED)
   @Permissions('user.create')
-  createUser(@Body() dto: CreateUserDto) {
-    return this.residentService.createUser(dto);
+  createUser(@Body() dto: CreateUserDto, @Request() req) {
+    return this.residentService.createUser(dto, {
+      actorUserId: req.user.id,
+      permissions: req.user.permissions,
+    });
   }
 
   @Get()
@@ -85,7 +87,7 @@ export class AdminUsersController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @Permissions('user.suspend')
+  @Permissions('user.delete')
   deactivateUser(@Param('id') id: string) {
     return this.residentService.deactivateUser(id);
   }
