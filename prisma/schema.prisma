@@ -442,10 +442,12 @@ model Attachment {
 
   serviceRequestId String?
   invoiceId        String?
+  incidentId       String?
 
   // Explicit relations
   serviceRequest ServiceRequest? @relation("ServiceRequestAttachments", fields: [serviceRequestId], references: [id])
   invoice        Invoice?        @relation("InvoiceDocuments", fields: [invoiceId], references: [id])
+  incident       Incident?       @relation("IncidentAttachments", fields: [incidentId], references: [id])
 
   createdAt DateTime @default(now())
 }
@@ -667,6 +669,7 @@ model Incident {
   unit           Unit?          @relation(fields: [unitId], references: [id])
   unitId         String?
   invoices       Invoice[]
+  attachments    Attachment[]   @relation("IncidentAttachments")
 }
 
 model Facility {
@@ -883,6 +886,12 @@ model UnitFee {
 
 // --- Invoice Sequence for DB-backed invoice numbers ---
 model InvoiceSequence {
+  name    String @id
+  counter BigInt @default(0)
+}
+
+// --- Incident Sequence for DB-backed incident numbers ---
+model IncidentSequence {
   name    String @id
   counter BigInt @default(0)
 }

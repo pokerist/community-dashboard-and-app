@@ -15,13 +15,13 @@ import { BookingsModule } from './modules/bookings/bookings.module';
 import { ResidentModule } from './modules/residents/residents.module';
 import { PendingRegistrationsModule } from './modules/pending-registrations/pending-registrations.module';
 import { EventsModule } from './events/events.module';
+import { IncidentsModule } from './modules/incidents/incidents.module';
 
 @Module({
   imports: [
     PrismaModule,
     InvoicesModule,
     UnitsModule,
-    InvoicesModule,
     EventEmitterModule.forRoot(),
     FileModule,
     ServiceRequestModule,
@@ -35,6 +35,7 @@ import { EventsModule } from './events/events.module';
     ResidentModule,
     PendingRegistrationsModule,
     EventsModule,
+    IncidentsModule,
   ],
   controllers: [],
   providers: [],

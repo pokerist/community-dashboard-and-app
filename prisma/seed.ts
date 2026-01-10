@@ -155,6 +155,11 @@ const PERMISSIONS = [
   'banner.manage',
   'banner.view',
 
+  // Incidents
+  'incidents.create',
+  'incidents.view',
+  'incidents.resolve',
+
   // Referrals
   'referral.create',
   'referral.view_all',
@@ -203,6 +208,9 @@ const ROLES = {
 
     'banner.manage',
     'referral.view_all',
+
+    'incidents.view',
+    'incidents.resolve',
   ],
 
   OPERATOR: [
@@ -217,6 +225,9 @@ const ROLES = {
 
     'qr.view_all',
     'booking.view_all',
+
+    'incidents.view',
+    'incidents.resolve',
   ],
 
   SUPPORT: [
@@ -224,6 +235,8 @@ const ROLES = {
     'complaint.view_all',
     'complaint.resolve',
     'qr.view_all',
+
+    'incidents.view',
   ],
 
   COMMUNITY_USER: [
