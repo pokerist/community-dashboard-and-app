@@ -6,10 +6,12 @@ import {
   Patch,
   Param,
   Delete,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { ComplaintsService } from './complaints.service';
 import { CreateComplaintDto, UpdateComplaintDto } from './dto/complaints.dto';
+import { ComplaintsQueryDto } from './dto/complaints-query.dto';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { UpdateComplaintStatusDto } from './dto/update-status.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -37,8 +39,8 @@ export class ComplaintsController {
   // ---------------------------
   @Get()
   @Permissions('complaint.view_all')
-  findAll() {
-    return this.complaintsService.findAll();
+  findAll(@Query() query: ComplaintsQueryDto) {
+    return this.complaintsService.findAll(query);
   }
 
   // ---------------------------
@@ -83,4 +85,3 @@ export class ComplaintsController {
     return this.complaintsService.remove(id);
   }
 }
-

@@ -16,6 +16,7 @@ import { ResidentModule } from './modules/residents/residents.module';
 import { PendingRegistrationsModule } from './modules/pending-registrations/pending-registrations.module';
 import { EventsModule } from './events/events.module';
 import { IncidentsModule } from './modules/incidents/incidents.module';
+import { ReferralsModule } from './modules/referrals/referrals.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { IncidentsModule } from './modules/incidents/incidents.module';
     PendingRegistrationsModule,
     EventsModule,
     IncidentsModule,
+    ReferralsModule,
   ],
   controllers: [],
   providers: [],

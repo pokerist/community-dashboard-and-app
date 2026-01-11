@@ -9,6 +9,8 @@ import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { PermissionCacheService } from './permission-cache.service';
+import { SignupWithReferralDto } from '../referrals/dto/signup-with-referral.dto';
+import { ReferralsService } from '../referrals/referrals.service';
 
 @Injectable()
 export class AuthService {
@@ -16,6 +18,7 @@ export class AuthService {
     private prisma: PrismaService,
     private jwtService: JwtService,
     private permissionCache: PermissionCacheService,
+    private referralsService: ReferralsService,
   ) {}
 
   // ================= LOGIN =================
@@ -129,6 +132,48 @@ export class AuthService {
     });
 
     return { accessToken, refreshToken: rawRefreshToken };
+  }
+
+  // ================= SIGNUP WITH REFERRAL =================
+  async signupWithReferral(dto: SignupWithReferralDto) {
+    const { phone, name, password } = dto;
+
+    // Validate referral exists and is valid
+    const validation = await this.referralsService.validateReferral(phone);
+    if (!validation.valid) {
+      throw new BadRequestException('No valid referral found for this phone number');
+    }
+
+    // Check if user already exists
+    const existingUser = await this.prisma.user.findFirst({
+      where: {
+        OR: [{ phone }, { email: phone }], // Allow phone as email fallback
+      },
+    });
+
+    if (existingUser) {
+      throw new BadRequestException('User already exists with this phone number');
+    }
+
+    // Hash password
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    // Create user
+    const user = await this.prisma.user.create({
+      data: {
+        phone,
+        nameEN: name,
+        passwordHash,
+        signupSource: 'referral',
+      },
+      include: { roles: { include: { role: true } } },
+    });
+
+    // Convert the referral
+    await this.referralsService.convertReferral(phone, user.id);
+
+    // Generate tokens
+    return this.generateTokens(user);
   }
 
   // ================= REFRESH TOKEN =================

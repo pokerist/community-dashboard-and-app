@@ -1,24 +1,25 @@
 import { IsOptional, IsEnum, IsString } from 'class-validator';
 import { UnitType, UnitStatus } from '@prisma/client';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
+import { BaseQueryDto } from '../../../common/dto/base-query.dto';
 
-export class UnitQueryDto {
-  @ApiProperty({ example: 'APARTMENT', enum: UnitType, required: false })
+export class UnitQueryDto extends BaseQueryDto {
+  @ApiPropertyOptional({ enum: UnitType, example: UnitType.APARTMENT })
   @IsOptional()
   @IsEnum(UnitType)
   type?: UnitType;
 
-  @ApiProperty({ example: 'OCCUPIED', enum: UnitStatus, required: false })
+  @ApiPropertyOptional({ enum: UnitStatus, example: UnitStatus.OCCUPIED })
   @IsOptional()
   @IsEnum(UnitStatus)
   status?: UnitStatus;
 
-  @ApiProperty({ example: 'Block A', required: false })
+  @ApiPropertyOptional({ example: 'Block A' })
   @IsOptional()
   @IsString()
   block?: string;
 
-  @ApiProperty({ example: 'Sunrise Residences', required: false })
+  @ApiPropertyOptional({ example: 'Sunrise Residences' })
   @IsOptional()
   @IsString()
   projectName?: string;

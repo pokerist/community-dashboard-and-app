@@ -4,6 +4,7 @@ import { CreateIncidentDto } from './dto/create-incident.dto';
 import { IncidentsQueryDto } from './dto/incidents-query.dto';
 import { IncidentStatus } from '@prisma/client';
 import dayjs from 'dayjs';
+import { paginate } from '../../common/utils/pagination.util';
 
 @Injectable()
 export class IncidentsService {
@@ -85,30 +86,23 @@ export class IncidentsService {
   }
 
   async findAll(query: IncidentsQueryDto) {
-    const { page = 1, limit = 10, status, priority, dateRange } = query;
-    const skip = (page - 1) * limit;
+    const { status, priority, reportedAtFrom, reportedAtTo, unitId, ...baseQuery } = query;
 
-    let where: any = {};
+    // Build filters object
+    const filters: Record<string, any> = {
+      status,
+      priority,
+      unitId,
+      reportedAtFrom,
+      reportedAtTo,
+    };
 
-    if (status) {
-      where.status = status;
-    }
-
-    if (priority) {
-      where.priority = priority;
-    }
-
-    if (dateRange) {
-      const [start, end] = dateRange.split(',');
-      where.reportedAt = {
-        gte: new Date(start),
-        lte: new Date(end),
-      };
-    }
-
-    const [incidents, total] = await Promise.all([
-      this.prisma.incident.findMany({
-        where,
+    return paginate(
+      this.prisma.incident,
+      baseQuery,
+      {
+        searchFields: ['type', 'location', 'residentName', 'description', 'incidentNumber'],
+        additionalFilters: filters,
         select: {
           id: true,
           incidentNumber: true,
@@ -120,23 +114,15 @@ export class IncidentsService {
           status: true,
           responseTime: true,
           reportedAt: true,
+          unit: {
+            select: {
+              unitNumber: true,
+              projectName: true,
+            },
+          },
         },
-        skip,
-        take: limit,
-        orderBy: { reportedAt: 'desc' },
-      }),
-      this.prisma.incident.count({ where }),
-    ]);
-
-    return {
-      data: incidents,
-      meta: {
-        page,
-        limit,
-        total,
-        totalPages: Math.ceil(total / limit),
       },
-    };
+    );
   }
 
   async resolve(id: string) {

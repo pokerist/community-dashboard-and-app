@@ -298,7 +298,8 @@ model User {
   notificationsSent Notification[]   @relation("sender")
   statusLogs        UserStatusLog[]
 
-  referrals Referral[] @relation("referrer")
+  referrals        Referral[] @relation("referrer")
+  convertedReferral Referral?  @relation("converted_user")
 
   admin    Admin?
   resident Resident?
@@ -917,6 +918,8 @@ model Referral {
   friendMobile   String
   message        String? // Free text box message
   status         ReferralStatus @default(NEW)
+  convertedUserId String?        @unique
+  convertedUser   User?          @relation("converted_user", fields: [convertedUserId], references: [id])
   createdAt      DateTime       @default(now())
 }
 

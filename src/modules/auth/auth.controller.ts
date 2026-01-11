@@ -3,6 +3,7 @@ import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { RegisterDto } from './dto/register.dto';
+import { SignupWithReferralDto } from '../referrals/dto/signup-with-referral.dto';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 
 @ApiTags('Auth')
@@ -26,6 +27,12 @@ export class AuthController {
   // register(@Body() dto: RegisterDto) {
   //   return this.authService.register(dto.email, dto.password, dto.nameEN, dto.nameAR);
   // }
+
+  @Post('signup-with-referral')
+  @ApiOperation({ summary: 'Signup a new user via referral invitation' })
+  signupWithReferral(@Body() dto: SignupWithReferralDto) {
+    return this.authService.signupWithReferral(dto);
+  }
 
   @Post('refresh')
   @ApiOperation({ summary: 'Refresh access token using refresh token' })

@@ -8,6 +8,7 @@ import { PermissionCacheService } from './permission-cache.service';
 import { PassportModule } from '@nestjs/passport';
 import { JwtStrategy } from './jwt.strategy';
 import { PrismaModule } from '../../../prisma/prisma.module';
+import { ReferralsModule } from '../referrals/referrals.module';
 @Module({
   imports: [
     PrismaModule,
@@ -16,6 +17,7 @@ import { PrismaModule } from '../../../prisma/prisma.module';
       secret: process.env.JWT_ACCESS_SECRET || 'defaultSecretKey',
       signOptions: { expiresIn: '15m' },
     }),
+    ReferralsModule,
   ],
   providers: [
     AuthService,
