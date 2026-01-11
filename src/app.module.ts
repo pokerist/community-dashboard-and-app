@@ -18,6 +18,7 @@ import { EventsModule } from './events/events.module';
 import { IncidentsModule } from './modules/incidents/incidents.module';
 import { ReferralsModule } from './modules/referrals/referrals.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     IncidentsModule,
     ReferralsModule,
     NotificationsModule,
+    DashboardModule,
   ],
   controllers: [],
   providers: [],
