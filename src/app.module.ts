@@ -17,6 +17,7 @@ import { PendingRegistrationsModule } from './modules/pending-registrations/pend
 import { EventsModule } from './events/events.module';
 import { IncidentsModule } from './modules/incidents/incidents.module';
 import { ReferralsModule } from './modules/referrals/referrals.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { ReferralsModule } from './modules/referrals/referrals.module';
     EventsModule,
     IncidentsModule,
     ReferralsModule,
+    NotificationsModule,
   ],
   controllers: [],
   providers: [],

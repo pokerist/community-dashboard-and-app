@@ -1,14 +1,20 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateIncidentDto } from './dto/create-incident.dto';
 import { IncidentsQueryDto } from './dto/incidents-query.dto';
 import { IncidentStatus } from '@prisma/client';
 import dayjs from 'dayjs';
 import { paginate } from '../../common/utils/pagination.util';
+import { IncidentCreatedEvent } from '../../events/contracts/incident-created.event';
+import { IncidentResolvedEvent } from '../../events/contracts/incident-resolved.event';
 
 @Injectable()
 export class IncidentsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private eventEmitter: EventEmitter2,
+  ) {}
 
   async generateIncidentNumber(): Promise<string> {
     const sequence = await this.prisma.incidentSequence.upsert({
@@ -38,6 +44,12 @@ export class IncidentsService {
         data: { incidentId: incident.id },
       });
     }
+
+    // Emit incident created event
+    this.eventEmitter.emit(
+      'incident.created',
+      new IncidentCreatedEvent(incident.id, incident.incidentNumber, incident.type, incident.priority, incident.unitId),
+    );
 
     return incident;
   }
@@ -140,7 +152,7 @@ export class IncidentsService {
 
     const responseTime = Math.floor((Date.now() - incident.reportedAt.getTime()) / 1000); // in seconds
 
-    return this.prisma.incident.update({
+    const updatedIncident = await this.prisma.incident.update({
       where: { id },
       data: {
         status: IncidentStatus.RESOLVED,
@@ -148,5 +160,13 @@ export class IncidentsService {
         responseTime,
       },
     });
+
+    // Emit incident resolved event
+    this.eventEmitter.emit(
+      'incident.resolved',
+      new IncidentResolvedEvent(updatedIncident.id, updatedIncident.incidentNumber, updatedIncident.type, updatedIncident.unitId, responseTime),
+    );
+
+    return updatedIncident;
   }
 }

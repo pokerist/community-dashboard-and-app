@@ -11,18 +11,19 @@ The system follows a modular architecture with the following key components:
 ### Core Modules
 
 1. **Authentication (auth)** - User authentication, authorization, and session management
-2. **Residents** - Resident, owner, and tenant management
-3. **Units** - Property unit management and assignments
-4. **Bookings** - Facility booking and reservation system
-5. **Complaints** - Complaint filing and resolution tracking
-6. **Violations** - Violation tracking and fine management
-7. **Facilities** - Community facility management
-8. **Incidents** - Incident reporting and management
-9. **Invoices** - Billing and payment management
-10. **Service Requests** - Maintenance and service request handling
-11. **Referrals** - Invitation-based user onboarding system
-12. **Pending Registrations** - User registration approval workflow
-13. **File Management** - File upload and storage handling
+2. **Notifications** - Centralized notification system with multi-channel support
+3. **Residents** - Resident, owner, and tenant management
+4. **Units** - Property unit management and assignments
+5. **Bookings** - Facility booking and reservation system
+6. **Complaints** - Complaint filing and resolution tracking
+7. **Violations** - Violation tracking and fine management
+8. **Facilities** - Community facility management
+9. **Incidents** - Incident reporting and management
+10. **Invoices** - Billing and payment management
+11. **Service Requests** - Maintenance and service request handling
+12. **Referrals** - Invitation-based user onboarding system
+13. **Pending Registrations** - User registration approval workflow
+14. **File Management** - File upload and storage handling
 
 ### Technology Stack
 
@@ -34,6 +35,13 @@ The system follows a modular architecture with the following key components:
 - **File Storage**: Supabase (configurable)
 
 ## Key Features
+
+### 🔔 Centralized Notifications
+- Event-driven notification system
+- Multi-channel support (in-app, email, SMS, push)
+- Dynamic audience targeting
+- Comprehensive delivery tracking
+- Admin notification management
 
 ### 🔐 Security & Authentication
 - JWT-based authentication with refresh tokens
@@ -182,6 +190,7 @@ The system includes auto-generated Swagger documentation available at `/api` whe
 
 ### ✅ Fully Documented Modules
 - **Authentication** - Complete security, JWT, RBAC documentation
+- **Notifications** - Centralized notification system with multi-channel support
 - **Referrals** - Comprehensive invitation system documentation
 - **Residents** - Full user management system documentation
 - **Units** - Detailed property unit management documentation

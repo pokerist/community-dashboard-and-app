@@ -3,14 +3,20 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingStatusDto } from './dto/update-status.dto';
 import { BookingStatus } from '@prisma/client';
+import { BookingApprovedEvent } from '../../events/contracts/booking-approved.event';
+import { BookingCancelledEvent } from '../../events/contracts/booking-cancelled.event';
 
 @Injectable()
 export class BookingsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private eventEmitter: EventEmitter2,
+  ) {}
 
   async create(dto: CreateBookingDto) {
     const facility = await this.prisma.facility.findUnique({
@@ -152,10 +158,48 @@ export class BookingsService {
   }
 
   async updateStatus(id: string, dto: UpdateBookingStatusDto) {
-    return this.prisma.booking.update({
+    const booking = await this.prisma.booking.findUnique({
+      where: { id },
+      include: { facility: true },
+    });
+
+    if (!booking) {
+      throw new NotFoundException('Booking not found');
+    }
+
+    const updatedBooking = await this.prisma.booking.update({
       where: { id },
       data: { status: dto.status },
     });
+
+    // Emit events based on status change
+    if (dto.status === BookingStatus.APPROVED) {
+      this.eventEmitter.emit(
+        'booking.approved',
+        new BookingApprovedEvent(
+          booking.id,
+          booking.userId,
+          booking.facility.name,
+          booking.date,
+          booking.startTime,
+          booking.endTime,
+        ),
+      );
+    } else if (dto.status === BookingStatus.CANCELLED || dto.status === BookingStatus.REJECTED) {
+      this.eventEmitter.emit(
+        'booking.cancelled',
+        new BookingCancelledEvent(
+          booking.id,
+          booking.userId,
+          booking.facility.name,
+          booking.date,
+          booking.startTime,
+          booking.endTime,
+        ),
+      );
+    }
+
+    return updatedBooking;
   }
 
   async findByFacility(facilityId: string) {
@@ -183,6 +227,7 @@ export class BookingsService {
   async cancelOwn(id: string, userId: string) {
     const booking = await this.prisma.booking.findUnique({
       where: { id },
+      include: { facility: true },
     });
 
     if (!booking) throw new NotFoundException('Booking not found');
@@ -195,13 +240,28 @@ export class BookingsService {
       throw new BadRequestException('Booking already cancelled');
     }
 
-    return this.prisma.booking.update({
+    const updatedBooking = await this.prisma.booking.update({
       where: { id },
       data: {
         status: BookingStatus.CANCELLED,
         cancelledAt: new Date(),
       },
     });
+
+    // Emit booking cancelled event
+    this.eventEmitter.emit(
+      'booking.cancelled',
+      new BookingCancelledEvent(
+        booking.id,
+        booking.userId,
+        booking.facility.name,
+        booking.date,
+        booking.startTime,
+        booking.endTime,
+      ),
+    );
+
+    return updatedBooking;
   }
 
   async remove(id: string) {
