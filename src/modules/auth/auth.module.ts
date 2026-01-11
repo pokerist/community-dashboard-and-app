@@ -9,6 +9,7 @@ import { PassportModule } from '@nestjs/passport';
 import { JwtStrategy } from './jwt.strategy';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { ReferralsModule } from '../referrals/referrals.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 @Module({
   imports: [
     PrismaModule,
@@ -18,6 +19,7 @@ import { ReferralsModule } from '../referrals/referrals.module';
       signOptions: { expiresIn: '15m' },
     }),
     ReferralsModule,
+    NotificationsModule,
   ],
   providers: [
     AuthService,
