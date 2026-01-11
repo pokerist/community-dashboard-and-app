@@ -100,14 +100,23 @@ export class IncidentsService {
   async findAll(query: IncidentsQueryDto) {
     const { status, priority, reportedAtFrom, reportedAtTo, unitId, ...baseQuery } = query;
 
-    // Build filters object
+    // Build filters object with proper date range filtering
     const filters: Record<string, any> = {
       status,
       priority,
       unitId,
-      reportedAtFrom,
-      reportedAtTo,
     };
+
+    // Add date range filters if provided
+    if (reportedAtFrom || reportedAtTo) {
+      filters.reportedAt = {};
+      if (reportedAtFrom) {
+        filters.reportedAt.gte = new Date(reportedAtFrom);
+      }
+      if (reportedAtTo) {
+        filters.reportedAt.lte = new Date(reportedAtTo);
+      }
+    }
 
     return paginate(
       this.prisma.incident,

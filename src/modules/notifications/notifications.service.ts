@@ -243,12 +243,12 @@ export class NotificationsService {
           { targetAudience: Audience.ALL },
           {
             targetAudience: Audience.SPECIFIC_RESIDENCES,
-            audienceMeta: { path: '$.userIds', array_contains: userId },
+            audienceMeta: { path: ['userIds'], array_contains: userId },
           },
-          {
+          ...userUnitIds.map(unitId => ({
             targetAudience: Audience.SPECIFIC_UNITS,
-            audienceMeta: { path: '$.unitIds', array_overlaps: userUnitIds },
-          },
+            audienceMeta: { path: ['unitIds'], array_contains: unitId },
+          })),
           // For block-based notifications, get blocks from user's units
           {
             targetAudience: Audience.SPECIFIC_BLOCKS,
@@ -278,12 +278,12 @@ export class NotificationsService {
           { targetAudience: Audience.ALL },
           {
             targetAudience: Audience.SPECIFIC_RESIDENCES,
-            audienceMeta: { path: '$.userIds', array_contains: userId },
+            audienceMeta: { path: ['userIds'], array_contains: userId },
           },
-          {
+          ...userUnitIds.map(unitId => ({
             targetAudience: Audience.SPECIFIC_UNITS,
-            audienceMeta: { path: '$.unitIds', array_overlaps: userUnitIds },
-          },
+            audienceMeta: { path: ['unitIds'], array_contains: unitId },
+          })),
         ],
       },
     });

@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
@@ -18,8 +18,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
       secret: process.env.JWT_ACCESS_SECRET || 'defaultSecretKey',
       signOptions: { expiresIn: '15m' },
     }),
-    ReferralsModule,
-    NotificationsModule,
+    forwardRef(() => ReferralsModule),
+    forwardRef(() => NotificationsModule),
   ],
   providers: [
     AuthService,

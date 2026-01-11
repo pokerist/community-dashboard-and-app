@@ -306,7 +306,7 @@ async function seed() {
     }
   }
 
-  // // Create an initial super admin user
+  // Create an initial super admin user for testing
   // const adminEmail = 'test@admin.com';
   // const existingAdmin = await prisma.user.findUnique({
   //   where: { email: adminEmail },

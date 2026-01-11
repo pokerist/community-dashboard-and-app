@@ -13,18 +13,19 @@ import { IncidentsService } from './incidents.service';
 import { CreateIncidentDto } from './dto/create-incident.dto';
 import { IncidentsQueryDto } from './dto/incidents-query.dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
 
 @ApiTags('incidents')
 @Controller('incidents')
-@UseGuards(PermissionsGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class IncidentsController {
   constructor(private readonly incidentsService: IncidentsService) {}
 
   @Post()
-  @Permissions('incidents.create')
   @ApiOperation({ summary: 'Create a new incident' })
   @ApiResponse({ status: 201, description: 'Incident created successfully' })
+  @Permissions('incidents.create')
   create(@Body() createIncidentDto: CreateIncidentDto) {
     return this.incidentsService.create(createIncidentDto);
   }
