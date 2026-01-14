@@ -70,8 +70,12 @@ export class NotificationsController {
   @Permissions('notification.view_own')
   @ApiOperation({ summary: 'Mark notification as read' })
   @ApiResponse({ status: 200, description: 'Notification marked as read' })
+  @ApiResponse({ status: 404, description: 'Notification not found or not accessible' })
   async markAsRead(@Param('id') notificationId: string, @Request() req) {
-    await this.notificationsService.markAsRead(notificationId, req.user.id);
+    const success = await this.notificationsService.markAsRead(notificationId, req.user.id);
+    if (!success) {
+      return { success: false, message: 'Notification not found or not accessible' };
+    }
     return { success: true };
   }
 

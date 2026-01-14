@@ -14,17 +14,22 @@ export class NotificationDeliveryListener {
   private readonly logger = new Logger(NotificationDeliveryListener.name);
 
   constructor(
-    @Inject(PrismaService)
     private readonly prisma: PrismaService,
     private readonly emailService: EmailService,
-  ) {}
+  ) {
+    console.log('🔥 NotificationDeliveryListener initialized');
+  }
 
-  @OnEvent('notification.created')
+  @OnEvent('notification.created', { async: false })
   async handleNotificationCreated(event: NotificationCreatedEvent) {
     const notification = await this.prisma.notification.findUnique({
       where: { id: event.notificationId },
       include: { logs: true },
     });
+
+    this.logger.log(
+      `[DELIVERY] Notification ${notification?.id} | channels=${notification?.channels.join(',')}`,
+    );
 
     if (!notification) return;
 
@@ -55,6 +60,22 @@ export class NotificationDeliveryListener {
       },
       select: { id: true, email: true },
     });
+
+    this.logger.log(`[EMAIL] Logs count=${notification.logs.length}`);
+
+    this.logger.log(
+      `[EMAIL] Pending EMAIL logs=${
+        notification.logs.filter(
+          (l) =>
+            l.channel === Channel.EMAIL &&
+            l.status === NotificationLogStatus.PENDING,
+        ).length
+      }`,
+    );
+
+    this.logger.log(`[EMAIL] User IDs=${JSON.stringify(userIds)}`);
+
+    this.logger.log(`[EMAIL] Users with email=${users.length}`);
 
     const emailPromises = users.map(async (user) => {
       try {
@@ -91,8 +112,6 @@ export class NotificationDeliveryListener {
             providerResponse: { error: error.message },
           },
         });
-
-        throw error;
       }
     });
 
@@ -101,7 +120,11 @@ export class NotificationDeliveryListener {
 
   private extractUserIdsFromLogs(logs: any[], channel: Channel): string[] {
     return logs
-      .filter((log) => log.channel === channel)
+      .filter(
+        (log) =>
+          log.channel === channel &&
+          log.status === NotificationLogStatus.PENDING,
+      )
       .map((log) => log.recipient);
   }
 

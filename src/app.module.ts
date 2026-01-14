@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaModule } from '../prisma/prisma.module';
 import { InvoicesModule } from './modules/invoices/invoices.module';
 import { UnitsModule } from './modules/units/units.module';
@@ -22,7 +23,9 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     PrismaModule,
+    AuthModule,
     InvoicesModule,
     UnitsModule,
     EventEmitterModule.forRoot(),
@@ -30,7 +33,6 @@ import { DashboardModule } from './modules/dashboard/dashboard.module';
     ServiceRequestModule,
     ServiceModule,
     ServiceFieldModule,
-    AuthModule,
     ComplaintsModule,
     ViolationsModule,
     FacilitiesModule,

@@ -34,8 +34,11 @@ export class NotificationsService {
       scheduledAt,
     } = dto;
 
+    const scheduledDate = scheduledAt ? new Date(scheduledAt) : null;
     const now = new Date();
-    const isScheduled = scheduledAt && scheduledAt > now;
+
+    const isScheduled =
+      scheduledDate !== null && scheduledDate.getTime() > now.getTime();
 
     const notification = await this.prisma.notification.create({
       data: {
@@ -46,7 +49,7 @@ export class NotificationsService {
         channels,
         targetAudience,
         audienceMeta,
-        scheduledAt,
+        scheduledAt: scheduledDate,
         senderId,
         sentAt: isScheduled ? null : now,
         status: isScheduled
@@ -71,6 +74,7 @@ export class NotificationsService {
       where: { id: notificationId },
     });
 
+    
     if (!notification) return;
 
     if (
@@ -169,6 +173,8 @@ export class NotificationsService {
         status:
           channel === Channel.IN_APP
             ? NotificationLogStatus.DELIVERED
+            : channel === Channel.EMAIL
+            ? NotificationLogStatus.PENDING
             : NotificationLogStatus.SENT,
       })),
     );
@@ -225,7 +231,7 @@ export class NotificationsService {
     };
   }
 
-  async markAsRead(notificationId: string, userId: string) {
+  async markAsRead(notificationId: string, userId: string): Promise<boolean> {
     const log = await this.prisma.notificationLog.findFirst({
       where: {
         notificationId,
@@ -234,7 +240,7 @@ export class NotificationsService {
       },
     });
 
-    if (!log) return;
+    if (!log) return false;
 
     await this.prisma.notificationLog.update({
       where: { id: log.id },
@@ -245,5 +251,7 @@ export class NotificationsService {
       where: { id: notificationId },
       data: { readCount: { increment: 1 } },
     });
+
+    return true;
   }
 }

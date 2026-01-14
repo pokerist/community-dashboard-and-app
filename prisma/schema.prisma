@@ -215,6 +215,7 @@ enum NotificationStatus {
 
 enum NotificationLogStatus {
   SENT
+  PENDING
   FAILED
   DELIVERED
   READ

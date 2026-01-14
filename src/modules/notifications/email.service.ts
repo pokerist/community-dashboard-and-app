@@ -26,11 +26,13 @@ export class EmailService {
   ): Promise<void> {
     try {
       const mailOptions = {
-        from: process.env.FROM_EMAIL || 'noreply@alkarma.com',
+        from: process.env.FROM_EMAIL,
         to: recipient,
         subject,
         html: content,
       };
+
+      this.logger.log(`[SMTP] Attempting send to ${recipient} | subject="${subject}"`);
 
       const info = await this.transporter.sendMail(mailOptions);
       this.logger.log(
