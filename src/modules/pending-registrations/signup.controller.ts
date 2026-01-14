@@ -1,10 +1,4 @@
-import {
-  Controller,
-  Post,
-  Body,
-  HttpCode,
-  HttpStatus,
-} from '@nestjs/common';
+import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
 import { PendingRegistrationsService } from './pending-registrations.service';
 import { CreatePendingRegistrationDto } from './dto/create-pending-registration.dto';
 import { ApiTags } from '@nestjs/swagger';

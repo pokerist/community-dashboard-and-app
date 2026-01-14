@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
 
@@ -75,7 +76,7 @@ const PERMISSIONS = [
   'invoice.cancel',
 
   // Fees
-  'unit_fee.view_all', 
+  'unit_fee.view_all',
   'unit_fee.view_own',
   'unit_fee.create',
   'unit_fee.update',
@@ -147,9 +148,10 @@ const PERMISSIONS = [
   'smart_device.view_own',
 
   // Notifications
-  'notification.send',
-  'notification.schedule',
-  'notification.view',
+  'notification.create',
+  'notification.view_own',
+  'notification.view_all',
+  'notification.manage',
 
   // Banners
   'banner.manage',
@@ -169,95 +171,156 @@ const ROLES = {
   SUPER_ADMIN: PERMISSIONS,
 
   MANAGER: [
+    // Users / Admins / Residents
     'user.read',
     'user.update',
-
     'resident.view',
-    'resident.assign_unit',
-    'resident.remove_unit',
+    'resident.create',
+    'resident.update',
 
-    'unit.view',
+    'owner.create',
+    'owner.view',
+    'owner.update',
+
+    'admin.view',
+    'admin.update',
+    'admin.assign_role',
+
+    // Units / Projects
+    'unit.view_all',
     'unit.create',
     'unit.update',
+    'unit.assign_resident',
+    'unit.remove_resident_from_unit',
+    'unit.view_assigned_residents',
+    'unit.update_status',
+    'unit.view_leases',
+
+    'project.view',
     'project.manage',
 
+    // Invoices / Fees
     'invoice.view_all',
     'invoice.create',
+    'invoice.update',
     'invoice.mark_paid',
+
+    'unit_fee.view_all',
+    'unit_fee.create',
+    'unit_fee.update',
+    'unit_fee.delete',
     'fee.manage',
 
+    // Services / Requests
+    'service.create',
+    'service.read',
+    'service.update',
+    'service.delete',
     'service_request.view_all',
     'service_request.assign',
     'service_request.resolve',
 
+    // Complaints / Violations
     'complaint.view_all',
-    'complaint.resolve',
+    'complaint.manage',
+    'complaint.assign',
+    'complaint.manage_status',
 
     'violation.issue',
     'violation.view_all',
+    'violation.update',
 
+    // QR Codes / Facilities / Bookings
     'qr.view_all',
     'qr.cancel',
 
+    'facility.create',
+    'facility.view_all',
+    'facility.update',
+    'facility.delete',
+
     'booking.view_all',
 
-    'facility.manage',
-
-    'notification.send',
-    'notification.schedule',
-
     'banner.manage',
-    'referral.view_all',
+
+    // Notifications / Incidents / Referrals
+    'notification.create',
+    'notification.view_all',
+    'notification.manage',
 
     'incidents.view',
     'incidents.resolve',
+
+    'referral.view_all',
   ],
 
   OPERATOR: [
+    // Services / Requests
     'service_request.view_all',
     'service_request.assign',
     'service_request.resolve',
 
+    // Complaints / Violations
     'complaint.view_all',
-    'complaint.resolve',
-
+    'complaint.manage',
     'violation.issue',
 
+    // QR Codes / Bookings
     'qr.view_all',
     'booking.view_all',
 
+    // Incidents
     'incidents.view',
     'incidents.resolve',
   ],
 
   SUPPORT: [
+    // Service Requests / Complaints
     'service_request.view_all',
+
     'complaint.view_all',
-    'complaint.resolve',
+    'complaint.manage',
+
+    // QR Codes / Bookings
     'qr.view_all',
 
+    // Incidents
     'incidents.view',
   ],
 
   COMMUNITY_USER: [
-    'unit.view', // Critical for "My Unit" section
-    'project.view', // For the "Alkarma Projects" section
-    'banner.view', // For the home screen carousel
-    'facility.view', // To see what they are booking
+    // Units / Projects
+    'unit.view_own',
+    'project.view',
+
+    'banner.view',
+    'facility.view_own',
+
+    // Invoices / Services
     'invoice.view_own',
     'service_request.view_own',
     'service_request.create',
+
+    // Complaints / Violations
     'complaint.view_own',
     'complaint.report',
     'violation.view_own',
+
+    // QR Codes / Bookings
     'qr.generate',
     'qr.view_own',
     'qr.cancel',
+
     'booking.view_own',
     'booking.create',
-    'booking.cancel',
+    'booking.cancel_own',
+
+    // Smart Devices / Referrals
     'smart_device.view_own',
     'referral.create',
+
+    // Notifications
+    'notification.view_own',
   ],
 } as const;
 
@@ -306,6 +369,124 @@ async function seed() {
     }
   }
 
+  console.log('🌱 Seeding users...');
+
+  const passwordHash = await bcrypt.hash('pass123', 12);
+
+  const superAdminRole = await prisma.role.findUnique({
+    where: { name: 'SUPER_ADMIN' },
+  });
+
+  const managerRole = await prisma.role.findUnique({
+    where: { name: 'MANAGER' },
+  });
+
+  const communityRole = await prisma.role.findUnique({
+    where: { name: 'COMMUNITY_USER' },
+  });
+
+  if (!superAdminRole || !managerRole || !communityRole) {
+    throw new Error('Required roles missing');
+  }
+
+  // SUPER ADMIN
+  const superAdmin = await prisma.user.upsert({
+    where: { email: 'test@admin.com' },
+    update: {},
+    create: {
+      email: 'test@admin.com',
+      passwordHash,
+      nameEN: 'Super Admin',
+      roles: {
+        create: [{ roleId: superAdminRole.id }],
+      },
+      admin: { create: {} },
+    },
+  });
+
+  // MANAGER
+  const manager = await prisma.user.create({
+    data: {
+      email: 'manager@test.com',
+      passwordHash,
+      nameEN: 'Manager One',
+      roles: {
+        create: [{ roleId: managerRole.id }],
+      },
+      admin: { create: {} },
+    },
+  });
+
+  // RESIDENT A
+  const residentA = await prisma.user.create({
+    data: {
+      email: 'residentA@test.com',
+      passwordHash,
+      nameEN: 'Resident A',
+      roles: {
+        create: [{ roleId: communityRole.id }],
+      },
+      resident: { create: {} },
+    },
+  });
+
+  // RESIDENT B
+  const residentB = await prisma.user.create({
+    data: {
+      email: 'residentB@test.com',
+      passwordHash,
+      nameEN: 'Resident B',
+      roles: {
+        create: [{ roleId: communityRole.id }],
+      },
+      resident: { create: {} },
+    },
+  });
+
+  console.log('🌱 Seeding units...');
+
+  const unitA = await prisma.unit.create({
+    data: {
+      projectName: 'Alkarma Heights',
+      block: 'A',
+      unitNumber: '101',
+      type: 'APARTMENT',
+      bedrooms: 2,
+      bathrooms: 1,
+      sizeSqm: 120,
+    },
+  });
+
+  const unitB = await prisma.unit.create({
+    data: {
+      projectName: 'Alkarma Heights',
+      block: 'B',
+      unitNumber: '202',
+      type: 'APARTMENT',
+      bedrooms: 3,
+      bathrooms: 2,
+      sizeSqm: 160,
+    },
+  });
+
+  console.log('🌱 Assigning residents to units...');
+
+  await prisma.residentUnit.create({
+    data: {
+      residentId: residentA.id,
+      unitId: unitA.id,
+      isPrimary: true,
+    },
+  });
+
+  await prisma.residentUnit.create({
+    data: {
+      residentId: residentB.id,
+      unitId: unitB.id,
+      isPrimary: true,
+    },
+  });
+
   // Create an initial super admin user for testing
   // const adminEmail = 'test@admin.com';
   // const existingAdmin = await prisma.user.findUnique({
@@ -337,6 +518,11 @@ async function seed() {
   // }
 
   console.log('✅ Seeding complete');
+  console.log('✅ Seed summary:');
+  console.log('- Super Admin: test@admin.com / pass123');
+  console.log('- Manager: manager@test.com / pass123');
+  console.log('- Resident A: residentA@test.com / pass123 → Unit A');
+  console.log('- Resident B: residentB@test.com / pass123 → Unit B');
 }
 
 seed()

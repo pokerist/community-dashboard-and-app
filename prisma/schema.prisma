@@ -205,6 +205,14 @@ enum ReferralStatus {
   REJECTED
 }
 
+enum NotificationStatus {
+  SCHEDULED
+  PENDING
+  SENT
+  FAILED
+  READ
+}
+
 enum NotificationLogStatus {
   SENT
   FAILED
@@ -816,6 +824,7 @@ model Notification {
   title          String
   type           NotificationType
   channels       Channel[]
+  status         NotificationStatus @default(PENDING)
   sender         User?             @relation("sender", fields: [senderId], references: [id])
   senderId       String?
   targetAudience Audience

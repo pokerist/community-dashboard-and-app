@@ -61,7 +61,16 @@ export class ComplaintsService {
 
   // --- 2. READ (FIND ALL) ---
   async findAll(query: ComplaintsQueryDto) {
-    const { status, priority, unitId, reporterId, assignedToId, createdAtFrom, createdAtTo, ...baseQuery } = query;
+    const {
+      status,
+      priority,
+      unitId,
+      reporterId,
+      assignedToId,
+      createdAtFrom,
+      createdAtTo,
+      ...baseQuery
+    } = query;
 
     const filters: Record<string, any> = {
       status,
@@ -73,19 +82,15 @@ export class ComplaintsService {
       createdAtTo,
     };
 
-    return paginate(
-      this.prisma.complaint,
-      baseQuery,
-      {
-        searchFields: ['complaintNumber', 'category', 'description'],
-        additionalFilters: filters,
-        include: {
-          reporter: { select: { nameEN: true, email: true } },
-          unit: { select: { unitNumber: true } },
-          assignedTo: { select: { nameEN: true } },
-        },
+    return paginate(this.prisma.complaint, baseQuery, {
+      searchFields: ['complaintNumber', 'category', 'description'],
+      additionalFilters: filters,
+      include: {
+        reporter: { select: { nameEN: true, email: true } },
+        unit: { select: { unitNumber: true } },
+        assignedTo: { select: { nameEN: true } },
       },
-    );
+    });
   }
 
   // --- 3. READ (FIND ONE) ---

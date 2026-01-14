@@ -32,9 +32,7 @@ export class PendingRegistrationsService {
     }
 
     const { password, ...data } = dto;
-    const passwordHash = password
-      ? await bcrypt.hash(password, 12)
-      : undefined;
+    const passwordHash = password ? await bcrypt.hash(password, 12) : undefined;
 
     return this.prisma.pendingRegistration.create({
       data: {

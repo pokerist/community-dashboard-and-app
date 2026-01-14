@@ -8,7 +8,6 @@ import {
   IsEnum,
   IsArray,
   ValidateNested,
-  
 } from 'class-validator';
 import { Priority } from '@prisma/client';
 import { FieldValueDto } from './field-value.dto';
@@ -46,5 +45,4 @@ export class CreateServiceRequestDto {
   @Type(() => FieldValueDto) // Ensure NestJS validates the nested array
   @IsOptional()
   fieldValues?: FieldValueDto[]; // New: Array of dynamic field inputs
-  
 }

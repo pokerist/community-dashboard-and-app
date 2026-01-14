@@ -20,7 +20,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     let statusCode: number;
     let message: string;
     let errorCode: string;
-    let errorDetails: unknown = {};
+    const errorDetails: unknown = {};
 
     if (exception instanceof HttpException) {
       // 1. Handle standard NestJS HTTP Errors (400, 404, 500, etc.)
@@ -32,8 +32,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
         errorCode =
           (exceptionResponse as any).error || exception.constructor.name;
       } else {
-        message =
-          (exceptionResponse as string) || 'An unexpected error occurred.';
+        message = exceptionResponse || 'An unexpected error occurred.';
         errorCode = exception.constructor.name;
       }
     } else if (exception instanceof PrismaClientKnownRequestError) {
@@ -76,7 +75,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       errorCode: errorCode,
       timestamp: new Date().toISOString(),
       path: request.url,
-      errorDetails // For deep debugging
+      errorDetails, // For deep debugging
     });
   }
 }

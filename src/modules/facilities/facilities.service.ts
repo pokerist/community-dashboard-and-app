@@ -74,56 +74,56 @@ export class FacilitiesService {
 
     return facility;
   }
-  
-async update(id: string, dto: UpdateFacilityDto) {
-  await this.findOne(id);
 
-  // Destructure nested relations from dto
-  const { slotConfig, slotExceptions, ...updateData } = dto;
+  async update(id: string, dto: UpdateFacilityDto) {
+    await this.findOne(id);
 
-  // Build the update data with proper Prisma syntax for relations
-  const data: any = {
-    ...updateData,
-  };
+    // Destructure nested relations from dto
+    const { slotConfig, slotExceptions, ...updateData } = dto;
 
-  // Handle slotConfig updates (delete all and recreate)
-  if (slotConfig !== undefined) {
-    data.slotConfig = {
-      deleteMany: {},
-      create: slotConfig.map((slot) => ({
-        dayOfWeek: slot.dayOfWeek,
-        startTime: slot.startTime,
-        endTime: slot.endTime,
-        slotDurationMinutes: slot.slotDurationMinutes,
-        slotCapacity: slot.slotCapacity,
-      })),
+    // Build the update data with proper Prisma syntax for relations
+    const data: any = {
+      ...updateData,
     };
-  }
 
-  // Handle slotExceptions updates (delete all and recreate)
-  if (slotExceptions !== undefined) {
-    data.slotExceptions = {
-      deleteMany: {},
-      create: slotExceptions.map((exc) => ({
-        date: new Date(exc.date),
-        isClosed: exc.isClosed ?? false,
-        startTime: exc.startTime,
-        endTime: exc.endTime,
-        slotDurationMinutes: exc.slotDurationMinutes,
-        slotCapacity: exc.slotCapacity,
-      })),
-    };
-  }
+    // Handle slotConfig updates (delete all and recreate)
+    if (slotConfig !== undefined) {
+      data.slotConfig = {
+        deleteMany: {},
+        create: slotConfig.map((slot) => ({
+          dayOfWeek: slot.dayOfWeek,
+          startTime: slot.startTime,
+          endTime: slot.endTime,
+          slotDurationMinutes: slot.slotDurationMinutes,
+          slotCapacity: slot.slotCapacity,
+        })),
+      };
+    }
 
-  return this.prisma.facility.update({
-    where: { id },
-    data,
-    include: {
-      slotConfig: true,
-      slotExceptions: true,
-    },
-  });
-}
+    // Handle slotExceptions updates (delete all and recreate)
+    if (slotExceptions !== undefined) {
+      data.slotExceptions = {
+        deleteMany: {},
+        create: slotExceptions.map((exc) => ({
+          date: new Date(exc.date),
+          isClosed: exc.isClosed ?? false,
+          startTime: exc.startTime,
+          endTime: exc.endTime,
+          slotDurationMinutes: exc.slotDurationMinutes,
+          slotCapacity: exc.slotCapacity,
+        })),
+      };
+    }
+
+    return this.prisma.facility.update({
+      where: { id },
+      data,
+      include: {
+        slotConfig: true,
+        slotExceptions: true,
+      },
+    });
+  }
 
   async remove(id: string) {
     await this.findOne(id);

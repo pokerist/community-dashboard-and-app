@@ -11,7 +11,9 @@ describe('PendingRegistrationsController', () => {
       providers: [PendingRegistrationsService],
     }).compile();
 
-    controller = module.get<PendingRegistrationsController>(PendingRegistrationsController);
+    controller = module.get<PendingRegistrationsController>(
+      PendingRegistrationsController,
+    );
   });
 
   it('should be defined', () => {

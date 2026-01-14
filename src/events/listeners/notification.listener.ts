@@ -47,7 +47,10 @@ export class NotificationListener {
 
       this.logger.log(`Payment reminder sent for invoice ${payload.invoiceId}`);
     } catch (error) {
-      this.logger.error(`Failed to send notification for invoice ${payload.invoiceId}`, error);
+      this.logger.error(
+        `Failed to send notification for invoice ${payload.invoiceId}`,
+        error,
+      );
     }
   }
 
@@ -57,15 +60,17 @@ export class NotificationListener {
 
     try {
       // Send emergency alert to all users if high priority, otherwise to specific unit/block
-      const audience = payload.priority === 'CRITICAL' || payload.priority === 'HIGH'
-        ? Audience.ALL
-        : payload.unitId
-          ? Audience.SPECIFIC_UNITS
-          : Audience.ALL;
+      const audience =
+        payload.priority === 'CRITICAL' || payload.priority === 'HIGH'
+          ? Audience.ALL
+          : payload.unitId
+            ? Audience.SPECIFIC_UNITS
+            : Audience.ALL;
 
-      const audienceMeta = audience === Audience.SPECIFIC_UNITS
-        ? { unitIds: [payload.unitId] }
-        : undefined;
+      const audienceMeta =
+        audience === Audience.SPECIFIC_UNITS
+          ? { unitIds: [payload.unitId] }
+          : undefined;
 
       await this.notificationsService.sendNotification({
         type: NotificationType.EMERGENCY_ALERT,
@@ -76,9 +81,14 @@ export class NotificationListener {
         audienceMeta,
       });
 
-      this.logger.log(`Emergency alert sent for incident ${payload.incidentNumber}`);
+      this.logger.log(
+        `Emergency alert sent for incident ${payload.incidentNumber}`,
+      );
     } catch (error) {
-      this.logger.error(`Failed to send notification for incident ${payload.incidentId}`, error);
+      this.logger.error(
+        `Failed to send notification for incident ${payload.incidentId}`,
+        error,
+      );
     }
   }
 
@@ -89,9 +99,10 @@ export class NotificationListener {
     try {
       // Send resolution notification to affected users
       const audience = payload.unitId ? Audience.SPECIFIC_UNITS : Audience.ALL;
-      const audienceMeta = audience === Audience.SPECIFIC_UNITS
-        ? { unitIds: [payload.unitId] }
-        : undefined;
+      const audienceMeta =
+        audience === Audience.SPECIFIC_UNITS
+          ? { unitIds: [payload.unitId] }
+          : undefined;
 
       await this.notificationsService.sendNotification({
         type: NotificationType.MAINTENANCE_ALERT,
@@ -102,9 +113,14 @@ export class NotificationListener {
         audienceMeta,
       });
 
-      this.logger.log(`Resolution notification sent for incident ${payload.incidentNumber}`);
+      this.logger.log(
+        `Resolution notification sent for incident ${payload.incidentNumber}`,
+      );
     } catch (error) {
-      this.logger.error(`Failed to send resolution notification for incident ${payload.incidentId}`, error);
+      this.logger.error(
+        `Failed to send resolution notification for incident ${payload.incidentId}`,
+        error,
+      );
     }
   }
 
@@ -123,9 +139,14 @@ export class NotificationListener {
         audienceMeta: { userIds: [payload.userId] },
       });
 
-      this.logger.log(`Booking confirmation sent for booking ${payload.bookingId}`);
+      this.logger.log(
+        `Booking confirmation sent for booking ${payload.bookingId}`,
+      );
     } catch (error) {
-      this.logger.error(`Failed to send booking confirmation for booking ${payload.bookingId}`, error);
+      this.logger.error(
+        `Failed to send booking confirmation for booking ${payload.bookingId}`,
+        error,
+      );
     }
   }
 
@@ -144,9 +165,14 @@ export class NotificationListener {
         audienceMeta: { userIds: [payload.userId] },
       });
 
-      this.logger.log(`Booking cancellation notification sent for booking ${payload.bookingId}`);
+      this.logger.log(
+        `Booking cancellation notification sent for booking ${payload.bookingId}`,
+      );
     } catch (error) {
-      this.logger.error(`Failed to send booking cancellation notification for booking ${payload.bookingId}`, error);
+      this.logger.error(
+        `Failed to send booking cancellation notification for booking ${payload.bookingId}`,
+        error,
+      );
     }
   }
 }

@@ -1,4 +1,11 @@
-import { IsEnum, IsNotEmpty, IsOptional, IsArray, IsString, IsDateString } from 'class-validator';
+import {
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsArray,
+  IsString,
+  IsDateString,
+} from 'class-validator';
 import { Channel, Audience, NotificationType } from '@prisma/client';
 
 export class SendNotificationDto {

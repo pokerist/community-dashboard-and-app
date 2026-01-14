@@ -148,7 +148,9 @@ export class AuthService {
     // Validate referral exists and is valid
     const validation = await this.referralsService.validateReferral(phone);
     if (!validation.valid) {
-      throw new BadRequestException('No valid referral found for this phone number');
+      throw new BadRequestException(
+        'No valid referral found for this phone number',
+      );
     }
 
     // Check if user already exists
@@ -159,7 +161,9 @@ export class AuthService {
     });
 
     if (existingUser) {
-      throw new BadRequestException('User already exists with this phone number');
+      throw new BadRequestException(
+        'User already exists with this phone number',
+      );
     }
 
     // Hash password

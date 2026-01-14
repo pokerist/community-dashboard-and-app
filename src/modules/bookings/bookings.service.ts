@@ -185,7 +185,10 @@ export class BookingsService {
           booking.endTime,
         ),
       );
-    } else if (dto.status === BookingStatus.CANCELLED || dto.status === BookingStatus.REJECTED) {
+    } else if (
+      dto.status === BookingStatus.CANCELLED ||
+      dto.status === BookingStatus.REJECTED
+    ) {
       this.eventEmitter.emit(
         'booking.cancelled',
         new BookingCancelledEvent(

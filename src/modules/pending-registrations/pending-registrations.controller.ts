@@ -50,7 +50,11 @@ export class PendingRegistrationsController {
 
   @Patch(':id/approve')
   @Permissions('pending_registration.approve')
-  approve(@Param('id') id: string, @Body() dto: ApprovePendingRegistrationDto, @Req() req: any) {
+  approve(
+    @Param('id') id: string,
+    @Body() dto: ApprovePendingRegistrationDto,
+    @Req() req: any,
+  ) {
     return this.service.approve(id, dto, req.user.id);
   }
 }

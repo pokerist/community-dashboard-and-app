@@ -247,8 +247,13 @@ export class DashboardService {
       status: 'PAID',
     };
 
-    if (dateFrom) whereClause.paidDate = { ...whereClause.paidDate, gte: new Date(dateFrom) };
-    if (dateTo) whereClause.paidDate = { ...whereClause.paidDate, lte: new Date(dateTo) };
+    if (dateFrom)
+      whereClause.paidDate = {
+        ...whereClause.paidDate,
+        gte: new Date(dateFrom),
+      };
+    if (dateTo)
+      whereClause.paidDate = { ...whereClause.paidDate, lte: new Date(dateTo) };
     if (unitId) whereClause.unitId = unitId;
 
     if (projectName || block) {
@@ -268,13 +273,16 @@ export class DashboardService {
     });
 
     // Group by month manually
-    const monthlyData = revenueData.reduce((acc, invoice) => {
-      if (!invoice.paidDate) return acc;
-      const month = dayjs(invoice.paidDate).format('YYYY-MM');
-      if (!acc[month]) acc[month] = 0;
-      acc[month] += invoice.amount.toNumber();
-      return acc;
-    }, {} as Record<string, number>);
+    const monthlyData = revenueData.reduce(
+      (acc, invoice) => {
+        if (!invoice.paidDate) return acc;
+        const month = dayjs(invoice.paidDate).format('YYYY-MM');
+        if (!acc[month]) acc[month] = 0;
+        acc[month] += invoice.amount.toNumber();
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
 
     const chartData = Object.entries(monthlyData).map(([month, total]) => ({
       month,

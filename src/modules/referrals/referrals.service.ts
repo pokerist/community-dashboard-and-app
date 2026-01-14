@@ -79,7 +79,16 @@ export class ReferralsService {
   }
 
   async findAll(query: ReferralQueryDto, userId?: string) {
-    const { page, limit, sortBy, sortOrder, status, referrerId, dateFrom, dateTo } = query;
+    const {
+      page,
+      limit,
+      sortBy,
+      sortOrder,
+      status,
+      referrerId,
+      dateFrom,
+      dateTo,
+    } = query;
 
     const where: any = {};
 
@@ -159,7 +168,8 @@ export class ReferralsService {
       return { valid: false };
     }
 
-    const referrerName = referral.referrer.nameEN || referral.referrer.nameAR || 'Referrer';
+    const referrerName =
+      referral.referrer.nameEN || referral.referrer.nameAR || 'Referrer';
     return { valid: true, referrerName };
   }
 
@@ -204,7 +214,9 @@ export class ReferralsService {
     });
 
     if (!referral) {
-      throw new BadRequestException('No valid referral found for this phone number');
+      throw new BadRequestException(
+        'No valid referral found for this phone number',
+      );
     }
 
     // Update referral status and link to converted user

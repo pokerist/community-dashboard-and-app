@@ -21,20 +21,16 @@ export class UnitsService {
       projectName,
     };
 
-    return paginate(
-      this.prisma.unit,
-      baseQuery,
-      {
-        searchFields: ['unitNumber', 'projectName', 'block'],
-        additionalFilters: filters,
-        include: {
-          residents: {
-            include: { resident: true },
-          },
-          leases: true,
+    return paginate(this.prisma.unit, baseQuery, {
+      searchFields: ['unitNumber', 'projectName', 'block'],
+      additionalFilters: filters,
+      include: {
+        residents: {
+          include: { resident: true },
         },
+        leases: true,
       },
-    );
+    });
   }
 
   async findOne(id: string) {

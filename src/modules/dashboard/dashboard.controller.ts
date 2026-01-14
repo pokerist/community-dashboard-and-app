@@ -1,9 +1,4 @@
-import {
-  Controller,
-  Get,
-  Query,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { DashboardService } from './dashboard.service';
 import { DashboardSummaryDto } from './dto/dashboard-summary.dto';
@@ -13,18 +8,23 @@ import { DashboardRevenueQueryDto } from './dto/dashboard-revenue-query.dto';
 import { DashboardOccupancyQueryDto } from './dto/dashboard-occupancy-query.dto';
 import { DashboardDevicesQueryDto } from './dto/dashboard-devices-query.dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
 
 @ApiTags('dashboard')
 @Controller('dashboard')
-@UseGuards(PermissionsGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}
 
   @Get('summary')
   @Permissions('dashboard.view')
   @ApiOperation({ summary: 'Get dashboard summary KPIs' })
-  @ApiResponse({ status: 200, description: 'Dashboard summary data', type: DashboardSummaryDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Dashboard summary data',
+    type: DashboardSummaryDto,
+  })
   getSummary(): Promise<DashboardSummaryDto> {
     return this.dashboardService.getSummary();
   }

@@ -1,10 +1,27 @@
-import { Controller, Get, Post, Patch, Query, Param, Body, UseGuards, Request } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Query,
+  Param,
+  Body,
+  UseGuards,
+  Request,
+} from '@nestjs/common';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { NotificationsService } from './notifications.service';
 import { SendNotificationDto } from './dto/send-notification.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
+
+// ⭕ NOTE: Delivery for EMAIL is async and best-effort. SMS/PUSH/retries intentionally deferred.
 
 @ApiTags('Notifications')
 @Controller('notifications')
@@ -13,19 +30,27 @@ import { Permissions } from '../auth/decorators/permissions.decorator';
 export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 
+  // Sending notifications to users (ALL/SPECIFIC_USERS/SPECIFIC_UNITS/SPECIFIC_BLOCKS)
   @Post()
   @Permissions('notification.create')
   @ApiOperation({ summary: 'Send a notification' })
   @ApiResponse({ status: 201, description: 'Notification sent successfully' })
   async sendNotification(@Body() dto: SendNotificationDto, @Request() req) {
-    const notificationId = await this.notificationsService.sendNotification(dto, req.user.id);
+    const notificationId = await this.notificationsService.sendNotification(
+      dto,
+      req.user.id,
+    );
     return { notificationId };
   }
 
-  @Get()
+  // User's notifications
+  @Get('me')
   @Permissions('notification.view_own')
   @ApiOperation({ summary: 'Get user notifications' })
-  @ApiResponse({ status: 200, description: 'Notifications retrieved successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Notifications retrieved successfully',
+  })
   async getUserNotifications(
     @Request() req,
     @Query('page') page: string = '1',
@@ -33,9 +58,14 @@ export class NotificationsController {
   ) {
     const pageNum = parseInt(page, 10);
     const limitNum = parseInt(limit, 10);
-    return this.notificationsService.getUserNotifications(req.user.id, pageNum, limitNum);
+    return this.notificationsService.getUserNotifications(
+      req.user.id,
+      pageNum,
+      limitNum,
+    );
   }
 
+  // Mark notification as read
   @Patch(':id/read')
   @Permissions('notification.view_own')
   @ApiOperation({ summary: 'Mark notification as read' })
@@ -49,7 +79,10 @@ export class NotificationsController {
   @Get('admin/all')
   @Permissions('notification.view_all')
   @ApiOperation({ summary: 'Get all notifications (Admin)' })
-  @ApiResponse({ status: 200, description: 'All notifications retrieved successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'All notifications retrieved successfully',
+  })
   async getAllNotifications(
     @Query('page') page: string = '1',
     @Query('limit') limit: string = '20',

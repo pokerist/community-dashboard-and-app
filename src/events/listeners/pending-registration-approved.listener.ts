@@ -11,6 +11,8 @@ export class PendingRegistrationApprovedListener {
     // - Send notification to admin
     // - Sync with gate access
     // - Send SMS/WhatsApp
-    console.log(`Pending registration ${event.pendingId} approved by ${event.approvedBy}, user ${event.userId} created`);
+    console.log(
+      `Pending registration ${event.pendingId} approved by ${event.approvedBy}, user ${event.userId} created`,
+    );
   }
 }

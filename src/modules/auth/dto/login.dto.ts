@@ -1,5 +1,11 @@
 // src/modules/auth/dto/login.dto.ts
-import { IsEmail, Matches, IsNotEmpty, IsOptional, MinLength } from 'class-validator';
+import {
+  IsEmail,
+  Matches,
+  IsNotEmpty,
+  IsOptional,
+  MinLength,
+} from 'class-validator';
 
 export class LoginDto {
   @IsOptional()

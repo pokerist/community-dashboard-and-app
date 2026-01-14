@@ -1,4 +1,8 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateIncidentDto } from './dto/create-incident.dto';
@@ -48,7 +52,13 @@ export class IncidentsService {
     // Emit incident created event
     this.eventEmitter.emit(
       'incident.created',
-      new IncidentCreatedEvent(incident.id, incident.incidentNumber, incident.type, incident.priority, incident.unitId),
+      new IncidentCreatedEvent(
+        incident.id,
+        incident.incidentNumber,
+        incident.type,
+        incident.priority,
+        incident.unitId,
+      ),
     );
 
     return incident;
@@ -80,9 +90,15 @@ export class IncidentsService {
       select: { responseTime: true },
     });
 
-    const averageResponseTime = resolvedIncidents.length > 0
-      ? Math.round(resolvedIncidents.reduce((sum, inc) => sum + (inc.responseTime || 0), 0) / resolvedIncidents.length)
-      : 0;
+    const averageResponseTime =
+      resolvedIncidents.length > 0
+        ? Math.round(
+            resolvedIncidents.reduce(
+              (sum, inc) => sum + (inc.responseTime || 0),
+              0,
+            ) / resolvedIncidents.length,
+          )
+        : 0;
 
     // Total CCTV cameras
     const totalCCTVCameras = await this.prisma.smartDevice.count({
@@ -98,7 +114,14 @@ export class IncidentsService {
   }
 
   async findAll(query: IncidentsQueryDto) {
-    const { status, priority, reportedAtFrom, reportedAtTo, unitId, ...baseQuery } = query;
+    const {
+      status,
+      priority,
+      reportedAtFrom,
+      reportedAtTo,
+      unitId,
+      ...baseQuery
+    } = query;
 
     // Build filters object with proper date range filtering
     const filters: Record<string, any> = {
@@ -118,32 +141,34 @@ export class IncidentsService {
       }
     }
 
-    return paginate(
-      this.prisma.incident,
-      baseQuery,
-      {
-        searchFields: ['type', 'location', 'residentName', 'description', 'incidentNumber'],
-        additionalFilters: filters,
-        select: {
-          id: true,
-          incidentNumber: true,
-          type: true,
-          location: true,
-          residentName: true,
-          description: true,
-          priority: true,
-          status: true,
-          responseTime: true,
-          reportedAt: true,
-          unit: {
-            select: {
-              unitNumber: true,
-              projectName: true,
-            },
+    return paginate(this.prisma.incident, baseQuery, {
+      searchFields: [
+        'type',
+        'location',
+        'residentName',
+        'description',
+        'incidentNumber',
+      ],
+      additionalFilters: filters,
+      select: {
+        id: true,
+        incidentNumber: true,
+        type: true,
+        location: true,
+        residentName: true,
+        description: true,
+        priority: true,
+        status: true,
+        responseTime: true,
+        reportedAt: true,
+        unit: {
+          select: {
+            unitNumber: true,
+            projectName: true,
           },
         },
       },
-    );
+    });
   }
 
   async resolve(id: string) {
@@ -159,7 +184,9 @@ export class IncidentsService {
       throw new BadRequestException('Only open incidents can be resolved');
     }
 
-    const responseTime = Math.floor((Date.now() - incident.reportedAt.getTime()) / 1000); // in seconds
+    const responseTime = Math.floor(
+      (Date.now() - incident.reportedAt.getTime()) / 1000,
+    ); // in seconds
 
     const updatedIncident = await this.prisma.incident.update({
       where: { id },
@@ -173,7 +200,13 @@ export class IncidentsService {
     // Emit incident resolved event
     this.eventEmitter.emit(
       'incident.resolved',
-      new IncidentResolvedEvent(updatedIncident.id, updatedIncident.incidentNumber, updatedIncident.type, updatedIncident.unitId, responseTime),
+      new IncidentResolvedEvent(
+        updatedIncident.id,
+        updatedIncident.incidentNumber,
+        updatedIncident.type,
+        updatedIncident.unitId,
+        responseTime,
+      ),
     );
 
     return updatedIncident;

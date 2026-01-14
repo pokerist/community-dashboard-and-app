@@ -31,7 +31,12 @@ export async function paginate<T extends Record<string, any>>(
   options: PaginationOptions = {},
 ): Promise<PaginatedResult<T>> {
   const { page = 1, limit = 10, sortBy, sortOrder = 'desc', search } = query;
-  const { searchFields = [], additionalFilters = {}, include, select } = options;
+  const {
+    searchFields = [],
+    additionalFilters = {},
+    include,
+    select,
+  } = options;
 
   // Build where clause
   const where: Record<string, any> = { ...additionalFilters };

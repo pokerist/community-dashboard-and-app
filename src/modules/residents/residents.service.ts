@@ -212,12 +212,15 @@ export class ResidentService {
       if (data.roles.length > 0) {
         // If roles are objects with 'role' property (role names), convert to role IDs
         let roleIds: string[] = [];
-        if (typeof (data.roles as any)[0] === 'object' && (data.roles as any)[0].role) {
-          const roleNames = (data.roles as any[]).map((r: any) => r.role);
+        if (
+          typeof (data.roles as any)[0] === 'object' &&
+          (data.roles as any)[0].role
+        ) {
+          const roleNames = data.roles.map((r: any) => r.role);
           const roles = await this.prisma.role.findMany({
             where: { name: { in: roleNames } },
           });
-          roleIds = roles.map(r => r.id);
+          roleIds = roles.map((r) => r.id);
         } else {
           // Assume roles are already IDs
           roleIds = data.roles as string[];
@@ -600,7 +603,10 @@ export class ResidentService {
   /**
    * Create an admin profile for an existing user
    */
-  async createAdmin(data: CreateAdminDto, options?: { permissions?: string[] }): Promise<AdminWithUser> {
+  async createAdmin(
+    data: CreateAdminDto,
+    options?: { permissions?: string[] },
+  ): Promise<AdminWithUser> {
     this.enforceDirectCreationPolicy(options);
 
     await this.getUserWithRelations(data.userId);

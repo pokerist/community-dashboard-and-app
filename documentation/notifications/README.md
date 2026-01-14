@@ -18,14 +18,16 @@ The Notifications module provides a centralized, event-driven notification syste
 
 ### Components
 
-1. **NotificationsService**: Core business logic for sending notifications and resolving recipients
+1. **NotificationsService**: Core business logic for creating notifications, resolving recipients, and emitting events
 2. **NotificationsController**: REST API endpoints for notification management
-3. **NotificationListener**: Event-driven handlers for business events
-4. **Channel Providers**: Abstractions for different communication channels
+3. **NotificationDeliveryListener**: Event-driven handler for processing notification delivery asynchronously
+4. **EmailService**: Provider-agnostic email delivery service using Nodemailer
+5. **NotificationListener**: Event-driven handlers for business events that trigger notifications
+6. **Channel Providers**: Abstractions for different communication channels (future extensions)
 
 ### Database Entities
 
-- **Notification**: Main notification record with metadata and targeting
+- **Notification**: Main notification record with metadata, targeting, and status
 - **NotificationLog**: Delivery tracking per recipient and channel
 
 ### Enums
@@ -33,7 +35,38 @@ The Notifications module provides a centralized, event-driven notification syste
 - **NotificationType**: ANNOUNCEMENT, PAYMENT_REMINDER, MAINTENANCE_ALERT, EVENT_NOTIFICATION, EMERGENCY_ALERT
 - **Channel**: IN_APP, EMAIL, SMS, PUSH
 - **Audience**: ALL, SPECIFIC_RESIDENCES, SPECIFIC_UNITS, SPECIFIC_BLOCKS
+- **NotificationStatus**: PENDING, SENT, FAILED, READ
 - **NotificationLogStatus**: SENT, FAILED, DELIVERED, READ
+
+### Notification Creation vs Delivery Responsibilities
+
+#### Notification Creation (Synchronous)
+- **Responsible**: `NotificationsService.sendNotification()`
+- **Creates**: Notification record with PENDING status
+- **Resolves**: Recipients based on audience targeting
+- **Creates**: Initial notification logs for all recipient/channel combinations
+- **Emits**: `notification.created` event for async delivery
+- **Returns**: notificationId immediately (fast HTTP response)
+
+#### Notification Delivery (Asynchronous)
+- **Responsible**: `NotificationDeliveryListener.handleNotificationCreated()`
+- **Triggered by**: `notification.created` event
+- **Processes**: Each channel asynchronously (non-blocking)
+- **Updates**: Notification status to SENT/FAILED
+- **Updates**: Log status and provider responses
+- **Handles**: Email sending via EmailService
+
+#### Event Flow
+1. Controller calls `sendNotification()` → Creates record, emits event
+2. HTTP response returns immediately with notificationId
+3. `NotificationDeliveryListener` processes event asynchronously
+4. EmailService sends emails, updates logs and status
+
+#### Failure Handling
+- **Creation failures**: Synchronous, return error to controller
+- **Delivery failures**: Asynchronous, update status to FAILED, persist error details
+- **Partial failures**: If some channels fail, overall status is FAILED
+- **Retries**: TODO - implement retry mechanism for transient failures
 
 ## API Endpoints
 
@@ -249,23 +282,313 @@ Allow users to opt-out of specific notification types or channels:
 - Push notification images
 - In-app notification attachments
 
-## Testing
+## Testing Guide
 
-### Unit Tests
-- NotificationService methods
-- Audience resolution logic
-- Channel dispatch handlers
-- Event listener responses
+This section provides comprehensive testing steps for the new Notification Delivery Layer implementation.
 
-### Integration Tests
-- End-to-end notification flows
-- Event-driven notification triggers
-- Multi-channel delivery verification
+### Prerequisites
 
-### Performance Tests
-- High-volume notification scenarios
-- Database query performance
-- External provider rate limiting
+1. **Database Setup**
+   ```bash
+   # Ensure database is running and migrations are applied
+   npm run prisma:migrate
+   npm run prisma:generate
+   ```
+
+2. **Environment Variables**
+   ```env
+   # Add to .env for email testing
+   SMTP_HOST=smtp.gmail.com
+   SMTP_PORT=587
+   SMTP_USER=your-test-email@gmail.com
+   SMTP_PASS=your-app-password
+   FROM_EMAIL=noreply@alkarma.com
+   ```
+
+3. **Test Data**
+   ```bash
+   # Seed test users with email addresses
+   npm run prisma:seed
+   ```
+
+### Manual Testing Steps
+
+#### 1. Test Notification Creation (Synchronous)
+
+**Objective**: Verify notification is created instantly and event is emitted.
+
+**Steps**:
+1. Start the application:
+   ```bash
+   npm run start:dev
+   ```
+
+2. Send a notification via API:
+   ```bash
+   curl -X POST http://localhost:3000/notifications \
+     -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "type": "ANNOUNCEMENT",
+       "title": "Test Notification",
+       "messageEn": "This is a test message",
+       "channels": ["IN_APP", "EMAIL"],
+       "targetAudience": "SPECIFIC_RESIDENCES",
+       "audienceMeta": {"userIds": ["test-user-id"]}
+     }'
+   ```
+
+3. **Expected Results**:
+   - ✅ HTTP response returns immediately with `notificationId`
+   - ✅ Response time < 100ms
+   - ✅ Database shows notification with `status: "PENDING"`
+   - ✅ Notification logs created for each channel
+
+#### 2. Test Asynchronous Delivery
+
+**Objective**: Verify delivery happens asynchronously without blocking.
+
+**Steps**:
+1. Monitor application logs for delivery processing
+2. Check database for status updates after ~2-3 seconds
+
+**Expected Results**:
+- ✅ Logs show: `"Processing delivery for notification ${id}"`
+- ✅ Email sent successfully (check email inbox)
+- ✅ Database notification `status` updated to `"SENT"`
+- ✅ Notification logs updated with delivery details
+
+#### 3. Test Email Delivery
+
+**Objective**: Verify email sending functionality.
+
+**Steps**:
+1. Send notification with EMAIL channel
+2. Check recipient's email inbox
+3. Verify email content and formatting
+
+**Expected Results**:
+- ✅ Email received with correct subject and content
+- ✅ HTML formatting preserved
+- ✅ Sender shows as configured FROM_EMAIL
+- ✅ Bilingual content (English + Arabic if provided)
+
+#### 4. Test Status Lifecycle
+
+**Objective**: Verify status transitions work correctly.
+
+**Test Cases**:
+
+**Successful Delivery**:
+- Create notification → Status: PENDING
+- After delivery → Status: SENT
+
+**Failed Delivery**:
+- Remove SMTP credentials temporarily
+- Create notification → Status: PENDING
+- After delivery attempt → Status: FAILED
+- Check providerResponse contains error details
+
+**Partial Failure**:
+- Send to user with email + user without email
+- Status should be FAILED (since some deliveries failed)
+
+#### 5. Test Error Handling
+
+**Objective**: Verify graceful error handling.
+
+**Steps**:
+1. **Invalid SMTP credentials**:
+   - Set wrong SMTP_PASS
+   - Send notification
+   - Verify status becomes FAILED
+   - Check error details in logs
+
+2. **User without email**:
+   - Send to user with null email
+   - Verify EMAIL channel fails gracefully
+   - Other channels still work
+
+3. **Event emission failure**:
+   - Temporarily disable event emitter
+   - Verify notification still created but not delivered
+
+#### 6. Test Integration with Existing Flows
+
+**Objective**: Ensure existing event-triggered notifications still work.
+
+**Steps**:
+1. Trigger business event (e.g., create invoice)
+2. Verify notification is created automatically
+3. Check delivery processing
+
+**Expected Results**:
+- ✅ Event listeners still trigger notifications
+- ✅ Delivery layer processes them asynchronously
+- ✅ No breaking changes to existing functionality
+
+### Automated Testing
+
+#### Unit Tests
+
+Create test files for each component:
+
+**notifications.service.spec.ts**
+```typescript
+describe('NotificationsService', () => {
+  it('should create notification and emit event', async () => {
+    // Test notification creation
+    // Test event emission
+    // Verify no direct email sending
+  });
+
+  it('should resolve recipients correctly', async () => {
+    // Test audience resolution logic
+  });
+});
+```
+
+**email.service.spec.ts**
+```typescript
+describe('EmailService', () => {
+    it('should send email successfully', async () => {
+      // Mock nodemailer
+      // Test email sending
+      // Verify transporter configuration
+    });
+
+    it('should handle send failures', async () => {
+      // Test error scenarios
+      // Verify proper error throwing
+    });
+});
+```
+
+**notification-delivery.listener.spec.ts**
+```typescript
+describe('NotificationDeliveryListener', () => {
+  it('should process notification.created event', async () => {
+    // Test event handling
+    // Mock email service
+    // Verify status updates
+  });
+
+  it('should handle delivery failures', async () => {
+    // Test error scenarios
+    // Verify FAILED status
+    // Check error persistence
+  });
+});
+```
+
+#### Integration Tests
+
+**notification-delivery.e2e-spec.ts**
+```typescript
+describe('Notification Delivery (e2e)', () => {
+  it('should create and deliver notification end-to-end', async () => {
+    // Create notification via API
+    // Wait for async processing
+    // Verify email sent
+    // Check database state
+  });
+
+  it('should handle delivery failures gracefully', async () => {
+    // Simulate email failure
+    // Verify notification still exists
+    // Check error handling
+  });
+});
+```
+
+#### E2E Test Commands
+
+```bash
+# Run unit tests
+npm run test
+
+# Run e2e tests
+npm run test:e2e
+
+# Run with coverage
+npm run test:cov
+```
+
+### Performance Testing
+
+#### Load Testing
+
+**Objective**: Verify async delivery doesn't impact performance.
+
+**Steps**:
+1. Send 100 notifications simultaneously
+2. Measure response times
+3. Monitor memory usage
+4. Check delivery processing time
+
+**Expected Results**:
+- ✅ All HTTP responses < 200ms
+- ✅ No memory leaks
+- ✅ Delivery processes in background without blocking
+
+#### Database Performance
+
+**Steps**:
+1. Create notifications for large audience (1000+ users)
+2. Monitor query performance
+3. Check log creation efficiency
+
+### Monitoring and Debugging
+
+#### Logs to Monitor
+
+**Application Logs**:
+```
+Processing delivery for notification xxx
+Email sent successfully to user@domain.com
+Delivery completed for notification xxx with status SENT
+```
+
+**Database Queries**:
+```sql
+-- Check notification status
+SELECT id, status, sentAt FROM Notification WHERE id = 'xxx';
+
+-- Check delivery logs
+SELECT channel, recipient, status, providerResponse
+FROM NotificationLog WHERE notificationId = 'xxx';
+```
+
+#### Common Issues and Solutions
+
+**Event not processed**:
+- Check EventEmitter2 is properly injected
+- Verify event listener is registered in module
+
+**Email not sent**:
+- Verify SMTP credentials
+- Check network connectivity
+- Review email service logs
+
+**Status not updated**:
+- Check database transactions
+- Verify listener has proper permissions
+- Review error handling in listener
+
+### Testing Checklist
+
+- [ ] Notification creation returns immediately
+- [ ] Event emission works
+- [ ] Async delivery processes correctly
+- [ ] Email sending with proper content
+- [ ] Status transitions (PENDING → SENT/FAILED)
+- [ ] Error handling and persistence
+- [ ] Integration with existing event triggers
+- [ ] Performance under load
+- [ ] Database efficiency
+- [ ] No breaking changes to existing API
+
+This testing guide ensures the Notification Delivery Layer works reliably and maintains system performance while providing the requested asynchronous, event-driven delivery mechanism.
 
 ## Best Practices
 

@@ -23,12 +23,12 @@ import { Permissions } from '../auth/decorators/permissions.decorator';
 
 @ApiTags('Referrals')
 @Controller('referrals')
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class ReferralsController {
   constructor(private readonly referralsService: ReferralsService) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('referral.create')
   @ApiOperation({ summary: 'Create a new referral invitation' })
   @ApiResponse({ status: 201, description: 'Referral created successfully' })
@@ -38,7 +38,6 @@ export class ReferralsController {
 
   @Get()
   @HttpCode(HttpStatus.OK)
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('referral.view_all')
   @ApiOperation({ summary: 'Get paginated list of referrals with filters' })
   @ApiResponse({ status: 200, description: 'Paginated referrals list' })
@@ -55,13 +54,14 @@ export class ReferralsController {
     description: 'Referral validation result',
     type: ValidateReferralResponseDto,
   })
-  validate(@Query('phone') phone: string): Promise<ValidateReferralResponseDto> {
+  validate(
+    @Query('phone') phone: string,
+  ): Promise<ValidateReferralResponseDto> {
     return this.referralsService.validateReferral(phone);
   }
 
   @Patch(':id/reject')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
   @Permissions('referral.view_all') // Admin permission to reject
   @ApiOperation({ summary: 'Reject a referral invitation' })
   @ApiResponse({ status: 200, description: 'Referral rejected successfully' })
