@@ -37,8 +37,8 @@ describe('ServiceRequestService', () => {
       unit: { id: 'unit-1', residents: [{ userId: 'res-1' }] },
     } as any;
 
-    (mockPrisma.serviceRequest.findUnique as jest.Mock).mockResolvedValue(req);
-    (mockInvoices.generateInvoice as jest.Mock).mockResolvedValue({
+    mockPrisma.serviceRequest.findUnique.mockResolvedValue(req);
+    mockInvoices.generateInvoice.mockResolvedValue({
       id: 'inv-1',
     });
 

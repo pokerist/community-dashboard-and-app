@@ -1,6 +1,10 @@
 // src/service/service.service.ts
 
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
@@ -29,8 +33,7 @@ export class ServiceService {
    * Can be filtered for dashboard by status/category.
    */
   async findAll(status: boolean | undefined) {
-    const whereCondition =
-    status === undefined ? {} : { status };
+    const whereCondition = status === undefined ? {} : { status };
 
     return this.prisma.service.findMany({
       where: whereCondition,

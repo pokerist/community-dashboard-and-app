@@ -2,17 +2,34 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateUnitDto } from './dto/create-unit.dto';
 import { UpdateUnitDto } from './dto/update-unit.dto';
+import { UnitQueryDto } from './dto/unit-query.dto';
 import { UnitType, UnitStatus } from '@prisma/client';
+import { paginate } from '../../common/utils/pagination.util';
 
 @Injectable()
 export class UnitsService {
   constructor(private prisma: PrismaService) {}
 
   // CRUD
-  async findAll(filters?: any) {
-    return this.prisma.unit.findMany({
-      where: { ...filters },
-      include: { residents: true, leases: true },
+  async findAll(query: UnitQueryDto) {
+    const { type, status, block, projectName, ...baseQuery } = query;
+
+    const filters: Record<string, any> = {
+      type,
+      status,
+      block,
+      projectName,
+    };
+
+    return paginate(this.prisma.unit, baseQuery, {
+      searchFields: ['unitNumber', 'projectName', 'block'],
+      additionalFilters: filters,
+      include: {
+        residents: {
+          include: { resident: true },
+        },
+        leases: true,
+      },
     });
   }
 

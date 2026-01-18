@@ -147,7 +147,8 @@ export class ServiceRequestService {
     if (!unitId)
       throw new BadRequestException('Service Request has no associated unit.');
 
-    if (!residentId) residentId = request.unit?.residents?.[0]?.residentId ?? undefined;
+    if (!residentId)
+      residentId = request.unit?.residents?.[0]?.residentId ?? undefined;
 
     const invoice = await this.invoicesService.generateInvoice({
       unitId,

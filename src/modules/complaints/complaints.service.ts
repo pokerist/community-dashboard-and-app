@@ -5,8 +5,10 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateComplaintDto, UpdateComplaintDto } from './dto/complaints.dto';
+import { ComplaintsQueryDto } from './dto/complaints-query.dto';
 import { ComplaintStatus, Priority, InvoiceType } from '@prisma/client';
 import { InvoicesService } from '../invoices/invoices.service';
+import { paginate } from '../../common/utils/pagination.util';
 
 @Injectable()
 export class ComplaintsService {
@@ -58,14 +60,36 @@ export class ComplaintsService {
   }
 
   // --- 2. READ (FIND ALL) ---
-  async findAll() {
-    return this.prisma.complaint.findMany({
+  async findAll(query: ComplaintsQueryDto) {
+    const {
+      status,
+      priority,
+      unitId,
+      reporterId,
+      assignedToId,
+      createdAtFrom,
+      createdAtTo,
+      ...baseQuery
+    } = query;
+
+    const filters: Record<string, any> = {
+      status,
+      priority,
+      unitId,
+      reporterId,
+      assignedToId,
+      createdAtFrom,
+      createdAtTo,
+    };
+
+    return paginate(this.prisma.complaint, baseQuery, {
+      searchFields: ['complaintNumber', 'category', 'description'],
+      additionalFilters: filters,
       include: {
         reporter: { select: { nameEN: true, email: true } },
         unit: { select: { unitNumber: true } },
         assignedTo: { select: { nameEN: true } },
       },
-      orderBy: { createdAt: 'desc' },
     });
   }
 

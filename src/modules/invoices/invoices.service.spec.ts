@@ -31,10 +31,7 @@ describe('InvoicesService', () => {
     }).compile();
 
     // Manually construct with the mock-understood provider keys
-    service = new InvoicesService(
-      mockPrisma as any as any,
-      mockEmitter as any as any,
-    );
+    service = new InvoicesService(mockPrisma as any, mockEmitter as any);
     jest.clearAllMocks();
   });
 
@@ -100,7 +97,7 @@ describe('InvoicesService', () => {
       residentId: 'res-1',
       amount: 150,
       dueDate: new Date(),
-      type: createdInvoice.type as any,
+      type: createdInvoice.type,
       sources: { unitFeeIds: ['fee-1', 'fee-2'] },
     } as any);
 
@@ -191,7 +188,7 @@ describe('InvoicesService', () => {
 
   it('markAsPaid should update the invoice and related Violation status when present', async () => {
     // findOne uses the outer prisma client - stub invoice.findUnique to return the invoice
-    (mockPrisma.invoice.findUnique as jest.Mock).mockResolvedValue({
+    mockPrisma.invoice.findUnique.mockResolvedValue({
       id: 'inv-10',
       status: 'PENDING',
       violationId: 'vio-10',

@@ -1,8 +1,5 @@
 import { PartialType } from '@nestjs/swagger';
-import {
-  IsOptional,
-  IsEnum,
-} from 'class-validator';
+import { IsOptional, IsEnum } from 'class-validator';
 import { CreateUnitDto } from './create-unit.dto';
 import { UnitType, UnitStatus } from '@prisma/client';
 

@@ -51,7 +51,12 @@ describe('UnitsService', () => {
 
   // Example Test Case: Testing the create method
   it('should successfully create a unit', async () => {
-    const newUnitData = { unitNumber: 'C-303', building: 'C', type: 'APT', sizeSqm: 120 };
+    const newUnitData = {
+      unitNumber: 'C-303',
+      building: 'C',
+      type: 'APT',
+      sizeSqm: 120,
+    };
     const createdUnit = { id: 'u3', ...newUnitData, status: 'AVAILABLE' };
     mockPrismaService.unit.create.mockResolvedValue(createdUnit);
 

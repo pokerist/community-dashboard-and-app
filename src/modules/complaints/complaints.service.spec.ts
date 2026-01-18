@@ -234,7 +234,7 @@ describe('ComplaintsService', () => {
 
       // Recreate service with mocked invoices service
       const localService = new ComplaintsService(
-        mockPrismaService as any as any,
+        mockPrismaService as any,
         mockInvoices as any,
       );
 
@@ -265,7 +265,7 @@ describe('ComplaintsService', () => {
       mockPrismaService.complaint.findUnique.mockResolvedValue(null);
       const mockInvoices = { generateInvoice: jest.fn() };
       const localService = new ComplaintsService(
-        mockPrismaService as any as any,
+        mockPrismaService as any,
         mockInvoices as any,
       );
       await expect(

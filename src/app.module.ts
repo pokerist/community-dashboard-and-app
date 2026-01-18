@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { PrismaModule } from '../prisma/prisma.module';
 import { InvoicesModule } from './modules/invoices/invoices.module';
 import { UnitsModule } from './modules/units/units.module';
@@ -12,24 +13,38 @@ import { ComplaintsModule } from './modules/complaints/complaints.module';
 import { ViolationsModule } from './modules/violations/violations.module';
 import { FacilitiesModule } from './modules/facilities/facilities.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
+import { ResidentModule } from './modules/residents/residents.module';
+import { PendingRegistrationsModule } from './modules/pending-registrations/pending-registrations.module';
+import { EventsModule } from './events/events.module';
+import { IncidentsModule } from './modules/incidents/incidents.module';
+import { ReferralsModule } from './modules/referrals/referrals.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
+import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { LeasesModule } from './modules/leases/leases.module';
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(),
     PrismaModule,
+    AuthModule,
     InvoicesModule,
     UnitsModule,
-    InvoicesModule,
     EventEmitterModule.forRoot(),
     FileModule,
     ServiceRequestModule,
     ServiceModule,
     ServiceFieldModule,
-    AuthModule,
     ComplaintsModule,
     ViolationsModule,
     FacilitiesModule,
     BookingsModule,
+    ResidentModule,
+    PendingRegistrationsModule,
+    EventsModule,
+    IncidentsModule,
+    ReferralsModule,
+    NotificationsModule,
+    DashboardModule,
     LeasesModule
   ],
   controllers: [],

@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
@@ -8,6 +8,8 @@ import { PermissionCacheService } from './permission-cache.service';
 import { PassportModule } from '@nestjs/passport';
 import { JwtStrategy } from './jwt.strategy';
 import { PrismaModule } from '../../../prisma/prisma.module';
+import { ReferralsModule } from '../referrals/referrals.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 @Module({
   imports: [
     PrismaModule,
@@ -16,6 +18,8 @@ import { PrismaModule } from '../../../prisma/prisma.module';
       secret: process.env.JWT_ACCESS_SECRET || 'defaultSecretKey',
       signOptions: { expiresIn: '15m' },
     }),
+    forwardRef(() => ReferralsModule),
+    forwardRef(() => NotificationsModule),
   ],
   providers: [
     AuthService,

@@ -87,7 +87,7 @@ export class InvoicesController {
     return this.invoicesService.findOne(id);
   }
 
-  // POST /invoices (Admin: Manual invoice creation) 
+  // POST /invoices (Admin: Manual invoice creation)
   @Post()
   @Permissions('invoice.create')
   create(@Body() createInvoiceDto: CreateInvoiceDto) {
