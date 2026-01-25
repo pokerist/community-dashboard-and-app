@@ -6,6 +6,7 @@ import {
   Delete,
   Param,
   Body,
+  Query,
   UseGuards,
   Request,
 } from '@nestjs/common';
@@ -13,6 +14,7 @@ import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { BookingsService } from './bookings.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingStatusDto } from './dto/update-status.dto';
+import { BookingsQueryDto } from './dto/bookings-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
@@ -35,8 +37,8 @@ export class BookingsController {
   @Get()
   @Permissions('booking.view_all')
   @ApiOperation({ summary: 'View all bookings (admin)' })
-  findAll() {
-    return this.bookingsService.findAll();
+  findAll(@Query() query: BookingsQueryDto) {
+    return this.bookingsService.findAll(query);
   }
 
   @Get('me')

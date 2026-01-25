@@ -26,4 +26,10 @@ export class ValidateReferralResponseDto {
     required: false,
   })
   referrerName?: string;
+
+  @ApiProperty({
+    description: 'Message providing additional information',
+    example: 'Referral found for this phone number.',
+  })
+  message: string;
 }

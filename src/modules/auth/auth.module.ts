@@ -10,6 +10,8 @@ import { JwtStrategy } from './jwt.strategy';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { ReferralsModule } from '../referrals/referrals.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+
+
 @Module({
   imports: [
     PrismaModule,

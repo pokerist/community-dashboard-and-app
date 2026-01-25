@@ -30,38 +30,46 @@ export class IncidentsService {
   }
 
   async create(createIncidentDto: CreateIncidentDto) {
-    const { attachmentIds, ...incidentData } = createIncidentDto;
+    const { attachmentIds = [], ...incidentData } = createIncidentDto;
     const incidentNumber = await this.generateIncidentNumber();
 
-    const incident = await this.prisma.incident.create({
-      data: {
-        ...incidentData,
-        incidentNumber,
-        status: IncidentStatus.OPEN,
-        reportedAt: new Date(),
-      },
-    });
-
-    if (attachmentIds && attachmentIds.length > 0) {
-      await this.prisma.attachment.updateMany({
-        where: { fileId: { in: attachmentIds } },
-        data: { incidentId: incident.id },
+    return this.prisma.$transaction(async (tx) => {
+      const incident = await tx.incident.create({
+        data: {
+          ...incidentData,
+          incidentNumber,
+          status: IncidentStatus.OPEN,
+          reportedAt: new Date(),
+        },
       });
-    }
 
-    // Emit incident created event
-    this.eventEmitter.emit(
-      'incident.created',
-      new IncidentCreatedEvent(
-        incident.id,
-        incident.incidentNumber,
-        incident.type,
-        incident.priority,
-        incident.unitId,
-      ),
-    );
+      // Create attachments if provided
+      if (attachmentIds.length > 0) {
+        const attachmentsData = attachmentIds.map((fileId) => ({
+          fileId: fileId,
+          entityId: incident.id,
+          entity: 'INCIDENT',
+        }));
+        await tx.attachment.createMany({
+          data: attachmentsData,
+          skipDuplicates: true,
+        });
+      }
 
-    return incident;
+      // Emit incident created event
+      this.eventEmitter.emit(
+        'incident.created',
+        new IncidentCreatedEvent(
+          incident.id,
+          incident.incidentNumber,
+          incident.type,
+          incident.priority,
+          incident.unitId,
+        ),
+      );
+
+      return incident;
+    });
   }
 
   async findCards() {

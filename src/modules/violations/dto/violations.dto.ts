@@ -8,6 +8,7 @@ import {
   IsOptional,
   IsEnum,
   IsDateString,
+  IsArray,
 } from 'class-validator';
 import { ApiProperty, PartialType } from '@nestjs/swagger';
 import { ViolationStatus } from '@prisma/client';
@@ -71,6 +72,16 @@ export class CreateViolationDto {
   @IsString()
   @IsOptional()
   issuedById?: string;
+
+  @ApiProperty({
+    example: ['file-uuid-1', 'file-uuid-2'],
+    description: 'Array of uploaded file IDs for violation evidence.',
+    required: false,
+  })
+  @IsArray()
+  @IsUUID(undefined, { each: true })
+  @IsOptional()
+  attachmentIds?: string[];
 }
 
 export class UpdateViolationDto extends PartialType(CreateViolationDto) {

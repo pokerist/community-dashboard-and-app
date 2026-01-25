@@ -5,6 +5,7 @@ import {
   IsOptional,
   IsEnum,
   MaxLength,
+  IsArray,
 } from 'class-validator';
 import { ApiProperty, PartialType } from '@nestjs/swagger';
 // Using your final, correct Enum names
@@ -53,6 +54,16 @@ export class CreateComplaintDto {
   @IsEnum(Priority)
   @IsOptional()
   priority?: Priority;
+
+  @ApiProperty({
+    example: ['file-uuid-1', 'file-uuid-2'],
+    description: 'Array of uploaded file IDs for complaint attachments.',
+    required: false,
+  })
+  @IsArray()
+  @IsUUID(undefined, { each: true })
+  @IsOptional()
+  attachmentIds?: string[];
 }
 
 export class UpdateComplaintDto extends PartialType(CreateComplaintDto) {

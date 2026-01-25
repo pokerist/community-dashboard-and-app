@@ -9,6 +9,7 @@ import { ComplaintsQueryDto } from './dto/complaints-query.dto';
 import { ComplaintStatus, Priority, InvoiceType } from '@prisma/client';
 import { InvoicesService } from '../invoices/invoices.service';
 import { paginate } from '../../common/utils/pagination.util';
+import { getActiveUnitAccess } from '../../common/utils/unit-access.util';
 
 @Injectable()
 export class ComplaintsService {
@@ -47,15 +48,39 @@ export class ComplaintsService {
 
   // --- 1. CREATE ---
   async create(dto: CreateComplaintDto) {
-    const complaintNumber = await this.generateComplaintNumber();
+    // Access Control: Check if user has active access to the unit (if provided)
+    if (dto.unitId) {
+      await getActiveUnitAccess(this.prisma, dto.reporterId, dto.unitId);
+    }
 
-    return this.prisma.complaint.create({
-      data: {
-        ...dto,
-        complaintNumber,
-        status: ComplaintStatus.NEW, // Default status from schema
-        priority: dto.priority || Priority.MEDIUM, // Use provided priority or MEDIUM default
-      },
+    const complaintNumber = await this.generateComplaintNumber();
+    const { attachmentIds = [], ...complaintData } = dto;
+
+    return this.prisma.$transaction(async (tx) => {
+      // Create the complaint
+      const complaint = await tx.complaint.create({
+        data: {
+          ...complaintData,
+          complaintNumber,
+          status: ComplaintStatus.NEW, // Default status from schema
+          priority: dto.priority || Priority.MEDIUM, // Use provided priority or MEDIUM default
+        },
+      });
+
+      // Create attachments if provided
+      if (attachmentIds.length > 0) {
+        const attachmentsData = attachmentIds.map((fileId) => ({
+          fileId: fileId,
+          entityId: complaint.id,
+          entity: 'COMPLAINT',
+        }));
+        await tx.attachment.createMany({
+          data: attachmentsData,
+          skipDuplicates: true,
+        });
+      }
+
+      return complaint;
     });
   }
 

@@ -1,5 +1,5 @@
 import { PartialType } from '@nestjs/swagger';
-import { IsOptional, IsEnum, IsArray } from 'class-validator';
+import { IsOptional, IsEnum, IsArray, IsString, IsUUID } from 'class-validator';
 import { CreateUserDto } from './create-user.dto';
 
 export class UpdateUserDto extends PartialType(CreateUserDto) {
@@ -7,8 +7,13 @@ export class UpdateUserDto extends PartialType(CreateUserDto) {
   @IsEnum(['INVITED', 'ACTIVE', 'SUSPENDED', 'DISABLED'])
   userStatus?: string;
 
-  // Override roles to accept both string IDs and objects with role property
+  // Roles are standardized to string array of role IDs
   @IsOptional()
   @IsArray()
-  roles?: any[];
+  @IsString({ each: true })
+  roles?: string[];
+
+  @IsOptional()
+  @IsUUID()
+  profilePhotoId?: string;
 }

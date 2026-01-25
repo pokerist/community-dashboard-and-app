@@ -1,8 +1,8 @@
-// src/modules/users/users.service.spec.ts
+// src/modules/residents/residents.service.spec.ts
 import { Test, TestingModule } from '@nestjs/testing';
 import { ResidentService } from './residents.service';
 import { PrismaService } from '../../../prisma/prisma.service';
-import * as bcrypt from 'bcrypt'; // Import bcrypt for mocking
+import * as bcrypt from 'bcrypt';
 
 // Mock the bcrypt hash function
 jest.mock('bcrypt', () => ({
@@ -11,11 +11,27 @@ jest.mock('bcrypt', () => ({
 
 // Mock the Prisma client methods used in your service
 const mockPrismaService = {
+  $transaction: jest.fn(),
   user: {
     create: jest.fn(),
     findMany: jest.fn(),
     findUnique: jest.fn(),
     update: jest.fn(),
+  },
+  userRole: {
+    createMany: jest.fn(),
+    deleteMany: jest.fn(),
+  },
+  resident: {
+    findUnique: jest.fn(),
+    delete: jest.fn(),
+    deleteMany: jest.fn(),
+  },
+  residentUnit: {
+    deleteMany: jest.fn(),
+  },
+  booking: {
+    deleteMany: jest.fn(),
   },
 };
 
@@ -34,7 +50,6 @@ describe('ResidentService', () => {
     }).compile();
 
     service = module.get<ResidentService>(ResidentService);
-    // Reset mocks before each test
     jest.clearAllMocks();
   });
 
@@ -42,42 +57,68 @@ describe('ResidentService', () => {
     expect(service).toBeDefined();
   });
 
-  // --- Verification 1: Create User ---
-  it('should call prisma.user.create and hash the password', async () => {
-    const createDto = {
-      name: 'John Doe',
-      phone: '+966501234567',
-      role: 'RESIDENT',
-      password: 'testpassword',
-    } as any;
-
-    mockPrismaService.user.create.mockResolvedValue({
-      id: 'u1',
-      ...createDto,
-      passwordHash: 'hashedPassword123',
-    });
-
-    await service.createUser(createDto);
-
-    // Verify bcrypt was called
-    expect(bcrypt.hash).toHaveBeenCalledWith('testpassword', 10);
-
-    // Verify Prisma was called with the hashed password
-    expect(mockPrismaService.user.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        phone: createDto.phone,
-        passwordHash: 'hashedPassword123',
-        userStatus: 'ACTIVE',
+  describe('createUser', () => {
+    it('should create user with roles in transaction', async () => {
+      const createDto = {
+        nameEN: 'John Doe',
+        phone: '+971501234567',
+        password: 'testpassword',
+        roles: ['role1', 'role2'],
         signupSource: 'dashboard',
-      }),
-      include: expect.any(Object),
-    });
+      };
 
-    // --- Verification 2: Deactivate User ---
-    it('should call prisma.user.update to set status to INACTIVE', async () => {
+      const mockUser = {
+        id: 'u1',
+        ...createDto,
+        passwordHash: 'hashedPassword123',
+      };
+
+      mockPrismaService.$transaction.mockImplementation(async (callback) => {
+        return callback(mockPrismaService);
+      });
+
+      mockPrismaService.user.create.mockResolvedValue(mockUser);
+      mockPrismaService.user.findUnique.mockResolvedValue({
+        ...mockUser,
+        roles: [],
+        resident: null,
+        owner: null,
+        tenant: null,
+        admin: null,
+        residentUnits: [],
+        leasesAsOwner: [],
+        leasesAsTenant: [],
+        invoices: [],
+      });
+
+      const result = await service.createUser(createDto, {
+        permissions: ['user.create.direct'],
+      });
+
+      expect(mockPrismaService.$transaction).toHaveBeenCalled();
+      expect(bcrypt.hash).toHaveBeenCalledWith('testpassword', 12);
+      expect(mockPrismaService.userRole.createMany).toHaveBeenCalledWith({
+        data: [
+          { userId: 'u1', roleId: 'role1' },
+          { userId: 'u1', roleId: 'role2' },
+        ],
+      });
+    });
+  });
+
+  describe('deactivateUser', () => {
+    it('should deactivate user by setting status to DISABLED', async () => {
       const userId = 'user-to-deactivate';
+
+      mockPrismaService.user.findUnique.mockResolvedValue({
+        id: userId,
+        userStatus: 'ACTIVE',
+      });
+
       mockPrismaService.user.update.mockResolvedValue({
+        id: userId,
         userStatus: 'DISABLED',
+        updatedAt: new Date(),
       });
 
       await service.deactivateUser(userId);
@@ -85,6 +126,39 @@ describe('ResidentService', () => {
       expect(mockPrismaService.user.update).toHaveBeenCalledWith({
         where: { id: userId },
         data: { userStatus: 'DISABLED', updatedAt: expect.any(Date) },
+        include: expect.any(Object),
+      });
+    });
+  });
+
+  describe('deleteResident', () => {
+    it('should delete resident with cascading cleanup', async () => {
+      const residentId = 'resident-id';
+      const userId = 'user-id';
+
+      const mockResident = {
+        id: residentId,
+        userId,
+        user: { id: userId },
+      };
+
+      mockPrismaService.resident.findUnique.mockResolvedValue(mockResident);
+
+      mockPrismaService.$transaction.mockImplementation(async (callback) => {
+        return callback(mockPrismaService);
+      });
+
+      await service.deleteResident(residentId);
+
+      expect(mockPrismaService.$transaction).toHaveBeenCalled();
+      expect(mockPrismaService.residentUnit.deleteMany).toHaveBeenCalledWith({
+        where: { residentId: userId },
+      });
+      expect(mockPrismaService.booking.deleteMany).toHaveBeenCalledWith({
+        where: { residentId: residentId },
+      });
+      expect(mockPrismaService.resident.delete).toHaveBeenCalledWith({
+        where: { id: residentId },
       });
     });
   });

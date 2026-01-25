@@ -27,14 +27,7 @@ export class LeasesService {
     if (unit.status === UnitStatus.LEASED) {
       throw new ConflictException('Unit is already LEASED.');
     }
-    if (
-      unit.status === UnitStatus.UNDER_MAINTENANCE ||
-      unit.status === UnitStatus.UNDER_CONSTRUCTION
-    ) {
-      throw new BadRequestException(
-        'Unit is under maintenance/construction and cannot be leased.',
-      );
-    }
+
 
     // 2. VALIDATION: Check for Overlapping Active Leases
     // (Double safety in case status was manually changed)
@@ -89,8 +82,8 @@ export class LeasesService {
         // Check if they are already assigned to avoid duplicates
         const existingAssignment = await tx.residentUnit.findUnique({
           where: {
-            userId_unitId: {
-              userId: dto.tenantId,
+            residentId_unitId: {
+              residentId: dto.tenantId,
               unitId: dto.unitId,
             },
           },
@@ -99,7 +92,7 @@ export class LeasesService {
         if (!existingAssignment) {
           await tx.residentUnit.create({
             data: {
-              userId: dto.tenantId,
+              residentId: dto.tenantId,
               unitId: dto.unitId,
               isPrimary: true, // Assuming lease holder is primary
               assignedAt: new Date(),
@@ -176,7 +169,7 @@ export class LeasesService {
         if (existingLease.tenantId) {
           await tx.residentUnit.deleteMany({
             where: {
-              userId: existingLease.tenantId,
+              residentId: existingLease.tenantId,
               unitId: existingLease.unitId,
             },
           });

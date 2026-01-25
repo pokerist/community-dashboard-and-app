@@ -418,7 +418,7 @@ async function seed() {
   });
 
   // RESIDENT A
-  const residentA = await prisma.user.create({
+  const residentAUser = await prisma.user.create({
     data: {
       email: 'residentA@test.com',
       passwordHash,
@@ -430,8 +430,12 @@ async function seed() {
     },
   });
 
+  const residentA = await prisma.resident.findUnique({
+    where: { userId: residentAUser.id },
+  });
+
   // RESIDENT B
-  const residentB = await prisma.user.create({
+  const residentBUser = await prisma.user.create({
     data: {
       email: 'residentB@test.com',
       passwordHash,
@@ -441,6 +445,10 @@ async function seed() {
       },
       resident: { create: {} },
     },
+  });
+
+  const residentB = await prisma.resident.findUnique({
+    where: { userId: residentBUser.id },
   });
 
   console.log('🌱 Seeding units...');
@@ -470,6 +478,10 @@ async function seed() {
   });
 
   console.log('🌱 Assigning residents to units...');
+
+  if (!residentA || !residentB) {
+    throw new Error('Failed to create residents');
+  }
 
   await prisma.residentUnit.create({
     data: {

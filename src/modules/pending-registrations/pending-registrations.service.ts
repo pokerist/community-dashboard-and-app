@@ -83,11 +83,7 @@ export class PendingRegistrationsService {
     });
   }
 
-  async approve(
-    id: string,
-    dto: ApprovePendingRegistrationDto,
-    approvedBy: string,
-  ) {
+  private async validatePendingRegistration(id: string) {
     const pending = await this.findOne(id);
 
     if (pending.expiresAt < new Date()) {
@@ -102,94 +98,134 @@ export class PendingRegistrationsService {
       throw new ConflictException('Registration already processed');
     }
 
+    return pending;
+  }
+
+  private async lockPendingRegistration(id: string, prisma: any) {
+    const locked = await prisma.pendingRegistration.updateMany({
+      where: { id, status: 'PENDING' },
+      data: { status: 'PROCESSING' },
+    });
+
+    if (locked.count !== 1) {
+      throw new ConflictException('Registration already processed');
+    }
+  }
+
+  private async checkUniqueness(pending: any, prisma: any) {
+    if (pending.email) {
+      const emailExists = await prisma.user.findUnique({
+        where: { email: pending.email },
+      });
+      if (emailExists) {
+        throw new BadRequestException('Email already registered');
+      }
+    }
+
+    const phoneExists = await prisma.user.findFirst({
+      where: { phone: pending.phone },
+    });
+    if (phoneExists) {
+      throw new BadRequestException('Phone already registered');
+    }
+  }
+
+  private async createUserAndResident(pending: any, prisma: any) {
+    const passwordHash =
+      pending.passwordHash ??
+      (await bcrypt.hash(crypto.randomBytes(12).toString('hex'), 12));
+
+    const user = await prisma.user.create({
+      data: {
+        nameEN: pending.name,
+        email: pending.email,
+        phone: pending.phone,
+        passwordHash,
+        profilePhotoId: pending.personalPhotoId,
+        userStatus: 'ACTIVE',
+        signupSource: pending.origin,
+      },
+    });
+
+    await prisma.resident.create({
+      data: {
+        userId: user.id,
+        nationalId: pending.nationalId,
+      },
+    });
+
+    return user;
+  }
+
+  private async assignRole(userId: string, role: string, prisma: any) {
+    switch (role) {
+      case 'OWNER':
+        await prisma.owner.create({ data: { userId } });
+        break;
+      case 'TENANT':
+        await prisma.tenant.create({ data: { userId } });
+        break;
+      case 'FAMILY':
+        // FAMILY role doesn't require additional role table entry
+        break;
+      default:
+        throw new BadRequestException(`Invalid role: ${role}`);
+    }
+  }
+
+  private async assignResidentUnit(userId: string, dto: ApprovePendingRegistrationDto, prisma: any) {
+    if (dto.isPrimary) {
+      const existingPrimary = await prisma.residentUnit.findFirst({
+        where: { unitId: dto.unitId, isPrimary: true },
+      });
+      if (existingPrimary) {
+        throw new BadRequestException(
+          'This unit already has a primary resident',
+        );
+      }
+    }
+
+    await prisma.residentUnit.create({
+      data: {
+        residentId: userId,
+        unitId: dto.unitId,
+        isPrimary: dto.isPrimary,
+      },
+    });
+  }
+
+  private async finalizeApproval(id: string, userId: string, prisma: any) {
+    await prisma.pendingRegistration.update({
+      where: { id },
+      data: { status: 'VERIFIED' },
+    });
+
+    await prisma.userStatusLog.create({
+      data: {
+        userId,
+        oldStatus: 'PENDING',
+        newStatus: 'ACTIVE',
+        source: 'ADMIN',
+        note: 'Approved via pending registration',
+      },
+    });
+  }
+
+  async approve(
+    id: string,
+    dto: ApprovePendingRegistrationDto,
+    approvedBy: string,
+  ) {
+    const pending = await this.validatePendingRegistration(id);
+
     const user = await this.prisma.$transaction(async (prisma) => {
-      const locked = await prisma.pendingRegistration.updateMany({
-        where: { id, status: 'PENDING' },
-        data: { status: 'PROCESSING' },
-      });
+      await this.lockPendingRegistration(id, prisma);
+      await this.checkUniqueness(pending, prisma);
 
-      if (locked.count !== 1) {
-        throw new ConflictException('Registration already processed');
-      }
-
-      if (pending.email) {
-        const emailExists = await prisma.user.findUnique({
-          where: { email: pending.email },
-        });
-        if (emailExists) {
-          throw new BadRequestException('Email already registered');
-        }
-      }
-
-      const phoneExists = await prisma.user.findFirst({
-        where: { phone: pending.phone },
-      });
-      if (phoneExists) {
-        throw new BadRequestException('Phone already registered');
-      }
-
-      const passwordHash =
-        pending.passwordHash ??
-        (await bcrypt.hash(crypto.randomBytes(12).toString('hex'), 12));
-
-      const user = await prisma.user.create({
-        data: {
-          nameEN: pending.name,
-          email: pending.email,
-          phone: pending.phone,
-          passwordHash,
-          profilePhotoId: pending.personalPhotoId,
-          userStatus: 'ACTIVE',
-          signupSource: pending.origin,
-        },
-      });
-
-      const resident = await prisma.resident.create({
-        data: {
-          userId: user.id,
-          nationalId: pending.nationalId,
-        },
-      });
-
-      if (dto.role === 'OWNER') {
-        await prisma.owner.create({ data: { userId: user.id } });
-      } else if (dto.role === 'TENANT') {
-        await prisma.tenant.create({ data: { userId: user.id } });
-      }
-
-      if (dto.isPrimary) {
-        const existingPrimary = await prisma.residentUnit.findFirst({
-          where: { unitId: dto.unitId, isPrimary: true },
-        });
-        if (existingPrimary) {
-          throw new BadRequestException(
-            'This unit already has a primary resident',
-          );
-        }
-      }
-
-      await prisma.residentUnit.create({
-        data: {
-          residentId: user.id,
-          unitId: dto.unitId,
-          isPrimary: dto.isPrimary,
-        },
-      });
-
-      await prisma.pendingRegistration.update({
-        where: { id },
-        data: { status: 'VERIFIED' },
-      });
-
-      await prisma.userStatusLog.create({
-        data: {
-          userId: user.id,
-          oldStatus: 'PENDING',
-          newStatus: 'ACTIVE',
-          source: 'ADMIN',
-          note: 'Approved via pending registration',
-        },
-      });
+      const user = await this.createUserAndResident(pending, prisma);
+      await this.assignRole(user.id, dto.role, prisma);
+      await this.assignResidentUnit(user.id, dto, prisma);
+      await this.finalizeApproval(id, user.id, prisma);
 
       return user;
     });

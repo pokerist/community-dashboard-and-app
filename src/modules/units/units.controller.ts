@@ -111,4 +111,23 @@ export class UnitsController {
   getByNumber(@Param('unitNumber') unitNumber: string) {
     return this.unitsService.getByNumber(unitNumber);
   }
+
+  // ----- Access Control -----
+  @Get('access/:unitId/:userId')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('unit.view_all')
+  getUserAccess(@Param('unitId') unitId: string, @Param('userId') userId: string) {
+    return this.unitsService.getUserAccessForUnit(unitId, userId);
+  }
+
+  @Get('can-access-feature/:unitId')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('unit.view_all')
+  async canAccessFeature(
+    @Param('unitId') unitId: string,
+    @Query('feature') feature: string,
+  ) {
+    const hasAccess = await this.unitsService.canAccessFeature(unitId, feature);
+    return { canAccess: hasAccess };
+  }
 }

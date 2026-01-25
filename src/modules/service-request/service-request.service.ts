@@ -10,6 +10,7 @@ import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestInternalDto } from './dto/update-service-request-internal.dto';
 import { InvoicesService } from '../invoices/invoices.service';
 import { InvoiceType } from '@prisma/client';
+import { getActiveUnitAccess } from '../../common/utils/unit-access.util';
 
 @Injectable()
 export class ServiceRequestService {
@@ -35,7 +36,24 @@ export class ServiceRequestService {
       fieldValues = [], // Get the new field values
     } = createServiceRequestDto;
 
-    // 1. Core Validation (Ensure service is active, required fields are present)
+    if (!unitId) {
+      throw new BadRequestException('Unit ID is required');
+    }
+
+    // 1. Access Control: Check if user has active access to the unit
+    await getActiveUnitAccess(this.prisma, createdById, unitId);
+
+    // 2. Feature Gating: Service requests only available after delivery
+    const unit = await this.prisma.unit.findUnique({
+      where: { id: unitId },
+      select: { status: true },
+    });
+
+    if (unit?.status !== 'DELIVERED') {
+      throw new BadRequestException('Service requests are only available after delivery');
+    }
+
+    // 3. Core Validation (Ensure service is active, required fields are present)
     const service = await this.prisma.service.findUnique({
       where: { id: serviceId },
       // Eagerly load the required ServiceFields for validation
@@ -74,11 +92,12 @@ export class ServiceRequestService {
         },
       });
 
-      // B. Create the Attachment records (Existing Logic)
+      // B. Create the Attachment records (Updated Logic)
       if (attachmentIds.length > 0) {
         const attachmentsData = attachmentIds.map((fileId) => ({
           fileId: fileId,
-          serviceRequestId: newRequest.id,
+          entityId: newRequest.id,
+          entity: 'SERVICE_REQUEST',
         }));
         await tx.attachment.createMany({
           data: attachmentsData,

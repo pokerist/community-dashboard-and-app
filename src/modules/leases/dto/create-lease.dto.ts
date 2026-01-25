@@ -51,10 +51,10 @@ export class CreateLeaseDto {
   @IsOptional()
   securityDeposit?: number;
 
-  @ApiPropertyOptional({ example: 'file-uuid-here' })
-  @IsString()
-  @IsOptional()
-  contractFileId?: string;
+  @ApiProperty({ example: 'file-uuid-here', description: 'The ID of the uploaded contract file' })
+  @IsUUID()
+  @IsNotEmpty()
+  contractFileId: string;
 }
 
 export class UpdateLeaseDto {

@@ -83,6 +83,22 @@ export class AuthService {
       data: { loginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() },
     });
 
+    // Skip unit access check for admin roles (SUPER_ADMIN, MANAGER)
+    const isAdmin = user.roles.some(ur => ['SUPER_ADMIN', 'MANAGER'].includes(ur.role.name));
+
+    if (!isAdmin) {
+      const hasActiveAccess = await this.prisma.unitAccess.findFirst({
+        where: {
+          userId: user.id,
+          status: 'ACTIVE',
+        },
+      });
+
+      if (!hasActiveAccess) {
+        throw new ForbiddenException('Your access has been revoked.');
+      }
+    }
+
     const permissions = this.permissionCache.resolveUserPermissions(
       user.roles.map((ur) => ur.role.name),
     );
@@ -111,7 +127,7 @@ export class AuthService {
   }
 
   // ================= GENERATE TOKENS =================
-  async generateTokens(user: any) {
+  async generateTokens(user: any, prismaClient?: any) {
     // Roles of the user
     const roles = user.roles.map((ur) => ur.role.name);
 
@@ -130,7 +146,8 @@ export class AuthService {
     const rawRefreshToken = crypto.randomUUID();
     const tokenHash = await bcrypt.hash(rawRefreshToken, 12);
 
-    await this.prisma.refreshToken.create({
+    const prisma = prismaClient || this.prisma;
+    await prisma.refreshToken.create({
       data: {
         userId: user.id,
         tokenHash,
@@ -145,46 +162,60 @@ export class AuthService {
   async signupWithReferral(dto: SignupWithReferralDto) {
     const { phone, name, password } = dto;
 
-    // Validate referral exists and is valid
-    const validation = await this.referralsService.validateReferral(phone);
-    if (!validation.valid) {
-      throw new BadRequestException(
-        'No valid referral found for this phone number',
-      );
-    }
+    return this.prisma.$transaction(async (tx) => {
+      // Validate referral exists and is valid
+      const validation = await this.referralsService.validateReferral(phone);
+      if (!validation.valid) {
+        console.error(`Referral validation failed for phone ${phone}: ${validation.message || 'Unknown reason'}`);
+        throw new BadRequestException(
+          'No valid referral found for this phone number',
+        );
+      }
 
-    // Check if user already exists
-    const existingUser = await this.prisma.user.findFirst({
-      where: {
-        OR: [{ phone }, { email: phone }], // Allow phone as email fallback
-      },
+      // Check if user already exists
+      const existingUser = await tx.user.findFirst({
+        where: {
+          OR: [{ phone }, { email: phone }], // Allow phone as email fallback
+        },
+      });
+
+      if (existingUser) {
+        console.error(`User already exists for phone ${phone}: user ID ${existingUser.id}, email: ${existingUser.email}`);
+        throw new BadRequestException(
+          'User already exists with this phone number',
+        );
+      }
+
+      // Hash password
+      const passwordHash = await bcrypt.hash(password, 12);
+
+      // Create user
+      const user = await tx.user.create({
+        data: {
+          phone,
+          nameEN: name,
+          passwordHash,
+          signupSource: 'referral',
+        },
+        include: { roles: { include: { role: true } } },
+      });
+
+      // Convert the referral
+      try {
+        await this.referralsService.convertReferral(phone, user.id);
+      } catch (error) {
+        console.error(`Failed to convert referral for phone ${phone}, user ID ${user.id}: ${error.message}`);
+        throw error;
+      }
+
+      // Generate tokens
+      try {
+        return await this.generateTokens(user);
+      } catch (error) {
+        console.error(`Failed to generate tokens for user ID ${user.id}: ${error.message}`);
+        throw error;
+      }
     });
-
-    if (existingUser) {
-      throw new BadRequestException(
-        'User already exists with this phone number',
-      );
-    }
-
-    // Hash password
-    const passwordHash = await bcrypt.hash(password, 12);
-
-    // Create user
-    const user = await this.prisma.user.create({
-      data: {
-        phone,
-        nameEN: name,
-        passwordHash,
-        signupSource: 'referral',
-      },
-      include: { roles: { include: { role: true } } },
-    });
-
-    // Convert the referral
-    await this.referralsService.convertReferral(phone, user.id);
-
-    // Generate tokens
-    return this.generateTokens(user);
   }
 
   // ================= REFRESH TOKEN =================
@@ -269,7 +300,7 @@ export class AuthService {
       const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${rawToken}`;
       await this.notificationsService.sendNotification(
         {
-          type: 'PAYMENT_REMINDER', // reuse, or create new type
+          type: 'OTP', // reuse, or create new type
           title: 'Password Reset',
           messageEn: `Click here to reset your password: ${resetLink}`,
           channels: ['EMAIL'],
@@ -293,7 +324,7 @@ export class AuthService {
 
       await this.notificationsService.sendNotification(
         {
-          type: 'PAYMENT_REMINDER',
+          type: 'OTP',
           title: 'Password Reset OTP',
           messageEn: `Your OTP for password reset: ${otp}`,
           channels: ['SMS'],
@@ -405,7 +436,7 @@ export class AuthService {
     // Send SMS
     await this.notificationsService.sendNotification(
       {
-        type: 'PAYMENT_REMINDER',
+        type: 'OTP',
         title: 'Phone Verification OTP',
         messageEn: `Your OTP: ${otp}`,
         channels: ['SMS'],

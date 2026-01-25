@@ -22,16 +22,24 @@ import * as bcrypt from 'bcrypt';
 type UserWithRelations = Prisma.UserGetPayload<{
   include: {
     roles: { include: { role: true } };
-    resident: true;
+    resident: { include: { residentUnits: { include: { unit: true } } } };
     owner: true;
     tenant: true;
     admin: true;
-    residentUnits: { include: { unit: true } };
     leasesAsOwner: true;
     leasesAsTenant: true;
     invoices: true;
   };
 }>;
+
+// Optimized include for basic user info (can be used for list views)
+const userBasicInclude = {
+  roles: { include: { role: true } },
+  resident: true,
+  owner: true,
+  tenant: true,
+  admin: true,
+};
 
 type ResidentWithUser = Prisma.ResidentGetPayload<{
   include: { user: true };
@@ -76,40 +84,32 @@ export class ResidentService {
 
     const { password, roles: roleIds, ...rest } = data;
 
-    const passwordHash = password ? await bcrypt.hash(password, 10) : undefined;
+    const passwordHash = password ? await bcrypt.hash(password, 12) : undefined;
 
-    const user = await this.prisma.user.create({
-      data: {
-        ...rest,
-        passwordHash,
-        userStatus: UserStatusEnum.ACTIVE,
-        signupSource: data.signupSource ?? 'dashboard',
-      },
-      include: {
-        roles: { include: { role: true } },
-        resident: true,
-        owner: true,
-        tenant: true,
-        admin: true,
-        residentUnits: { include: { unit: true } },
-        leasesAsOwner: true,
-        leasesAsTenant: true,
-        invoices: true,
-      },
+    // Use transaction to ensure atomicity
+    const user = await this.prisma.$transaction(async (tx) => {
+      const createdUser = await tx.user.create({
+        data: {
+          ...rest,
+          passwordHash,
+          userStatus: UserStatusEnum.ACTIVE,
+          signupSource: data.signupSource ?? 'dashboard',
+        },
+      });
+
+      if (roleIds?.length) {
+        await tx.userRole.createMany({
+          data: roleIds.map((roleId) => ({
+            userId: createdUser.id,
+            roleId,
+          })),
+        });
+      }
+
+      return createdUser;
     });
 
-    if (roleIds?.length) {
-      await Promise.all(
-        roleIds.map((roleId) =>
-          this.prisma.userRole.create({
-            data: { userId: user.id, roleId },
-          }),
-        ),
-      );
-      return this.getUserWithRelations(user.id);
-    }
-
-    return user;
+    return this.getUserWithRelations(user.id);
   }
 
   /**
@@ -148,11 +148,10 @@ export class ResidentService {
       orderBy: { createdAt: 'desc' },
       include: {
         roles: { include: { role: true } },
-        resident: true,
+        resident: { include: { residentUnits: { include: { unit: true } } } },
         owner: true,
         tenant: true,
         admin: true,
-        residentUnits: { include: { unit: true } },
         leasesAsOwner: true,
         leasesAsTenant: true,
         invoices: true,
@@ -168,11 +167,10 @@ export class ResidentService {
       where: { id },
       include: {
         roles: { include: { role: true } },
-        resident: true,
+        resident: { include: { residentUnits: { include: { unit: true } } } },
         owner: true,
         tenant: true,
         admin: true,
-        residentUnits: { include: { unit: true } },
         leasesAsOwner: true,
         leasesAsTenant: true,
         invoices: true,
@@ -197,43 +195,30 @@ export class ResidentService {
 
     // Handle password update
     if (data.password) {
-      updateData.passwordHash = await bcrypt.hash(data.password, 10);
+      updateData.passwordHash = await bcrypt.hash(data.password, 12);
       delete updateData.password;
     }
 
     // Handle roles update
     if (data.roles !== undefined) {
-      // Delete existing roles
-      await this.prisma.userRole.deleteMany({
-        where: { userId: id },
-      });
+      const roles = data.roles;
+      // Use transaction for role updates to ensure consistency
+      await this.prisma.$transaction(async (tx) => {
+        // Delete existing roles
+        await tx.userRole.deleteMany({
+          where: { userId: id },
+        });
 
-      // Create new roles if provided
-      if (data.roles.length > 0) {
-        // If roles are objects with 'role' property (role names), convert to role IDs
-        let roleIds: string[] = [];
-        if (
-          typeof (data.roles as any)[0] === 'object' &&
-          (data.roles as any)[0].role
-        ) {
-          const roleNames = data.roles.map((r: any) => r.role);
-          const roles = await this.prisma.role.findMany({
-            where: { name: { in: roleNames } },
+        // Create new roles if provided
+        if (roles.length > 0) {
+          await tx.userRole.createMany({
+            data: roles.map((roleId) => ({
+              userId: id,
+              roleId,
+            })),
           });
-          roleIds = roles.map((r) => r.id);
-        } else {
-          // Assume roles are already IDs
-          roleIds = data.roles as string[];
         }
-
-        await Promise.all(
-          roleIds.map((roleId) =>
-            this.prisma.userRole.create({
-              data: { userId: id, roleId },
-            }),
-          ),
-        );
-      }
+      });
 
       // Remove roles from updateData since we've handled it separately
       delete updateData.roles;
@@ -247,11 +232,10 @@ export class ResidentService {
       data: updateData,
       include: {
         roles: { include: { role: true } },
-        resident: true,
+        resident: { include: { residentUnits: { include: { unit: true } } } },
         owner: true,
         tenant: true,
         admin: true,
-        residentUnits: { include: { unit: true } },
         leasesAsOwner: true,
         leasesAsTenant: true,
         invoices: true,
@@ -272,11 +256,10 @@ export class ResidentService {
       data: { userStatus: UserStatusEnum.DISABLED, updatedAt: new Date() },
       include: {
         roles: { include: { role: true } },
-        resident: true,
+        resident: { include: { residentUnits: { include: { unit: true } } } },
         owner: true,
         tenant: true,
         admin: true,
-        residentUnits: { include: { unit: true } },
         leasesAsOwner: true,
         leasesAsTenant: true,
         invoices: true,
@@ -380,15 +363,30 @@ export class ResidentService {
   }
 
   /**
-   * Delete a resident profile
+   * Delete a resident profile with cascading cleanup
    */
   async deleteResident(id: string): Promise<ResidentWithUser> {
-    await this.getResident(id);
+    const resident = await this.getResident(id);
 
-    return this.prisma.resident.delete({
-      where: { id },
-      include: { user: true },
+    // Use transaction to ensure atomic cleanup
+    await this.prisma.$transaction(async (tx) => {
+      // Clean up resident units
+      await tx.residentUnit.deleteMany({
+        where: { residentId: resident.userId },
+      });
+
+      // Clean up bookings
+      await tx.booking.deleteMany({
+        where: { residentId: resident.id },
+      });
+
+      // Delete the resident profile
+      await tx.resident.delete({
+        where: { id },
+      });
     });
+
+    return resident;
   }
 
   // ===== OWNER MANAGEMENT =====

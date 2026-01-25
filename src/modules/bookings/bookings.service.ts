@@ -7,9 +7,19 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingStatusDto } from './dto/update-status.dto';
+import { BookingsQueryDto } from './dto/bookings-query.dto';
 import { BookingStatus } from '@prisma/client';
 import { BookingApprovedEvent } from '../../events/contracts/booking-approved.event';
 import { BookingCancelledEvent } from '../../events/contracts/booking-cancelled.event';
+import { paginate } from '../../common/utils/pagination.util';
+import { getActiveUnitAccess } from '../../common/utils/unit-access.util';
+
+interface EffectiveSlotConfig {
+  startTime: string;
+  endTime: string;
+  slotDurationMinutes?: number;
+  slotCapacity?: number;
+}
 
 @Injectable()
 export class BookingsService {
@@ -18,109 +28,51 @@ export class BookingsService {
     private eventEmitter: EventEmitter2,
   ) {}
 
-  async create(dto: CreateBookingDto) {
+  private async getFacility(dto: CreateBookingDto) {
     const facility = await this.prisma.facility.findUnique({
       where: { id: dto.facilityId },
       include: {
         slotConfig: true,
         slotExceptions: true,
-        bookings: true,
       },
     });
 
     if (!facility) throw new NotFoundException('Facility not found');
     if (!facility.isActive) throw new BadRequestException('Facility inactive');
 
-    const date = new Date(dto.date);
-    const dayIndex = date.getUTCDay();
-
-    // 1 — Handle Exceptions
-    const exception = facility.slotExceptions.find(
-      (e) => e.date.toISOString().split('T')[0] === dto.date.split('T')[0],
-    );
-
-    if (exception?.isClosed)
-      throw new BadRequestException('Facility closed on this date');
-
-    // 2 — Determine Effective Slot Config
-    let config: any;
-
-    if (exception) {
-      config = {
-        startTime: exception.startTime ?? '00:00',
-        endTime: exception.endTime ?? '23:59',
-        slotDurationMinutes: exception.slotDurationMinutes ?? null,
-        slotCapacity: exception.slotCapacity ?? facility.capacity ?? null,
-      };
-    } else {
-      config = facility.slotConfig.find((c) => c.dayOfWeek === dayIndex);
-    }
-
-    if (!config)
-      throw new BadRequestException('No slots configured for this day');
-
-    // Validate that requested times match slot boundaries
-    const valid = await this.validateTime(dto, config);
-    if (!valid) {
-      throw new BadRequestException('Requested time does not match slot rules');
-    }
-
-    // 3 — Check maxReservationsPerDay
-    if (facility.maxReservationsPerDay) {
-      const dailyCount = await this.prisma.booking.count({
-        where: {
-          userId: dto.userId,
-          facilityId: dto.facilityId,
-          date,
-        },
-      });
-
-      if (dailyCount >= facility.maxReservationsPerDay)
-        throw new BadRequestException(
-          `Max reservations per day exceeded (${facility.maxReservationsPerDay})`,
-        );
-    }
-
-    // 4 — Cooldown check
-    if (facility.cooldownMinutes) {
-      const last = await this.prisma.booking.findFirst({
-        where: {
-          userId: dto.userId,
-          facilityId: dto.facilityId,
-        },
-        orderBy: { createdAt: 'desc' },
-      });
-
-      if (last) {
-        const diff =
-          (Date.now() - new Date(last.createdAt).getTime()) / 1000 / 60;
-
-        if (diff < facility.cooldownMinutes)
-          throw new BadRequestException(
-            `Cooldown active. Wait ${
-              facility.cooldownMinutes - Math.floor(diff)
-            } minutes`,
-          );
-      }
-    }
-
-    // 5 — Save Booking
-    return this.prisma.booking.create({
-      data: {
-        userId: dto.userId,
-        facilityId: dto.facilityId,
-        residentId: dto.residentId,
-        unitId: dto.unitId,
-        date,
-        startTime: dto.startTime,
-        endTime: dto.endTime,
-        status: BookingStatus.PENDING,
-      },
-    });
+    return facility;
   }
 
-  // slot validation helper
-  async validateTime(dto: CreateBookingDto, config: any) {
+  private resolveSlotConfig(facility: any, dateStr: string): EffectiveSlotConfig | null {
+    const date = new Date(dateStr);
+    const dayIndex = date.getUTCDay();
+
+    const exception = facility.slotExceptions.find(
+      (e: any) => e.date.toISOString().split('T')[0] === dateStr.split('T')[0],
+    );
+
+    if (exception?.isClosed) return null;
+
+    if (exception) {
+      return {
+        startTime: exception.startTime ?? '00:00',
+        endTime: exception.endTime ?? '23:59',
+        slotDurationMinutes: exception.slotDurationMinutes ?? undefined,
+        slotCapacity: exception.slotCapacity ?? facility.capacity ?? undefined,
+      };
+    } else {
+      const config = facility.slotConfig.find((c: any) => c.dayOfWeek === dayIndex);
+      if (!config) return null;
+      return {
+        startTime: config.startTime,
+        endTime: config.endTime,
+        slotDurationMinutes: config.slotDurationMinutes ?? undefined,
+        slotCapacity: config.slotCapacity ?? facility.capacity ?? undefined,
+      };
+    }
+  }
+
+  private validateTime(dto: CreateBookingDto, config: EffectiveSlotConfig): boolean {
     const toMinutes = (t: string) => {
       const [h, m] = t.split(':').map(Number);
       return h * 60 + m;
@@ -142,9 +94,158 @@ export class BookingsService {
     return true;
   }
 
-  async findAll() {
-    return this.prisma.booking.findMany({
-      include: { facility: true, user: true, resident: true, unit: true },
+  private async enforceLimits(dto: CreateBookingDto, facility: any) {
+    const date = new Date(dto.date);
+
+    // Check maxReservationsPerDay
+    if (facility.maxReservationsPerDay) {
+      const dailyCount = await this.prisma.booking.count({
+        where: {
+          userId: dto.userId,
+          facilityId: dto.facilityId,
+          date,
+        },
+      });
+
+      if (dailyCount >= facility.maxReservationsPerDay)
+        throw new BadRequestException(
+          `Max reservations per day exceeded (${facility.maxReservationsPerDay})`,
+        );
+    }
+
+    // Cooldown check
+    if (facility.cooldownMinutes) {
+      const last = await this.prisma.booking.findFirst({
+        where: {
+          userId: dto.userId,
+          facilityId: dto.facilityId,
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      if (last) {
+        const diff =
+          (Date.now() - new Date(last.createdAt).getTime()) / 1000 / 60;
+
+        if (diff < facility.cooldownMinutes)
+          throw new BadRequestException(
+            `Cooldown active. Wait ${
+              facility.cooldownMinutes - Math.floor(diff)
+            } minutes`,
+          );
+      }
+    }
+  }
+
+  private async checkSlotCapacity(dto: CreateBookingDto, facility: any, config: EffectiveSlotConfig) {
+    if (config.slotCapacity) {
+      const slotCount = await this.prisma.booking.count({
+        where: {
+          facilityId: dto.facilityId,
+          date: new Date(dto.date),
+          startTime: dto.startTime,
+          endTime: dto.endTime,
+          status: { in: [BookingStatus.PENDING, BookingStatus.APPROVED] },
+        },
+      });
+
+      if (slotCount >= config.slotCapacity) {
+        throw new BadRequestException(
+          `Slot capacity exceeded (${config.slotCapacity})`,
+        );
+      }
+    }
+  }
+
+  private async saveBooking(dto: CreateBookingDto) {
+    const date = new Date(dto.date);
+
+    return this.prisma.booking.create({
+      data: {
+        userId: dto.userId,
+        facilityId: dto.facilityId,
+        residentId: dto.residentId,
+        unitId: dto.unitId,
+        date,
+        startTime: dto.startTime,
+        endTime: dto.endTime,
+        status: BookingStatus.PENDING,
+      },
+    });
+  }
+
+  async create(dto: CreateBookingDto) {
+    if (!dto.unitId) {
+      throw new BadRequestException('Unit ID is required for booking');
+    }
+
+    // Access Control: Check if user has active access to the unit
+    const access = await getActiveUnitAccess(this.prisma, dto.userId, dto.unitId);
+
+    // Feature Gating: Bookings only available after delivery
+    const unit = await this.prisma.unit.findUnique({
+      where: { id: dto.unitId },
+      select: { status: true },
+    });
+
+    if (unit?.status !== 'DELIVERED') {
+      throw new BadRequestException('Facility bookings are only available after delivery');
+    }
+
+    // Check if user has permission to book facilities
+    if (!access.canBookFacilities) {
+      throw new BadRequestException('User does not have permission to book facilities');
+    }
+
+    const facility = await this.getFacility(dto);
+    const config = this.resolveSlotConfig(facility, dto.date);
+
+    if (!config) throw new BadRequestException('Facility closed or no slots configured for this day');
+
+    if (!this.validateTime(dto, config)) {
+      throw new BadRequestException('Requested time does not match slot rules');
+    }
+
+    return this.prisma.$transaction(async (prisma) => {
+      await this.enforceLimits(dto, facility);
+      await this.checkSlotCapacity(dto, facility, config);
+      return this.saveBooking(dto);
+    });
+  }
+
+  async findAll(query: BookingsQueryDto) {
+    const {
+      status,
+      facilityId,
+      userId,
+      unitId,
+      dateFrom,
+      dateTo,
+      ...baseQuery
+    } = query;
+
+    const filters: Record<string, any> = {
+      status,
+      facilityId,
+      userId,
+      unitId,
+    };
+
+    if (dateFrom || dateTo) {
+      filters.date = {};
+      if (dateFrom) filters.date.gte = new Date(dateFrom);
+      if (dateTo) filters.date.lte = new Date(dateTo);
+    }
+
+    return paginate(this.prisma.booking, baseQuery, {
+      searchFields: ['facility.name', 'user.nameEN', 'unit.unitNumber'],
+      additionalFilters: filters,
+      include: {
+        facility: { select: { name: true } },
+        user: { select: { nameEN: true, email: true } },
+        resident: { select: { nationalId: true } },
+        unit: { select: { unitNumber: true } },
+      },
     });
   }
 

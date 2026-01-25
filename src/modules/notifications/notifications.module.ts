@@ -15,6 +15,6 @@ import { AuthModule } from '../auth/auth.module';
     NotificationDeliveryListener,
     NotificationScheduler,
   ],
-  exports: [NotificationsService],
+  exports: [NotificationsService, EmailService],
 })
 export class NotificationsModule {}

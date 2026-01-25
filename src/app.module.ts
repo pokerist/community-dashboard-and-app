@@ -21,6 +21,9 @@ import { ReferralsModule } from './modules/referrals/referrals.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { LeasesModule } from './modules/leases/leases.module';
+import { OwnersModule } from './modules/owners/owners.module';
+import { DelegatesModule } from './modules/delegates/delegates.module';
+import { ClubhouseModule } from './modules/clubhouse/clubhouse.module';
 
 @Module({
   imports: [
@@ -45,7 +48,10 @@ import { LeasesModule } from './modules/leases/leases.module';
     ReferralsModule,
     NotificationsModule,
     DashboardModule,
-    LeasesModule
+    LeasesModule,
+    OwnersModule,
+    DelegatesModule,
+    ClubhouseModule
   ],
   controllers: [],
   providers: [],

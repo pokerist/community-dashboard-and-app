@@ -31,35 +31,51 @@ export class ViolationsService {
 
   async create(dto: CreateViolationDto) {
     const violationNumber = await this.generateViolationNumber();
+    const { attachmentIds = [], ...violationData } = dto;
 
-    // 1. Create the Violation Record
-    const violation = await this.prisma.violation.create({
-      data: {
-        violationNumber,
-        unitId: dto.unitId,
-        residentId: dto.residentId,
-        type: dto.type,
-        description: dto.description,
-        fineAmount: dto.fineAmount,
-        issuedById: dto.issuedById,
-        status: ViolationStatus.PENDING,
-      },
-    });
-
-    // 2. Automatically Create the Invoice (Financial Consequence)
-    if (dto.fineAmount > 0) {
-      await this.invoicesService.generateInvoice({
-        unitId: dto.unitId,
-        residentId: dto.residentId,
-        type: InvoiceType.FINE,
-        amount: dto.fineAmount,
-        dueDate: dto.dueDate,
-        sources: { violationIds: [violation.id] },
-        status: InvoiceStatus.PENDING,
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Create the Violation Record
+      const violation = await tx.violation.create({
+        data: {
+          violationNumber,
+          unitId: dto.unitId,
+          residentId: dto.residentId,
+          type: dto.type,
+          description: dto.description,
+          fineAmount: dto.fineAmount,
+          issuedById: dto.issuedById,
+          status: ViolationStatus.PENDING,
+        },
       });
-    }
 
-    return violation;
+      // 2. Create attachments if provided
+      if (attachmentIds.length > 0) {
+        const attachmentsData = attachmentIds.map((fileId) => ({
+          fileId: fileId,
+          entityId: violation.id,
+          entity: 'VIOLATION',
+        }));
+        await tx.attachment.createMany({
+          data: attachmentsData,
+          skipDuplicates: true,
+        });
+      }
+
+      // 3. Automatically Create the Invoice (Financial Consequence)
+      if (dto.fineAmount > 0) {
+        await this.invoicesService.generateInvoice({
+          unitId: dto.unitId,
+          residentId: dto.residentId,
+          type: InvoiceType.FINE,
+          amount: dto.fineAmount,
+          dueDate: dto.dueDate,
+          sources: { violationIds: [violation.id] },
+          status: InvoiceStatus.PENDING,
+        });
+      }
+
+      return violation;
+    });
   }
 
   async findAll() {
