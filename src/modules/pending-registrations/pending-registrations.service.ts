@@ -173,7 +173,11 @@ export class PendingRegistrationsService {
     }
   }
 
-  private async assignResidentUnit(userId: string, dto: ApprovePendingRegistrationDto, prisma: any) {
+  private async assignResidentUnit(
+    userId: string,
+    dto: ApprovePendingRegistrationDto,
+    prisma: any,
+  ) {
     if (dto.isPrimary) {
       const existingPrimary = await prisma.residentUnit.findFirst({
         where: { unitId: dto.unitId, isPrimary: true },

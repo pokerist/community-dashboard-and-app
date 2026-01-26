@@ -19,7 +19,7 @@ This documentation covers the complete Owner Onboarding & Access Control Flow im
 
 ### **1. Flow Documentation**
 📄 [`owner-onboarding-flow.md`](./owner-onboarding-flow.md)
-- Complete flow breakdown with phases
+- Complete flow breakdown with phases (8 phases total)
 - Access control matrix
 - Email notification templates
 - Database schema changes
@@ -27,10 +27,11 @@ This documentation covers the complete Owner Onboarding & Access Control Flow im
 
 ### **2. API Testing Guide**
 📄 [`api-testing-guide.md`](./api-testing-guide.md)
-- All endpoints with request/response examples
-- Postman collection setup
+- All endpoints with request/response examples (40+ endpoints)
+- Postman collection setup with test scripts
 - Error scenarios and test cases
 - Performance and security testing
+- Enhanced environment variables
 - Cleanup scripts
 
 ### **3. Modules Overview**

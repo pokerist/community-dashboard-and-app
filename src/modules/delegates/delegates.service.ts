@@ -26,7 +26,9 @@ export class DelegatesService {
       throw new NotFoundException('Unit not found');
     }
     if (unit.status !== 'DELIVERED') {
-      throw new ForbiddenException('Cannot add delegates until unit is delivered');
+      throw new ForbiddenException(
+        'Cannot add delegates until unit is delivered',
+      );
     }
 
     // Check if requester is the owner
@@ -106,7 +108,9 @@ export class DelegatesService {
     });
 
     if (delegate?.email) {
-      const unitAccess = delegate.unitAccesses.find(ua => ua.id === unitAccessId);
+      const unitAccess = delegate.unitAccesses.find(
+        (ua) => ua.id === unitAccessId,
+      );
       const subject = `Delegate Access Approved - Alkarma Community`;
       const content = `
         <h2>Delegate Access Approved</h2>
@@ -135,14 +139,16 @@ export class DelegatesService {
     const isAdmin = await this.prisma.admin.findUnique({
       where: { userId: revokedBy },
     });
-    const isOwner = access.unit && await this.prisma.unitAccess.findFirst({
-      where: {
-        unitId: access.unitId,
-        userId: revokedBy,
-        role: 'OWNER',
-        status: 'ACTIVE',
-      },
-    });
+    const isOwner =
+      access.unit &&
+      (await this.prisma.unitAccess.findFirst({
+        where: {
+          unitId: access.unitId,
+          userId: revokedBy,
+          role: 'OWNER',
+          status: 'ACTIVE',
+        },
+      }));
 
     if (!isAdmin && !isOwner) {
       throw new ForbiddenException('Not authorized to revoke delegate');

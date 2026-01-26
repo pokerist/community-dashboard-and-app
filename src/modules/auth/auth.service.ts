@@ -84,7 +84,9 @@ export class AuthService {
     });
 
     // Skip unit access check for admin roles (SUPER_ADMIN, MANAGER)
-    const isAdmin = user.roles.some(ur => ['SUPER_ADMIN', 'MANAGER'].includes(ur.role.name));
+    const isAdmin = user.roles.some((ur) =>
+      ['SUPER_ADMIN', 'MANAGER'].includes(ur.role.name),
+    );
 
     if (!isAdmin) {
       const hasActiveAccess = await this.prisma.unitAccess.findFirst({
@@ -166,7 +168,9 @@ export class AuthService {
       // Validate referral exists and is valid
       const validation = await this.referralsService.validateReferral(phone);
       if (!validation.valid) {
-        console.error(`Referral validation failed for phone ${phone}: ${validation.message || 'Unknown reason'}`);
+        console.error(
+          `Referral validation failed for phone ${phone}: ${validation.message || 'Unknown reason'}`,
+        );
         throw new BadRequestException(
           'No valid referral found for this phone number',
         );
@@ -180,7 +184,9 @@ export class AuthService {
       });
 
       if (existingUser) {
-        console.error(`User already exists for phone ${phone}: user ID ${existingUser.id}, email: ${existingUser.email}`);
+        console.error(
+          `User already exists for phone ${phone}: user ID ${existingUser.id}, email: ${existingUser.email}`,
+        );
         throw new BadRequestException(
           'User already exists with this phone number',
         );
@@ -204,7 +210,9 @@ export class AuthService {
       try {
         await this.referralsService.convertReferral(phone, user.id);
       } catch (error) {
-        console.error(`Failed to convert referral for phone ${phone}, user ID ${user.id}: ${error.message}`);
+        console.error(
+          `Failed to convert referral for phone ${phone}, user ID ${user.id}: ${error.message}`,
+        );
         throw error;
       }
 
@@ -212,7 +220,9 @@ export class AuthService {
       try {
         return await this.generateTokens(user);
       } catch (error) {
-        console.error(`Failed to generate tokens for user ID ${user.id}: ${error.message}`);
+        console.error(
+          `Failed to generate tokens for user ID ${user.id}: ${error.message}`,
+        );
         throw error;
       }
     });

@@ -1,4 +1,10 @@
-import { IsString, IsOptional, IsBoolean, IsDateString, IsUUID } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsBoolean,
+  IsDateString,
+  IsUUID,
+} from 'class-validator';
 import { DelegateType } from '@prisma/client';
 
 export class CreateDelegateDto {

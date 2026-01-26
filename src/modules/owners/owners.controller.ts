@@ -10,14 +10,19 @@ import {
   Req,
   UseInterceptors,
   UploadedFile,
+  Query,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { OwnersService } from './owners.service';
 import { CreateOwnerWithUnitDto } from './dto/create-owner-with-unit.dto';
-import { UpdateProfileDto, UpdateFamilyProfileDto } from './dto/update-profile.dto';
-import { CreateLeaseDto, TerminateLeaseDto } from './dto/create-lease.dto';
+import { AddFamilyMemberDto } from './dto/add-family-member.dto';
+import {
+  UpdateProfileDto,
+  UpdateFamilyProfileDto,
+} from './dto/update-profile.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { AuthorityResolver } from '../../common/utils/authority-resolver.util';
 
 @Controller('owners')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -25,11 +30,8 @@ export class OwnersController {
   constructor(private readonly ownersService: OwnersService) {}
 
   @Post('create-with-unit')
-  createWithUnit(
-    @Body() dto: CreateOwnerWithUnitDto,
-    @Req() req: any,
-  ) {
-    const createdBy = req.user.id; 
+  createWithUnit(@Body() dto: CreateOwnerWithUnitDto, @Req() req: any) {
+    const createdBy = req.user.id;
     return this.ownersService.createOwnerWithUnit(dto, createdBy);
   }
 
@@ -48,6 +50,16 @@ export class OwnersController {
     return this.ownersService.remove(id);
   }
 
+  // Remove a user from a unit (for family/tenants)
+  @Post('units/:unitId/remove-user/:userId')
+  removeUserFromUnit(
+    @Param('unitId') unitId: string,
+    @Param('userId') userId: string,
+    @Req() req: any,
+  ) {
+    return this.ownersService.removeUserFromUnit(userId, unitId, req.user.id);
+  }
+
   // ===== PROFILE MANAGEMENT =====
 
   @Patch('profile')
@@ -57,46 +69,29 @@ export class OwnersController {
 
   @Post('upload/profile-photo')
   @UseInterceptors(FileInterceptor('file'))
-  uploadProfilePhoto(@UploadedFile() file: Express.Multer.File, @Req() req: any) {
+  uploadProfilePhoto(
+    @UploadedFile() file: Express.Multer.File,
+    @Req() req: any,
+  ) {
     // This would integrate with file service
     // For now, return placeholder
-    return { message: 'Profile photo upload endpoint - integrate with file service' };
+    return {
+      message: 'Profile photo upload endpoint - integrate with file service',
+    };
   }
 
   @Post('upload/national-id-photo')
   @UseInterceptors(FileInterceptor('file'))
-  uploadNationalIdPhoto(@UploadedFile() file: Express.Multer.File, @Req() req: any) {
-    // This would integrate with file service
-    // For now, return placeholder
-    return { message: 'National ID photo upload endpoint - integrate with file service' };
-  }
-
-  // ===== LEASE MANAGEMENT =====
-
-  @Post('leases')
-  createLease(@Body() dto: CreateLeaseDto, @Req() req: any) {
-    return this.ownersService.createLease(dto, req.user.id);
-  }
-
-  @Post('leases/:leaseId/add-tenant')
-  @UseInterceptors(FileInterceptor('nationalIdPhoto'))
-  addTenantToLease(
-    @Param('leaseId') leaseId: string,
+  uploadNationalIdPhoto(
     @UploadedFile() file: Express.Multer.File,
     @Req() req: any,
   ) {
-    // File upload would return fileId, for now use placeholder
-    const nationalIdPhotoId = 'file-id-placeholder';
-    return this.ownersService.addTenantToLease(leaseId, nationalIdPhotoId, req.user.id);
-  }
-
-  @Post('leases/:leaseId/terminate')
-  terminateLease(
-    @Param('leaseId') leaseId: string,
-    @Body() dto: TerminateLeaseDto,
-    @Req() req: any,
-  ) {
-    return this.ownersService.terminateLease(leaseId, dto, req.user.id);
+    // This would integrate with file service
+    // For now, return placeholder
+    return {
+      message:
+        'National ID photo upload endpoint - integrate with file service',
+    };
   }
 
   // ===== FAMILY MANAGEMENT =====
@@ -104,10 +99,11 @@ export class OwnersController {
   @Post('family/:unitId')
   addFamilyMember(
     @Param('unitId') unitId: string,
-    @Body() dto: { name: string; phone: string; email?: string; nationalId?: string; relationship?: string },
+    @Query('targetResidentId') targetResidentId: string,
+    @Body() dto: AddFamilyMemberDto,
     @Req() req: any,
   ) {
-    return this.ownersService.addFamilyMember(unitId, dto, req.user.id);
+    return this.ownersService.addFamilyMember(unitId, dto, req.user.id, targetResidentId);
   }
 
   @Patch('family/:userId')

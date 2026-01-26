@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateUnitDto } from './dto/create-unit.dto';
@@ -73,7 +77,9 @@ export class UnitsService {
       if (!unit) throw new NotFoundException('Unit not found');
 
       // Check if resident exists
-      const resident = await tx.resident.findUnique({ where: { id: residentId } });
+      const resident = await tx.resident.findUnique({
+        where: { id: residentId },
+      });
       if (!resident) throw new NotFoundException('Resident not found');
 
       // Check if resident is already assigned to this unit
@@ -81,7 +87,9 @@ export class UnitsService {
         where: { residentId_unitId: { residentId, unitId } },
       });
       if (existingAssignment) {
-        throw new BadRequestException('Resident is already assigned to this unit');
+        throw new BadRequestException(
+          'Resident is already assigned to this unit',
+        );
       }
 
       // If assigning as OWNER, check if unit already has an owner
@@ -111,7 +119,9 @@ export class UnitsService {
         where: { residentId_unitId: { residentId, unitId } },
       });
       if (!assignment) {
-        throw new NotFoundException('Resident assignment not found for this unit');
+        throw new NotFoundException(
+          'Resident assignment not found for this unit',
+        );
       }
 
       return tx.residentUnit.delete({
@@ -132,9 +142,12 @@ export class UnitsService {
     const unit = await this.findOne(unitId);
     const previousStatus = unit.status;
 
+    // Set isDelivered flag based on status
+    const isDelivered = status === 'DELIVERED';
+
     const updatedUnit = await this.prisma.unit.update({
       where: { id: unitId },
-      data: { status },
+      data: { status, isDelivered },
     });
 
     // Emit event if status changed
@@ -169,30 +182,33 @@ export class UnitsService {
         },
       },
     });
-    if (units.length === 0) throw new NotFoundException('No units found matching the number');
+    if (units.length === 0)
+      throw new NotFoundException('No units found matching the number');
     return units;
   }
 
   // Feature access gating based on unit status
   async canAccessFeature(unitId: string, feature: string): Promise<boolean> {
-    return this.prisma.unit.findUnique({
-      where: { id: unitId },
-    }).then(unit => {
-      if (!unit) return false;
+    return this.prisma.unit
+      .findUnique({
+        where: { id: unitId },
+      })
+      .then((unit) => {
+        if (!unit) return false;
 
-      switch (feature) {
-        case 'add_tenant':
-        case 'add_family':
-        case 'manage_delegates':
-          return unit.status === 'DELIVERED';
-        case 'view_payment_plan':
-        case 'view_announcements':
-        case 'view_overdue_checks':
-          return true; // Available even for NOT_DELIVERED
-        default:
-          return false;
-      }
-    });
+        switch (feature) {
+          case 'add_tenant':
+          case 'add_family':
+          case 'manage_delegates':
+            return unit.status === 'DELIVERED';
+          case 'view_payment_plan':
+          case 'view_announcements':
+          case 'view_overdue_checks':
+            return true; // Available even for NOT_DELIVERED
+          default:
+            return false;
+        }
+      });
   }
 
   // Get user access level for a unit

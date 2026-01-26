@@ -25,6 +25,8 @@ enum RegistrationStatus {
 
 enum UnitStatus {
   AVAILABLE
+  HELD
+  UNRELEASED
   NOT_DELIVERED
   DELIVERED
   OCCUPIED
@@ -96,6 +98,11 @@ enum LeaseStatus {
   EXPIRING_SOON
   EXPIRED
   TERMINATED
+}
+
+enum LeaseSource {
+  OWNER
+  COMPOUND
 }
 
 enum InvoiceStatus {
@@ -427,15 +434,37 @@ model Admin {
 }
 
 model Resident {
-  id          String    @id @default(uuid())
-  userId      String    @unique
-  user        User      @relation(fields: [userId], references: [id])
-  nationalId  String?
-  dateOfBirth DateTime?
+  id           String    @id @default(uuid())
+  userId       String    @unique
+  user         User      @relation(fields: [userId], references: [id])
+  nationalId   String?
+  dateOfBirth  DateTime?
   relationship String? // e.g., "spouse", "child", "parent"
-  bookings    Booking[]
+  bookings     Booking[]
 
   residentUnits ResidentUnit[]
+  familyMembers FamilyMember[] @relation("primary_family_members")
+  familyOf      FamilyMember?  @relation("family_member_of")
+}
+
+model FamilyMember {
+  id                String   @id @default(uuid())
+  primaryResidentId String // the owner/tenant
+  primaryResident   Resident @relation("primary_family_members", fields: [primaryResidentId], references: [id])
+
+  familyResidentId String   @unique // the family member themselves
+  familyResident   Resident @relation("family_member_of", fields: [familyResidentId], references: [id])
+
+  relationship  Rela // CHILD | SPOUSE | PARENT
+  status        UserStatusEnum @default(ACTIVE)
+  activatedAt   DateTime       @default(now())
+  deactivatedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([primaryResidentId])
+  @@index([familyResidentId])
 }
 
 model Owner {
@@ -494,8 +523,8 @@ model Unit {
   incidents       Incident[]
   unitFees        UnitFee[]
 
-  accessGrants AccessGrant[]
-  unitAccesses UnitAccess[]
+  accessGrants            AccessGrant[]
+  unitAccesses            UnitAccess[]
   clubhouseAccessRequests ClubhouseAccessRequest[]
 
   workers Worker[]
@@ -524,15 +553,15 @@ model UnitAccess {
   unitId String
   userId String
 
-  role        UnitAccessRole
+  role         UnitAccessRole
   delegateType DelegateType?
-  startsAt    DateTime
-  endsAt      DateTime?
+  startsAt     DateTime
+  endsAt       DateTime?
 
   grantedBy String // owner userId or admin userId
   status    AccessStatus // ACTIVE / REVOKED / EXPIRED
 
-  source String? // OWNER_DELEGATION | ADMIN_ASSIGNMENT
+  source String? // OWNER_DELEGATION | ADMIN_ASSIGNMENT | FAMILY_AUTO | TENANT_AUTO
 
   canViewFinancials Boolean @default(false)
   canReceiveBilling Boolean @default(false)
@@ -619,11 +648,11 @@ model File {
 }
 
 model Attachment {
-  id        String @id @default(uuid())
-  file      File   @relation(fields: [fileId], references: [id])
-  fileId    String
-  entityId  String // ID of the entity this attachment belongs to
-  entity    String // e.g., 'SERVICE_REQUEST', 'COMPLAINT', 'INCIDENT', 'VIOLATION'
+  id       String @id @default(uuid())
+  file     File   @relation(fields: [fileId], references: [id])
+  fileId   String
+  entityId String // ID of the entity this attachment belongs to
+  entity   String // e.g., 'SERVICE_REQUEST', 'COMPLAINT', 'INCIDENT', 'VIOLATION'
 
   // Explicit relations (keep for backward compatibility, but prefer entity/entityId pattern)
   serviceRequestId String?
@@ -750,6 +779,7 @@ model Lease {
   contractFileId   String?     @unique
   contractFile     File?       @relation("lease_contract", fields: [contractFileId], references: [id])
   status           LeaseStatus @default(ACTIVE)
+  source           LeaseSource @default(OWNER)
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
 }
@@ -1123,14 +1153,14 @@ model Referral {
 
 // Clubhouse Access Requests
 model ClubhouseAccessRequest {
-  id         String   @id @default(uuid())
-  userId     String
-  unitId     String
-  status     String   @default("PENDING") // PENDING, APPROVED, REJECTED
-  requestedAt DateTime @default(now())
-  approvedAt DateTime?
-  approvedBy String?
-  createdAt  DateTime @default(now())
+  id          String    @id @default(uuid())
+  userId      String
+  unitId      String
+  status      String    @default("PENDING") // PENDING, APPROVED, REJECTED
+  requestedAt DateTime  @default(now())
+  approvedAt  DateTime?
+  approvedBy  String?
+  createdAt   DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id])
   unit Unit @relation(fields: [unitId], references: [id])

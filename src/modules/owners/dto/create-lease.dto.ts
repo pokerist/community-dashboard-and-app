@@ -1,4 +1,12 @@
-import { IsString, IsDateString, IsOptional, IsDecimal, IsNotEmpty, IsUUID } from 'class-validator';
+import {
+  IsString,
+  IsDateString,
+  IsOptional,
+  IsDecimal,
+  IsNotEmpty,
+  IsUUID,
+  IsNumber,
+} from 'class-validator';
 import { Transform } from 'class-transformer';
 
 export class CreateLeaseDto {
@@ -22,13 +30,11 @@ export class CreateLeaseDto {
   @IsNotEmpty()
   endDate: string;
 
-  @Transform(({ value }) => parseFloat(value))
-  @IsDecimal()
+  @IsNumber()
   monthlyRent: number;
 
-  @Transform(({ value }) => value ? parseFloat(value) : undefined)
   @IsOptional()
-  @IsDecimal()
+  @IsNumber()
   securityDeposit?: number;
 
   @IsOptional()

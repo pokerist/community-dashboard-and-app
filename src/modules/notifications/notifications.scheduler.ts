@@ -11,7 +11,6 @@ export class NotificationScheduler {
   // Run every minute to dispatch due notifications
   @Cron('* * * * *')
   async handleScheduledNotifications() {
-    
     this.logger.log('Checking for scheduled notifications...');
     await this.notificationsService.dispatchScheduled();
   }

@@ -50,7 +50,9 @@ export class ServiceRequestService {
     });
 
     if (unit?.status !== 'DELIVERED') {
-      throw new BadRequestException('Service requests are only available after delivery');
+      throw new BadRequestException(
+        'Service requests are only available after delivery',
+      );
     }
 
     // 3. Core Validation (Ensure service is active, required fields are present)

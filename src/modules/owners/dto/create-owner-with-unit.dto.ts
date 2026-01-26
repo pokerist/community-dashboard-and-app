@@ -13,13 +13,18 @@ export class CreateOwnerWithUnitDto {
   @IsNotEmpty()
   phone: string;
 
-  @IsString()
-  @IsNotEmpty()
-  password: string;
+  // Remove password field - will be auto-generated
+  // @IsString()
+  // @IsNotEmpty()
+  // password: string;
 
   @IsString()
-  @IsOptional()
-  nationalId?: string;
+  @IsNotEmpty()
+  nationalId: string;
+
+  @IsString()
+  @IsNotEmpty()
+  nationalIdPhotoId: string; // Mandatory national ID photo
 
   @IsString()
   @IsNotEmpty()

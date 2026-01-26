@@ -21,9 +21,16 @@ const IDENTITY_DOCS_BUCKET = 'identity-docs';
 
 // Validation functions
 function validateImageOrPdf(file: Express.Multer.File) {
-  const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf'];
+  const allowedMimeTypes = [
+    'image/jpeg',
+    'image/png',
+    'image/jpg',
+    'application/pdf',
+  ];
   if (!allowedMimeTypes.includes(file.mimetype)) {
-    throw new BadRequestException('Only JPEG, PNG images and PDF files are allowed');
+    throw new BadRequestException(
+      'Only JPEG, PNG images and PDF files are allowed',
+    );
   }
   // Check file size (5MB limit for documents)
   const maxSize = 5 * 1024 * 1024; // 5MB
@@ -51,62 +58,98 @@ export class FileController {
   // Specific upload endpoints as per guide
   @Post('upload/profile-photo')
   @UseInterceptors(FileInterceptor('file'))
-  async uploadProfilePhoto(@UploadedFile() file: Express.Multer.File): Promise<FileUploadResult> {
+  async uploadProfilePhoto(
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<FileUploadResult> {
     if (!file) {
       throw new BadRequestException('File is missing.');
     }
     validateImage(file);
-    return this.fileService.handleUpload(file, PROFILE_BUCKET, FileCategory.PROFILE_PHOTO);
+    return this.fileService.handleUpload(
+      file,
+      PROFILE_BUCKET,
+      FileCategory.PROFILE_PHOTO,
+    );
   }
 
   @Post('upload/national-id')
   @UseInterceptors(FileInterceptor('file'))
-  async uploadNationalId(@UploadedFile() file: Express.Multer.File): Promise<FileUploadResult> {
+  async uploadNationalId(
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<FileUploadResult> {
     if (!file) {
       throw new BadRequestException('File is missing.');
     }
     validateImageOrPdf(file);
-    return this.fileService.handleUpload(file, IDENTITY_DOCS_BUCKET, FileCategory.NATIONAL_ID);
+    return this.fileService.handleUpload(
+      file,
+      IDENTITY_DOCS_BUCKET,
+      FileCategory.NATIONAL_ID,
+    );
   }
 
   @Post('upload/contract')
   @UseInterceptors(FileInterceptor('file'))
-  async uploadContract(@UploadedFile() file: Express.Multer.File): Promise<FileUploadResult> {
+  async uploadContract(
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<FileUploadResult> {
     if (!file) {
       throw new BadRequestException('File is missing.');
     }
     validateImageOrPdf(file);
-    return this.fileService.handleUpload(file, IDENTITY_DOCS_BUCKET, FileCategory.CONTRACT);
+    return this.fileService.handleUpload(
+      file,
+      IDENTITY_DOCS_BUCKET,
+      FileCategory.CONTRACT,
+    );
   }
 
   @Post('upload/delegate-id')
   @UseInterceptors(FileInterceptor('file'))
-  async uploadDelegateId(@UploadedFile() file: Express.Multer.File): Promise<FileUploadResult> {
+  async uploadDelegateId(
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<FileUploadResult> {
     if (!file) {
       throw new BadRequestException('File is missing.');
     }
     validateImageOrPdf(file);
-    return this.fileService.handleUpload(file, IDENTITY_DOCS_BUCKET, FileCategory.DELEGATE_ID);
+    return this.fileService.handleUpload(
+      file,
+      IDENTITY_DOCS_BUCKET,
+      FileCategory.DELEGATE_ID,
+    );
   }
 
   @Post('upload/worker-id')
   @UseInterceptors(FileInterceptor('file'))
-  async uploadWorkerId(@UploadedFile() file: Express.Multer.File): Promise<FileUploadResult> {
+  async uploadWorkerId(
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<FileUploadResult> {
     if (!file) {
       throw new BadRequestException('File is missing.');
     }
     validateImageOrPdf(file);
-    return this.fileService.handleUpload(file, IDENTITY_DOCS_BUCKET, FileCategory.WORKER_ID);
+    return this.fileService.handleUpload(
+      file,
+      IDENTITY_DOCS_BUCKET,
+      FileCategory.WORKER_ID,
+    );
   }
 
   @Post('upload/service-attachment')
   @UseInterceptors(FileInterceptor('file'))
-  async uploadServiceAttachment(@UploadedFile() file: Express.Multer.File): Promise<FileUploadResult> {
+  async uploadServiceAttachment(
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<FileUploadResult> {
     if (!file) {
       throw new BadRequestException('File is missing.');
     }
     validateImageOrPdf(file);
-    return this.fileService.handleUpload(file, ATTACHMENTS_BUCKET, FileCategory.SERVICE_ATTACHMENT);
+    return this.fileService.handleUpload(
+      file,
+      ATTACHMENTS_BUCKET,
+      FileCategory.SERVICE_ATTACHMENT,
+    );
   }
 
   // DELETE /files/:fileId

@@ -43,7 +43,10 @@ export class BookingsService {
     return facility;
   }
 
-  private resolveSlotConfig(facility: any, dateStr: string): EffectiveSlotConfig | null {
+  private resolveSlotConfig(
+    facility: any,
+    dateStr: string,
+  ): EffectiveSlotConfig | null {
     const date = new Date(dateStr);
     const dayIndex = date.getUTCDay();
 
@@ -61,7 +64,9 @@ export class BookingsService {
         slotCapacity: exception.slotCapacity ?? facility.capacity ?? undefined,
       };
     } else {
-      const config = facility.slotConfig.find((c: any) => c.dayOfWeek === dayIndex);
+      const config = facility.slotConfig.find(
+        (c: any) => c.dayOfWeek === dayIndex,
+      );
       if (!config) return null;
       return {
         startTime: config.startTime,
@@ -72,7 +77,10 @@ export class BookingsService {
     }
   }
 
-  private validateTime(dto: CreateBookingDto, config: EffectiveSlotConfig): boolean {
+  private validateTime(
+    dto: CreateBookingDto,
+    config: EffectiveSlotConfig,
+  ): boolean {
     const toMinutes = (t: string) => {
       const [h, m] = t.split(':').map(Number);
       return h * 60 + m;
@@ -137,7 +145,11 @@ export class BookingsService {
     }
   }
 
-  private async checkSlotCapacity(dto: CreateBookingDto, facility: any, config: EffectiveSlotConfig) {
+  private async checkSlotCapacity(
+    dto: CreateBookingDto,
+    facility: any,
+    config: EffectiveSlotConfig,
+  ) {
     if (config.slotCapacity) {
       const slotCount = await this.prisma.booking.count({
         where: {
@@ -180,7 +192,11 @@ export class BookingsService {
     }
 
     // Access Control: Check if user has active access to the unit
-    const access = await getActiveUnitAccess(this.prisma, dto.userId, dto.unitId);
+    const access = await getActiveUnitAccess(
+      this.prisma,
+      dto.userId,
+      dto.unitId,
+    );
 
     // Feature Gating: Bookings only available after delivery
     const unit = await this.prisma.unit.findUnique({
@@ -189,18 +205,25 @@ export class BookingsService {
     });
 
     if (unit?.status !== 'DELIVERED') {
-      throw new BadRequestException('Facility bookings are only available after delivery');
+      throw new BadRequestException(
+        'Facility bookings are only available after delivery',
+      );
     }
 
     // Check if user has permission to book facilities
     if (!access.canBookFacilities) {
-      throw new BadRequestException('User does not have permission to book facilities');
+      throw new BadRequestException(
+        'User does not have permission to book facilities',
+      );
     }
 
     const facility = await this.getFacility(dto);
     const config = this.resolveSlotConfig(facility, dto.date);
 
-    if (!config) throw new BadRequestException('Facility closed or no slots configured for this day');
+    if (!config)
+      throw new BadRequestException(
+        'Facility closed or no slots configured for this day',
+      );
 
     if (!this.validateTime(dto, config)) {
       throw new BadRequestException('Requested time does not match slot rules');

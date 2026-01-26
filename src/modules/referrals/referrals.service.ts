@@ -165,12 +165,19 @@ export class ReferralsService {
     });
 
     if (!referral) {
-      return { valid: false, message: 'No active referral found for this phone number' };
+      return {
+        valid: false,
+        message: 'No active referral found for this phone number',
+      };
     }
 
     const referrerName =
       referral.referrer.nameEN || referral.referrer.nameAR || 'Referrer';
-    return { valid: true, referrerName, message: `Referral found for this phone number from ${referrerName}` };
+    return {
+      valid: true,
+      referrerName,
+      message: `Referral found for this phone number from ${referrerName}`,
+    };
   }
 
   async reject(id: string, reason?: string) {

@@ -116,7 +116,10 @@ export class UnitsController {
   @Get('access/:unitId/:userId')
   @HttpCode(HttpStatus.OK)
   @Permissions('unit.view_all')
-  getUserAccess(@Param('unitId') unitId: string, @Param('userId') userId: string) {
+  getUserAccess(
+    @Param('unitId') unitId: string,
+    @Param('userId') userId: string,
+  ) {
     return this.unitsService.getUserAccessForUnit(unitId, userId);
   }
 

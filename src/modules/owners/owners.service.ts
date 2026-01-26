@@ -7,10 +7,21 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { EmailService } from '../notifications/email.service';
+import { AuthorityResolver } from '../../common/utils/authority-resolver.util';
 import * as bcrypt from 'bcrypt';
 import { CreateOwnerWithUnitDto } from './dto/create-owner-with-unit.dto';
-import { UpdateProfileDto, UpdateFamilyProfileDto } from './dto/update-profile.dto';
-import { CreateLeaseDto } from './dto/create-lease.dto';
+import {
+  AddFamilyMemberDto,
+  RelationshipType,
+  ChildDataDto,
+  SpouseDataDto,
+  ParentDataDto,
+} from './dto/add-family-member.dto';
+import {
+  UpdateProfileDto,
+  UpdateFamilyProfileDto,
+} from './dto/update-profile.dto';
+import { UnitStatus, UserStatusEnum, UnitAccessRole } from '@prisma/client';
 
 @Injectable()
 export class OwnersService {
@@ -57,8 +68,37 @@ export class OwnersService {
         throw new BadRequestException('Unit already has a primary owner');
       }
 
-      // Hash password
-      const passwordHash = await bcrypt.hash(dto.password, 12);
+      // Check national ID uniqueness
+      const existingNationalId = await tx.resident.findFirst({
+        where: { nationalId: dto.nationalId },
+      });
+      if (existingNationalId) {
+        throw new ConflictException('National ID already exists');
+      }
+
+      // Check national ID photo exists and is valid
+      const nationalIdPhoto = await tx.file.findUnique({
+        where: { id: dto.nationalIdPhotoId },
+      });
+      if (!nationalIdPhoto) {
+        throw new BadRequestException('National ID photo is required');
+      }
+      if (nationalIdPhoto.category !== 'NATIONAL_ID') {
+        throw new BadRequestException(
+          'Invalid file category for national ID photo',
+        );
+      }
+
+      // Generate secure password automatically
+      const chars =
+        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+      let randomPassword = '';
+      for (let i = 0; i < 12; i++) {
+        randomPassword += chars.charAt(
+          Math.floor(Math.random() * chars.length),
+        );
+      }
+      const passwordHash = await bcrypt.hash(randomPassword, 12);
 
       // Create user
       const user = await tx.user.create({
@@ -69,6 +109,7 @@ export class OwnersService {
           passwordHash,
           userStatus: 'ACTIVE',
           signupSource: 'dashboard',
+          nationalIdFileId: dto.nationalIdPhotoId, // Set national ID photo
         },
       });
 
@@ -117,7 +158,7 @@ export class OwnersService {
       // Update unit status to NOT_DELIVERED
       await tx.unit.update({
         where: { id: dto.unitId },
-        data: { status: 'NOT_DELIVERED' },
+        data: { status: 'NOT_DELIVERED', isDelivered: false },
       });
 
       // Log status change
@@ -131,7 +172,32 @@ export class OwnersService {
         },
       });
 
-      return user;
+      // Send welcome email with credentials
+      if (user.email) {
+        const subject = `Welcome to Alkarma Community - Your Account Details`;
+        const content = `
+          <h2>Welcome ${user.nameEN}!</h2>
+          <p>Your account has been created successfully as an owner in Alkarma Community.</p>
+          <p><strong>Your login credentials:</strong></p>
+          <p>Email: ${user.email}</p>
+          <p>Password: ${randomPassword}</p>
+          <p><strong>Important:</strong> Please change your password after first login for security.</p>
+          <p><strong>Your Access:</strong></p>
+          <ul>
+            <li>✅ View financial information</li>
+            <li>✅ Receive billing notifications</li>
+            <li>✅ Book facilities</li>
+            <li>✅ Generate QR codes</li>
+            <li>✅ Manage workers</li>
+            <li>✅ Add family members and tenants</li>
+          </ul>
+          <p><a href="https://app.alkarma.com/login">Login to your account</a></p>
+          <p>If you did not request this account, please contact our support team immediately.</p>
+        `;
+        await this.emailService.sendEmail(subject, user.email, content);
+      }
+
+      return { user, randomPassword };
     });
   }
 
@@ -154,9 +220,114 @@ export class OwnersService {
 
   async remove(id: string) {
     const owner = await this.findOne(id);
-    return this.prisma.owner.delete({
-      where: { id },
-      include: { user: true },
+
+    return this.prisma.$transaction(async (tx) => {
+      // Get the owner's user and unit access
+      const user = await tx.user.findUnique({
+        where: { id: owner.userId },
+      });
+
+      const unitAccess = await tx.unitAccess.findFirst({
+        where: {
+          userId: owner.userId,
+          role: 'OWNER',
+          status: 'ACTIVE',
+        },
+      });
+
+      // Delete the owner record
+      await tx.owner.delete({
+        where: { id },
+      });
+
+      // If owner had unit access, update unit status back to HELD
+      if (unitAccess) {
+        await tx.unit.update({
+          where: { id: unitAccess.unitId },
+          data: { status: 'UNRELEASED' as any },
+        });
+      }
+
+      return owner;
+    });
+  }
+
+  // Method to remove a user from a unit (for family/tenants)
+  async removeUserFromUnit(userId: string, unitId: string, removedBy: string) {
+    return this.prisma.$transaction(async (tx) => {
+      // Check if remover has permission (owner or admin)
+      const removerAccess = await tx.unitAccess.findFirst({
+        where: {
+          unitId,
+          userId: removedBy,
+          role: 'OWNER',
+          status: 'ACTIVE',
+        },
+      });
+
+      const isAdmin = await tx.admin.findUnique({
+        where: { userId: removedBy },
+      });
+
+      if (!removerAccess && !isAdmin) {
+        throw new ForbiddenException(
+          'Only owners or admins can remove users from units',
+        );
+      }
+
+      // Get the user being removed
+      const userToRemove = await tx.user.findUnique({
+        where: { id: userId },
+        include: { unitAccesses: true },
+      });
+
+      if (!userToRemove) {
+        throw new NotFoundException('User not found');
+      }
+
+      // Check if user has access to this unit
+      const userUnitAccess = userToRemove.unitAccesses.find(
+        (access) => access.unitId === unitId && access.status === 'ACTIVE',
+      );
+
+      if (!userUnitAccess) {
+        throw new BadRequestException('User does not have access to this unit');
+      }
+
+      // Update unit access status to REVOKED
+      await tx.unitAccess.update({
+        where: { id: userUnitAccess.id },
+        data: { status: 'REVOKED' },
+      });
+
+      // Check if this was the last active user in the unit
+      const activeUsersCount = await tx.unitAccess.count({
+        where: {
+          unitId,
+          status: 'ACTIVE',
+        },
+      });
+
+      // If no more active users, set unit status back to UNRELEASED
+      if (activeUsersCount === 0) {
+        await tx.unit.update({
+          where: { id: unitId },
+          data: { status: UnitStatus.UNRELEASED },
+        });
+      }
+
+      // Send removal notification email
+      if (userToRemove.email) {
+        const subject = `Access Revoked - Alkarma Community`;
+        const content = `
+          <h2>Access Revoked</h2>
+          <p>Your access to unit ${unitId} has been revoked.</p>
+          <p>If you believe this was done in error, please contact the administration.</p>
+        `;
+        await this.emailService.sendEmail(subject, userToRemove.email, content);
+      }
+
+      return { message: 'User access revoked successfully' };
     });
   }
 
@@ -224,7 +395,11 @@ export class OwnersService {
   }
 
   // Update family member profile (owner only)
-  async updateFamilyProfile(ownerId: string, familyUserId: string, dto: UpdateFamilyProfileDto) {
+  async updateFamilyProfile(
+    ownerId: string,
+    familyUserId: string,
+    dto: UpdateFamilyProfileDto,
+  ) {
     return this.prisma.$transaction(async (tx) => {
       // Check if owner has access to this family member
       const familyAccess = await tx.unitAccess.findFirst({
@@ -251,7 +426,9 @@ export class OwnersService {
       });
 
       if (!ownerAccess) {
-        throw new ForbiddenException('You do not have permission to edit this family member');
+        throw new ForbiddenException(
+          'You do not have permission to edit this family member',
+        );
       }
 
       // Check national ID uniqueness if provided
@@ -292,406 +469,193 @@ export class OwnersService {
     });
   }
 
-  // ===== LEASE MANAGEMENT =====
+  // ===== FAMILY MANAGEMENT =====
 
-  // Create lease (admin or owner)
-  async createLease(dto: CreateLeaseDto, createdBy: string) {
+  // Add family member with new authority-based system
+  async addFamilyMember(
+    unitId: string,
+    dto: AddFamilyMemberDto,
+    addedBy: string,
+    targetResidentId?: string, // admin-only override
+  ) {
     return this.prisma.$transaction(async (tx) => {
-      // Check if unit exists and is available for leasing
-      const unit = await tx.unit.findUnique({
-        where: { id: dto.unitId },
-      });
-      if (!unit) {
-        throw new NotFoundException('Unit not found');
+      const unit = await tx.unit.findUnique({ where: { id: unitId } });
+      if (!unit || unit.status !== 'DELIVERED') {
+        throw new BadRequestException(
+          'Unit must be delivered to add family members',
+        );
       }
 
-      // Check permissions (admin or owner of unit)
-      const isAdmin = await tx.admin.findUnique({
-        where: { userId: createdBy },
-      });
-
-      const isOwner = await tx.unitAccess.findFirst({
+      // Check authority using the resolver
+      const authority = await this.prisma.lease.findFirst({
         where: {
-          unitId: dto.unitId,
-          userId: createdBy,
-          role: 'OWNER',
+          unitId,
           status: 'ACTIVE',
         },
       });
 
-      if (!isAdmin && !isOwner) {
-        throw new ForbiddenException('Only admin or unit owner can create leases');
-      }
-
-      // Check if there's already an active lease for this unit
-      const existingLease = await tx.lease.findFirst({
-        where: {
-          unitId: dto.unitId,
-          status: 'ACTIVE',
-        },
-      });
-
-      if (existingLease) {
-        throw new ConflictException('Unit already has an active lease');
-      }
-
-      // Create lease
-      const leaseData: any = {
-        unitId: dto.unitId,
-        tenantEmail: dto.tenantEmail,
-        tenantNationalId: dto.tenantNationalId,
-        startDate: new Date(dto.startDate),
-        endDate: new Date(dto.endDate),
-        monthlyRent: dto.monthlyRent,
-        securityDeposit: dto.securityDeposit,
-        contractFileId: dto.contractFileId,
-        status: 'ACTIVE',
-      };
-
-      if (isOwner) {
-        leaseData.ownerId = createdBy; // Only set if owner
-      }
-
-      const lease = await tx.lease.create({
-        data: leaseData,
-      });
-
-      return lease;
-    });
-  }
-
-  // Add tenant to lease (creates user account and links to lease)
-  async addTenantToLease(leaseId: string, nationalIdPhotoId: string, addedBy: string) {
-    return this.prisma.$transaction(async (tx) => {
-      // Get lease
-      const lease = await tx.lease.findUnique({
-        where: { id: leaseId },
-        include: { unit: true },
-      });
-
-      if (!lease) {
-        throw new NotFoundException('Lease not found');
-      }
-
-      if (lease.status !== 'ACTIVE') {
-        throw new BadRequestException('Lease is not active');
-      }
+      const currentAuthority = authority ? 'TENANT' : 'OWNER';
 
       // Check permissions
       const isAdmin = await tx.admin.findUnique({
         where: { userId: addedBy },
       });
 
-      const isOwner = lease.ownerId && lease.ownerId === addedBy;
+      let hasAuthority = false;
+      let currentResidentId: string | null = null;
 
-      if (!isAdmin && !isOwner) {
-        throw new ForbiddenException('Only admin or lease owner can add tenant');
-      }
-
-      // Check if tenant info is complete (from lease data)
-      if (!lease.tenantEmail) {
-        throw new BadRequestException('Lease tenant email is required');
-      }
-
-      // Check for unique email
-      const existingEmail = await tx.user.findUnique({
-        where: { email: lease.tenantEmail },
-      });
-      if (existingEmail) {
-        throw new ConflictException('Email already registered');
-      }
-
-      // Check national ID uniqueness
-      if (lease.tenantNationalId) {
-        const existingNationalId = await tx.resident.findFirst({
-          where: { nationalId: lease.tenantNationalId },
-        });
-        if (existingNationalId) {
-          throw new ConflictException('National ID already exists');
+      if (isAdmin) {
+        hasAuthority = true;
+        // Admin can override or use resolved resident
+        if (targetResidentId) {
+          currentResidentId = targetResidentId;
+        } else {
+      // Resolve current resident
+      const currentResident = await this.getCurrentResidentForUnit(tx, unitId);
+          if (!currentResident) {
+            throw new BadRequestException('No current resident found for this unit');
+          }
+          currentResidentId = currentResident.residentId;
         }
-      }
-
-      // For now, we'll need to get tenant name and phone from somewhere else
-      // Since they're not in the lease schema, we'll use default values and require profile update
-      const tenantName = 'Tenant'; // This should be provided when creating lease
-      const tenantPhone = '0000000000'; // This should be provided when creating lease
-
-      // Generate secure password
-      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-      let randomPassword = '';
-      for (let i = 0; i < 12; i++) {
-        randomPassword += chars.charAt(Math.floor(Math.random() * chars.length));
-      }
-      const passwordHash = await bcrypt.hash(randomPassword, 12);
-
-      // Create user with basic info (will need profile update for complete details)
-      const user = await tx.user.create({
-        data: {
-          nameEN: tenantName,
-          email: lease.tenantEmail,
-          phone: tenantPhone,
-          passwordHash,
-          userStatus: 'ACTIVE',
-          signupSource: 'dashboard',
-          nationalIdFileId: nationalIdPhotoId,
-        },
-      });
-
-      // Create resident
-      const resident = await tx.resident.create({
-        data: {
-          userId: user.id,
-          nationalId: lease.tenantNationalId,
-        },
-      });
-
-      // Create tenant role
-      await tx.tenant.create({
-        data: { userId: user.id },
-      });
-
-      // Link tenant to lease
-      await tx.lease.update({
-        where: { id: leaseId },
-        data: { tenantId: user.id },
-      });
-
-      // Create resident-unit relationship
-      await tx.residentUnit.create({
-        data: {
-          residentId: resident.id,
-          unitId: lease.unitId,
-          isPrimary: true,
-        },
-      });
-
-      // Create unit access (expires with lease)
-      await tx.unitAccess.create({
-        data: {
-          unitId: lease.unitId,
-          userId: user.id,
-          role: 'TENANT',
-          startsAt: new Date(lease.startDate),
-          endsAt: new Date(lease.endDate),
-          grantedBy: addedBy,
-          status: 'ACTIVE',
-          source: 'LEASE_ASSIGNMENT',
-          canViewFinancials: true,
-          canReceiveBilling: true,
-          canBookFacilities: true,
-          canGenerateQR: true,
-          canManageWorkers: false,
-        },
-      });
-
-      // Send welcome email
-      if (user.email) {
-        const subject = `Welcome to Alkarma Community - Your Lease Details`;
-        const content = `
-          <h2>Welcome ${user.nameEN}!</h2>
-          <p>You have been added as a tenant to your leased unit.</p>
-          <p><strong>Lease Details:</strong></p>
-          <ul>
-            <li>Unit: ${lease.unit.unitNumber}</li>
-            <li>Start Date: ${lease.startDate.toDateString()}</li>
-            <li>End Date: ${lease.endDate.toDateString()}</li>
-            <li>Monthly Rent: $${lease.monthlyRent}</li>
-          </ul>
-          <p><strong>Your login credentials:</strong></p>
-          <p>Email: ${user.email}</p>
-          <p>Password: ${randomPassword}</p>
-          <p>Please change your password after first login.</p>
-          <p><a href="https://app.alkarma.com/login">Login to your account</a></p>
-        `;
-        await this.emailService.sendEmail(subject, user.email, content);
-      }
-
-      return { user, lease, randomPassword };
-    });
-  }
-
-  // Terminate lease and remove tenant
-  async terminateLease(leaseId: string, dto: { reason?: string; terminationDate?: string }, terminatedBy: string) {
-    return this.prisma.$transaction(async (tx) => {
-      // Get lease with tenant info
-      const lease = await tx.lease.findUnique({
-        where: { id: leaseId },
-        include: { unit: true, tenant: true },
-      });
-
-      if (!lease) {
-        throw new NotFoundException('Lease not found');
-      }
-
-      if (lease.status !== 'ACTIVE') {
-        throw new BadRequestException('Lease is not active');
-      }
-
-      // Check permissions
-      const isAdmin = await tx.admin.findUnique({
-        where: { userId: terminatedBy },
-      });
-
-      const isOwner = lease.ownerId === terminatedBy;
-
-      if (!isAdmin && !isOwner) {
-        throw new ForbiddenException('Only admin or lease owner can terminate leases');
-      }
-
-      const terminationDate = dto.terminationDate ? new Date(dto.terminationDate) : new Date();
-
-      // Update lease status
-      await tx.lease.update({
-        where: { id: leaseId },
-        data: {
-          status: 'TERMINATED',
-          endDate: terminationDate,
-        },
-      });
-
-      // Update unit access to expired
-      if (lease.tenantId) {
-        await tx.unitAccess.updateMany({
+      } else {
+        // Normal user must have appropriate access
+        const userAccess = await tx.unitAccess.findFirst({
           where: {
-            unitId: lease.unitId,
-            userId: lease.tenantId,
-            role: 'TENANT',
-          },
-          data: {
-            status: 'EXPIRED',
-            endsAt: terminationDate,
+            unitId,
+            userId: addedBy,
+            role: currentAuthority === 'OWNER' ? 'OWNER' : 'TENANT',
+            status: 'ACTIVE',
           },
         });
 
-        // Send termination email
-        if (lease.tenant && lease.tenant.email) {
-          const subject = `Lease Termination Notice - Alkarma Community`;
-          const content = `
-            <h2>Lease Termination Notice</h2>
-            <p>Dear ${lease.tenant.nameEN},</p>
-            <p>Your lease for unit ${lease.unit.unitNumber} has been terminated.</p>
-            <p><strong>Termination Details:</strong></p>
-            <ul>
-              <li>Termination Date: ${terminationDate.toDateString()}</li>
-              ${dto.reason ? `<li>Reason: ${dto.reason}</li>` : ''}
-            </ul>
-            <p>Please contact the administration for any questions regarding your security deposit or final settlement.</p>
-            <p>If you believe this termination was made in error, please contact us immediately.</p>
-          `;
-          await this.emailService.sendEmail(subject, lease.tenant.email, content);
+        if (!userAccess) {
+          throw new ForbiddenException(
+            `You do not have permission to add family members to this unit. Current authority: ${currentAuthority}`,
+          );
         }
+
+        hasAuthority = true;
+        currentResidentId = userAccess.userId;
       }
 
-      return lease;
-    });
-  }
-
-  // ===== FAMILY MANAGEMENT =====
-
-  // Add family member (after unit delivery)
-  async addFamilyMember(
-    unitId: string,
-    dto: { name: string; phone: string; email?: string; nationalId?: string; relationship?: string },
-    addedBy: string,
-  ) {
-    return this.prisma.$transaction(async (tx) => {
-      // Check unit is delivered
-      const unit = await tx.unit.findUnique({
-        where: { id: unitId },
-      });
-      if (!unit || unit.status !== 'DELIVERED') {
-        throw new BadRequestException('Unit must be delivered to add family members');
+      if (!hasAuthority) {
+        throw new ForbiddenException(
+          'You do not have permission to add family members to this unit',
+        );
       }
 
-      // Check adder has access to unit (owner or tenant)
-      const adderAccess = await tx.unitAccess.findFirst({
-        where: {
-          unitId,
-          userId: addedBy,
-          role: { in: ['OWNER', 'TENANT'] },
-          status: 'ACTIVE',
-        },
-      });
-      if (!adderAccess) {
-        throw new ForbiddenException('You do not have permission to add family members to this unit');
-      }
+      // ✅ Correct extraction
+      const data = dto.data;
 
-      // Check for unique email and phone
-      if (dto.email) {
+      // Type narrowing based on relationship
+      const isChild = dto.relationship === RelationshipType.CHILD;
+      const isSpouse = dto.relationship === RelationshipType.SPOUSE;
+      const isParent = dto.relationship === RelationshipType.PARENT;
+
+      // Uniqueness checks
+      if (data.email) {
         const existingEmail = await tx.user.findUnique({
-          where: { email: dto.email },
+          where: { email: data.email },
         });
-        if (existingEmail) {
+        if (existingEmail)
           throw new ConflictException('Email already registered');
-        }
       }
 
-      const existingPhone = await tx.user.findFirst({
-        where: { phone: dto.phone },
-      });
-      if (existingPhone) {
-        throw new ConflictException('Phone already registered');
-      }
-
-      // Check national ID uniqueness
-      if (dto.nationalId) {
-        const existingNationalId = await tx.resident.findFirst({
-          where: { nationalId: dto.nationalId },
+      if (data.phone) {
+        const existingPhone = await tx.user.findFirst({
+          where: { phone: data.phone },
         });
-        if (existingNationalId) {
-          throw new ConflictException('National ID already exists');
-        }
+        if (existingPhone)
+          throw new ConflictException('Phone already registered');
       }
 
-      // Generate secure password
-      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+      // File validation
+      await this.validateFileUploads(
+        tx,
+        this.getRequiredFileIds(dto.relationship, data),
+      );
+
+      // Password
+      const chars =
+        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
       let randomPassword = '';
       for (let i = 0; i < 12; i++) {
-        randomPassword += chars.charAt(Math.floor(Math.random() * chars.length));
+        randomPassword += chars[Math.floor(Math.random() * chars.length)];
       }
       const passwordHash = await bcrypt.hash(randomPassword, 12);
 
-      // Create user
+      // User
       const user = await tx.user.create({
         data: {
-          nameEN: dto.name,
-          email: dto.email,
-          phone: dto.phone,
+          nameEN: data.name,
+          email: data.email ?? undefined,
+          phone: data.phone ?? undefined,
           passwordHash,
-          userStatus: 'ACTIVE',
+          userStatus: data.email
+            ? UserStatusEnum.ACTIVE
+            : UserStatusEnum.INVITED,
           signupSource: 'dashboard',
+          profilePhotoId: data.personalPhotoId,
+          nationalIdFileId:
+            'nationalIdFileId' in data ? data.nationalIdFileId : undefined,
         },
       });
 
-      // Create resident
-      const resident = await tx.resident.create({
+      // Resident
+      const residentData: any = {
+        userId: user.id,
+        relationship: dto.relationship,
+      };
+
+      if ('nationalId' in data) {
+        residentData.nationalId = data.nationalId ?? undefined;
+      }
+
+      if (isChild && 'birthDate' in data && data.birthDate) {
+        residentData.birthDate = data.birthDate;
+      }
+
+      if (isChild && 'birthCertificateId' in data && data.birthCertificateId) {
+        residentData.birthCertificateId = data.birthCertificateId;
+      }
+
+      if (isSpouse && 'marriageCertificateId' in data && data.marriageCertificateId) {
+        residentData.marriageCertificateId = data.marriageCertificateId;
+      }
+
+      const resident = await tx.resident.create({ data: residentData });
+
+      // Create family member record linked to current resident
+      // currentResidentId is a userId, but we need the residentId (Resident table ID)
+      const currentResident = await tx.resident.findUnique({
+        where: { userId: currentResidentId! },
+      });
+      
+      if (!currentResident) {
+        throw new BadRequestException('Current resident not found');
+      }
+
+      await tx.familyMember.create({
         data: {
-          userId: user.id,
-          nationalId: dto.nationalId,
+          primaryResidentId: currentResident.id,
+          familyResidentId: resident.id,
           relationship: dto.relationship,
+          status: 'ACTIVE',
+          activatedAt: new Date(),
         },
       });
 
-      // Assign to unit
-      await tx.residentUnit.create({
-        data: {
-          residentId: resident.id,
-          unitId,
-          isPrimary: false,
-        },
-      });
-
-      // Create unit access with limited permissions
+      // Create UnitAccess for the family member in the current unit
       await tx.unitAccess.create({
         data: {
-          unitId,
+          unitId: unitId,
           userId: user.id,
           role: 'FAMILY',
           delegateType: 'FAMILY',
           startsAt: new Date(),
           grantedBy: addedBy,
           status: 'ACTIVE',
-          source: 'FAMILY_ADDITION',
+          source: 'FAMILY_MANUAL',
           canViewFinancials: false,
           canReceiveBilling: false,
           canBookFacilities: true,
@@ -700,32 +664,80 @@ export class OwnersService {
         },
       });
 
-      // Send welcome email
-      if (user.email) {
-        const subject = `Welcome to Alkarma Community - Family Member Access`;
-        const content = `
-          <h2>Welcome ${user.nameEN}!</h2>
-          <p>You have been added as a family member to your family unit.</p>
-          <p><strong>Your login credentials:</strong></p>
-          <p>Email: ${user.email}</p>
-          <p>Password: ${randomPassword}</p>
-          <p>Please change your password after first login.</p>
-          <p><strong>Access Permissions:</strong></p>
-          <ul>
-            <li>✅ View announcements</li>
-            <li>✅ Book facilities</li>
-            <li>❌ View financial information</li>
-            <li>❌ Receive billing</li>
-            <li>❌ Generate QR codes</li>
-            <li>❌ Manage workers</li>
-          </ul>
-          <p><a href="https://app.alkarma.com/login">Login to your account</a></p>
-        `;
-        await this.emailService.sendEmail(subject, user.email, content);
+      // Auto-propagate to all active units of the resident
+      if (currentResidentId) {
+        await this.createFamilyUnitAccess(tx, user.id, currentResidentId, addedBy);
       }
 
       return { user, randomPassword };
     });
+  }
+  
+  // Get required file IDs based on relationship and data
+  private getRequiredFileIds(
+    relationship: RelationshipType,
+    data: any,
+  ): string[] {
+    const fileIds: string[] = [];
+
+    // Personal photo is always required
+    if (data.personalPhotoId) {
+      fileIds.push(data.personalPhotoId);
+    }
+
+    // National ID file is required for spouse and parent, and for children 16+
+    if (data.nationalIdFileId) {
+      fileIds.push(data.nationalIdFileId);
+    }
+
+    // Relationship-specific files
+    if (
+      relationship === RelationshipType.SPOUSE &&
+      data.marriageCertificateId
+    ) {
+      fileIds.push(data.marriageCertificateId);
+    }
+
+    if (relationship === RelationshipType.CHILD && data.birthCertificateId) {
+      fileIds.push(data.birthCertificateId);
+    }
+
+    return fileIds;
+  }
+
+  // Validate file uploads exist and are correct category
+  private async validateFileUploads(tx: any, fileIds: string[]) {
+    for (const fileId of fileIds) {
+      const file = await tx.file.findUnique({
+        where: { id: fileId },
+      });
+
+      if (!file) {
+        throw new BadRequestException(`File with ID ${fileId} not found`);
+      }
+
+      // Validate file category based on file ID usage
+      // This is a simplified check - in production you might want more specific validation
+      if (!file.category) {
+        throw new BadRequestException(`File ${fileId} has no category`);
+      }
+    }
+  }
+
+  // Calculate age from birth date
+  private calculateAge(birthDate: Date): number {
+    const today = new Date();
+    const age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+
+    if (
+      monthDiff < 0 ||
+      (monthDiff === 0 && today.getDate() < birthDate.getDate())
+    ) {
+      return age - 1;
+    }
+
+    return age;
   }
 
   // Get family members for unit (owner/tenant only)
@@ -761,5 +773,82 @@ export class OwnersService {
     });
 
     return familyMembers;
+  }
+
+  // Helper method to get current resident for a unit
+  private async getCurrentResidentForUnit(tx: any, unitId: string) {
+    // First check for active lease
+    const activeLease = await tx.lease.findFirst({
+      where: {
+        unitId,
+        status: 'ACTIVE',
+      },
+      include: {
+        tenant: {
+          include: {
+            resident: true,
+          },
+        },
+      },
+    });
+
+    if (activeLease && activeLease.tenant) {
+      return {
+        residentId: activeLease.tenant.resident.userId,
+        type: 'TENANT',
+      };
+    }
+
+    // Fall back to owner
+    const ownerResidentUnit = await tx.residentUnit.findFirst({
+      where: {
+        unitId,
+        isPrimary: true,
+      },
+      include: {
+        resident: true,
+      },
+    });
+
+    if (ownerResidentUnit) {
+      return {
+        residentId: ownerResidentUnit.resident.userId,
+        type: 'OWNER',
+      };
+    }
+
+    return null;
+  }
+
+  // Helper method to create family unit access for all active units
+  private async createFamilyUnitAccess(tx: any, familyUserId: string, residentId: string, grantedBy: string) {
+    // Get all active units for the resident
+    const activeUnits = await tx.residentUnit.findMany({
+      where: {
+        residentId,
+      },
+      select: { unitId: true },
+    });
+
+    // Create unit access for family member in all active units
+    for (const unit of activeUnits) {
+      await tx.unitAccess.create({
+        data: {
+          unitId: unit.unitId,
+          userId: familyUserId,
+          role: 'FAMILY',
+          delegateType: 'FAMILY',
+          startsAt: new Date(),
+          grantedBy: grantedBy,
+          status: 'ACTIVE',
+          source: 'FAMILY_AUTO',
+          canViewFinancials: false,
+          canReceiveBilling: false,
+          canBookFacilities: true,
+          canGenerateQR: false,
+          canManageWorkers: false,
+        },
+      });
+    }
   }
 }

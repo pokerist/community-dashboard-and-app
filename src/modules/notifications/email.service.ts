@@ -32,7 +32,9 @@ export class EmailService {
         html: content,
       };
 
-      this.logger.log(`[SMTP] Attempting send to ${recipient} | subject="${subject}"`);
+      this.logger.log(
+        `[SMTP] Attempting send to ${recipient} | subject="${subject}"`,
+      );
 
       const info = await this.transporter.sendMail(mailOptions);
       this.logger.log(

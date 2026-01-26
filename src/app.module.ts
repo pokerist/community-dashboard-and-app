@@ -51,7 +51,7 @@ import { ClubhouseModule } from './modules/clubhouse/clubhouse.module';
     LeasesModule,
     OwnersModule,
     DelegatesModule,
-    ClubhouseModule
+    ClubhouseModule,
   ],
   controllers: [],
   providers: [],

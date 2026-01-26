@@ -74,7 +74,6 @@ export class NotificationsService {
       where: { id: notificationId },
     });
 
-    
     if (!notification) return;
 
     if (
@@ -174,8 +173,8 @@ export class NotificationsService {
           channel === Channel.IN_APP
             ? NotificationLogStatus.DELIVERED
             : channel === Channel.EMAIL
-            ? NotificationLogStatus.PENDING
-            : NotificationLogStatus.SENT,
+              ? NotificationLogStatus.PENDING
+              : NotificationLogStatus.SENT,
       })),
     );
 
