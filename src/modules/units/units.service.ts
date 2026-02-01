@@ -142,8 +142,15 @@ export class UnitsService {
     const unit = await this.findOne(unitId);
     const previousStatus = unit.status;
 
+    console.log({
+      incomingStatus: status,
+      deliveredEnum: UnitStatus.DELIVERED,
+      equals: status === UnitStatus.DELIVERED,
+    });
+
     // Set isDelivered flag based on status
-    const isDelivered = status === 'DELIVERED';
+    // Explicitly check for 'DELIVERED' status to set isDelivered to true
+    const isDelivered = status === UnitStatus.DELIVERED;
 
     const updatedUnit = await this.prisma.unit.update({
       where: { id: unitId },

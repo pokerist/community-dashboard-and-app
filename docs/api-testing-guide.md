@@ -1,13 +1,40 @@
-# 🧪 Complete API Testing Guide - Owner Onboarding & Family Management Flow
+# 🧪 Complete API Testing Guide - Profile Management, Family Management, Delegates, Workers & Clubhouse Flow
 
 ## Overview
 
-This guide provides comprehensive testing instructions for the Owner Onboarding, Family Management, and Access Control Flow. All tests assume:
+This guide provides comprehensive testing instructions for Profile Management, Family Management, Delegates, Workers, and Clubhouse Access Control Flow. All tests assume:
 
 - **Base URL:** `http://localhost:3000`
 - **Authentication:** `Authorization: Bearer <jwt-token>` header
 - **Admin Token:** Required for admin-only endpoints
 - **Owner Token:** Required for owner-specific endpoints
+- **Tenant Token:** Required for tenant-specific endpoints
+- **Family Token:** Required for family member-specific endpoints
+
+## 📋 Profile Management - Core Principles
+
+### **Profile = Identity (Singular, Self-Owned)**
+A profile represents WHO YOU ARE and is completely independent of units, leases, or family relationships.
+
+**✅ Profile Includes:**
+- Identity & personal data (Full name, National ID, Date of birth, Gender, Nationality)
+- Contact information (Phone, Email, Emergency contact)
+- Authentication-adjacent (User ID, Role(s), Account status)
+- Files (profilePhotoId, nationalIdFileId - 1-to-1 max)
+
+**❌ Profile Does NOT Include:**
+- Family members ❌
+- Marriage certificates ❌
+- Lease contracts ❌
+- Unit access ❌
+
+**🔑 Key Rule:** A profile can exist without a unit, without family, without leases. If your system breaks when a user has no unit → bad architecture.
+
+**🎯 Profile Management is Singular & Self-Owned:**
+- Users can only manage their OWN profile
+- No one else can edit your profile (not even admins for personal data)
+- Admins can only manage account status and roles
+- Profile is boring by design - it's just your identity
 
 ## 📋 Prerequisites
 
@@ -238,15 +265,13 @@ Content-Type: application/json
 ```json
 {
   "relationship": "CHILD",
-  "data": {
-    "name": "Omar Hassan",
-    "email": "omar.hassan@email.com",
-    "phone": "+201234567892",
-    "birthDate": "2010-05-15T00:00:00.000Z",
-    "personalPhotoId": "file-uuid-here",
-    "nationalId": "12345678901236",
-    "nationalIdFileId": "file-uuid-here"
-  }
+  "name": "Omar Hassan",
+  "email": "omar.hassan@email.com",
+  "phone": "+201234567892",
+  "birthDate": "2010-05-15T00:00:00.000Z",
+  "personalPhotoId": "file-uuid-here",
+  "nationalId": "12345678901236",
+  "nationalIdFileId": "file-uuid-here"
 }
 ```
 
@@ -254,15 +279,13 @@ Content-Type: application/json
 ```json
 {
   "relationship": "SPOUSE",
-  "data": {
-    "name": "Sarah Hassan",
-    "email": "sarah.hassan@email.com",
-    "phone": "+201234567893",
-    "nationalId": "12345678901237",
-    "nationalIdFileId": "file-uuid-here",
-    "marriageCertificateId": "file-uuid-here",
-    "personalPhotoId": "file-uuid-here"
-  }
+  "name": "Sarah Hassan",
+  "email": "sarah.hassan@email.com",
+  "phone": "+201234567893",
+  "nationalId": "12345678901237",
+  "nationalIdFileId": "file-uuid-here",
+  "marriageCertificateId": "file-uuid-here",
+  "personalPhotoId": "file-uuid-here"
 }
 ```
 
@@ -270,14 +293,12 @@ Content-Type: application/json
 ```json
 {
   "relationship": "PARENT",
-  "data": {
-    "name": "Hassan Mohamed",
-    "email": "hassan.mohamed@email.com",
-    "phone": "+201234567894",
-    "nationalId": "12345678901238",
-    "nationalIdFileId": "file-uuid-here",
-    "personalPhotoId": "file-uuid-here"
-  }
+  "name": "Hassan Mohamed",
+  "email": "hassan.mohamed@email.com",
+  "phone": "+201234567894",
+  "nationalId": "12345678901238",
+  "nationalIdFileId": "file-uuid-here",
+  "personalPhotoId": "file-uuid-here"
 }
 ```
 
@@ -351,15 +372,13 @@ Content-Type: application/json
 ```json
 {
   "relationship": "SPOUSE",
-  "data": {
-    "name": "Admin Added Spouse",
-    "email": "admin.spouse@email.com",
-    "phone": "+201234567895",
-    "nationalId": "12345678901239",
-    "nationalIdFileId": "file-uuid-here",
-    "marriageCertificateId": "file-uuid-here",
-    "personalPhotoId": "file-uuid-here"
-  }
+  "name": "Admin Added Spouse",
+  "email": "admin.spouse@email.com",
+  "phone": "+201234567895",
+  "nationalId": "12345678901239",
+  "nationalIdFileId": "file-uuid-here",
+  "marriageCertificateId": "file-uuid-here",
+  "personalPhotoId": "file-uuid-here"
 }
 ```
 
@@ -1102,3 +1121,726 @@ if (pm.response.code === 201) {
 - [ ] Access admin endpoints as regular user → 403
 - [ ] Access owner endpoints as non-owner → 403
 - [ ] Modify other users' data → 403
+
+--- 
+
+## **Phase 7: Delegate Management Flow**
+
+### **7.1 Request Delegate Access**
+**Endpoint:** `POST /delegates/request-access`
+
+**Purpose:** Owner requests delegate access for a specific person and unit
+
+**Headers:**
+```
+Authorization: Bearer <owner-token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "unitId": "550e8400-e29b-41d4-a716-446655440000",
+  "delegateName": "Mohamed Ali",
+  "delegatePhone": "+201234567896",
+  "delegateEmail": "mohamed.ali@email.com",
+  "delegateType": "FRIEND",
+  "permissions": ["ENTER", "WORK"],
+  "validFrom": "2024-01-01T00:00:00.000Z",
+  "validTo": "2024-12-31T23:59:59.000Z"
+}
+```
+
+**✅ Success Response (201):**
+```json
+{
+  "id": "aa0e8400-e29b-41d4-a716-446655440020",
+  "status": "PENDING",
+  "delegateName": "Mohamed Ali",
+  "delegatePhone": "+201234567896",
+  "delegateEmail": "mohamed.ali@email.com",
+  "delegateType": "FRIEND",
+  "permissions": ["ENTER", "WORK"],
+  "validFrom": "2024-01-01T00:00:00.000Z",
+  "validTo": "2024-12-31T23:59:59.000Z"
+}
+```
+
+**❌ Error Cases:**
+
+**Non-Owner Requests (403):**
+```json
+{
+  "statusCode": 403,
+  "message": "Only owners can request delegate access",
+  "error": "Forbidden"
+}
+```
+
+**Invalid Unit (400):**
+```json
+{
+  "statusCode": 400,
+  "message": "Unit not found or not owned by requester",
+  "error": "Bad Request"
+}
+```
+
+**Invalid Permissions (400):**
+```json
+{
+  "statusCode": 400,
+  "message": "Invalid permissions: DELIVER not allowed for FRIEND delegate type",
+  "error": "Bad Request"
+}
+```
+
+--- 
+
+### **7.2 Approve Delegate Request**
+**Endpoint:** `POST /delegates/{requestId}/approve`
+
+**Purpose:** Admin approves delegate request and creates access profile
+
+**Headers:**
+```
+Authorization: Bearer <admin-token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "nationalId": "12345678901240",
+  "photoId": "file-uuid-here"
+}
+```
+
+**✅ Success Response (200):**
+```json
+{
+  "id": "aa0e8400-e29b-41d4-a716-446655440020",
+  "status": "APPROVED",
+  "accessProfileId": "bb0e8400-e29b-41d4-a716-446655440021",
+  "delegateName": "Mohamed Ali",
+  "delegatePhone": "+201234567896"
+}
+```
+
+**✅ Side Effects:**
+- Creates AccessProfile record
+- Creates AccessGrant record
+- Sends approval email to delegate
+- Creates QR codes for specified permissions
+
+**❌ Error Cases:**
+
+**Request Not Found (404):**
+```json
+{
+  "statusCode": 404,
+  "message": "Delegate request not found",
+  "error": "Not Found"
+}
+```
+
+**Missing Required Files (400):**
+```json
+{
+  "statusCode": 400,
+  "message": "National ID photo is required for delegate approval",
+  "error": "Bad Request"
+}
+```
+
+--- 
+
+### **7.3 Revoke Delegate Access**
+**Endpoint:** `POST /delegates/{requestId}/revoke`
+
+**Purpose:** Owner or admin revokes delegate access
+
+**Headers:**
+```
+Authorization: Bearer <owner-or-admin-token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "reason": "No longer needed"
+}
+```
+
+**✅ Success Response (200):**
+```json
+{
+  "message": "Delegate access revoked successfully"
+}
+```
+
+**✅ Side Effects:**
+- Updates AccessGrant status to REVOKED
+- Sends revocation email to delegate
+- Invalidates any active QR codes
+
+--- 
+
+### **7.4 List Delegate Requests**
+**Endpoint:** `GET /delegates/requests`
+
+**Purpose:** Owner views their delegate requests
+
+**Headers:**
+```
+Authorization: Bearer <owner-token>
+```
+
+**✅ Success Response (200):**
+```json
+[
+  {
+    "id": "aa0e8400-e29b-41d4-a716-446655440020",
+    "status": "APPROVED",
+    "delegateName": "Mohamed Ali",
+    "delegatePhone": "+201234567896",
+    "delegateType": "FRIEND",
+    "permissions": ["ENTER", "WORK"],
+    "validFrom": "2024-01-01T00:00:00.000Z",
+    "validTo": "2024-12-31T23:59:59.000Z",
+    "createdAt": "2024-01-01T10:00:00.000Z"
+  }
+]
+```
+
+--- 
+
+### **7.5 Delegate Access Verification**
+**Endpoint:** `GET /delegates/verify/{qrId}`
+
+**Purpose:** Security gate verifies delegate QR code
+
+**Headers:**
+```
+Authorization: Bearer <security-token>
+```
+
+**✅ Success Response (200):**
+```json
+{
+  "valid": true,
+  "delegateName": "Mohamed Ali",
+  "permissions": ["ENTER"],
+  "validUntil": "2024-12-31T23:59:59.000Z",
+  "unitId": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**❌ Error Cases:**
+
+**Invalid QR (400):**
+```json
+{
+  "valid": false,
+  "message": "Invalid or expired QR code"
+}
+```
+
+**No Permissions (403):**
+```json
+{
+  "valid": false,
+  "message": "No active permissions for this gate"
+}
+```
+
+--- 
+
+## **Phase 8: Worker Management Flow**
+
+### **8.1 Register Worker**
+**Endpoint:** `POST /workers/register`
+
+**Purpose:** Admin registers a worker with contractor and access profile
+
+**Headers:**
+```
+Authorization: Bearer <admin-token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "contractorId": "cc0e8400-e29b-41d4-a716-446655440022",
+  "fullName": "Ahmed Mohamed",
+  "nationalId": "12345678901241",
+  "jobType": "Electrician",
+  "phone": "+201234567897",
+  "photoId": "file-uuid-here",
+  "nationalIdPhotoId": "file-uuid-here",
+  "unitId": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**✅ Success Response (201):**
+```json
+{
+  "id": "dd0e8400-e29b-41d4-a716-446655440023",
+  "accessProfileId": "ee0e8400-e29b-41d4-a716-446655440024",
+  "fullName": "Ahmed Mohamed",
+  "jobType": "Electrician",
+  "status": "ACTIVE"
+}
+```
+
+**✅ Side Effects:**
+- Creates AccessProfile record
+- Creates Worker record
+- Creates AccessGrant for WORK permission
+- Sends welcome email to worker
+
+**❌ Error Cases:**
+
+**Duplicate National ID (409):**
+```json
+{
+  "statusCode": 409,
+  "message": "Worker with this national ID already exists",
+  "error": "Conflict"
+}
+```
+
+**Invalid Contractor (400):**
+```json
+{
+  "statusCode": 400,
+  "message": "Contractor not found",
+  "error": "Bad Request"
+}
+```
+
+--- 
+
+### **8.2 Update Worker Status**
+**Endpoint:** `PATCH /workers/{workerId}/status`
+
+**Purpose:** Admin updates worker status (ACTIVE/INACTIVE)
+
+**Headers:**
+```
+Authorization: Bearer <admin-token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "status": "INACTIVE",
+  "reason": "Contract ended"
+}
+```
+
+**✅ Success Response (200):**
+```json
+{
+  "id": "dd0e8400-e29b-41d4-a716-446655440023",
+  "status": "INACTIVE",
+  "updatedAt": "2024-01-01T10:00:00.000Z"
+}
+```
+
+**✅ Side Effects:**
+- Updates Worker status
+- Revokes all active AccessGrants
+- Sends notification email
+
+--- 
+
+### **8.3 Worker Access Verification**
+**Endpoint:** `GET /workers/verify/{qrId}`
+
+**Purpose:** Security gate verifies worker QR code
+
+**Headers:**
+```
+Authorization: Bearer <security-token>
+```
+
+**✅ Success Response (200):**
+```json
+{
+  "valid": true,
+  "workerName": "Ahmed Mohamed",
+  "jobType": "Electrician",
+  "contractor": "ABC Contracting",
+  "permissions": ["WORK"],
+  "validUntil": "2024-12-31T23:59:59.000Z",
+  "unitId": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**❌ Error Cases:**
+
+**Worker Inactive (403):**
+```json
+{
+  "valid": false,
+  "message": "Worker access has been revoked"
+}
+```
+
+**Expired Access (400):**
+```json
+{
+  "valid": false,
+  "message": "Worker access has expired"
+}
+```
+
+--- 
+
+### **8.4 List Workers for Unit**
+**Endpoint:** `GET /workers/unit/{unitId}`
+
+**Purpose:** Owner views all workers with access to their unit
+
+**Headers:**
+```
+Authorization: Bearer <owner-token>
+```
+
+**✅ Success Response (200):**
+```json
+[
+  {
+    "id": "dd0e8400-e29b-41d4-a716-446655440023",
+    "fullName": "Ahmed Mohamed",
+    "jobType": "Electrician",
+    "contractor": "ABC Contracting",
+    "status": "ACTIVE",
+    "accessValidUntil": "2024-12-31T23:59:59.000Z"
+  }
+]
+```
+
+--- 
+
+## **Phase 9: Clubhouse Access Management Flow**
+
+### **9.1 Request Clubhouse Access**
+**Endpoint:** `POST /clubhouse/request-access`
+
+**Purpose:** Resident requests clubhouse access for their unit
+
+**Headers:**
+```
+Authorization: Bearer <resident-token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "unitId": "550e8400-e29b-41d4-a716-446655440000",
+  "requestReason": "Regular use for family",
+  "familyMembersIncluded": true
+}
+```
+
+**✅ Success Response (201):**
+```json
+{
+  "id": "ff0e8400-e29b-41d4-a716-446655440025",
+  "status": "PENDING",
+  "requestReason": "Regular use for family",
+  "familyMembersIncluded": true,
+  "requestedBy": "ii0e8400-e29b-41d4-a716-446655440013"
+}
+```
+
+**❌ Error Cases:**
+
+**Non-Resident Requests (403):**
+```json
+{
+  "statusCode": 403,
+  "message": "Only residents can request clubhouse access",
+  "error": "Forbidden"
+}
+```
+
+**Unit Not Delivered (400):**
+```json
+{
+  "statusCode": 400,
+  "message": "Unit must be delivered to request clubhouse access",
+  "error": "Bad Request"
+}
+```
+
+--- 
+
+### **9.2 Approve Clubhouse Request**
+**Endpoint:** `POST /clubhouse/{requestId}/approve`
+
+**Purpose:** Admin approves clubhouse access request
+
+**Headers:**
+```
+Authorization: Bearer <admin-token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "validFrom": "2024-01-01T00:00:00.000Z",
+  "validTo": "2024-12-31T23:59:59.000Z",
+  "notes": "Approved for family use"
+}
+```
+
+**✅ Success Response (200):**
+```json
+{
+  "id": "ff0e8400-e29b-41d4-a716-446655440025",
+  "status": "APPROVED",
+  "approvedAt": "2024-01-01T10:00:00.000Z",
+  "approvedBy": "admin-user-id",
+  "validFrom": "2024-01-01T00:00:00.000Z",
+  "validTo": "2024-12-31T23:59:59.000Z"
+}
+```
+
+**✅ Side Effects:**
+- Updates request status to APPROVED
+- Sends approval email to resident
+- Creates access permissions for all family members if requested
+
+--- 
+
+### **9.3 Revoke Clubhouse Access**
+**Endpoint:** `POST /clubhouse/{requestId}/revoke`
+
+**Purpose:** Admin or resident revokes clubhouse access
+
+**Headers:**
+```
+Authorization: Bearer <admin-or-resident-token>
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "reason": "Moving out of unit"
+}
+```
+
+**✅ Success Response (200):**
+```json
+{
+  "message": "Clubhouse access revoked successfully"
+}
+```
+
+**✅ Side Effects:**
+- Updates request status to REVOKED
+- Sends revocation email to resident
+- Removes access permissions for all associated users
+
+--- 
+
+### **9.4 Check Clubhouse Access**
+**Endpoint:** `GET /clubhouse/check-access/{unitId}`
+
+**Purpose:** Check if unit has active clubhouse access
+
+**Headers:**
+```
+Authorization: Bearer <admin-token>
+```
+
+**✅ Success Response (200):**
+```json
+{
+  "hasAccess": true,
+  "requestId": "ff0e8400-e29b-41d4-a716-446655440025",
+  "status": "APPROVED",
+  "validFrom": "2024-01-01T00:00:00.000Z",
+  "validTo": "2024-12-31T23:59:59.000Z",
+  "familyMembersIncluded": true
+}
+```
+
+**❌ No Access (200):**
+```json
+{
+  "hasAccess": false,
+  "reason": "No active requests"
+}
+```
+
+--- 
+
+### **9.5 List Clubhouse Requests**
+**Endpoint:** `GET /clubhouse/requests`
+
+**Purpose:** Resident views their clubhouse access requests
+
+**Headers:**
+```
+Authorization: Bearer <resident-token>
+```
+
+**✅ Success Response (200):**
+```json
+[
+  {
+    "id": "ff0e8400-e29b-41d4-a716-446655440025",
+    "status": "APPROVED",
+    "requestReason": "Regular use for family",
+    "familyMembersIncluded": true,
+    "requestedAt": "2024-01-01T09:00:00.000Z",
+    "approvedAt": "2024-01-01T10:00:00.000Z"
+  }
+]
+```
+
+--- 
+
+## **Complete Cross-Flow Test Scenarios**
+
+### **Scenario 1: Full Resident Journey**
+1. **Profile Setup**
+   - Create owner with unit
+   - Upload profile photo and national ID
+   - Verify profile is independent of unit
+
+2. **Family Management**
+   - Add spouse with marriage certificate
+   - Add child with birth certificate
+   - Verify family auto-propagation
+
+3. **Delegate Management**
+   - Request friend delegate for unit access
+   - Admin approves delegate
+   - Verify delegate QR works
+
+4. **Worker Management**
+   - Admin registers electrician for unit
+   - Verify worker access verification
+   - Update worker status to inactive
+
+5. **Clubhouse Access**
+   - Request clubhouse access for family
+   - Admin approves request
+   - Verify access works for all family members
+
+### **Scenario 2: Multi-Unit Tenant Journey**
+1. **Lease Setup**
+   - Create tenant with lease on Unit A
+   - Add family members → Auto-propagation to Unit A
+
+2. **Second Lease**
+   - Create second lease on Unit B
+   - Add more family members → Auto-propagation to BOTH units
+
+3. **Delegate Access**
+   - Request delegate for Unit A only
+   - Verify delegate cannot access Unit B
+
+4. **Lease Termination**
+   - Terminate Unit A lease → Family stays active (Unit B active)
+   - Terminate Unit B lease → Family becomes inactive
+
+### **Scenario 3: Security & Access Control**
+1. **Profile Security**
+   - Verify users can only edit their own profile
+   - Verify admins cannot edit personal data
+   - Verify profile exists without units
+
+2. **Authority Validation**
+   - Owner tries to add family when unit leased → Blocked
+   - Tenant adds family when unit leased → Success
+   - Admin override works correctly
+
+3. **Access Verification**
+   - Test all QR code types (delegate, worker, resident)
+   - Verify expired access is rejected
+   - Verify permission-based access control
+
+### **Performance & Scalability Tests**
+- [ ] 100+ family members per resident
+- [ ] 50+ delegates per owner
+- [ ] 20+ workers per unit
+- [ ] Concurrent access verification requests
+- [ ] Database query optimization for access checks
+- [ ] File upload performance with large files
+
+### **Integration Tests**
+- [ ] Email notifications for all approval/rejection events
+- [ ] Audit logging for all access changes
+- [ ] Database transaction integrity
+- [ ] File storage integration
+- [ ] QR code generation and validation
+- [ ] Real-time access status updates
+
+--- 
+
+## **Final Production Checklist**
+
+### **Profile Management**
+- [ ] Profile is truly independent of units/leases/family
+- [ ] Users can only manage their own profile
+- [ ] No one else can edit personal identity data
+- [ ] Profile exists and functions without any units
+- [ ] File uploads (profile photo, national ID) work correctly
+
+### **Family Management**
+- [ ] Authority-based access control works correctly
+- [ ] Auto-propagation to multiple units
+- [ ] Family lifecycle management (activation/deactivation)
+- [ ] Document validation (marriage/birth certificates)
+- [ ] Age-based validation rules
+
+### **Delegate Management**
+- [ ] Request workflow (request → approve → revoke)
+- [ ] QR code generation and validation
+- [ ] Permission-based access control
+- [ ] Delegate types (FRIEND, INTERIOR_DESIGNER, FAMILY)
+- [ ] Security gate integration
+
+### **Worker Management**
+- [ ] Contractor management
+- [ ] Worker registration and status tracking
+- [ ] Access verification at gates
+- [ ] Job type tracking
+- [ ] Security and safety compliance
+
+### **Clubhouse Access**
+- [ ] Request and approval workflow
+- [ ] Family member inclusion
+- [ ] Access verification
+- [ ] Time-based access control
+- [ ] Integration with resident management
+
+### **Cross-Flow Integration**
+- [ ] Profile independence verified
+- [ ] Authority resolution accuracy
+- [ ] Access control consistency
+- [ ] Email notification reliability
+- [ ] Audit trail completeness
+- [ ] Performance under load
+
+### **Security & Compliance**
+- [ ] Data protection for personal information
+- [ ] Access control enforcement
+- [ ] Audit logging for all sensitive operations
+- [ ] File upload security
+- [ ] QR code security
+- [ ] Authentication and authorization
+
+This comprehensive testing guide ensures that all flows work correctly, maintain proper separation of concerns, and provide a secure, scalable solution for community management.

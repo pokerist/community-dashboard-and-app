@@ -10,9 +10,10 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { FileService, FileCategory } from './file.service';
+import { FileService } from './file.service';
 import { FileUploadResult } from '../../common/interfaces/file-storage.interface';
 import type { Response } from 'express';
+import { $Enums } from '@prisma/client';
 
 // Define the bucket name constants centrally
 const ATTACHMENTS_BUCKET = 'service-attachments';
@@ -68,7 +69,7 @@ export class FileController {
     return this.fileService.handleUpload(
       file,
       PROFILE_BUCKET,
-      FileCategory.PROFILE_PHOTO,
+      $Enums.FileCategory.PROFILE_PHOTO,
     );
   }
 
@@ -84,7 +85,7 @@ export class FileController {
     return this.fileService.handleUpload(
       file,
       IDENTITY_DOCS_BUCKET,
-      FileCategory.NATIONAL_ID,
+      $Enums.FileCategory.NATIONAL_ID,
     );
   }
 
@@ -100,7 +101,7 @@ export class FileController {
     return this.fileService.handleUpload(
       file,
       IDENTITY_DOCS_BUCKET,
-      FileCategory.CONTRACT,
+      $Enums.FileCategory.CONTRACT,
     );
   }
 
@@ -116,7 +117,7 @@ export class FileController {
     return this.fileService.handleUpload(
       file,
       IDENTITY_DOCS_BUCKET,
-      FileCategory.DELEGATE_ID,
+      $Enums.FileCategory.DELEGATE_ID,
     );
   }
 
@@ -132,7 +133,39 @@ export class FileController {
     return this.fileService.handleUpload(
       file,
       IDENTITY_DOCS_BUCKET,
-      FileCategory.WORKER_ID,
+      $Enums.FileCategory.WORKER_ID,
+    );
+  }
+
+  @Post('upload/marriage-certificate')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadMarriageCertificate(
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<FileUploadResult> {
+    if (!file) {
+      throw new BadRequestException('File is missing.');
+    }
+    validateImageOrPdf(file);
+    return this.fileService.handleUpload(
+      file,
+      IDENTITY_DOCS_BUCKET,
+      'MARRIAGE_CERTIFICATE' as $Enums.FileCategory,
+    );
+  }
+
+  @Post('upload/birth-certificate')
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadBirthCertificate(
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<FileUploadResult> {
+    if (!file) {
+      throw new BadRequestException('File is missing.');
+    }
+    validateImageOrPdf(file);
+    return this.fileService.handleUpload(
+      file,
+      IDENTITY_DOCS_BUCKET,
+      'BIRTH_CERTIFICATE' as $Enums.FileCategory,
     );
   }
 
@@ -148,7 +181,7 @@ export class FileController {
     return this.fileService.handleUpload(
       file,
       ATTACHMENTS_BUCKET,
-      FileCategory.SERVICE_ATTACHMENT,
+      $Enums.FileCategory.SERVICE_ATTACHMENT,
     );
   }
 

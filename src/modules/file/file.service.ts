@@ -9,17 +9,7 @@ import {
 } from '../../common/interfaces/file-storage.interface';
 import { SupabaseStorageAdapter } from './adapters/supabase-storage.adapter';
 import { PrismaService } from '../../../prisma/prisma.service';
-
-// Define FileCategory enum locally until Prisma generates it
-export enum FileCategory {
-  PROFILE_PHOTO = 'PROFILE_PHOTO',
-  NATIONAL_ID = 'NATIONAL_ID',
-  CONTRACT = 'CONTRACT',
-  DELEGATE_ID = 'DELEGATE_ID',
-  WORKER_ID = 'WORKER_ID',
-  DELIVERY = 'DELIVERY',
-  SERVICE_ATTACHMENT = 'SERVICE_ATTACHMENT',
-}
+import { $Enums } from '@prisma/client';
 
 @Injectable()
 export class FileService {
@@ -33,7 +23,7 @@ export class FileService {
   async handleUpload(
     file: Express.Multer.File,
     bucket: string,
-    category: FileCategory,
+    category: $Enums.FileCategory,
   ): Promise<FileUploadResult> {
     const uploadResult = await this.storageAdapter.uploadFile(file, bucket);
 
@@ -66,11 +56,11 @@ export class FileService {
     }
 
     // Deletion rules based on category
-    if (file.category === FileCategory.NATIONAL_ID) {
+    if (file.category === $Enums.FileCategory.NATIONAL_ID) {
       throw new BadRequestException('Identity documents cannot be deleted');
     }
 
-    if (file.category === FileCategory.CONTRACT) {
+    if (file.category === $Enums.FileCategory.CONTRACT) {
       // Check if lease is still active - for now, allow deletion but this should be checked
       // throw new BadRequestException('Contracts cannot be deleted after lease starts');
     }

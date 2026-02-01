@@ -9,6 +9,7 @@ datasource db {
 }
 
 enum UserStatusEnum {
+  PENDING
   INVITED
   ACTIVE
   SUSPENDED
@@ -218,6 +219,17 @@ enum ReferralStatus {
   REJECTED
 }
 
+enum RelationshipType {
+  CHILD
+  SPOUSE
+  PARENT
+}
+
+enum ResidentDocumentType {
+  MARRIAGE_CERTIFICATE
+  BIRTH_CERTIFICATE
+}
+
 enum NotificationStatus {
   SCHEDULED
   PENDING
@@ -246,6 +258,8 @@ enum FileCategory {
   CONTRACT
   DELEGATE_ID
   WORKER_ID
+  MARRIAGE_CERTIFICATE
+  BIRTH_CERTIFICATE
   DELIVERY
   SERVICE_ATTACHMENT
 }
@@ -445,6 +459,7 @@ model Resident {
   residentUnits ResidentUnit[]
   familyMembers FamilyMember[] @relation("primary_family_members")
   familyOf      FamilyMember?  @relation("family_member_of")
+  documents     ResidentDocument[] @relation("resident_documents")
 }
 
 model FamilyMember {
@@ -455,7 +470,7 @@ model FamilyMember {
   familyResidentId String   @unique // the family member themselves
   familyResident   Resident @relation("family_member_of", fields: [familyResidentId], references: [id])
 
-  relationship  Rela // CHILD | SPOUSE | PARENT
+  relationship  RelationshipType // CHILD | SPOUSE | PARENT
   status        UserStatusEnum @default(ACTIVE)
   activatedAt   DateTime       @default(now())
   deactivatedAt DateTime?
@@ -645,6 +660,22 @@ model File {
   leaseContract  Lease?       @relation("lease_contract")
 
   pendingRegistrations PendingRegistration[]
+  documents            ResidentDocument[] @relation("file_documents")
+}
+
+model ResidentDocument {
+  id          String @id @default(uuid())
+  residentId  String
+  type        ResidentDocumentType
+  fileId      String
+
+  resident Resident @relation("resident_documents", fields: [residentId], references: [id])
+  file     File     @relation("file_documents", fields: [fileId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([residentId, type])
+  @@index([residentId])
 }
 
 model Attachment {
@@ -1089,8 +1120,7 @@ model UserStatusLog {
   id        String               @id @default(uuid())
   user      User                 @relation(fields: [userId], references: [id])
   userId    String
-  oldStatus String
-  newStatus String
+  newStatus UserStatusEnum       @default(ACTIVE)
   source    UserStatusLogSource?
   note      String?
   createdAt DateTime             @default(now())

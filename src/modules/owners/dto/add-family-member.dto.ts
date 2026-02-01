@@ -6,10 +6,7 @@ import {
   IsDate,
   IsEnum,
   IsUUID,
-  IsObject,
-  ValidateNested,
 } from 'class-validator';
-import { Type } from 'class-transformer';
 
 export enum RelationshipType {
   CHILD = 'CHILD',
@@ -17,76 +14,52 @@ export enum RelationshipType {
   SPOUSE = 'SPOUSE',
 }
 
-// Base data for all relationships
-export class FamilyMemberDataDto {
-  @ApiProperty()
-  @IsString()
-  name: string;
-
-  @ApiPropertyOptional()
-  @IsEmail()
-  @IsOptional()
-  email?: string;
-
-  @ApiProperty()
-  @IsString()
-  phone: string;
-
-  @ApiPropertyOptional()
-  @IsString()
-  @IsOptional()
-  nationalId?: string;
-
-  @ApiProperty()
-  @IsUUID()
-  personalPhotoId: string;
-
-  @ApiPropertyOptional()
-  @IsUUID()
-  @IsOptional()
-  nationalIdFileId?: string;
-}
-
-// Child-specific data
-export class ChildDataDto extends FamilyMemberDataDto {
-  @ApiProperty()
-  @IsDate()
-  birthDate: Date;
-
-  @ApiPropertyOptional()
-  @IsUUID()
-  @IsOptional()
-  birthCertificateId?: string;
-}
-
-// Spouse-specific data
-export class SpouseDataDto extends FamilyMemberDataDto {
-  @ApiProperty()
-  @IsUUID()
-  marriageCertificateId: string;
-}
-
-// Parent-specific data
-export class ParentDataDto extends FamilyMemberDataDto {
-  // No additional required fields for parents
-}
-
 export class AddFamilyMemberDto {
   @ApiProperty({ enum: RelationshipType })
   @IsEnum(RelationshipType)
   relationship: RelationshipType;
 
-  @ApiProperty({ description: 'Relationship-specific data' })
-  @ValidateNested()
-  @Type(() => FamilyMemberDataDto, {
-    discriminator: {
-      property: 'relationship',
-      subTypes: [
-        { value: ChildDataDto, name: 'CHILD' },
-        { value: SpouseDataDto, name: 'SPOUSE' },
-        { value: ParentDataDto, name: 'PARENT' },
-      ],
-    },
-  })
-  data: ChildDataDto | SpouseDataDto | ParentDataDto;
+  @ApiProperty({ description: 'Family member name' })
+  @IsString()
+  name: string;
+
+  @ApiPropertyOptional({ description: 'Email (optional)' })
+  @IsEmail()
+  @IsOptional()
+  email?: string;
+
+  @ApiProperty({ description: 'Phone number' })
+  @IsString()
+  phone: string;
+
+  @ApiPropertyOptional({ description: 'National ID number' })
+  @IsString()
+  @IsOptional()
+  nationalId?: string;
+
+  @ApiProperty({ description: 'Personal photo file ID' })
+  @IsUUID()
+  personalPhotoId: string;
+
+  @ApiPropertyOptional({ description: 'National ID file ID' })
+  @IsUUID()
+  @IsOptional()
+  nationalIdFileId?: string;
+
+  // Child-specific fields
+  @ApiPropertyOptional({ description: 'Birth date (for children only)' })
+  @IsDate()
+  @IsOptional()
+  birthDate?: Date;
+
+  @ApiPropertyOptional({ description: 'Birth certificate file ID (for children only)' })
+  @IsUUID()
+  @IsOptional()
+  birthCertificateId?: string;
+
+  // Spouse-specific fields
+  @ApiPropertyOptional({ description: 'Marriage certificate file ID (for spouse only)' })
+  @IsUUID()
+  @IsOptional()
+  marriageCertificateId?: string;
 }
