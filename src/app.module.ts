@@ -24,6 +24,7 @@ import { LeasesModule } from './modules/leases/leases.module';
 import { OwnersModule } from './modules/owners/owners.module';
 import { DelegatesModule } from './modules/delegates/delegates.module';
 import { ClubhouseModule } from './modules/clubhouse/clubhouse.module';
+import { AccessControlModule } from './modules/access-control/access-control.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { ClubhouseModule } from './modules/clubhouse/clubhouse.module';
     OwnersModule,
     DelegatesModule,
     ClubhouseModule,
+    AccessControlModule,
   ],
   controllers: [],
   providers: [],

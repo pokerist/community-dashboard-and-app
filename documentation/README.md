@@ -181,6 +181,7 @@ Each module has detailed documentation in its respective directory:
 ### Additional Modules
 - [Service](./service/) - Service catalog management
 - [Service-Field](./service-field/) - Dynamic service form fields
+- [Access Control (QR Codes)](./access-control/access-control-api.md) - QR generation, tracking, and HikCentral integration layer
 
 ## API Documentation
 
