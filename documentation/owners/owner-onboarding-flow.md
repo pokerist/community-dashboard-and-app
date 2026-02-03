@@ -241,18 +241,18 @@ POST /clubhouse/approve/{requestId}
 
 ## 🔐 Access Control Matrix
 
-| Feature | NOT_DELIVERED Owner | DELIVERED Owner | Family | Tenant | Delegate |
+|         Feature          | NOT_DELIVERED Owner | DELIVERED Owner | Family | Tenant | Delegate |
 |---------|-------------------|-----------------|--------|--------|----------|
-| View Payment Plans | ✅ | ✅ | ✅ | ✅ | ❌ |
-| View Announcements | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Add Family/Tenant | ❌ | ✅ | ❌ | ❌ | ❌ |
-| Request Delegates | ❌ | ✅ | ❌ | ❌ | ❌ |
-| Book Basic Facilities | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Book Advanced Facilities | ❌ | ✅ | ✅ | ✅ | ✅ |
-| Generate QR Codes | ❌ | ✅ | ❌ | ❌ | ✅ |
-| Manage Workers | ❌ | ✅ | ❌ | ❌ | ✅ |
-| View Financials | ✅ | ✅ | ❌ | ❌ | ✅ |
-| Receive Billing | ✅ | ✅ | ❌ | ❌ | ✅ |
+| View Payment Plans |            ✅             |        ✅       |   ✅  |   ✅   |   ❌     |
+| View Announcements |            ✅             |        ✅       |   ✅  |   ✅   |   ✅     |
+| Add Family/Tenant |             ❌             |        ✅       |   ❌  |   ❌   |   ❌     |
+| Request Delegates |             ❌             |        ✅       |   ❌  |   ❌   |   ❌     |
+| Book Basic Facilities |         ✅             |        ✅       |   ✅  |   ✅   |   ✅     |
+| Book Advanced Facilities |      ❌             |        ✅       |   ✅  |   ✅   |   ✅     |
+| Generate QR Codes |             ❌             |        ✅       |   ❌  |   ❌   |   ✅     |
+| Manage Workers |                ❌             |        ✅       |   ❌  |   ❌   |   ✅     |
+| View Financials |               ✅             |        ✅       |   ❌  |   ❌   |   ✅     |
+| Receive Billing |               ✅             |        ✅       |   ❌  |   ❌   |   ✅     |
 
 ---
 

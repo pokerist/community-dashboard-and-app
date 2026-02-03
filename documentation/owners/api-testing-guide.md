@@ -746,7 +746,7 @@ Content-Type: application/json
 }
 ```
 
-### **6.2 Remove User from Unit**
+### **6.2 Remove Family Access from Unit**
 **Endpoint:** `POST /owners/units/{unitId}/remove-user/{userId}`
 
 **Headers:**

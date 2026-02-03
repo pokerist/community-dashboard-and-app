@@ -77,6 +77,7 @@ enum ServiceFieldType {
 }
 
 enum QRType {
+  SELF
   VISITOR
   DELIVERY
   WORKER
@@ -223,11 +224,6 @@ enum RelationshipType {
   CHILD
   SPOUSE
   PARENT
-}
-
-enum ResidentDocumentType {
-  MARRIAGE_CERTIFICATE
-  BIRTH_CERTIFICATE
 }
 
 enum NotificationStatus {
@@ -666,7 +662,7 @@ model File {
 model ResidentDocument {
   id          String @id @default(uuid())
   residentId  String
-  type        ResidentDocumentType
+  type        FileCategory
   fileId      String
 
   resident Resident @relation("resident_documents", fields: [residentId], references: [id])

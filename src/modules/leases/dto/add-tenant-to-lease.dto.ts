@@ -1,16 +1,11 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
-  IsDate,
   IsEmail,
   IsNotEmpty,
-  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
-  IsEnum,
 } from 'class-validator';
-import { Type } from 'class-transformer';
-import { LeaseStatus } from '@prisma/client';
 
 export class AddTenantToLeaseDto {
   @ApiProperty({
@@ -42,11 +37,11 @@ export class AddTenantToLeaseDto {
   @IsNotEmpty()
   phone: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: 'file-uuid-here',
-    description: 'The ID of the uploaded national ID photo',
+    description: 'The ID of the uploaded national ID photo (if not uploading a file)',
   })
   @IsUUID()
-  @IsNotEmpty()
-  nationalIdPhotoId: string;
+  @IsOptional()
+  nationalIdFileId?: string;
 }

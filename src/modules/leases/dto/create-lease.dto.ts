@@ -1,4 +1,4 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'; // Import this
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsDate,
   IsEmail,
@@ -39,22 +39,24 @@ export class CreateLeaseDto {
   endDate: Date;
 
   @ApiProperty({ example: 5000.0 })
+  @Type(() => Number)
   @IsNumber()
   @IsNotEmpty()
   monthlyRent: number;
 
   @ApiPropertyOptional({ example: 2500.0 })
+  @Type(() => Number)
   @IsNumber()
   @IsOptional()
   securityDeposit?: number;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: 'file-uuid-here',
-    description: 'The ID of the uploaded contract file',
+    description: 'The ID of the uploaded contract file (if not uploading a file)',
   })
   @IsUUID()
-  @IsNotEmpty()
-  contractFileId: string;
+  @IsOptional()
+  contractFileId?: string;
 
   // Tenant information for complete lease creation
   @ApiProperty({
@@ -65,34 +67,40 @@ export class CreateLeaseDto {
   @IsNotEmpty()
   tenantEmail: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: '123456789',
-    description: 'The national ID of the tenant',
+    description:
+      'The national ID of the tenant (required when creating a new tenant; optional when reusing an existing tenant by email)',
   })
   @IsString()
-  @IsNotEmpty()
-  tenantNationalId: string;
+  @IsOptional()
+  tenantNationalId?: string;
 
-  @ApiProperty({ example: 'John Doe', description: 'The name of the tenant' })
+  @ApiPropertyOptional({
+    example: 'John Doe',
+    description:
+      'The name of the tenant (required when creating a new tenant; optional when reusing an existing tenant by email)',
+  })
   @IsString()
-  @IsNotEmpty()
-  tenantName: string;
+  @IsOptional()
+  tenantName?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: '+201234567890',
-    description: 'The phone number of the tenant',
+    description:
+      'The phone number of the tenant (required when creating a new tenant; optional when reusing an existing tenant by email)',
   })
   @IsString()
-  @IsNotEmpty()
-  tenantPhone: string;
+  @IsOptional()
+  tenantPhone?: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: 'file-uuid-here',
-    description: 'The ID of the uploaded national ID photo',
+    description: 'The ID of the uploaded national ID photo (if not uploading a file)',
   })
   @IsUUID()
-  @IsNotEmpty()
-  nationalIdPhotoId: string;
+  @IsOptional()
+  nationalIdFileId?: string;
 }
 
 export class UpdateLeaseDto {
@@ -114,6 +122,7 @@ export class UpdateLeaseDto {
   endDate?: Date;
 
   @ApiPropertyOptional()
+  @Type(() => Number)
   @IsNumber()
   @IsOptional()
   monthlyRent?: number;

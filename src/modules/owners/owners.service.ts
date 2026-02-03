@@ -33,135 +33,144 @@ export class OwnersService {
   ) {}
   async createOwnerWithUnit(dto: CreateOwnerWithUnitDto, createdBy: string) {
     try {
-      const result = await this.prisma.$transaction(async (tx) => {
-        // 1️⃣ Check unit
-        const unit = await tx.unit.findUnique({ where: { id: dto.unitId } });
-        if (!unit) throw new BadRequestException('Unit not found');
-        if (unit.status !== 'AVAILABLE')
-          throw new BadRequestException('Unit not available for assignment');
+      // Keep expensive work (bcrypt) out of the DB transaction to avoid Prisma tx timeouts (P2028).
+      const chars =
+        'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+      let randomPassword = '';
+      for (let i = 0; i < 12; i++) {
+        randomPassword += chars[Math.floor(Math.random() * chars.length)];
+      }
+      const passwordHash = await bcrypt.hash(randomPassword, 12);
 
-        // 2️⃣ Check email & phone uniqueness
-        if (dto.email) {
-          const existingEmail = await tx.user.findUnique({
-            where: { email: dto.email },
+      const result = await this.prisma.$transaction(
+        async (tx) => {
+          // 1) Check unit
+          const unit = await tx.unit.findUnique({ where: { id: dto.unitId } });
+          if (!unit) throw new BadRequestException('Unit not found');
+          if (unit.status !== 'AVAILABLE') {
+            throw new BadRequestException('Unit not available for assignment');
+          }
+
+          // 2) Check email & phone uniqueness
+          if (dto.email) {
+            const existingEmail = await tx.user.findUnique({
+              where: { email: dto.email },
+            });
+            if (existingEmail) {
+              throw new ConflictException('Email already registered');
+            }
+          }
+
+          const existingPhone = await tx.user.findFirst({
+            where: { phone: dto.phone },
           });
-          if (existingEmail)
-            throw new ConflictException('Email already registered');
-        }
-        const existingPhone = await tx.user.findFirst({
-          where: { phone: dto.phone },
-        });
-        if (existingPhone)
-          throw new ConflictException('Phone already registered');
+          if (existingPhone) {
+            throw new ConflictException('Phone already registered');
+          }
 
-        // 3️⃣ Check primary resident
-        const existingPrimary = await tx.residentUnit.findFirst({
-          where: { unitId: dto.unitId, isPrimary: true },
-        });
-        if (existingPrimary)
-          throw new BadRequestException('Unit already has a primary owner');
-
-        // 4️⃣ Check national ID
-        if (dto.nationalId) {
-          const existingNationalId = await tx.resident.findFirst({
-            where: { nationalId: dto.nationalId },
+          // 3) Check primary resident
+          const existingPrimary = await tx.residentUnit.findFirst({
+            where: { unitId: dto.unitId, isPrimary: true },
           });
-          if (existingNationalId)
-            throw new ConflictException('National ID already exists');
-        }
+          if (existingPrimary) {
+            throw new BadRequestException('Unit already has a primary owner');
+          }
 
-        // 5️⃣ Check national ID photo
-        const nationalIdPhoto = await tx.file.findUnique({
-          where: { id: dto.nationalIdPhotoId },
-        });
-        if (!nationalIdPhoto)
-          throw new BadRequestException('National ID photo is required');
-        if (nationalIdPhoto.category !== 'NATIONAL_ID')
-          throw new BadRequestException('Invalid national ID photo');
+          // 4) Check national ID
+          if (dto.nationalId) {
+            const existingNationalId = await tx.resident.findFirst({
+              where: { nationalId: dto.nationalId },
+            });
+            if (existingNationalId) {
+              throw new ConflictException('National ID already exists');
+            }
+          }
 
-        // 6️⃣ Generate secure random password
-        const chars =
-          'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-        let randomPassword = '';
-        for (let i = 0; i < 12; i++)
-          randomPassword += chars[Math.floor(Math.random() * chars.length)];
-        const passwordHash = await bcrypt.hash(randomPassword, 12);
+          // 5) Check national ID photo
+          const nationalIdPhoto = await tx.file.findUnique({
+            where: { id: dto.nationalIdPhotoId },
+          });
+          if (!nationalIdPhoto) {
+            throw new BadRequestException('National ID photo is required');
+          }
+          if (nationalIdPhoto.category !== 'NATIONAL_ID') {
+            throw new BadRequestException('Invalid national ID photo');
+          }
 
-        // 7️⃣ Create user
-        const user = await tx.user.create({
-          data: {
-            nameEN: dto.name,
-            email: dto.email ?? undefined,
-            phone: dto.phone ?? undefined,
-            passwordHash,
-            userStatus: dto.email
-              ? UserStatusEnum.ACTIVE
-              : UserStatusEnum.INVITED,
-            signupSource: 'dashboard',
-          },
-        });
+          // 6) Create user
+          const user = await tx.user.create({
+            data: {
+              nameEN: dto.name,
+              email: dto.email ?? undefined,
+              phone: dto.phone ?? undefined,
+              passwordHash,
+              userStatus: dto.email ? UserStatusEnum.ACTIVE : UserStatusEnum.INVITED,
+              signupSource: 'dashboard',
+            },
+          });
 
-        // 8️⃣ Create resident
-        const resident = await tx.resident.create({
-          data: { userId: user.id, nationalId: dto.nationalId ?? undefined },
-        });
+          // 7) Create resident
+          const resident = await tx.resident.create({
+            data: { userId: user.id, nationalId: dto.nationalId ?? undefined },
+          });
 
-        // 9️⃣ Create owner
-        await tx.owner.create({ data: { userId: user.id } });
+          // 8) Create owner
+          await tx.owner.create({ data: { userId: user.id } });
 
-        // 🔟 Assign resident to unit as primary
-        await tx.residentUnit.create({
-          data: {
-            residentId: resident.id,
-            unitId: dto.unitId,
-            isPrimary: true,
-          },
-        });
+          // 9) Assign resident to unit as primary
+          await tx.residentUnit.create({
+            data: {
+              residentId: resident.id,
+              unitId: dto.unitId,
+              isPrimary: true,
+            },
+          });
 
-        // 1️⃣1️⃣ Create unit access
-        await tx.unitAccess.create({
-          data: {
-            unitId: dto.unitId,
+          // 10) Create unit access
+          await tx.unitAccess.create({
+            data: {
+              unitId: dto.unitId,
+              userId: user.id,
+              role: 'OWNER',
+              startsAt: new Date(),
+              grantedBy: createdBy,
+              status: 'ACTIVE',
+              source: 'ADMIN_ASSIGNMENT',
+              canViewFinancials: true,
+              canReceiveBilling: true,
+              canBookFacilities: true,
+              canGenerateQR: true,
+              canManageWorkers: true,
+            },
+          });
+
+          // 11) Update unit status safely
+          await tx.unit.update({
+            where: { id: dto.unitId },
+            data: { status: UnitStatus.NOT_DELIVERED, isDelivered: false },
+          });
+
+          // 12) Log user status
+          await tx.userStatusLog.create({
+            data: {
+              userId: user.id,
+              newStatus: UserStatusEnum.ACTIVE,
+              source: 'ADMIN',
+              note: 'Owner created by admin',
+            },
+          });
+
+          return {
             userId: user.id,
-            role: 'OWNER',
-            startsAt: new Date(),
-            grantedBy: createdBy,
-            status: 'ACTIVE',
-            source: 'ADMIN_ASSIGNMENT',
-            canViewFinancials: true,
-            canReceiveBilling: true,
-            canBookFacilities: true,
-            canGenerateQR: true,
-            canManageWorkers: true,
-          },
-        });
+            userEmail: user.email,
+            userName: user.nameEN,
+            randomPassword,
+          };
+        },
+        { timeout: 20000 },
+      );
 
-        // 1️⃣2️⃣ Update unit status safely
-        await tx.unit.update({
-          where: { id: dto.unitId },
-          data: { status: UnitStatus.NOT_DELIVERED, isDelivered: false },
-        });
-
-        // 1️⃣3️⃣ Log user status
-        await tx.userStatusLog.create({
-          data: {
-            userId: user.id,
-            newStatus: UserStatusEnum.ACTIVE,
-            source: 'ADMIN',
-            note: 'Owner created by admin',
-          },
-        });
-
-        // ✅ Return necessary info for email (outside transaction)
-        return {
-          userId: user.id,
-          userEmail: user.email,
-          userName: user.nameEN,
-          randomPassword,
-        };
-      });
-
-      // 2️⃣ Send welcome email outside transaction
+      // Send welcome email outside transaction
       if (result.userEmail && result.userName) {
         await this.sendWelcomeEmail(
           result.userEmail,
@@ -176,6 +185,7 @@ export class OwnersService {
       throw e;
     }
   }
+
 
   // Updated email sender
   async sendWelcomeEmail(email: string, name: string, password: string) {
@@ -193,6 +203,26 @@ export class OwnersService {
       await this.emailService.sendEmail(subject, email, content);
     } catch (err) {
       console.error('EMAIL SENDING FAILED', err);
+    }
+  }
+
+  // Family member welcome email sender
+  async sendFamilyWelcomeEmail(email: string, name: string, password: string) {
+    if (!email) return; // skip if no email
+    try {
+      const subject = `Welcome to Alkarma Community - Your Account Details`;
+      const content = `
+      <h2>Welcome ${name}!</h2>
+      <p>Your account has been created successfully as a family member.</p>
+      <p><strong>Login credentials:</strong></p>
+      <p>Email: ${email}</p>
+      <p>Password: ${password}</p>
+      <p><a href="https://app.alkarma.com/login">Login here</a></p>
+      <p>You have been added to a unit by an owner. You can now access community facilities and services.</p>
+    `;
+      await this.emailService.sendEmail(subject, email, content);
+    } catch (err) {
+      console.error('FAMILY EMAIL SENDING FAILED', err);
     }
   }
 
@@ -265,87 +295,160 @@ export class OwnersService {
   // Method to remove a user from a unit (for family/tenants)
   async removeUserFromUnit(userId: string, unitId: string, removedBy: string) {
     try {
-      return this.prisma.$transaction(async (tx) => {
-        // Check if remover has permission (owner or admin)
-        const removerAccess = await tx.unitAccess.findFirst({
-          where: {
-            unitId,
-            userId: removedBy,
-            role: 'OWNER',
-            status: 'ACTIVE',
-          },
-        });
-
-        const isAdmin = await tx.admin.findUnique({
-          where: { userId: removedBy },
-        });
-
-        if (!removerAccess && !isAdmin) {
-          throw new ForbiddenException(
-            'Only owners or admins can remove users from units',
-          );
-        }
-
-        // Get the user being removed
-        const userToRemove = await tx.user.findUnique({
-          where: { id: userId },
-          include: { unitAccesses: true },
-        });
-
-        if (!userToRemove) {
-          throw new NotFoundException('User not found');
-        }
-
-        // Check if user has access to this unit
-        const userUnitAccess = userToRemove.unitAccesses.find(
-          (access) => access.unitId === unitId && access.status === 'ACTIVE',
-        );
-
-        if (!userUnitAccess) {
-          throw new BadRequestException(
-            'User does not have access to this unit',
-          );
-        }
-
-        // Update unit access status to REVOKED
-        await tx.unitAccess.update({
-          where: { id: userUnitAccess.id },
-          data: { status: 'REVOKED' },
-        });
-
-        // Check if this was the last active user in the unit
-        const activeUsersCount = await tx.unitAccess.count({
-          where: {
-            unitId,
-            status: 'ACTIVE',
-          },
-        });
-
-        // If no more active users, set unit status back to UNRELEASED
-        if (activeUsersCount === 0) {
-          await tx.unit.update({
+      const result = await this.prisma.$transaction(
+        async (tx) => {
+          const unit = await tx.unit.findUnique({
             where: { id: unitId },
-            data: { status: UnitStatus.UNRELEASED },
+            select: { id: true },
           });
-        }
+          if (!unit) throw new NotFoundException('Unit not found');
 
-        // Send removal notification email
-        if (userToRemove.email) {
-          const subject = `Access Revoked - Alkarma Community`;
-          const content = `
+          const isAdmin = await tx.admin.findUnique({
+            where: { userId: removedBy },
+            select: { id: true },
+          });
+
+          const activeLease = await tx.lease.findFirst({
+            where: { unitId, status: 'ACTIVE' },
+            select: { tenantId: true },
+          });
+
+          // Permission model:
+          // - Admin can revoke access for the unit.
+          // - Otherwise, only the "current resident" can revoke THEIR FAMILY members from the unit:
+          //   - If ACTIVE lease exists => tenant is current resident
+          //   - Else => owner is current resident
+          if (!isAdmin) {
+            if (activeLease?.tenantId) {
+              if (activeLease.tenantId !== removedBy) {
+                throw new ForbiddenException(
+                  'Only the active tenant or admin can remove family members from this unit',
+                );
+              }
+            } else {
+              const ownerAccess = await tx.unitAccess.findFirst({
+                where: {
+                  unitId,
+                  userId: removedBy,
+                  role: 'OWNER',
+                  status: 'ACTIVE',
+                },
+                select: { id: true },
+              });
+              if (!ownerAccess) {
+                throw new ForbiddenException(
+                  'Only the unit owner or admin can remove family members from this unit',
+                );
+              }
+            }
+          }
+
+          const accessToRevoke = await tx.unitAccess.findFirst({
+            where: {
+              unitId,
+              userId,
+              status: 'ACTIVE',
+            },
+            select: { id: true, role: true, user: { select: { email: true } } },
+          });
+
+          if (!accessToRevoke) {
+            throw new BadRequestException('User does not have access to this unit');
+          }
+
+          // To keep lease/unit state consistent, tenant removal must go through lease termination.
+          if (accessToRevoke.role === 'TENANT') {
+            throw new BadRequestException(
+              'Cannot remove tenant access from here. Terminate the lease instead.',
+            );
+          }
+
+          // Ownership changes are handled by the owner/unit onboarding flows, not this endpoint.
+          if (accessToRevoke.role === 'OWNER') {
+            throw new BadRequestException(
+              'Cannot remove owner access from here. Use the ownership management flow instead.',
+            );
+          }
+
+          if (accessToRevoke.role !== 'FAMILY') {
+            throw new BadRequestException(
+              'Only FAMILY access can be removed from this endpoint',
+            );
+          }
+
+          // Non-admins can only revoke access for family members linked to the current resident.
+          if (!isAdmin) {
+            // Resolve current resident id without pulling nested includes.
+            const currentResidentId = activeLease?.tenantId
+              ? (
+                  await tx.resident.findUnique({
+                    where: { userId: activeLease.tenantId },
+                    select: { id: true },
+                  })
+                )?.id
+              : (
+                  await tx.residentUnit.findFirst({
+                    where: { unitId, isPrimary: true },
+                    select: { residentId: true },
+                  })
+                )?.residentId;
+
+            if (!currentResidentId) {
+              throw new BadRequestException(
+                'No current resident found for this unit',
+              );
+            }
+
+            const targetResident = await tx.resident.findUnique({
+              where: { userId },
+              select: { id: true },
+            });
+            if (!targetResident) {
+              throw new BadRequestException('Target user is not a resident');
+            }
+
+            const isLinkedFamily = await tx.familyMember.findFirst({
+              where: {
+                primaryResidentId: currentResidentId,
+                familyResidentId: targetResident.id,
+                status: 'ACTIVE',
+              },
+              select: { id: true },
+            });
+            if (!isLinkedFamily) {
+              throw new ForbiddenException(
+                'You can only remove your own family members from this unit',
+              );
+            }
+          }
+
+          await tx.unitAccess.updateMany({
+            where: { id: accessToRevoke.id, status: 'ACTIVE' },
+            data: { status: 'REVOKED', endsAt: new Date() },
+          });
+
+          return {
+            message: 'User access revoked successfully',
+            email: accessToRevoke.user?.email ?? null,
+          };
+        },
+        { timeout: 20000 },
+      );
+
+      // Send email outside the DB transaction (avoid Prisma tx timeouts / rollback on email issues).
+      if (result.email) {
+        const subject = `Access Revoked - Alkarma Community`;
+        const content = `
           <h2>Access Revoked</h2>
           <p>Your access to unit ${unitId} has been revoked.</p>
           <p>If you believe this was done in error, please contact the administration.</p>
         `;
-          await this.emailService.sendEmail(
-            subject,
-            userToRemove.email,
-            content,
-          );
-        }
+        void this.emailService.sendEmail(subject, result.email, content).catch((e) => {
+          console.error('REMOVE USER EMAIL FAILED', e);
+        });
+      }
 
-        return { message: 'User access revoked successfully' };
-      });
+      return { message: result.message };
     } catch (e) {
       console.error('FAILED TO REMOVE USER FROM UNIT', e);
       throw e;
@@ -503,184 +606,192 @@ export class OwnersService {
 
   // ===== FAMILY MANAGEMENT =====
 
-  // Add family member with new authority-based system
   async addFamilyMember(
     unitId: string,
     dto: AddFamilyMemberDto,
     addedBy: string,
     targetResidentId?: string, // admin override
   ) {
-    try {
-      return this.prisma.$transaction(async (tx) => {
-        // 1️⃣ Check unit delivered
+    // Keep expensive work (bcrypt) out of the DB transaction to avoid Prisma tx timeouts (P2028).
+    const chars =
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    let randomPassword = '';
+    for (let i = 0; i < 12; i++) {
+      randomPassword += chars[Math.floor(Math.random() * chars.length)];
+    }
+    const passwordHash = await bcrypt.hash(randomPassword, 12);
+
+    const result = await this.prisma.$transaction(
+      async (tx) => {
+        // 1) Verify unit delivered
         const unit = await tx.unit.findUnique({ where: { id: unitId } });
-        if (!unit || unit.status !== UnitStatus.DELIVERED) {
+        // UnitStatus mixes delivery state with occupancy state; once leased/occupied we still treat it as delivered.
+        const deliveredStatuses: UnitStatus[] = [
+          UnitStatus.DELIVERED,
+          UnitStatus.OCCUPIED,
+          UnitStatus.LEASED,
+        ];
+        if (!unit || !deliveredStatuses.includes(unit.status)) {
           throw new BadRequestException(
             'Unit must be delivered to add family members',
           );
         }
 
-        // 2️⃣ Resolve current resident (owner or tenant)
-        let currentResidentObject: Resident | null = null;
+        // 2) Resolve current resident (owner or tenant)
+        let currentResident: Resident | null = null;
         let currentResidentType: 'OWNER' | 'TENANT' | null = null;
 
-        const isAdmin = await tx.admin.findUnique({
-          where: { userId: addedBy },
-        });
+        const isAdmin = await tx.admin.findUnique({ where: { userId: addedBy } });
 
         if (isAdmin && targetResidentId) {
-          const resident = await tx.resident.findUnique({
+          currentResident = await tx.resident.findUnique({
             where: { id: targetResidentId },
           });
-          if (!resident)
+          if (!currentResident) {
             throw new BadRequestException('Target resident not found');
-
-          currentResidentObject = resident;
-          currentResidentType = 'OWNER'; // admin override counts as OWNER
+          }
+          currentResidentType = 'OWNER';
         } else {
           const residentWithType = await this.getCurrentResidentForUnit(
             tx,
             unitId,
           );
-          if (!residentWithType)
-            throw new BadRequestException(
-              'No current resident found for this unit',
-            );
-
-          currentResidentObject = residentWithType.resident;
+          if (!residentWithType) {
+            throw new BadRequestException('No current resident found for this unit');
+          }
+          currentResident = residentWithType.resident;
           currentResidentType = residentWithType.type;
 
-          // Check addedBy has permission
-          const accessRole =
-            currentResidentType === 'OWNER' ? 'OWNER' : 'TENANT';
-          const userAccess = await tx.unitAccess.findFirst({
-            where: {
-              unitId,
-              userId: addedBy,
-              role: accessRole,
-              status: 'ACTIVE',
-            },
-          });
-          if (!userAccess)
-            throw new ForbiddenException(
-              'You do not have permission to add family members',
-            );
+          if (!isAdmin) {
+            const userAccess = await tx.unitAccess.findFirst({
+              where: {
+                unitId,
+                userId: addedBy,
+                role: currentResidentType,
+                status: 'ACTIVE',
+              },
+            });
+            if (!userAccess) {
+              throw new ForbiddenException(
+                'You do not have permission to add family members',
+              );
+            }
+          }
         }
 
-        // 3️⃣ Check uniqueness
+        // 3) Check email & phone uniqueness
         if (dto.email) {
           const existingEmail = await tx.user.findUnique({
             where: { email: dto.email },
           });
-          if (existingEmail)
+          if (existingEmail) {
             throw new ConflictException('Email already registered');
+          }
         }
         if (dto.phone) {
           const existingPhone = await tx.user.findFirst({
             where: { phone: dto.phone },
           });
-          if (existingPhone)
+          if (existingPhone) {
             throw new ConflictException('Phone already registered');
+          }
         }
 
-        // 4️⃣ Validate required files
-        const fileIds = this.getRequiredFileIds(dto.relationship, dto);
+        // 4) Determine age (for children)
+        let birthDate: Date | null = null;
+        if (dto.birthDate) {
+          birthDate = new Date(dto.birthDate);
+          if (isNaN(birthDate.getTime())) {
+            throw new BadRequestException('Invalid birth date');
+          }
+        }
+
+        const age =
+          birthDate && dto.relationship === RelationshipType.CHILD
+            ? Math.floor(
+                (Date.now() - birthDate.getTime()) /
+                  (1000 * 60 * 60 * 24 * 365.25),
+              )
+            : null;
+
+        // 5) Validate required files
+        const fileIds = this.getRequiredFileIds(dto.relationship, dto, age);
         await this.validateFileUploads(tx, fileIds);
 
-        // 5️⃣ Handle birthDate conversion
-        let birthDate: Date | null = null;
-        if (dto.relationship === RelationshipType.CHILD) {
-          if (!dto.birthDate) {
-            throw new BadRequestException(
-              'Birth date is required for children',
-            );
-          }
-          birthDate = new Date(dto.birthDate);
-          const age =
-            (new Date().getTime() - birthDate.getTime()) /
-            (1000 * 60 * 60 * 24 * 365.25);
-          if (age > 16) throw new BadRequestException('Child must be under 16');
-        }
-
-        // 6️⃣ Generate password
-        const chars =
-          'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-        let randomPassword = '';
-        for (let i = 0; i < 12; i++)
-          randomPassword += chars[Math.floor(Math.random() * chars.length)];
-        const passwordHash = await bcrypt.hash(randomPassword, 12);
-
-        // 7️⃣ Create user
+        // 6) Create user
         const user = await tx.user.create({
           data: {
             nameEN: dto.name,
             email: dto.email ?? undefined,
             phone: dto.phone ?? undefined,
             passwordHash,
-            userStatus: dto.email
-              ? UserStatusEnum.ACTIVE
-              : UserStatusEnum.INVITED,
+            userStatus: dto.email ? UserStatusEnum.ACTIVE : UserStatusEnum.INVITED,
             signupSource: 'dashboard',
             profilePhotoId: dto.personalPhotoId,
           },
         });
 
-        // 8️⃣ Create resident
+        // 7) Create resident
         const residentData: any = {
           userId: user.id,
           relationship: dto.relationship,
         };
-        if (dto.nationalId) residentData.nationalId = dto.nationalId;
         if (birthDate) residentData.dateOfBirth = birthDate;
+        if (dto.nationalId) residentData.nationalId = dto.nationalId;
+
         const resident = await tx.resident.create({ data: residentData });
 
-        // 9️⃣ Create ResidentDocument entries
-        if (
-          dto.relationship === RelationshipType.SPOUSE &&
-          dto.marriageCertificateId
-        ) {
-          await tx.residentDocument.create({
-            data: {
-              residentId: resident.id,
-              type: 'MARRIAGE_CERTIFICATE',
-              fileId: dto.marriageCertificateId,
-            },
-          });
-        }
+        // 8) Create ResidentDocument entries
         if (
           dto.relationship === RelationshipType.CHILD &&
-          dto.birthCertificateId
+          dto.birthCertificateFileId
         ) {
           await tx.residentDocument.create({
             data: {
               residentId: resident.id,
               type: 'BIRTH_CERTIFICATE',
-              fileId: dto.birthCertificateId,
+              fileId: dto.birthCertificateFileId,
+            },
+          });
+        }
+        if (dto.relationship === RelationshipType.CHILD && dto.nationalIdFileId) {
+          await tx.residentDocument.create({
+            data: {
+              residentId: resident.id,
+              type: 'NATIONAL_ID',
+              fileId: dto.nationalIdFileId,
+            },
+          });
+        }
+        if (
+          dto.relationship === RelationshipType.SPOUSE &&
+          dto.marriageCertificateFileId
+        ) {
+          await tx.residentDocument.create({
+            data: {
+              residentId: resident.id,
+              type: 'MARRIAGE_CERTIFICATE',
+              fileId: dto.marriageCertificateFileId,
             },
           });
         }
 
-        // 🔟 Link family member
-        if (!currentResidentObject) {
-          throw new BadRequestException(
-            'No current resident found for this unit',
-          );
-        }
-
+        // 9) Link family member
         const existing = await tx.familyMember.findFirst({
           where: {
-            primaryResidentId: currentResidentObject.id,
+            primaryResidentId: currentResident!.id,
             familyResidentId: resident.id,
           },
         });
-        if (existing)
+        if (existing) {
           throw new ConflictException(
             'Family member already linked to this resident',
           );
+        }
 
         await tx.familyMember.create({
           data: {
-            primaryResidentId: currentResidentObject.id,
+            primaryResidentId: currentResident!.id,
             familyResidentId: resident.id,
             relationship: dto.relationship,
             status: 'ACTIVE',
@@ -688,102 +799,96 @@ export class OwnersService {
           },
         });
 
-        // 1️⃣1️⃣ Create unit access
-        await this.createFamilyUnitAccess(
-          tx,
-          user.id,
-          currentResidentObject.id,
-          addedBy,
-        );
+        return {
+          userId: user.id,
+          randomPassword,
+          residentId: currentResident!.id,
+          grantedBy: addedBy,
+        };
+      },
+      { timeout: 20000 },
+    );
 
-        return { userId: user.id, randomPassword };
-      });
+    // Create family unit access outside transaction to avoid timeout
+    try {
+      await this.createFamilyUnitAccessOutsideTx(
+        result.userId,
+        result.residentId,
+        result.grantedBy,
+      );
     } catch (e) {
-      console.error('ADD FAMILY FAILED', e);
-      throw e;
+      console.error('CREATE FAMILY UNIT ACCESS FAILED (OUTSIDE TX)', e);
+      // Don't throw error here as the main transaction succeeded
     }
+
+    // Send welcome email to family member if they have an email
+    if (dto.email) {
+      try {
+        await this.sendFamilyWelcomeEmail(dto.email, dto.name, result.randomPassword);
+      } catch (e) {
+        console.error('FAMILY WELCOME EMAIL FAILED', e);
+      }
+    }
+
+    return { userId: result.userId, randomPassword: result.randomPassword };
   }
 
-  // ===== FILE VALIDATION =====
 
-  // Get required file IDs based on relationship and data
+  // ===== FILE VALIDATION =====
   private getRequiredFileIds(
     relationship: RelationshipType,
-    data: any,
-  ): {
-    fileId: string;
-    type:
-      | 'PERSONAL_PHOTO'
-      | 'NATIONAL_ID'
-      | 'MARRIAGE_CERTIFICATE'
-      | 'BIRTH_CERTIFICATE';
-  }[] {
-    const files: {
-      fileId: string;
-      type:
-        | 'PERSONAL_PHOTO'
-        | 'NATIONAL_ID'
-        | 'MARRIAGE_CERTIFICATE'
-        | 'BIRTH_CERTIFICATE';
-    }[] = [];
+    data: AddFamilyMemberDto,
+    age: number | null,
+  ): { fileId: string; type: string }[] {
+    const files: { fileId: string; type: string }[] = [];
 
-    // 1️⃣ Personal photo - always required
+    // 1️⃣ Personal photo (always required)
     if (!data.personalPhotoId) {
       throw new BadRequestException('Personal photo is required');
     }
-    files.push({ fileId: data.personalPhotoId, type: 'PERSONAL_PHOTO' });
+    files.push({ fileId: data.personalPhotoId, type: 'PROFILE_PHOTO' });
 
-    // 2️⃣ National ID
-    if (
-      (relationship === RelationshipType.SPOUSE ||
-        relationship === RelationshipType.PARENT) &&
-      !data.nationalIdFileId
-    ) {
-      throw new BadRequestException(
-        'National ID file is required for spouse/parent',
-      );
-    }
-    if (data.nationalIdFileId) {
-      files.push({ fileId: data.nationalIdFileId, type: 'NATIONAL_ID' });
+    // 2️⃣ Child age rules
+    if (relationship === RelationshipType.CHILD) {
+      if (age !== null && age < 16) {
+        if (!data.birthCertificateFileId) {
+          throw new BadRequestException(
+            'Children under 16 must provide birth certificate',
+          );
+        }
+        files.push({
+          fileId: data.birthCertificateFileId,
+          type: 'BIRTH_CERTIFICATE',
+        });
+      }
+
+      if (age !== null && age >= 16) {
+        if (!data.nationalId || !data.nationalIdFileId) {
+          throw new BadRequestException(
+            'Children 16+ must provide national ID and ID file',
+          );
+        }
+        files.push({ fileId: data.nationalIdFileId, type: 'NATIONAL_ID' });
+      }
     }
 
-    // 3️⃣ Spouse - marriage certificate
+    // 3️⃣ Spouse
     if (relationship === RelationshipType.SPOUSE) {
-      if (!data.marriageCertificateId) {
+      if (!data.marriageCertificateFileId) {
         throw new BadRequestException(
           'Marriage certificate is required for spouse',
         );
       }
       files.push({
-        fileId: data.marriageCertificateId,
+        fileId: data.marriageCertificateFileId,
         type: 'MARRIAGE_CERTIFICATE',
-      });
-    }
-
-    // 4️⃣ Child - birth certificate + age check
-    if (relationship === RelationshipType.CHILD) {
-      if (!data.birthCertificateId) {
-        throw new BadRequestException(
-          'Birth certificate is required for child',
-        );
-      }
-      if (!data.birthDate) {
-        throw new BadRequestException('Birth date is required for child');
-      }
-      const age = this.calculateAge(new Date(data.birthDate));
-      if (age > 16) {
-        throw new BadRequestException('Child must be under 16');
-      }
-      files.push({
-        fileId: data.birthCertificateId,
-        type: 'BIRTH_CERTIFICATE',
       });
     }
 
     return files;
   }
 
-  // Validate file uploads exist, category matches expected, and no duplicates
+  // ===== VALIDATE FILES =====
   private async validateFileUploads(
     tx: any,
     files: { fileId: string; type: string }[],
@@ -797,60 +902,91 @@ export class OwnersService {
       seen.add(fileId);
 
       const file = await tx.file.findUnique({ where: { id: fileId } });
-      if (!file) {
-        throw new BadRequestException(`File not found: ${fileId}`);
-      }
+      if (!file) throw new BadRequestException(`File not found: ${fileId}`);
 
-      // Ensure category matches expected type
+      // Make sure category matches expected type
       if (file.category !== type) {
         throw new BadRequestException(
           `File ${fileId} has category ${file.category}, expected ${type}`,
         );
       }
-
-      // Optional: size/type checks could go here if needed
     }
-  }
-
-  // Calculate age from birth date
-  private calculateAge(birthDate: Date): number {
-    const today = new Date();
-    const age = today.getFullYear() - birthDate.getFullYear();
-    const monthDiff = today.getMonth() - birthDate.getMonth();
-
-    if (
-      monthDiff < 0 ||
-      (monthDiff === 0 && today.getDate() < birthDate.getDate())
-    ) {
-      return age - 1;
-    }
-
-    return age;
   }
 
   // Get family members for unit (owner/tenant only)
   async getFamilyMembers(unitId: string, requesterId: string) {
     try {
+      const unit = await this.prisma.unit.findUnique({
+        where: { id: unitId },
+        select: { id: true },
+      });
+      if (!unit) {
+        throw new BadRequestException('Unit not found');
+      }
+
+      const isAdmin = await this.prisma.admin.findUnique({
+        where: { userId: requesterId },
+        select: { id: true },
+      });
+
       // Check requester has access to unit
-      const access = await this.prisma.unitAccess.findFirst({
-        where: {
-          unitId,
-          userId: requesterId,
-          role: { in: ['OWNER', 'TENANT'] },
-          status: 'ACTIVE',
+      if (!isAdmin) {
+        const access = await this.prisma.unitAccess.findFirst({
+          where: {
+            unitId,
+            userId: requesterId,
+            role: { in: ['OWNER', 'TENANT'] },
+            status: 'ACTIVE',
+          },
+        });
+
+        if (!access) {
+          throw new ForbiddenException('You do not have access to this unit');
+        }
+      }
+
+      // Resolve the "current resident" for this unit:
+      // - If there's an ACTIVE lease, the tenant is the current resident.
+      // - Otherwise, fall back to the primary owner resident mapping.
+      const activeLease = await this.prisma.lease.findFirst({
+        where: { unitId, status: 'ACTIVE' },
+        select: {
+          tenant: {
+            select: {
+              resident: { select: { id: true } },
+            },
+          },
         },
       });
 
-      if (!access) {
-        throw new ForbiddenException('You do not have access to this unit');
-      }
+      const currentResidentId =
+        activeLease?.tenant?.resident?.id ??
+        (
+          await this.prisma.residentUnit.findFirst({
+            where: { unitId, isPrimary: true },
+            select: { residentId: true },
+          })
+        )?.residentId;
 
-      // Get family members
+      if (!currentResidentId) return [];
+
+      const familyLinks = await this.prisma.familyMember.findMany({
+        where: { primaryResidentId: currentResidentId, status: 'ACTIVE' },
+        select: { familyResident: { select: { userId: true } } },
+      });
+      const familyUserIds = familyLinks
+        .map((f) => f.familyResident?.userId)
+        .filter(Boolean) as string[];
+
+      if (familyUserIds.length === 0) return [];
+
+      // Get family members (unit access records), filtered to the current resident's family only.
       const familyMembers = await this.prisma.unitAccess.findMany({
         where: {
           unitId,
           role: 'FAMILY',
           status: 'ACTIVE',
+          userId: { in: familyUserIds },
         },
         include: {
           user: {
@@ -896,16 +1032,15 @@ export class OwnersService {
     return null;
   }
 
-  // Helper method to create family unit access for all active units
-  private async createFamilyUnitAccess(
-    tx: any,
+  // Helper method to create family unit access outside transaction
+  private async createFamilyUnitAccessOutsideTx(
     familyUserId: string,
     residentId: string,
     grantedBy: string,
   ) {
     try {
       // Get all active units for the resident
-      const activeUnits = await tx.residentUnit.findMany({
+      const activeUnits = await this.prisma.residentUnit.findMany({
         where: {
           residentId,
         },
@@ -914,7 +1049,7 @@ export class OwnersService {
 
       // Create unit access for family member in all active units
       for (const unit of activeUnits) {
-        await tx.unitAccess.create({
+        await this.prisma.unitAccess.create({
           data: {
             unitId: unit.unitId,
             userId: familyUserId,
@@ -933,7 +1068,7 @@ export class OwnersService {
         });
       }
     } catch (e) {
-      console.error('CREATE FAMILY UNIT ACCESS FAILED', e);
+      console.error('CREATE FAMILY UNIT ACCESS FAILED (OUTSIDE TX)', e);
       throw e;
     }
   }

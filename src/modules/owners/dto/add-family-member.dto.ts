@@ -3,7 +3,7 @@ import {
   IsString,
   IsEmail,
   IsOptional,
-  IsDate,
+  IsDateString,
   IsEnum,
   IsUUID,
 } from 'class-validator';
@@ -15,11 +15,14 @@ export enum RelationshipType {
 }
 
 export class AddFamilyMemberDto {
+  // ------------------------
+  // Common fields (all members)
+  // ------------------------
   @ApiProperty({ enum: RelationshipType })
   @IsEnum(RelationshipType)
   relationship: RelationshipType;
 
-  @ApiProperty({ description: 'Family member name' })
+  @ApiProperty({ description: 'Full name of family member' })
   @IsString()
   name: string;
 
@@ -32,34 +35,54 @@ export class AddFamilyMemberDto {
   @IsString()
   phone: string;
 
-  @ApiPropertyOptional({ description: 'National ID number' })
+  @ApiProperty({ description: 'Personal photo file ID (required for all)' })
+  @IsUUID()
+  personalPhotoId: string;
+
+  // ------------------------
+  // National ID (Parent & Child >=16)
+  // ------------------------
+  @ApiPropertyOptional({
+    description: 'National ID number (required for Parent or Child >=16)',
+  })
   @IsString()
   @IsOptional()
   nationalId?: string;
 
-  @ApiProperty({ description: 'Personal photo file ID' })
-  @IsUUID()
-  personalPhotoId: string;
-
-  @ApiPropertyOptional({ description: 'National ID file ID' })
+  @ApiPropertyOptional({
+    description:
+      'National ID file ID (required for Parent or Child >=16, optional in DTO, enforced in code)',
+  })
   @IsUUID()
   @IsOptional()
   nationalIdFileId?: string;
 
+  // ------------------------
   // Child-specific fields
-  @ApiPropertyOptional({ description: 'Birth date (for children only)' })
-  @IsDate()
+  // ------------------------
+  @ApiPropertyOptional({
+    description: 'Birth date of child (required for CHILD)',
+  })
+  @IsDateString()
   @IsOptional()
-  birthDate?: Date;
+  birthDate?: string;
 
-  @ApiPropertyOptional({ description: 'Birth certificate file ID (for children only)' })
+  @ApiPropertyOptional({
+    description:
+      'Birth certificate file ID (required for CHILD under 16, optional in DTO, enforced in code)',
+  })
   @IsUUID()
   @IsOptional()
-  birthCertificateId?: string;
+  birthCertificateFileId?: string;
 
+  // ------------------------
   // Spouse-specific fields
-  @ApiPropertyOptional({ description: 'Marriage certificate file ID (for spouse only)' })
+  // ------------------------
+  @ApiPropertyOptional({
+    description:
+      'Marriage certificate file ID (required for SPOUSE, optional in DTO, enforced in code)',
+  })
   @IsUUID()
   @IsOptional()
-  marriageCertificateId?: string;
+  marriageCertificateFileId?: string;
 }
