@@ -13,7 +13,7 @@ import { ComplaintsModule } from './modules/complaints/complaints.module';
 import { ViolationsModule } from './modules/violations/violations.module';
 import { FacilitiesModule } from './modules/facilities/facilities.module';
 import { BookingsModule } from './modules/bookings/bookings.module';
-import { ResidentModule } from './modules/residents/residents.module';
+import { UsersModule } from './modules/users/users.module';
 import { PendingRegistrationsModule } from './modules/pending-registrations/pending-registrations.module';
 import { EventsModule } from './events/events.module';
 import { IncidentsModule } from './modules/incidents/incidents.module';
@@ -42,7 +42,7 @@ import { AccessControlModule } from './modules/access-control/access-control.mod
     ViolationsModule,
     FacilitiesModule,
     BookingsModule,
-    ResidentModule,
+    UsersModule,
     PendingRegistrationsModule,
     EventsModule,
     IncidentsModule,

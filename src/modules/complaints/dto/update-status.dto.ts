@@ -10,7 +10,7 @@ export class UpdateComplaintStatusDto {
   })
   @IsEnum(ComplaintStatus)
   @IsNotEmpty()
-  status: ComplaintStatus;
+  status!: ComplaintStatus;
 
   @ApiProperty({
     example: 'Resolution steps documented here.',

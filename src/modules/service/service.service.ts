@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class ServiceService {
@@ -76,8 +77,11 @@ export class ServiceService {
             : undefined,
         },
       });
-    } catch (error) {
-      if (error.code === 'P2025') {
+    } catch (error: unknown) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2025'
+      ) {
         throw new NotFoundException(`Service with ID ${id} not found.`);
       }
       throw error;

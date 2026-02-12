@@ -12,6 +12,23 @@ import { BookingStatus } from '@prisma/client';
 export class FacilitiesService {
   constructor(private prisma: PrismaService) {}
 
+  private isSuperAdminRole(roles: unknown): boolean {
+    return (
+      Array.isArray(roles) &&
+      roles.some(
+        (r) => typeof r === 'string' && r.toUpperCase() === 'SUPER_ADMIN',
+      )
+    );
+  }
+
+  private canViewAllFacilities(ctx: { permissions: string[]; roles: string[] }) {
+    return (
+      this.isSuperAdminRole(ctx.roles) ||
+      (Array.isArray(ctx.permissions) &&
+        ctx.permissions.includes('facility.view_all'))
+    );
+  }
+
   async create(dto: CreateFacilityDto) {
     return this.prisma.$transaction(async (prisma) => {
       return await prisma.facility.create({
@@ -68,6 +85,23 @@ export class FacilitiesService {
     });
   }
 
+  async findAllForActor(ctx: {
+    actorUserId: string;
+    permissions: string[];
+    roles: string[];
+  }) {
+    const canViewAll = this.canViewAllFacilities(ctx);
+    if (canViewAll) return this.findAll();
+
+    return this.prisma.facility.findMany({
+      where: { isActive: true },
+      include: {
+        slotConfig: true,
+        slotExceptions: true,
+      },
+    });
+  }
+
   async findOne(id: string) {
     const facility = await this.prisma.facility.findUnique({
       where: { id },
@@ -78,6 +112,22 @@ export class FacilitiesService {
     });
 
     if (!facility) throw new NotFoundException('Facility not found');
+
+    return facility;
+  }
+
+  async findOneForActor(
+    id: string,
+    ctx: { actorUserId: string; permissions: string[]; roles: string[] },
+  ) {
+    const facility = await this.findOne(id);
+
+    const canViewAll = this.canViewAllFacilities(ctx);
+    if (canViewAll) return facility;
+
+    if (!facility.isActive) {
+      throw new NotFoundException('Facility not found');
+    }
 
     return facility;
   }

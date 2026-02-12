@@ -62,10 +62,14 @@ export class DashboardService {
       },
     });
 
-    // Pending registrations
-    const pendingRegistrations = await this.prisma.pendingRegistration.count({
-      where: { status: 'PENDING' },
-    });
+    // Pending registrations (feature-flagged; currently shelved)
+    const pendingRegistrationsEnabled =
+      process.env.ENABLE_PENDING_REGISTRATIONS === 'true';
+    const pendingRegistrations = pendingRegistrationsEnabled
+      ? await this.prisma.pendingRegistration.count({
+          where: { status: 'PENDING' },
+        })
+      : 0;
 
     // Occupancy rate
     const totalUnits = await this.prisma.unit.count();

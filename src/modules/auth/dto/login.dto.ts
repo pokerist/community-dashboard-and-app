@@ -4,7 +4,6 @@ import {
   Matches,
   IsNotEmpty,
   IsOptional,
-  MinLength,
 } from 'class-validator';
 
 export class LoginDto {
@@ -17,5 +16,5 @@ export class LoginDto {
   phone?: string;
 
   @IsNotEmpty()
-  password: string;
+  password!: string;
 }

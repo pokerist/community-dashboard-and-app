@@ -102,26 +102,20 @@ export class NotificationsController {
   ) {
     const pageNum = parseInt(page, 10);
     const limitNum = parseInt(limit, 10);
-
-    // This would need to be implemented in the service for admin access
-    // For now, return a placeholder
-    return {
-      data: [],
-      meta: {
-        total: 0,
-        page: pageNum,
-        limit: limitNum,
-        totalPages: 0,
-      },
-    };
+    return this.notificationsService.getAllNotifications(pageNum, limitNum);
   }
 
   @Post('admin/resend/:id')
   @Permissions('notification.manage')
   @ApiOperation({ summary: 'Resend failed notification (Admin)' })
   @ApiResponse({ status: 200, description: 'Notification resent successfully' })
-  async resendNotification(@Param('id') notificationId: string) {
-    // TODO: Implement resend logic
-    return { success: true, notificationId };
+  async resendNotification(
+    @Param('id') notificationId: string,
+    @Request() req,
+  ) {
+    return this.notificationsService.resendFailedNotification(
+      notificationId,
+      req.user.id,
+    );
   }
 }

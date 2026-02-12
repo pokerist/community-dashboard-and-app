@@ -16,11 +16,11 @@ export class CreateAccessQrCodeDto {
   @ApiProperty({ example: 'unit-uuid-here' })
   @IsUUID()
   @IsNotEmpty()
-  unitId: string;
+  unitId!: string;
 
   @ApiProperty({ enum: QRType, example: QRType.VISITOR })
   @IsEnum(QRType)
-  type: QRType;
+  type!: QRType;
 
   @ApiPropertyOptional({
     example: 'John Visitor',

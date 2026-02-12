@@ -97,8 +97,9 @@ export class NotificationDeliveryListener {
             status: NotificationLogStatus.SENT,
           },
         });
-      } catch (error) {
-        this.logger.error(`Failed to send email to ${user.email}`, error);
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.error(`Failed to send email to ${user.email}`, error as any);
 
         // Update log with failure
         await this.prisma.notificationLog.updateMany({
@@ -109,7 +110,7 @@ export class NotificationDeliveryListener {
           },
           data: {
             status: NotificationLogStatus.FAILED,
-            providerResponse: { error: error.message },
+            providerResponse: { error: message || 'Unknown error' },
           },
         });
       }

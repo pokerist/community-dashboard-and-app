@@ -20,7 +20,7 @@ export class CreateViolationDto {
   })
   @IsUUID()
   @IsNotEmpty()
-  unitId: string;
+  unitId!: string;
 
   @ApiProperty({
     example: 'a01a01a0-b1b1-c2c2-d3d3-e4e4e4e4e4e4',
@@ -37,7 +37,7 @@ export class CreateViolationDto {
   })
   @IsString()
   @IsNotEmpty()
-  type: string;
+  type!: string;
 
   @ApiProperty({
     example: 'Excessive noise after 10 PM on balcony.',
@@ -45,7 +45,7 @@ export class CreateViolationDto {
   })
   @IsString()
   @IsNotEmpty()
-  description: string;
+  description!: string;
 
   @ApiProperty({
     example: 500.0,
@@ -54,7 +54,7 @@ export class CreateViolationDto {
   @IsNumber()
   @Min(0)
   @IsNotEmpty()
-  fineAmount: number;
+  fineAmount!: number;
 
   @ApiProperty({
     example: '2025-12-10T00:00:00.000Z',
@@ -62,7 +62,7 @@ export class CreateViolationDto {
   })
   @IsDateString()
   @IsNotEmpty()
-  dueDate: Date; // <--- FLEXIBILITY: Admin sets this manually
+  dueDate!: Date; // <--- FLEXIBILITY: Admin sets this manually
 
   @ApiProperty({
     example: 'ADMIN_UUID',

@@ -12,7 +12,7 @@ import { Transform } from 'class-transformer';
 export class CreateLeaseDto {
   @IsUUID()
   @IsNotEmpty()
-  unitId: string;
+  unitId!: string;
 
   @IsOptional()
   @IsString()
@@ -24,14 +24,14 @@ export class CreateLeaseDto {
 
   @IsDateString()
   @IsNotEmpty()
-  startDate: string;
+  startDate!: string;
 
   @IsDateString()
   @IsNotEmpty()
-  endDate: string;
+  endDate!: string;
 
   @IsNumber()
-  monthlyRent: number;
+  monthlyRent!: number;
 
   @IsOptional()
   @IsNumber()

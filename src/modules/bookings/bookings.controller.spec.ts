@@ -12,12 +12,18 @@ describe('BookingsController', () => {
         {
           provide: BookingsService,
           useValue: {
-            create: jest.fn().mockResolvedValue({}),
-            findByResident: jest.fn().mockResolvedValue([]),
+            createForActor: jest.fn().mockResolvedValue({}),
+            findByUser: jest.fn().mockResolvedValue([]),
+            findOneForActor: jest.fn().mockResolvedValue({}),
           },
         },
       ],
-    }).compile();
+    })
+      .overrideGuard(require('../auth/guards/jwt-auth.guard').JwtAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(require('../auth/guards/permissions.guard').PermissionsGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get<BookingsController>(BookingsController);
   });

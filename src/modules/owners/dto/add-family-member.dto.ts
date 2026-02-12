@@ -20,11 +20,11 @@ export class AddFamilyMemberDto {
   // ------------------------
   @ApiProperty({ enum: RelationshipType })
   @IsEnum(RelationshipType)
-  relationship: RelationshipType;
+  relationship!: RelationshipType;
 
   @ApiProperty({ description: 'Full name of family member' })
   @IsString()
-  name: string;
+  name!: string;
 
   @ApiPropertyOptional({ description: 'Email (optional)' })
   @IsEmail()
@@ -33,11 +33,11 @@ export class AddFamilyMemberDto {
 
   @ApiProperty({ description: 'Phone number' })
   @IsString()
-  phone: string;
+  phone!: string;
 
   @ApiProperty({ description: 'Personal photo file ID (required for all)' })
   @IsUUID()
-  personalPhotoId: string;
+  personalPhotoId!: string;
 
   // ------------------------
   // National ID (Parent & Child >=16)

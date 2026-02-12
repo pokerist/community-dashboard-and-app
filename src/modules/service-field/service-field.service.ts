@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateServiceFieldDto } from './dto/create-service-field.dto';
 import { UpdateServiceFieldDto } from './dto/update-service-field.dto';
+import { Prisma } from '@prisma/client';
 
 @Injectable()
 export class ServiceFieldService {
@@ -62,8 +63,11 @@ export class ServiceFieldService {
         where: { id },
         data: updateServiceFieldDto,
       });
-    } catch (error) {
-      if (error.code === 'P2025') {
+    } catch (error: unknown) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2025'
+      ) {
         throw new NotFoundException(`Service Field with ID ${id} not found.`);
       }
       throw error;

@@ -1,266 +1,144 @@
-# Authentication Module
+# Auth Module (`src/modules/auth`)
 
-## Overview
+## What this module is responsible for
 
-The Authentication module handles user authentication, authorization, session management, and role-based access control (RBAC) for the Community Dashboard system. It provides secure login/logout functionality, JWT token management, and permission-based endpoint protection.
+This module provides authentication and account-verification workflows:
 
-## Key Features
+- Login with email or phone + password.
+- JWT access token issuance + refresh token rotation.
+- Password reset via time-limited token (sent by email).
+- Email verification (send token + verify token).
+- Phone verification OTP (token creation + verify; delivery depends on notification delivery implementation).
+- Referral-based signup (feature-flagged).
 
-- **JWT Authentication**: Stateless authentication using JSON Web Tokens
-- **Refresh Tokens**: Long-lived refresh tokens for seamless user experience
-- **Role-Based Access Control**: Permission-based endpoint protection
-- **Password Security**: Bcrypt hashing with configurable rounds
-- **Account Lockout**: Automatic account locking after failed login attempts
-- **Referral-Based Signup**: Integration with invitation system for controlled user onboarding
+## Authentication model
 
-## Architecture
+- Access tokens are JWTs signed with `JWT_ACCESS_SECRET` and expire in **15 minutes**.
+- Refresh tokens are random UUIDs stored hashed in DB and expire in **7 days**.
 
-### Components
+Generated JWT payload includes:
+- `sub`: user id
+- `roles`: role names
+- `permissions`: resolved permission strings
 
-1. **AuthService**: Core authentication business logic
-2. **AuthController**: HTTP endpoints for auth operations
-3. **JwtStrategy**: Passport JWT strategy for token validation
-4. **PermissionsGuard**: Route protection based on user permissions
-5. **JwtAuthGuard**: JWT token validation guard
-6. **PermissionCacheService**: Caches and resolves user permissions
+At request time, `JwtStrategy` resolves the authenticated actor as `req.user` with:
+- `req.user.id` (user id)
+- `req.user.roles` (role names)
+- `req.user.permissions` (strings)
 
-### Database Entities
+## Login flow (`POST /auth/login`)
 
-- **User**: Base user entity with authentication fields
-- **RefreshToken**: Stores hashed refresh tokens
-- **Role**: User roles (Admin, Resident, Owner, Tenant)
-- **UserRole**: Many-to-many relationship between users and roles
-- **Permission**: Individual permissions (e.g., "unit.view", "booking.create")
-- **RolePermission**: Role-permission assignments
+### Behavior
 
-## API Endpoints
+1) Lookup user by `email` OR `phone`.
+2) (Optional, feature-flagged) If `ENABLE_PENDING_REGISTRATIONS === 'true'`, block login if a matching `PendingRegistration` is still `PENDING`.
+3) Enforce lockout:
+   - After **5** failed attempts, user is locked for **15 minutes** (`lockedUntil`).
+4) If password is valid:
+   - resets `loginAttempts` and clears `lockedUntil`
+   - updates `lastLoginAt`
+5) For non-admin users, enforce active community access:
+   - SUPER_ADMIN and MANAGER skip this check.
+   - Otherwise the user must have at least one ACTIVE `UnitAccess` record (else 403).
+6) Issue tokens via `generateTokens(...)` (access + refresh).
 
-### POST /auth/login
-User login with email/phone and password.
+### Outputs
 
-**Request Body:**
-```json
-{
-  "email": "user@example.com", // optional
-  "phone": "+1234567890",     // optional (either email or phone required)
-  "password": "userpassword"
-}
-```
+Returns `{ accessToken, refreshToken }`.
 
-**Response:**
-```json
-{
-  "accessToken": "eyJhbGciOiJIUzI1NiIs...",
-  "refreshToken": "uuid-string"
-}
-```
+## Refresh flow (`POST /auth/refresh`)
 
-**Features:**
-- Accepts either email or phone for login
-- Checks for pending registrations
-- Implements account lockout after 5 failed attempts
-- Updates last login timestamp
-- Returns JWT tokens with user permissions
+This endpoint rotates refresh tokens:
 
-### POST /auth/signup-with-referral
-New user registration via referral invitation.
+- The backend fetches the latest non-revoked refresh token for the `userId`.
+- If the incoming token does not match (bcrypt compare) OR the stored token is expired:
+  - all refresh tokens for the user are revoked
+  - 401 is returned
+- If it matches:
+  - that refresh token is revoked
+  - a new access token + refresh token are issued
 
-**Request Body:**
-```json
-{
-  "phone": "+1234567890",
-  "name": "John Doe",
-  "password": "securePassword123"
-}
-```
+## Password reset flow
 
-**Response:**
-```json
-{
-  "accessToken": "eyJhbGciOiJIUzI1NiIs...",
-  "refreshToken": "uuid-string"
-}
-```
+### Request reset (`POST /auth/forgot-password`)
 
-**Features:**
-- Validates referral exists and is active
-- Prevents duplicate user creation
-- Automatically converts referral status
-- Sets signup source to "referral"
+- Accepts either `email` or `phone`.
+- Always returns a generic success message to avoid user enumeration.
+- If a matching user exists and they have an email address, a reset link is sent via `NotificationsService` using the `EMAIL` channel.
+- The raw token is never stored; only a hash/digest is stored in `PasswordResetToken`.
+- Token lifetime: **1 hour**.
 
-### POST /auth/refresh
-Refresh access token using refresh token.
+### Reset password (`POST /auth/reset-password`)
 
-**Request Body:**
-```json
-{
-  "userId": "user-uuid",
-  "refreshToken": "refresh-token-string"
-}
-```
+- Validates the token against a stored, un-used, un-expired `PasswordResetToken`.
+- On success:
+  - marks the reset token as used
+  - updates the user password hash
+  - revokes all refresh tokens for the user
 
-**Response:**
-```json
-{
-  "accessToken": "eyJhbGciOiJIUzI1NiIs...",
-  "refreshToken": "new-refresh-token"
-}
-```
+## Email verification flow
 
-**Security Features:**
-- Validates refresh token against stored hash
-- Revokes compromised tokens
-- Issues new token pair
+### Send verification token (`POST /auth/send-email-verification`)
 
-## Security Implementation
+JWT-protected endpoint that:
 
-### Password Security
-- **Hashing**: bcrypt with 12 salt rounds
-- **Storage**: Never stores plain text passwords
-- **Validation**: Minimum length and complexity rules
+- Invalidates previous un-used email verification tokens for the user.
+- Creates a new `EmailVerificationToken` (1 hour TTL).
+- Sends an email containing the token (and a link) using the `EMAIL` channel.
 
-### JWT Tokens
-- **Access Token**: 15-minute expiration
-- **Refresh Token**: 7-day expiration
-- **Payload**: Contains user ID, roles, and permissions
-- **Signing**: Uses configurable secret key
+### Verify email (`POST /auth/verify-email`)
 
-### Account Protection
-- **Failed Attempts**: Tracks login failures
-- **Lockout**: 15-minute lockout after 5 failures
-- **Session Management**: Automatic token revocation
+JWT-protected endpoint that:
 
-### Permission System
-- **RBAC**: Role-Based Access Control
-- **Permissions**: Granular permission system (e.g., "unit.view_all", "booking.create")
-- **Caching**: Permission resolution caching for performance
-- **Super Admin**: Bypass permission checks
+- Reads the latest un-used, un-expired `EmailVerificationToken` for the user.
+- Validates the provided token (bcrypt compare).
+- Marks the token as used and sets `User.emailVerifiedAt`.
 
-## Permission Structure
+## Phone OTP verification flow
 
-### Predefined Permissions
-- `auth.*` - Authentication-related permissions
-- `user.*` - User management permissions
-- `unit.*` - Property unit permissions
-- `booking.*` - Facility booking permissions
-- `complaint.*` - Complaint management permissions
-- `violation.*` - Violation tracking permissions
-- `invoice.*` - Billing permissions
-- `service.*` - Service request permissions
-- `referral.*` - Referral system permissions
+### Send OTP (`POST /auth/send-phone-otp`)
 
-### Permission Levels
-- `*.view` - Read access
-- `*.view_all` - View all records
-- `*.view_own` - View own records
-- `*.create` - Create new records
-- `*.update` - Update existing records
-- `*.delete` - Delete records
+JWT-protected endpoint that:
 
-## Guards and Decorators
+- Ensures the provided `phone` matches the user profile.
+- Creates a `PhoneVerificationOtp` (5 minute TTL).
+- Sends a notification with channel `SMS`.
 
-### @UseGuards(JwtAuthGuard, PermissionsGuard)
-Protects endpoints requiring authentication and specific permissions.
+Important: actual SMS delivery depends on notification delivery support (see `src/modules/notifications/notification-delivery.listener.ts`).
 
-### @Permissions('permission.key')
-Specifies required permissions for endpoint access.
+### Verify OTP (`POST /auth/verify-phone-otp`)
 
-```typescript
-@UseGuards(JwtAuthGuard, PermissionsGuard)
-@Permissions('unit.view_all')
-@Get('units')
-findAll() {
-  // Only users with 'unit.view_all' permission can access
-}
-```
+JWT-protected endpoint that:
 
-### @User() Decorator
-Injects authenticated user information into route handlers.
+- Reads the latest un-used, un-expired OTP for the user.
+- Validates the provided OTP (bcrypt compare).
+- Marks OTP as used and sets `User.phoneVerifiedAt`.
 
-```typescript
-create(@Body() dto: CreateDto, @User('id') userId: string) {
-  // userId contains the authenticated user's ID
-}
-```
+## Referral signup (feature-flagged)
+
+`POST /auth/signup-with-referral`:
+
+- Returns 404 unless `ENABLE_REFERRAL_SIGNUP === 'true'`.
+- Atomically:
+  - validates an existing referral for the phone
+  - creates a new user (`signupSource='referral'`)
+  - converts the referral
+  - issues tokens
+- After commit, emits `referral.converted` to drive in-app/email notifications.
 
 ## Configuration
 
-### Environment Variables
-```env
-JWT_ACCESS_SECRET=your-jwt-secret-key
-JWT_REFRESH_SECRET=your-refresh-secret-key
-BCRYPT_ROUNDS=12
-```
+Environment variables used by this module:
 
-### Token Expiration
-- Access tokens: 15 minutes
-- Refresh tokens: 7 days
-- Account lockout: 15 minutes after 5 failed attempts
+- `JWT_ACCESS_SECRET`
+- `FRONTEND_URL` (used to build reset/verification links)
+- `ENABLE_PENDING_REGISTRATIONS` (default: false)
+- `ENABLE_REFERRAL_SIGNUP` (default: false)
 
-## Error Handling
+## Relevant code entry points
 
-### Common Error Responses
-- `401 Unauthorized`: Invalid credentials or expired tokens
-- `403 Forbidden`: Insufficient permissions
-- `429 Too Many Requests`: Rate limiting triggered
-- `400 Bad Request`: Invalid input data
-
-## Integration Points
-
-### With Other Modules
-- **Referrals**: Validates referral codes during signup
-- **Users**: Provides user context for permissions
-- **All Modules**: Protects endpoints based on user roles
-
-### External Services
-- **Email Service**: Password reset notifications
-- **SMS Service**: Multi-factor authentication
-- **Audit Logging**: Security event tracking
-
-## Testing
-
-### Unit Tests
-- AuthService methods
-- Guard logic
-- Token generation/validation
-- Permission resolution
-
-### Integration Tests
-- Complete authentication flows
-- Permission-based access control
-- Token refresh scenarios
-- Account lockout behavior
-
-## Best Practices
-
-1. **Token Storage**: Store tokens securely (HttpOnly cookies in production)
-2. **Password Policies**: Enforce strong password requirements
-3. **Session Management**: Implement proper logout/token revocation
-4. **Rate Limiting**: Protect against brute force attacks
-5. **Audit Logging**: Log authentication events
-6. **Token Rotation**: Rotate refresh tokens regularly
-
-## Security Considerations
-
-- **HTTPS Only**: Always use HTTPS in production
-- **Token Expiry**: Short-lived access tokens
-- **Refresh Token Rotation**: Issue new refresh tokens on use
-- **Logout**: Properly revoke tokens on logout
-- **CSRF Protection**: Implement CSRF tokens for state-changing operations
-- **CORS**: Configure appropriate CORS policies
-
-## Performance Optimization
-
-- **Permission Caching**: Cache resolved permissions to reduce database queries
-- **Token Validation**: Efficient JWT validation without database calls
-- **Session Storage**: Consider Redis for token storage in distributed environments
-- **Rate Limiting**: Implement distributed rate limiting for scalability
-
-## Monitoring and Logging
-
-- **Authentication Events**: Log login/logout events
-- **Failed Attempts**: Monitor suspicious login activity
-- **Token Issues**: Track token validation failures
-- **Permission Denials**: Log unauthorized access attempts
-
-This authentication system provides a robust, scalable foundation for securing the Community Dashboard application while maintaining excellent user experience through thoughtful token management and permission design.
+- `src/modules/auth/auth.controller.ts`
+- `src/modules/auth/auth.service.ts`
+- `src/modules/auth/jwt.strategy.ts`
+- `src/modules/auth/guards/jwt-auth.guard.ts`
+- `src/modules/auth/guards/permissions.guard.ts`

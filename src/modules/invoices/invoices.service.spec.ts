@@ -2,10 +2,11 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { InvoicesService } from './invoices.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 
 const mockPrisma = {
-  invoice: { findUnique: jest.fn() },
+  invoice: { findUnique: jest.fn(), findMany: jest.fn() },
+  unitAccess: { findFirst: jest.fn(), findMany: jest.fn() },
   $transaction: jest.fn((callback) => {
     const tx = {
       invoiceSequence: { upsert: jest.fn(), update: jest.fn() },
@@ -259,19 +260,19 @@ describe('InvoicesService', () => {
           id: 'fee-1',
           unitId: 'u1',
           amount: { toNumber: () => 10 },
-          unit: { residents: [{ userId: 'r1' }] },
+          unit: { residents: [{ residentId: 'r1' }] },
         },
         {
           id: 'fee-2',
           unitId: 'u1',
           amount: { toNumber: () => 15 },
-          unit: { residents: [{ userId: 'r1' }] },
+          unit: { residents: [{ residentId: 'r1' }] },
         },
         {
           id: 'fee-3',
           unitId: 'u2',
           amount: { toNumber: () => 20 },
-          unit: { residents: [{ userId: 'r2' }] },
+          unit: { residents: [{ residentId: 'r2' }] },
         },
       ]),
     };
@@ -284,5 +285,116 @@ describe('InvoicesService', () => {
 
     expect(spy).toHaveBeenCalledTimes(2);
     expect(results.length).toBe(2);
+  });
+
+  it('findByResidentForActor should forbid invoice.view_own access to other users', async () => {
+    await expect(
+      service.findByResidentForActor('someone-else', {
+        actorUserId: 'me',
+        permissions: ['invoice.view_own'],
+        roles: [],
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('findByResidentForActor should allow invoice.view_own access to self only', async () => {
+    (mockPrisma.invoice.findMany as jest.Mock).mockResolvedValue([{ id: 'inv-1' }]);
+
+    const result = await service.findByResidentForActor('me', {
+      actorUserId: 'me',
+      permissions: ['invoice.view_own'],
+      roles: [],
+    });
+
+    expect(mockPrisma.invoice.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { residentId: 'me' } }),
+    );
+    expect(result).toEqual([{ id: 'inv-1' }]);
+  });
+
+  it('findOneForActor should allow invoice.view_own when actor is residentId', async () => {
+    mockPrisma.invoice.findUnique.mockResolvedValue({
+      id: 'inv-1',
+      unitId: 'u1',
+      residentId: 'me',
+      documents: [],
+    });
+
+    const result = await service.findOneForActor('inv-1', {
+      actorUserId: 'me',
+      permissions: ['invoice.view_own'],
+      roles: [],
+    });
+
+    expect(result).toEqual(expect.objectContaining({ id: 'inv-1' }));
+    expect(mockPrisma.unitAccess.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('findOneForActor should allow invoice.view_own when actor has ACTIVE unit access', async () => {
+    mockPrisma.invoice.findUnique.mockResolvedValue({
+      id: 'inv-2',
+      unitId: 'u2',
+      residentId: 'someone-else',
+      documents: [],
+    });
+    mockPrisma.unitAccess.findFirst.mockResolvedValue({
+      id: 'ua-1',
+      canViewFinancials: true,
+    });
+
+    const result = await service.findOneForActor('inv-2', {
+      actorUserId: 'me',
+      permissions: ['invoice.view_own'],
+      roles: [],
+    });
+
+    expect(mockPrisma.unitAccess.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ userId: 'me', unitId: 'u2', status: 'ACTIVE' }),
+      }),
+    );
+    expect(result).toEqual(expect.objectContaining({ id: 'inv-2' }));
+  });
+
+  it('findOneForActor should forbid invoice.view_own without unit access', async () => {
+    mockPrisma.invoice.findUnique.mockResolvedValue({
+      id: 'inv-3',
+      unitId: 'u3',
+      residentId: 'someone-else',
+      documents: [],
+    });
+    mockPrisma.unitAccess.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.findOneForActor('inv-3', {
+        actorUserId: 'me',
+        permissions: ['invoice.view_own'],
+        roles: [],
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('findAllUnitFeesForActor should filter fees to ACTIVE unit access when using unit_fee.view_own', async () => {
+    mockPrisma.unitAccess.findMany.mockResolvedValue([
+      { unitId: 'u1' },
+      { unitId: 'u2' },
+      { unitId: 'u2' },
+    ]);
+    (mockPrisma.unitFee.findMany as jest.Mock).mockResolvedValue([
+      { id: 'fee-1', unitId: 'u1' },
+    ]);
+
+    const result = await service.findAllUnitFeesForActor({
+      actorUserId: 'me',
+      permissions: ['unit_fee.view_own'],
+      roles: [],
+    });
+
+    expect(mockPrisma.unitFee.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { unitId: { in: ['u1', 'u2'] } },
+      }),
+    );
+    expect(result).toEqual([{ id: 'fee-1', unitId: 'u1' }]);
   });
 });

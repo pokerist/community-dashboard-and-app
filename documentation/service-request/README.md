@@ -1,51 +1,103 @@
-# Service-Request Module
+# Service Request Module (`src/modules/service-request`)
 
-## Purpose & Role in the System
-Processes resident service requests with workflow management, assignment, and invoicing integration.
+## What this module is responsible for
 
-## Controllers, Services, and Key Classes
-- **Controllers**: `ServiceRequestController`
-- **Services**: `ServiceRequestService`
-- **Files**: `src/modules/service-request/service-request.controller.ts`, `src/modules/service-request/service-request.service.ts`
+This module handles service requests created by community app users and processed by dashboard/staff users.
 
-## Key Features
-- Sequential request numbering
-- Priority levels and assignment
-- Status workflow: NEW → IN_PROGRESS → RESOLVED/CLOSED
-- Dynamic field values storage
-- Attachment support
-- Invoice generation for paid services
+It supports:
 
-## API Endpoints
-*(Detailed endpoint documentation needed - requires reading controller code)*
+- Creating a request for a specific `Service` and `Unit`
+- Submitting dynamic field values based on `ServiceField` configuration
+- Linking attachments to a request
+- Listing "my requests" for the authenticated user
+- Internal dashboard operations: list all requests and update assignment/status
 
-## DTOs and Validation Rules
-*(DTO definitions needed - requires reading dto files)*
+## Key data models (Prisma)
 
-## Data Relationships
-- **ServiceRequest** belongs to `Service`, `Unit`, `User` (creator), `User` (assignee)
-- **ServiceRequest** has many `ServiceRequestFieldValue`s, `Attachment`s, `Invoice`s
+From `prisma/schema.prisma`:
 
-## Business Logic and Workflow Rules
-1. **Sequential Numbering**: Auto-generated request numbers
-2. **Priority Levels**: LOW, MEDIUM, HIGH, CRITICAL
-3. **Status Transitions**: NEW → IN_PROGRESS → RESOLVED/CLOSED
-4. **Assignment**: Staff can assign requests to themselves or others
-5. **Field Values**: Dynamic storage of form responses
+- `ServiceRequest`
+  - belongs to `Service` via `serviceId`
+  - belongs to `Unit` via `unitId`
+  - created by `User` via `createdById`
+  - `status` (`NEW`, `IN_PROGRESS`, `RESOLVED`, `CLOSED`)
+  - `priority` (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`)
+  - `assignedToId` (optional staff user id)
+  - relations:
+    - `fieldValues` (`ServiceRequestFieldValue[]`)
+    - `attachments` (`Attachment[]`) (linked via `Attachment.serviceRequestId`)
+    - `invoices` (`Invoice[]`)
+- `ServiceRequestFieldValue`
+  - belongs to `ServiceRequest` via `requestId`
+  - belongs to `ServiceField` via `fieldId`
+  - stores one of:
+    - `valueText`, `valueNumber`, `valueBool`, `valueDate`, `fileAttachmentId`
+- `Attachment`
+  - for service requests, linked through `serviceRequestId`
+  - also stores a polymorphic `entity/entityId` pair (`SERVICE_REQUEST`)
 
-## File References
-- Controller: `src/modules/service-request/service-request.controller.ts`
-- Service: `src/modules/service-request/service-request.service.ts`
-- DTOs: `src/modules/service-request/dto/`
-- Database Models: `prisma/schema.prisma` (ServiceRequest, ServiceRequestFieldValue models)
+## Authentication / authorization
 
-## External Integrations
-- **File Service**: Attachment handling
-- **Invoices Service**: Service billing
-- **Prisma ORM**: Database operations
+All routes require:
 
-## Missing Information
-- Complete API endpoints
-- DTO specifications
-- Example request flows
-- Assignment workflow details
+- `JwtAuthGuard`
+- `PermissionsGuard` via `@Permissions(...)`
+
+In addition, `GET /service-requests/:id` enforces ownership rules in the service layer:
+
+- if you only have `service_request.view_own`, you can only view requests where `createdById === yourUserId`
+- if you have `service_request.view_all` (or SUPER_ADMIN role), you can view any request
+
+## API surface (controller)
+
+Base route: `/service-requests`
+
+Community app:
+
+- `POST /service-requests` (permissions: `service_request.create`)
+- `GET /service-requests/my-requests` (permissions: `service_request.view_own`)
+- `GET /service-requests/:id` (permissions: `service_request.view_own` OR `service_request.view_all`)
+
+Dashboard/staff:
+
+- `GET /service-requests` (permissions: `service_request.view_all`)
+- `PATCH /service-requests/:id` (permissions: `service_request.assign` OR `service_request.resolve` OR `service_request.close`)
+
+## Flow: Create a service request (`POST /service-requests`)
+
+Key validations and rules (see `ServiceRequestService.create`):
+
+1. Unit access check: user must have ACTIVE access to the unit (`getActiveUnitAccess`).
+2. Service must exist and be active (`Service.status === true`).
+3. Unit eligibility enforced based on the service's `unitEligibility`:
+   - `ALL`: allowed for any unit status
+   - `DELIVERED_ONLY`: allowed only when `Unit.status` is one of `DELIVERED`, `OCCUPIED`, `LEASED`
+   - `NON_DELIVERED_ONLY`: allowed only when `Unit.status` is not delivered (anything other than the delivered statuses above)
+4. Dynamic fields validation:
+   - every submitted `fieldId` must belong to the service's `formFields`
+   - required fields must be provided
+   - each field value must set exactly one value column (based on the field type)
+5. Attachments:
+   - `attachmentIds` are `File.id` values
+   - the service stores them as `Attachment` rows linked to the request
+
+## Flow: Update request (dashboard) (`PATCH /service-requests/:id`)
+
+Update DTO: `UpdateServiceRequestInternalDto` allows:
+
+- `assignedToId`
+- `status`
+
+Additional permission rules are enforced server-side (see `ServiceRequestService.updateForActor`):
+
+- changing `assignedToId` requires `service_request.assign`
+- setting `status=RESOLVED` requires `service_request.resolve`
+- setting `status=CLOSED` requires `service_request.close`
+- setting `status=NEW` or `IN_PROGRESS` requires `service_request.assign`
+
+## Relevant code entry points
+
+- `src/modules/service-request/service-request.controller.ts`
+- `src/modules/service-request/service-request.service.ts`
+- `src/modules/service-request/dto/*.ts`
+

@@ -64,7 +64,7 @@ export class HikCentralQrService {
           notes: request.notes,
         }),
       });
-    } catch (err) {
+    } catch (err: unknown) {
       this.logger.error('HikCentral QR create request failed', err as any);
       throw new BadGatewayException('HikCentral API request failed');
     }
@@ -81,7 +81,7 @@ export class HikCentralQrService {
     let json: any;
     try {
       json = await response.json();
-    } catch (err) {
+    } catch (err: unknown) {
       this.logger.error('HikCentral returned non-JSON response', err as any);
       throw new BadGatewayException('HikCentral returned invalid response');
     }
@@ -97,4 +97,3 @@ export class HikCentralQrService {
     return { qrId, qrImageBase64, raw: json };
   }
 }
-

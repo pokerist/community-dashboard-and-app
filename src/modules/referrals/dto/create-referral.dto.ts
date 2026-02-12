@@ -8,7 +8,7 @@ export class CreateReferralDto {
   })
   @IsNotEmpty()
   @IsString()
-  friendFullName: string;
+  friendFullName!: string;
 
   @ApiProperty({
     description: 'Mobile phone number of the friend',
@@ -18,7 +18,7 @@ export class CreateReferralDto {
   @Matches(/^\+?\d{9,15}$/, {
     message: 'Phone number must be a valid format',
   })
-  friendMobile: string;
+  friendMobile!: string;
 
   @ApiPropertyOptional({
     description: 'Optional message to include with the referral',

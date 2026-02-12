@@ -10,11 +10,11 @@ import {
 export class CreatePendingRegistrationDto {
   @IsNotEmpty()
   @IsString()
-  name: string;
+  name!: string;
 
   @IsNotEmpty()
   @Matches(/^\+?\d{9,15}$/, { message: 'Phone number format is invalid.' })
-  phone: string;
+  phone!: string;
 
   @IsEmail()
   @IsOptional()
@@ -22,11 +22,11 @@ export class CreatePendingRegistrationDto {
 
   @IsNotEmpty()
   @IsString()
-  nationalId: string; // PIC
+  nationalId!: string; // PIC
 
   @IsNotEmpty()
   @IsString()
-  personalPhotoId: string; // uploaded file ID
+  personalPhotoId!: string; // uploaded file ID
 
   @IsOptional()
   @IsIn(['OWNER', 'TENANT', 'FAMILY'])

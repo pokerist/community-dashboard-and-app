@@ -16,15 +16,15 @@ import { Type } from 'class-transformer';
 export class CreateServiceFieldDto {
   @IsUUID('4', { message: 'Service ID must be a valid UUID.' })
   @IsNotEmpty()
-  serviceId: string; // The service this field belongs to (e.g., Furniture Permit)
+  serviceId!: string; // The service this field belongs to (e.g., Furniture Permit)
 
   @IsString()
   @IsNotEmpty()
-  label: string; // The user-facing label (e.g., "Direction (In/Out)")
+  label!: string; // The user-facing label (e.g., "Direction (In/Out)")
 
   @IsEnum(ServiceFieldType)
   @IsNotEmpty()
-  type: ServiceFieldType; // The input type (e.g., TEXT, MEMBER_SELECTOR)
+  type!: ServiceFieldType; // The input type (e.g., TEXT, MEMBER_SELECTOR)
 
   @IsString()
   @IsOptional()

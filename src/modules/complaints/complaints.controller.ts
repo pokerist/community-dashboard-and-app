@@ -8,6 +8,8 @@ import {
   Delete,
   Query,
   UseGuards,
+  Req,
+  BadRequestException,
 } from '@nestjs/common';
 import { ComplaintsService } from './complaints.service';
 import { CreateComplaintDto, UpdateComplaintDto } from './dto/complaints.dto';
@@ -17,6 +19,7 @@ import { UpdateComplaintStatusDto } from './dto/update-status.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
+import type { Request } from 'express';
 
 @ApiBearerAuth()
 @ApiTags('Complaints')
@@ -30,8 +33,18 @@ export class ComplaintsController {
   // ---------------------------
   @Post()
   @Permissions('complaint.report')
-  create(@Body() dto: CreateComplaintDto) {
-    return this.complaintsService.create(dto);
+  create(@Body() dto: CreateComplaintDto, @Req() req: Request) {
+    const reporterId = (req as any).user?.id;
+    if (!reporterId) throw new BadRequestException('Invalid auth context');
+
+    if (dto.reporterId && dto.reporterId !== reporterId) {
+      throw new BadRequestException('reporterId must match the authenticated user');
+    }
+
+    return this.complaintsService.create({
+      ...dto,
+      reporterId,
+    });
   }
 
   // ---------------------------
@@ -48,8 +61,11 @@ export class ComplaintsController {
   // ---------------------------
   @Get(':id')
   @Permissions('complaint.view_own', 'complaint.view_all')
-  findOne(@Param('id') id: string) {
-    return this.complaintsService.findOne(id);
+  findOne(@Param('id') id: string, @Req() req: Request) {
+    return this.complaintsService.findOneForActor(id, {
+      actorUserId: (req as any).user?.id,
+      permissions: (req as any).user?.permissions ?? [],
+    });
   }
 
   // ---------------------------
@@ -81,7 +97,10 @@ export class ComplaintsController {
   // ---------------------------
   @Delete(':id')
   @Permissions('complaint.delete_own', 'complaint.delete_all')
-  remove(@Param('id') id: string) {
-    return this.complaintsService.remove(id);
+  remove(@Param('id') id: string, @Req() req: Request) {
+    return this.complaintsService.removeForActor(id, {
+      actorUserId: (req as any).user?.id,
+      permissions: (req as any).user?.permissions ?? [],
+    });
   }
 }

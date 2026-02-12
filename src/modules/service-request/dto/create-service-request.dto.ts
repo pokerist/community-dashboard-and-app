@@ -16,17 +16,17 @@ import { Type } from 'class-transformer';
 export class CreateServiceRequestDto {
   @IsUUID('4', { message: 'Service ID must be a valid UUID.' })
   @IsNotEmpty()
-  serviceId: string;
+  serviceId!: string;
 
   @IsUUID('4', { message: 'Unit ID must be a valid UUID.' })
-  @IsOptional()
-  unitId?: string;
+  @IsNotEmpty()
+  unitId!: string;
 
   @IsString()
   @IsNotEmpty({
     message: 'Description is required for the mandatory details box.',
   })
-  description: string;
+  description!: string;
 
   @IsEnum(Priority)
   @IsOptional()

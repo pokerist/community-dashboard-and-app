@@ -5,6 +5,7 @@ import { InvoicesService } from '../invoices/invoices.service';
 import { BadRequestException } from '@nestjs/common';
 import { ViolationStatus, InvoiceStatus, InvoiceType } from '@prisma/client';
 import { Decimal } from '@prisma/client/runtime/library';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 const mockPrismaService = {
   violation: {
@@ -61,6 +62,7 @@ describe('ViolationsService (Unit)', () => {
         ViolationsService,
         { provide: PrismaService, useValue: mockPrismaService },
         { provide: InvoicesService, useValue: mockInvoicesService },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
       ],
     }).compile();
 

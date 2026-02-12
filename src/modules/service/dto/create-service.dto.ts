@@ -16,11 +16,11 @@ import { Type } from 'class-transformer';
 export class CreateServiceDto {
   @IsString()
   @IsNotEmpty()
-  name: string; // e.g., "Furniture Permit", "IPTV Installation"
+  name!: string; // e.g., "Furniture Permit", "IPTV Installation"
 
   @IsEnum(ServiceCategory)
   @IsNotEmpty()
-  category: ServiceCategory; // e.g., MAINTENANCE, ADMIN
+  category!: ServiceCategory; // e.g., MAINTENANCE, ADMIN
 
   @IsEnum(EligibilityType)
   @IsOptional()

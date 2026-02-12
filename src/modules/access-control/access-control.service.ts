@@ -223,7 +223,7 @@ export class AccessControlService {
       });
 
       return { qrCode, qrImageBase64: hik.qrImageBase64 };
-    } catch (err) {
+    } catch (err: unknown) {
       if (accessGrantId) {
         await this.prisma.accessGrant
           .delete({ where: { id: accessGrantId } })

@@ -2,38 +2,38 @@ import { ApiProperty } from '@nestjs/swagger';
 
 export class DashboardSummaryDto {
   @ApiProperty({ description: 'Number of active incidents' })
-  activeIncidents: number;
+  activeIncidents!: number;
 
   @ApiProperty({ description: 'Number of incidents resolved today' })
-  resolvedToday: number;
+  resolvedToday!: number;
 
   @ApiProperty({ description: 'Average response time in seconds' })
-  avgResponseTime: number;
+  avgResponseTime!: number;
 
   @ApiProperty({ description: 'Number of open complaints' })
-  openComplaints: number;
+  openComplaints!: number;
 
   @ApiProperty({ description: 'Number of pending registrations' })
-  pendingRegistrations: number;
+  pendingRegistrations!: number;
 
   @ApiProperty({ description: 'Overall occupancy rate percentage' })
-  occupancyRate: number;
+  occupancyRate!: number;
 
   @ApiProperty({ description: 'Revenue for current month' })
-  revenueThisMonth: number;
+  revenueThisMonth!: number;
 
   @ApiProperty({ description: 'Revenue for current year' })
-  revenueThisYear: number;
+  revenueThisYear!: number;
 
   @ApiProperty({ description: 'Smart devices status counts' })
-  smartDevices: {
+  smartDevices!: {
     online: number;
     offline: number;
     error: number;
   };
 
   @ApiProperty({ description: 'CCTV cameras status counts' })
-  cctvCameras: {
+  cctvCameras!: {
     online: number;
     offline: number;
     error: number;

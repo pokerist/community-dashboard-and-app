@@ -8,6 +8,7 @@ import {
   Param,
   Delete,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { InvoicesService } from './invoices.service';
@@ -45,16 +46,24 @@ export class InvoicesController {
   // GET /invoices/resident/:residentId (Community App: Resident view)
   @Get('resident/:residentId')
   @Permissions('invoice.view_all', 'invoice.view_own')
-  findByResident(@Param('residentId') residentId: string) {
-    return this.invoicesService.findByResident(residentId);
+  findByResident(@Param('residentId') residentId: string, @Req() req: any) {
+    return this.invoicesService.findByResidentForActor(residentId, {
+      actorUserId: req.user.id,
+      permissions: Array.isArray(req.user.permissions) ? req.user.permissions : [],
+      roles: Array.isArray(req.user.roles) ? req.user.roles : [],
+    });
   }
 
   // GET /invoices/fees (Admin: List all fee records)
   @Get('fees')
   @ApiOperation({ summary: 'Lists all individual UnitFee records.' })
   @Permissions('unit_fee.view_all', 'unit_fee.view_own')
-  findAllUnitFees() {
-    return this.invoicesService.findAllUnitFees();
+  findAllUnitFees(@Req() req: any) {
+    return this.invoicesService.findAllUnitFeesForActor({
+      actorUserId: req.user.id,
+      permissions: Array.isArray(req.user.permissions) ? req.user.permissions : [],
+      roles: Array.isArray(req.user.roles) ? req.user.roles : [],
+    });
   }
 
   // POST /invoices/fees (Admin: Input new variable fee record)
@@ -83,8 +92,12 @@ export class InvoicesController {
   // GET /invoices/:id
   @Get(':id')
   @Permissions('invoice.view_all', 'invoice.view_own')
-  findOne(@Param('id') id: string) {
-    return this.invoicesService.findOne(id);
+  findOne(@Param('id') id: string, @Req() req: any) {
+    return this.invoicesService.findOneForActor(id, {
+      actorUserId: req.user.id,
+      permissions: Array.isArray(req.user.permissions) ? req.user.permissions : [],
+      roles: Array.isArray(req.user.roles) ? req.user.roles : [],
+    });
   }
 
   // POST /invoices (Admin: Manual invoice creation)

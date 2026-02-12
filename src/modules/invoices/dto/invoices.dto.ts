@@ -20,7 +20,7 @@ export class CreateInvoiceDto {
   })
   @IsUUID()
   @IsNotEmpty()
-  unitId: string;
+  unitId!: string;
 
   @ApiProperty({
     example: 'a01a01a0-b1b1-c2c2-d3d3-e4e4e4e4e4e4',
@@ -38,7 +38,7 @@ export class CreateInvoiceDto {
   })
   @IsEnum(InvoiceType)
   @IsNotEmpty()
-  type: InvoiceType;
+  type!: InvoiceType;
 
   @Type(() => Number)
   @ApiProperty({
@@ -48,7 +48,7 @@ export class CreateInvoiceDto {
   @IsNumber()
   @Min(0.01)
   @IsNotEmpty()
-  amount: number;
+  amount!: number;
 
   @ApiProperty({
     example: 'INV-00001',
@@ -66,7 +66,7 @@ export class CreateInvoiceDto {
   })
   @IsDateString()
   @IsNotEmpty()
-  dueDate: Date;
+  dueDate!: Date;
 
   @ApiProperty({
     example: InvoiceStatus.PENDING,

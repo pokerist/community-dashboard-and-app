@@ -15,12 +15,12 @@ export class CreateUnitDto {
   @ApiProperty({ example: 'A-504' })
   @IsNotEmpty()
   @IsString()
-  unitNumber: string;
+  unitNumber!: string;
 
   @ApiProperty({ example: 'Sunrise Residences' })
   @IsNotEmpty()
   @IsString()
-  projectName: string;
+  projectName!: string;
 
   @ApiProperty({ example: 'Block A', required: false })
   @IsOptional()
@@ -30,7 +30,7 @@ export class CreateUnitDto {
   @ApiProperty({ example: 'APARTMENT', enum: UnitType })
   @IsNotEmpty()
   @IsEnum(UnitType)
-  type: UnitType;
+  type!: UnitType;
 
   @ApiProperty({ example: 2, required: false })
   @IsOptional()
@@ -54,7 +54,7 @@ export class CreateUnitDto {
   @IsNotEmpty()
   @IsNumber()
   @IsPositive()
-  sizeSqm: number;
+  sizeSqm!: number;
 
   @ApiProperty({ example: 1500000.0, required: false })
   @IsOptional()

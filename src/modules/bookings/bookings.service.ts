@@ -2,17 +2,19 @@ import {
   BadRequestException,
   Injectable,
   NotFoundException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingStatusDto } from './dto/update-status.dto';
 import { BookingsQueryDto } from './dto/bookings-query.dto';
-import { BookingStatus } from '@prisma/client';
+import { BookingStatus, FacilityType, UnitStatus } from '@prisma/client';
 import { BookingApprovedEvent } from '../../events/contracts/booking-approved.event';
 import { BookingCancelledEvent } from '../../events/contracts/booking-cancelled.event';
 import { paginate } from '../../common/utils/pagination.util';
 import { getActiveUnitAccess } from '../../common/utils/unit-access.util';
+import { ClubhouseService } from '../clubhouse/clubhouse.service';
 
 interface EffectiveSlotConfig {
   startTime: string;
@@ -26,7 +28,25 @@ export class BookingsService {
   constructor(
     private prisma: PrismaService,
     private eventEmitter: EventEmitter2,
+    private clubhouseService: ClubhouseService,
   ) {}
+
+  private isSuperAdminRole(roles: unknown): boolean {
+    return (
+      Array.isArray(roles) &&
+      roles.some(
+        (r) => typeof r === 'string' && r.toUpperCase() === 'SUPER_ADMIN',
+      )
+    );
+  }
+
+  private isUnitDelivered(status: UnitStatus): boolean {
+    return (
+      status === UnitStatus.DELIVERED ||
+      status === UnitStatus.OCCUPIED ||
+      status === UnitStatus.LEASED
+    );
+  }
 
   private async getFacility(dto: CreateBookingDto) {
     const facility = await this.prisma.facility.findUnique({
@@ -102,7 +122,10 @@ export class BookingsService {
     return true;
   }
 
-  private async enforceLimits(dto: CreateBookingDto, facility: any) {
+  private async enforceLimits(
+    dto: CreateBookingDto & { userId: string },
+    facility: any,
+  ) {
     const date = new Date(dto.date);
 
     // Check maxReservationsPerDay
@@ -169,7 +192,9 @@ export class BookingsService {
     }
   }
 
-  private async saveBooking(dto: CreateBookingDto) {
+  private async saveBooking(
+    dto: CreateBookingDto & { userId: string; residentId?: string },
+  ) {
     const date = new Date(dto.date);
 
     return this.prisma.booking.create({
@@ -186,38 +211,54 @@ export class BookingsService {
     });
   }
 
-  async create(dto: CreateBookingDto) {
-    if (!dto.unitId) {
-      throw new BadRequestException('Unit ID is required for booking');
-    }
+  async createForActor(actorUserId: string, dto: CreateBookingDto) {
+    const access = await getActiveUnitAccess(this.prisma, actorUserId, dto.unitId);
 
-    // Access Control: Check if user has active access to the unit
-    const access = await getActiveUnitAccess(
-      this.prisma,
-      dto.userId,
-      dto.unitId,
-    );
-
-    // Feature Gating: Bookings only available after delivery
     const unit = await this.prisma.unit.findUnique({
       where: { id: dto.unitId },
       select: { status: true },
     });
+    if (!unit) throw new NotFoundException('Unit not found');
 
-    if (unit?.status !== 'DELIVERED') {
+    if (!this.isUnitDelivered(unit.status)) {
       throw new BadRequestException(
         'Facility bookings are only available after delivery',
       );
     }
 
-    // Check if user has permission to book facilities
     if (!access.canBookFacilities) {
       throw new BadRequestException(
         'User does not have permission to book facilities',
       );
     }
 
+    const resident = await this.prisma.resident.findUnique({
+      where: { userId: actorUserId },
+      select: { id: true },
+    });
+
+    const internalDto = {
+      ...dto,
+      userId: actorUserId,
+      residentId: resident?.id ?? undefined,
+    };
+
     const facility = await this.getFacility(dto);
+
+    // Clubhouse gating: treat MULTIPURPOSE_HALL facilities as clubhouse-managed.
+    // If your project uses a different type for clubhouse, adjust this mapping.
+    if (facility.type === FacilityType.MULTIPURPOSE_HALL) {
+      const hasAccess = await this.clubhouseService.hasClubhouseAccess(
+        actorUserId,
+        dto.unitId,
+      );
+      if (!hasAccess) {
+        throw new ForbiddenException(
+          'Clubhouse access approval is required before booking this facility',
+        );
+      }
+    }
+
     const config = this.resolveSlotConfig(facility, dto.date);
 
     if (!config)
@@ -230,9 +271,9 @@ export class BookingsService {
     }
 
     return this.prisma.$transaction(async (prisma) => {
-      await this.enforceLimits(dto, facility);
+      await this.enforceLimits(internalDto, facility);
       await this.checkSlotCapacity(dto, facility, config);
-      return this.saveBooking(dto);
+      return this.saveBooking(internalDto);
     });
   }
 
@@ -278,6 +319,29 @@ export class BookingsService {
       include: { facility: true, user: true, resident: true, unit: true },
     });
     if (!booking) throw new NotFoundException('Booking not found');
+    return booking;
+  }
+
+  async findOneForActor(
+    id: string,
+    ctx: { actorUserId: string; permissions: string[]; roles: string[] },
+  ) {
+    const booking = await this.findOne(id);
+
+    const canViewAll =
+      this.isSuperAdminRole(ctx.roles) ||
+      (Array.isArray(ctx.permissions) &&
+        ctx.permissions.includes('booking.view_all'));
+    if (canViewAll) return booking;
+
+    if (!ctx.permissions?.includes('booking.view_own')) {
+      throw new ForbiddenException('You do not have access to this booking');
+    }
+
+    if (booking.userId !== ctx.actorUserId) {
+      throw new ForbiddenException('You do not have access to this booking');
+    }
+
     return booking;
   }
 
@@ -360,7 +424,7 @@ export class BookingsService {
     if (!booking) throw new NotFoundException('Booking not found');
 
     if (booking.userId !== userId) {
-      throw new BadRequestException('You cannot cancel someone else’s booking');
+      throw new BadRequestException("You cannot cancel someone else's booking");
     }
 
     if (booking.cancelledAt) {

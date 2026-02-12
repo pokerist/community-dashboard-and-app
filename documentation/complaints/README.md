@@ -1,144 +1,101 @@
-# Complaints Module
+# Complaints Module (`src/modules/complaints`)
 
-## Purpose & Role in the System
-The Complaints module handles resident-submitted complaints about community issues. It supports a full complaint lifecycle from submission to resolution, with assignment to staff, status tracking, and integration with invoicing for fines.
+## What this module is responsible for
 
-## Controllers, Services, and Key Classes
-- **Controllers**: `ComplaintsController`
-- **Services**: `ComplaintsService`
-- **Key Classes**:
-  - DTOs: `CreateComplaintDto`, `UpdateComplaintDto`, `ComplaintsQueryDto`, `UpdateComplaintStatusDto`
-  - Files: `src/modules/complaints/complaints.controller.ts`, `src/modules/complaints/complaints.service.ts`
+The Complaints module handles resident-submitted complaints and the staff workflow around them:
 
-## API Endpoints
+- Residents report complaints (optionally linked to a unit).
+- Staff list/search/filter all complaints.
+- Staff update complaint details and status.
+- Residents can delete their own complaints *only while still open* (not resolved/closed).
+- Complaints can be linked to file attachments (evidence) via the shared `Attachment` table.
+- There is a helper method to generate an invoice for a complaint (not exposed as an HTTP endpoint).
 
-### 1. Create Complaint
-- **Endpoint**: `POST /complaints`
-- **Permissions**: `complaint.report`
-- **Request Body**:
-  ```json
-  {
-    "reporterId": "string (required)",
-    "unitId": "string (optional)",
-    "description": "string (required)",
-    "category": "string (required)",
-    "priority": "Priority enum (optional, default MEDIUM)"
-  }
-  ```
-- **Response**: Created Complaint object
+## Key data model concepts (Prisma)
 
-### 2. Get All Complaints (Staff)
-- **Endpoint**: `GET /complaints`
-- **Permissions**: `complaint.view_all`
-- **Query Params**: `ComplaintsQueryDto` (status, priority, unitId, reporterId, assignedToId, dates)
-- **Response**: Paginated list of complaints with relations
+Primary models involved (see `prisma/schema.prisma`):
 
-### 3. Get Complaint by ID
-- **Endpoint**: `GET /complaints/:id`
-- **Permissions**: `complaint.view_own` or `complaint.view_all`
-- **Response**: Single Complaint with full relations
+- `Complaint`
+  - `reporterId` (User.id) is required.
+  - Optional `unitId`.
+  - `status`: `NEW | IN_PROGRESS | RESOLVED | CLOSED`
+  - `resolutionNotes` + `resolvedAt` are used when resolved/closed.
+- `Attachment`
+  - Used for complaint evidence. The service stores attachments with:
+    - `entity = 'COMPLAINT'`
+    - `entityId = <complaint.id>`
+    - `fileId = <uploaded File.id>`
+- `File`
+  - Upload via File module (typically `POST /files/upload/service-attachment`).
 
-### 4. Update Complaint
-- **Endpoint**: `PATCH /complaints/:id`
-- **Permissions**: `complaint.manage`
-- **Request Body**: `UpdateComplaintDto` (partial update)
-- **Response**: Updated Complaint
+## Authentication / authorization
 
-### 5. Update Complaint Status
-- **Endpoint**: `PATCH /complaints/:id/status`
-- **Permissions**: `complaint.manage`
-- **Request Body**:
-  ```json
-  {
-    "status": "ComplaintStatus enum (required)",
-    "resolutionNotes": "string (required if RESOLVED/CLOSED)"
-  }
-  ```
-- **Response**: Updated Complaint
+All routes are guarded by:
 
-### 6. Delete Complaint
-- **Endpoint**: `DELETE /complaints/:id`
-- **Permissions**: `complaint.delete_own` or `complaint.delete_all`
-- **Response**: Deleted Complaint
+- `JwtAuthGuard` (JWT required).
+- `PermissionsGuard` using `@Permissions(...)` metadata.
 
-## DTOs and Validation Rules
-- **CreateComplaintDto** (`src/modules/complaints/dto/complaints.dto.ts`):
-  - `reporterId`: string, required, UUID
-  - `unitId`: string, optional, UUID
-  - `description`: string, required
-  - `category`: string, required
-  - `priority`: Priority enum, optional
+Important: In addition to permissions, the module enforces row-level rules for “own” access:
 
-- **UpdateComplaintDto**: Extends CreateComplaintDto as PartialType, adds:
-  - `status`: ComplaintStatus enum, optional
-  - `assignedToId`: string, optional, UUID
-  - `resolutionNotes`: string, optional
+- `GET /complaints/:id` with `complaint.view_own` is restricted to `Complaint.reporterId === req.user.id`.
+- `DELETE /complaints/:id` with `complaint.delete_own` is restricted to `Complaint.reporterId === req.user.id`.
 
-- **ComplaintsQueryDto** (`src/modules/complaints/dto/complaints-query.dto.ts`): Extends BaseQueryDto, adds filters for status, priority, unitId, reporterId, assignedToId, date ranges
+## API surface (controller)
 
-- **UpdateComplaintStatusDto** (`src/modules/complaints/dto/update-status.dto.ts`):
-  - `status`: ComplaintStatus enum, required
-  - `resolutionNotes`: string, optional (required for RESOLVED/CLOSED)
+Base route: `/complaints`
 
-## Data Relationships
-- **Complaint** belongs to:
-  - `User` (reporter, many-to-one)
-  - `Unit` (many-to-one, optional)
-  - `User` (assignedTo, many-to-one, optional)
-- **Complaint** has many `Invoice`s (one-to-many)
+- `POST /complaints` (permissions: `complaint.report`)
+- `GET /complaints` (permissions: `complaint.view_all`)
+- `GET /complaints/:id` (permissions: `complaint.view_own` OR `complaint.view_all`)
+- `PATCH /complaints/:id` (permissions: `complaint.manage`)
+- `PATCH /complaints/:id/status` (permissions: `complaint.manage`)
+- `DELETE /complaints/:id` (permissions: `complaint.delete_own` OR `complaint.delete_all`)
 
-## Business Logic and Workflow Rules
-1. **Number Generation**: Auto-generates sequential complaint numbers (CMP-XXXXX)
+## Flow 1: Resident reports a complaint (`POST /complaints`)
 
-2. **Status Workflow**:
-   - Initial: `NEW`
-   - Progress: `IN_PROGRESS` → `RESOLVED` or `CLOSED`
-   - Resolution requires `resolutionNotes`
-   - `resolvedAt` timestamp set automatically on resolution
+Key behavior:
 
-3. **Assignment**: Staff can assign complaints to themselves or others
+- `reporterId` is derived from the JWT (`req.user.id`). Clients should omit it.
+- If `unitId` is provided, the reporter must have active unit access (`UnitAccess(status=ACTIVE)`), enforced via `getActiveUnitAccess(...)`.
+- A sequential complaint number is generated: `CMP-00001`, `CMP-00002`, ...
+- Attachments:
+  - If `attachmentIds` are provided, `Attachment` rows are created with `entity='COMPLAINT'`.
 
-4. **Deletion Rules**: Cannot delete RESOLVED or CLOSED complaints
+## Flow 2: Staff list/search complaints (`GET /complaints`)
 
-5. **Invoice Integration**: Can generate fines for complaints
+This endpoint is paginated via the shared `paginate(...)` utility and supports:
 
-## Example Usage
+- Pagination: `page`, `limit`
+- Sorting: `sortBy`, `sortOrder`
+- Search: `search` across `complaintNumber`, `category`, `description`
+- Filters:
+  - `status`, `priority`, `unitId`, `reporterId`, `assignedToId`
+  - `createdAtFrom`, `createdAtTo` (date range)
 
-**Creating a complaint**:
-```bash
-POST /complaints
-Authorization: Bearer <token>
-Content-Type: application/json
+The list includes basic relations:
 
-{
-  "reporterId": "user-123",
-  "unitId": "unit-456",
-  "description": "Loud music after 11 PM",
-  "category": "Noise",
-  "priority": "MEDIUM"
-}
-```
+- `reporter` (nameEN/email)
+- `unit` (unitNumber)
+- `assignedTo` (nameEN)
 
-**Response**:
-```json
-{
-  "id": "comp-123",
-  "complaintNumber": "CMP-00001",
-  "reporterId": "user-123",
-  "description": "Loud music after 11 PM",
-  "category": "Noise",
-  "status": "NEW",
-  "priority": "MEDIUM"
-}
-```
+## Flow 3: Staff update / resolve / close
 
-## File References
-- Controller: `src/modules/complaints/complaints.controller.ts`
-- Service: `src/modules/complaints/complaints.service.ts`
-- DTOs: `src/modules/complaints/dto/`
-- Database Model: `prisma/schema.prisma` (Complaint model)
+`PATCH /complaints/:id` and `PATCH /complaints/:id/status`:
 
-## External Integrations
-- **Invoices Service**: Generates fines for complaints
-- **Prisma ORM**: Database operations
-- **Authentication Guards**: JWT and permissions-based access control
+- When transitioning to `RESOLVED` or `CLOSED`, `resolutionNotes` is required.
+- `resolvedAt` is set automatically when resolving/closing.
+
+## Flow 4: Delete complaint (`DELETE /complaints/:id`)
+
+Rules:
+
+- Residents can only delete their own complaints (when using `complaint.delete_own`).
+- Staff/admin can delete any complaint (when using `complaint.delete_all`).
+- Deletion is blocked when complaint is `RESOLVED` or `CLOSED` (history preservation).
+
+## Relevant code entry points
+
+- `src/modules/complaints/complaints.controller.ts`
+- `src/modules/complaints/complaints.service.ts`
+- `src/modules/complaints/dto/*.ts`
+

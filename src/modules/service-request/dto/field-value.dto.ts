@@ -12,7 +12,7 @@ import { Type } from 'class-transformer';
 
 export class FieldValueDto {
   @IsUUID('4', { message: 'Field ID must be a valid UUID.' })
-  fieldId: string; // The ID of the ServiceField this value relates to
+  fieldId!: string; // The ID of the ServiceField this value relates to
 
   // Only one of these should be populated based on the field type
   @IsString()

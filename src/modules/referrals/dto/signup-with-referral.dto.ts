@@ -10,7 +10,7 @@ export class SignupWithReferralDto {
   @Matches(/^\+?\d{9,15}$/, {
     message: 'Phone number must be a valid format',
   })
-  phone: string;
+  phone!: string;
 
   @ApiProperty({
     description: 'Full name of the new user',
@@ -18,7 +18,7 @@ export class SignupWithReferralDto {
   })
   @IsNotEmpty()
   @IsString()
-  name: string;
+  name!: string;
 
   @ApiProperty({
     description: 'Password for the new user account',
@@ -28,5 +28,5 @@ export class SignupWithReferralDto {
   @IsNotEmpty()
   @IsString()
   @MinLength(6, { message: 'Password must be at least 6 characters long' })
-  password: string;
+  password!: string;
 }

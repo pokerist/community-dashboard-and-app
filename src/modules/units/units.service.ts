@@ -8,7 +8,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateUnitDto } from './dto/create-unit.dto';
 import { UpdateUnitDto } from './dto/update-unit.dto';
 import { UnitQueryDto } from './dto/unit-query.dto';
-import { UnitType, UnitStatus } from '@prisma/client';
+import { Prisma, UnitType, UnitStatus } from '@prisma/client';
 import { paginate } from '../../common/utils/pagination.util';
 import { UnitStatusChangedEvent } from '../../events/contracts/unit-status-changed.event';
 
@@ -18,6 +18,25 @@ export class UnitsService {
     private prisma: PrismaService,
     private eventEmitter: EventEmitter2,
   ) {}
+
+  private async resolveResidentId(
+    tx: Prisma.TransactionClient,
+    idOrUserId: string,
+  ): Promise<string> {
+    const byResidentId = await tx.resident.findUnique({
+      where: { id: idOrUserId },
+      select: { id: true },
+    });
+    if (byResidentId) return byResidentId.id;
+
+    const byUserId = await tx.resident.findUnique({
+      where: { userId: idOrUserId },
+      select: { id: true },
+    });
+    if (byUserId) return byUserId.id;
+
+    throw new NotFoundException('Resident not found');
+  }
 
   // CRUD
   async findAll(query: UnitQueryDto) {
@@ -68,7 +87,7 @@ export class UnitsService {
   // Assignment
   async assignUser(
     unitId: string,
-    residentId: string,
+    userIdOrResidentId: string,
     role: 'OWNER' | 'TENANT' | 'FAMILY',
   ) {
     return this.prisma.$transaction(async (tx) => {
@@ -76,11 +95,7 @@ export class UnitsService {
       const unit = await tx.unit.findUnique({ where: { id: unitId } });
       if (!unit) throw new NotFoundException('Unit not found');
 
-      // Check if resident exists
-      const resident = await tx.resident.findUnique({
-        where: { id: residentId },
-      });
-      if (!resident) throw new NotFoundException('Resident not found');
+      const residentId = await this.resolveResidentId(tx, userIdOrResidentId);
 
       // Check if resident is already assigned to this unit
       const existingAssignment = await tx.residentUnit.findUnique({
@@ -112,8 +127,10 @@ export class UnitsService {
     });
   }
 
-  async removeUser(unitId: string, residentId: string) {
+  async removeUser(unitId: string, userIdOrResidentId: string) {
     return this.prisma.$transaction(async (tx) => {
+      const residentId = await this.resolveResidentId(tx, userIdOrResidentId);
+
       // Check if assignment exists
       const assignment = await tx.residentUnit.findUnique({
         where: { residentId_unitId: { residentId, unitId } },
@@ -141,12 +158,6 @@ export class UnitsService {
   async updateStatus(unitId: string, status: UnitStatus) {
     const unit = await this.findOne(unitId);
     const previousStatus = unit.status;
-
-    console.log({
-      incomingStatus: status,
-      deliveredEnum: UnitStatus.DELIVERED,
-      equals: status === UnitStatus.DELIVERED,
-    });
 
     // Set isDelivered flag based on status
     // Explicitly check for 'DELIVERED' status to set isDelivered to true
@@ -206,8 +217,13 @@ export class UnitsService {
         switch (feature) {
           case 'add_tenant':
           case 'add_family':
-          case 'manage_delegates':
             return unit.status === 'DELIVERED';
+          case 'manage_delegates':
+            return (
+              unit.status === 'DELIVERED' ||
+              unit.status === 'OCCUPIED' ||
+              unit.status === 'LEASED'
+            );
           case 'view_payment_plan':
           case 'view_announcements':
           case 'view_overdue_checks':

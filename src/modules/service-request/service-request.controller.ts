@@ -1,22 +1,20 @@
-// src/service-request/service-request.controller.ts
-
 import {
+  Body,
   Controller,
   Get,
-  Post,
-  Body,
-  Patch,
   Param,
+  Patch,
+  Post,
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { ServiceRequestService } from './service-request.service';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { Permissions } from '../auth/decorators/permissions.decorator';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestInternalDto } from './dto/update-service-request-internal.dto';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { PermissionsGuard } from '../auth/guards/permissions.guard';
-import { Permissions } from '../auth/decorators/permissions.decorator';
+import { ServiceRequestService } from './service-request.service';
 
 @ApiBearerAuth()
 @ApiTags('Service Requests')
@@ -26,81 +24,82 @@ export class ServiceRequestController {
   constructor(private readonly serviceRequestService: ServiceRequestService) {}
 
   /** POST /service-requests
-  Used by the Community App (resident) to create a new request
+  Used by the Community App (resident) to create a new request.
   */
   @Post()
   @ApiOperation({
     summary: 'Create a service request',
     description:
-      'Creates a resident service request, optionally linking attachments and submitting dynamic field values.',
+      'Creates a service request, optionally linking attachments and submitting dynamic field values.',
   })
   @Permissions('service_request.create')
-  create(
-    @Body() createServiceRequestDto: CreateServiceRequestDto,
-    @Req() req: any,
-  ) {
-    const createdById = req.user.id;
-
-    return this.serviceRequestService.create(
-      createdById,
-      createServiceRequestDto,
-    );
+  create(@Body() dto: CreateServiceRequestDto, @Req() req: any) {
+    return this.serviceRequestService.create(req.user.id, dto);
   }
 
   /** GET /service-requests/my-requests
-      Implements the Community App's "My requests" view
+      Implements the Community App's "My requests" view.
   */
   @Get('my-requests')
   @ApiOperation({
     summary: 'List my service requests',
     description:
-      'Returns the authenticated user’s service requests ordered by most recent first.',
+      "Returns the authenticated user's service requests ordered by most recent first.",
   })
   @Permissions('service_request.view_own')
   findByUser(@Req() req: any) {
-    const createdById = req.user.id;
-
-    return this.serviceRequestService.findByUser(createdById);
+    return this.serviceRequestService.findByUser(req.user.id);
   }
 
-  // GET /service-requests (Dashboard view: Fetch all)
+  /** GET /service-requests
+      Dashboard/staff view: list all requests.
+  */
   @Get()
   @ApiOperation({
     summary: 'List all service requests (dashboard)',
-    description:
-      'Returns all service requests for dashboard/staff workflows. Add role-based authorization before enabling in production.',
+    description: 'Returns all service requests for dashboard/staff workflows.',
   })
+  @Permissions('service_request.view_all')
   findAll() {
-    // You should add an Authorization Guard here to ensure the user has
-    // the MANAGER, OPERATOR, or SUPER_ADMIN Role before running this.
     return this.serviceRequestService.findAll();
   }
 
-  // GET /service-requests/:id
-  // @UseGuards(AuthGuard('jwt'))
+  /** GET /service-requests/:id */
   @Get(':id')
   @ApiOperation({
     summary: 'Get a service request by id',
     description:
       'Returns a single service request including service, attachments, and submitted field values.',
   })
-  findOne(@Param('id') id: string) {
-    return this.serviceRequestService.findOne(id);
+  @Permissions('service_request.view_own', 'service_request.view_all')
+  findOne(@Param('id') id: string, @Req() req: any) {
+    return this.serviceRequestService.findOneForActor(id, {
+      actorUserId: req.user.id,
+      permissions: Array.isArray(req.user.permissions) ? req.user.permissions : [],
+      roles: Array.isArray(req.user.roles) ? req.user.roles : [],
+    });
   }
 
-  // PATCH /service-requests/:id
-  // Used by Dashboard staff to update status, assignee, etc.
-  // @UseGuards(AuthGuard('jwt'))
+  /** PATCH /service-requests/:id
+      Used by dashboard staff to update status/assignment.
+  */
   @Patch(':id')
   @ApiOperation({
     summary: 'Update a service request (internal)',
     description:
       'Updates internal processing fields such as status and assignee. Intended for dashboard/staff use.',
   })
-  update(
-    @Param('id') id: string,
-    @Body() updateServiceRequestDto: UpdateServiceRequestInternalDto, // CHANGE DTO HERE
-  ) {
-    return this.serviceRequestService.update(id, updateServiceRequestDto);
+  @Permissions(
+    'service_request.assign',
+    'service_request.resolve',
+    'service_request.close',
+  )
+  update(@Param('id') id: string, @Body() dto: UpdateServiceRequestInternalDto, @Req() req: any) {
+    return this.serviceRequestService.updateForActor(id, dto, {
+      actorUserId: req.user.id,
+      permissions: Array.isArray(req.user.permissions) ? req.user.permissions : [],
+      roles: Array.isArray(req.user.roles) ? req.user.roles : [],
+    });
   }
 }
+

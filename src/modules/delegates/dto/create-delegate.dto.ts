@@ -1,24 +1,24 @@
 import {
-  IsString,
   IsOptional,
   IsBoolean,
   IsDateString,
   IsUUID,
+  IsEnum,
 } from 'class-validator';
 import { DelegateType } from '@prisma/client';
 
 export class CreateDelegateDto {
-  @IsString()
-  userId: string;
-
-  @IsString()
-  unitId: string;
-
-  @IsString()
-  type: DelegateType;
+  @IsUUID()
+  userId!: string;
 
   @IsUUID()
-  idFileId: string; // Required for delegate national ID
+  unitId!: string;
+
+  @IsEnum(DelegateType)
+  type!: DelegateType;
+
+  @IsUUID()
+  idFileId!: string; // Required for delegate national ID
 
   @IsOptional()
   @IsDateString()

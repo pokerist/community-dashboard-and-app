@@ -5,16 +5,117 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { EmailService } from '../notifications/email.service';
 import { CreateDelegateDto } from './dto/create-delegate.dto';
 import { UpdateDelegateDto } from './dto/update-delegate.dto';
+import { NotificationsService } from '../notifications/notifications.service';
+import {
+  Audience,
+  Channel,
+  FileCategory,
+  NotificationType,
+  UnitStatus,
+} from '@prisma/client';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class DelegatesService {
   constructor(
     private prisma: PrismaService,
-    private emailService: EmailService,
+    private notificationsService: NotificationsService,
   ) {}
+
+  private async assertIsAdmin(userId: string) {
+    const admin = await this.prisma.admin.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+    if (!admin) {
+      throw new ForbiddenException('Admin access required');
+    }
+  }
+
+  private async notifyAdmins(title: string, messageEn: string) {
+    const admins = await this.prisma.admin.findMany({
+      select: { userId: true },
+    });
+    const adminUserIds = admins.map((a) => a.userId).filter(Boolean);
+    if (adminUserIds.length === 0) return;
+
+    await this.notificationsService.sendNotification(
+      {
+        type: NotificationType.EVENT_NOTIFICATION,
+        title,
+        messageEn,
+        channels: [Channel.IN_APP, Channel.EMAIL],
+        targetAudience: Audience.SPECIFIC_RESIDENCES,
+        audienceMeta: { userIds: adminUserIds },
+      },
+      undefined,
+    );
+  }
+
+  private async notifyUser(userId: string, title: string, messageEn: string) {
+    await this.notificationsService.sendNotification(
+      {
+        type: NotificationType.EVENT_NOTIFICATION,
+        title,
+        messageEn,
+        channels: [Channel.IN_APP, Channel.EMAIL],
+        targetAudience: Audience.SPECIFIC_RESIDENCES,
+        audienceMeta: { userIds: [userId] },
+      },
+      undefined,
+    );
+  }
+
+  private coerceOptionalDate(value?: string) {
+    if (!value) return undefined;
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) {
+      throw new BadRequestException('Invalid date format');
+    }
+    return d;
+  }
+
+  private async sendCredentialSetupIfNeeded(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true, passwordHash: true },
+    });
+    if (!user) return;
+    if (user.passwordHash) return;
+    if (!user.email) return;
+
+    await this.prisma.passwordResetToken.updateMany({
+      where: { userId: user.id, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+
+    await this.prisma.passwordResetToken.create({
+      data: {
+        userId: user.id,
+        tokenHash,
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1 hour
+      },
+    });
+
+    const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${rawToken}`;
+
+    await this.notificationsService.sendNotification(
+      {
+        type: NotificationType.OTP,
+        title: 'Set up your account',
+        messageEn: `Your delegate access has been approved. Set your password here: ${resetLink}`,
+        channels: [Channel.EMAIL],
+        targetAudience: Audience.SPECIFIC_RESIDENCES,
+        audienceMeta: { userIds: [user.id] },
+      },
+      undefined,
+    );
+  }
 
   // Create delegate request (by owner)
   async createDelegateRequest(dto: CreateDelegateDto, requestedBy: string) {
@@ -25,9 +126,14 @@ export class DelegatesService {
     if (!unit) {
       throw new NotFoundException('Unit not found');
     }
-    if (unit.status !== 'DELIVERED') {
+    const allowedUnitStatuses: UnitStatus[] = [
+      UnitStatus.DELIVERED,
+      UnitStatus.OCCUPIED,
+      UnitStatus.LEASED,
+    ];
+    if (!allowedUnitStatuses.includes(unit.status)) {
       throw new ForbiddenException(
-        'Cannot add delegates until unit is delivered',
+        'Cannot add delegates until unit is delivered/occupied/leased',
       );
     }
 
@@ -49,11 +155,36 @@ export class DelegatesService {
       where: {
         unitId: dto.unitId,
         userId: dto.userId,
-        status: 'ACTIVE',
+        status: { in: ['PENDING', 'APPROVED', 'ACTIVE'] },
       },
     });
     if (existingAccess) {
       throw new BadRequestException('User already has access to this unit');
+    }
+
+    const delegateUser = await this.prisma.user.findUnique({
+      where: { id: dto.userId },
+      select: { id: true, email: true, phone: true },
+    });
+    if (!delegateUser) {
+      throw new NotFoundException('Delegate user not found');
+    }
+
+    const idFile = await this.prisma.file.findUnique({
+      where: { id: dto.idFileId },
+      select: { id: true, category: true },
+    });
+    if (!idFile) {
+      throw new BadRequestException('Delegate ID file not found');
+    }
+    const allowedIdFileCategories: FileCategory[] = [
+      FileCategory.DELEGATE_ID,
+      FileCategory.NATIONAL_ID,
+    ];
+    if (!allowedIdFileCategories.includes(idFile.category)) {
+      throw new BadRequestException(
+        'idFileId must be a DELEGATE_ID or NATIONAL_ID file',
+      );
     }
 
     // Update user's national ID file
@@ -63,30 +194,52 @@ export class DelegatesService {
     });
 
     // Create pending delegate access
-    return this.prisma.unitAccess.create({
+    const startsAt = this.coerceOptionalDate(dto.startsAt) ?? new Date();
+    const endsAt = this.coerceOptionalDate(dto.endsAt);
+    if (endsAt && endsAt <= startsAt) {
+      throw new BadRequestException('endsAt must be after startsAt');
+    }
+
+    const access = await this.prisma.unitAccess.create({
       data: {
         unitId: dto.unitId,
         userId: dto.userId,
         role: 'DELEGATE',
         delegateType: dto.type,
-        startsAt: dto.startsAt || new Date(),
-        endsAt: dto.endsAt,
+        startsAt,
+        endsAt,
         grantedBy: requestedBy,
         status: 'PENDING', // Wait for admin approval
         source: 'OWNER_DELEGATION',
-        canViewFinancials: dto.canViewFinancials || false,
-        canReceiveBilling: dto.canReceiveBilling || false,
-        canBookFacilities: dto.canBookFacilities || true,
-        canGenerateQR: dto.canGenerateQR || false,
-        canManageWorkers: dto.canManageWorkers || false,
+        canViewFinancials: dto.canViewFinancials ?? true,
+        canReceiveBilling: dto.canReceiveBilling ?? false,
+        canBookFacilities: dto.canBookFacilities ?? true,
+        canGenerateQR: dto.canGenerateQR ?? true,
+        canManageWorkers: dto.canManageWorkers ?? true,
       },
     });
+
+    await this.notifyAdmins(
+      'Delegate request pending',
+      `A new delegate request was created for unit ${unit.unitNumber}.`,
+    ).catch(() => undefined);
+
+    await this.notifyUser(
+      dto.userId,
+      'Delegate request submitted',
+      `Your delegate access request for unit ${unit.unitNumber} is pending admin approval.`,
+    ).catch(() => undefined);
+
+    return access;
   }
 
   // Approve delegate (by admin)
   async approveDelegate(unitAccessId: string, approvedBy: string) {
+    await this.assertIsAdmin(approvedBy);
+
     const access = await this.prisma.unitAccess.findUnique({
       where: { id: unitAccessId },
+      include: { unit: true, user: true },
     });
     if (!access || access.role !== 'DELEGATE') {
       throw new NotFoundException('Delegate access not found');
@@ -95,32 +248,29 @@ export class DelegatesService {
       throw new BadRequestException('Delegate is not pending approval');
     }
 
+    if (!access.user.email) {
+      throw new BadRequestException('Delegate must have an email before approval');
+    }
+    if (!access.user.phone) {
+      throw new BadRequestException('Delegate must have a phone number before approval');
+    }
+    if (!access.user.nationalIdFileId) {
+      throw new BadRequestException('Delegate must have an ID document before approval');
+    }
+
     // Update status to ACTIVE
     const updatedAccess = await this.prisma.unitAccess.update({
       where: { id: unitAccessId },
       data: { status: 'ACTIVE' },
     });
 
-    // Send email to delegate about approval
-    const delegate = await this.prisma.user.findUnique({
-      where: { id: access.userId },
-      include: { unitAccesses: { include: { unit: true } } },
-    });
+    await this.notifyUser(
+      access.userId,
+      'Delegate access approved',
+      `Your delegate access for unit ${access.unit?.unitNumber ?? ''} is now active.`,
+    ).catch(() => undefined);
 
-    if (delegate?.email) {
-      const unitAccess = delegate.unitAccesses.find(
-        (ua) => ua.id === unitAccessId,
-      );
-      const subject = `Delegate Access Approved - Alkarma Community`;
-      const content = `
-        <h2>Delegate Access Approved</h2>
-        <p>Dear ${delegate.nameEN},</p>
-        <p>Your delegate access request for unit ${unitAccess?.unit?.unitNumber || 'N/A'} has been approved.</p>
-        <p>You can now access the community dashboard with your existing credentials.</p>
-        <p><a href="https://app.alkarma.com/login">Login to your account</a></p>
-      `;
-      await this.emailService.sendEmail(subject, delegate.email, content);
-    }
+    await this.sendCredentialSetupIfNeeded(access.userId).catch(() => undefined);
 
     return updatedAccess;
   }
@@ -157,30 +307,38 @@ export class DelegatesService {
     // Update status to REVOKED
     const updatedAccess = await this.prisma.unitAccess.update({
       where: { id: unitAccessId },
-      data: { status: 'REVOKED' },
+      data: { status: 'REVOKED', endsAt: new Date() },
     });
 
-    // Send email to delegate about revocation
-    const delegate = await this.prisma.user.findUnique({
-      where: { id: access.userId },
-    });
-
-    if (delegate?.email) {
-      const subject = `Delegate Access Revoked - Alkarma Community`;
-      const content = `
-        <h2>Delegate Access Revoked</h2>
-        <p>Dear ${delegate.nameEN},</p>
-        <p>Your delegate access for unit ${access.unit?.unitNumber || 'N/A'} has been revoked.</p>
-        <p>If you believe this was done in error, please contact the administration.</p>
-      `;
-      await this.emailService.sendEmail(subject, delegate.email, content);
-    }
+    await this.notifyUser(
+      access.userId,
+      'Delegate access revoked',
+      `Your delegate access for unit ${access.unit?.unitNumber ?? ''} has been revoked.`,
+    ).catch(() => undefined);
 
     return updatedAccess;
   }
 
   // Get delegates for a unit
-  async getDelegatesForUnit(unitId: string) {
+  async getDelegatesForUnit(unitId: string, requestedBy: string) {
+    const isAdmin = await this.prisma.admin.findUnique({
+      where: { userId: requestedBy },
+      select: { id: true },
+    });
+    const isOwner = await this.prisma.unitAccess.findFirst({
+      where: {
+        unitId,
+        userId: requestedBy,
+        role: 'OWNER',
+        status: 'ACTIVE',
+      },
+      select: { id: true },
+    });
+
+    if (!isAdmin && !isOwner) {
+      throw new ForbiddenException('Not authorized to view delegates for this unit');
+    }
+
     return this.prisma.unitAccess.findMany({
       where: {
         unitId,
@@ -193,7 +351,8 @@ export class DelegatesService {
   }
 
   // Get pending delegate requests
-  async getPendingRequests() {
+  async getPendingRequests(requestedBy: string) {
+    await this.assertIsAdmin(requestedBy);
     return this.prisma.unitAccess.findMany({
       where: {
         role: 'DELEGATE',
@@ -207,7 +366,7 @@ export class DelegatesService {
   }
 
   // Update delegate permissions
-  async updateDelegate(unitAccessId: string, dto: UpdateDelegateDto) {
+  async updateDelegate(unitAccessId: string, dto: UpdateDelegateDto, updatedBy: string) {
     const access = await this.prisma.unitAccess.findUnique({
       where: { id: unitAccessId },
     });
@@ -215,14 +374,47 @@ export class DelegatesService {
       throw new NotFoundException('Delegate access not found');
     }
 
+    const isAdmin = await this.prisma.admin.findUnique({
+      where: { userId: updatedBy },
+      select: { id: true },
+    });
+    const isOwner = await this.prisma.unitAccess.findFirst({
+      where: {
+        unitId: access.unitId,
+        userId: updatedBy,
+        role: 'OWNER',
+        status: 'ACTIVE',
+      },
+      select: { id: true },
+    });
+
+    if (!isAdmin && !isOwner) {
+      throw new ForbiddenException('Not authorized to update this delegate');
+    }
+
+    const startsAt = this.coerceOptionalDate(dto.startsAt as any);
+    const endsAt = this.coerceOptionalDate(dto.endsAt as any);
+    if (startsAt && endsAt && endsAt <= startsAt) {
+      throw new BadRequestException('endsAt must be after startsAt');
+    }
+
     return this.prisma.unitAccess.update({
       where: { id: unitAccessId },
-      data: dto,
+      data: {
+        startsAt: startsAt ?? undefined,
+        endsAt: endsAt ?? undefined,
+        canViewFinancials: dto.canViewFinancials,
+        canReceiveBilling: dto.canReceiveBilling,
+        canBookFacilities: dto.canBookFacilities,
+        canGenerateQR: dto.canGenerateQR,
+        canManageWorkers: dto.canManageWorkers,
+      },
     });
   }
 
   // Remove delegate (hard delete)
-  async remove(unitAccessId: string) {
+  async remove(unitAccessId: string, removedBy: string) {
+    await this.assertIsAdmin(removedBy);
     const access = await this.prisma.unitAccess.findUnique({
       where: { id: unitAccessId },
     });

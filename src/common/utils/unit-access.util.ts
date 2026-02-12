@@ -16,11 +16,14 @@ export async function getActiveUnitAccess(
   userId: string,
   unitId: string,
 ) {
+  const now = new Date();
   const access = await prisma.unitAccess.findFirst({
     where: {
       userId,
       unitId,
       status: 'ACTIVE',
+      startsAt: { lte: now },
+      OR: [{ endsAt: null }, { endsAt: { gte: now } }],
     },
   });
 

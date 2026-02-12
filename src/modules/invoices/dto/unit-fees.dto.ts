@@ -17,7 +17,7 @@ export class CreateUnitFeeDto {
   })
   @IsUUID()
   @IsNotEmpty()
-  unitId: string;
+  unitId!: string;
 
   @ApiProperty({
     example: 'Electricity',
@@ -25,7 +25,7 @@ export class CreateUnitFeeDto {
   })
   @IsString()
   @IsNotEmpty()
-  type: string;
+  type!: string;
 
   @ApiProperty({
     example: 150.75,
@@ -35,7 +35,7 @@ export class CreateUnitFeeDto {
   @IsNumber()
   @Min(0.01)
   @IsNotEmpty()
-  amount: number;
+  amount!: number;
 
   @ApiProperty({
     example: '2025-11-01T00:00:00.000Z',
@@ -43,7 +43,7 @@ export class CreateUnitFeeDto {
   })
   @IsDateString()
   @IsNotEmpty()
-  billingMonth: Date;
+  billingMonth!: Date;
 }
 
 export class UpdateUnitFeeDto extends PartialType(CreateUnitFeeDto) {}

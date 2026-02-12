@@ -3,7 +3,7 @@ import { IsString, IsOptional, IsNotEmpty } from 'class-validator';
 export class CreateOwnerWithUnitDto {
   @IsString()
   @IsNotEmpty()
-  name: string;
+  name!: string;
 
   @IsString()
   @IsNotEmpty()
@@ -11,17 +11,17 @@ export class CreateOwnerWithUnitDto {
 
   @IsString()
   @IsNotEmpty()
-  phone: string;
+  phone!: string;
 
   @IsString()
   @IsNotEmpty()
-  nationalId: string;
+  nationalId!: string;
 
   @IsString()
   @IsNotEmpty()
-  nationalIdPhotoId: string; // Mandatory national ID photo
+  nationalIdPhotoId!: string; // Mandatory national ID photo
 
   @IsString()
   @IsNotEmpty()
-  unitId: string;
+  unitId!: string;
 }

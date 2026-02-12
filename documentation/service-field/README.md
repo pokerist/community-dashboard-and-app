@@ -1,48 +1,68 @@
-# Service-Field Module
+# Service Field Module (`src/modules/service-field`)
 
-## Purpose & Role in the System
-Manages form field definitions for service requests. Supports various input types including text, files, dates, and member selectors.
+## What this module is responsible for
 
-## Controllers, Services, and Key Classes
-- **Controllers**: `ServiceFieldController`
-- **Services**: `ServiceFieldService`
-- **Files**: `src/modules/service-field/service-field.controller.ts`, `src/modules/service-field/service-field.service.ts`
+This module configures the **dynamic form fields** that appear when creating a Service Request.
 
-## Field Types
-- TEXT
-- TEXTAREA
-- NUMBER
-- DATE
-- BOOLEAN
-- MEMBER_SELECTOR
-- FILE
+Each `Service` can have many `ServiceField`s (ordered by `order`), which the Community App uses to render the request form.
 
-## API Endpoints
-*(Detailed endpoint documentation needed - requires reading controller code)*
+## Key data models (Prisma)
 
-## DTOs and Validation Rules
-*(DTO definitions needed - requires reading dto files)*
+From `prisma/schema.prisma`:
 
-## Data Relationships
-- **ServiceField** belongs to `Service`
-- **ServiceField** has many `ServiceRequestFieldValue`s
+- `ServiceField`
+  - belongs to `Service` via `serviceId`
+  - `label` (user-facing field label)
+  - `type` (input type)
+  - `placeholder` (optional UI hint)
+  - `required` (whether a value is mandatory when submitting a request)
+  - `order` (display ordering in the UI)
+- `ServiceRequestFieldValue`
+  - stores submitted values per request/field
+  - supports different value columns: `valueText`, `valueNumber`, `valueBool`, `valueDate`, `fileAttachmentId`
 
-## Business Logic and Workflow Rules
-1. **Field Ordering**: Order field for form display sequence
-2. **Required Fields**: Mandatory vs optional fields
-3. **Type Validation**: Input type-specific validation rules
+## Field types
 
-## File References
-- Controller: `src/modules/service-field/service-field.controller.ts`
-- Service: `src/modules/service-field/service-field.service.ts`
-- DTOs: `src/modules/service-field/dto/`
-- Database Model: `prisma/schema.prisma` (ServiceField model)
+Enum `ServiceFieldType` (from Prisma):
 
-## External Integrations
-- **Prisma ORM**: Database operations
+- `TEXT`
+- `TEXTAREA`
+- `NUMBER`
+- `DATE`
+- `BOOLEAN`
+- `MEMBER_SELECTOR`
+- `FILE`
 
-## Missing Information
-- Complete API endpoints
-- DTO specifications
-- Example field configurations
-- Validation logic details
+## Authentication / authorization
+
+All routes require:
+
+- `JwtAuthGuard`
+- `PermissionsGuard` via `@Permissions(...)`
+
+Permissions are defined per endpoint in `src/modules/service-field/service-field.controller.ts`.
+
+## API surface (controller)
+
+Base route: `/service-fields`
+
+- `POST /service-fields` (permissions: `service_field.create`)
+- `GET /service-fields?serviceId=<uuid>` (permissions: `service_field.read`)
+- `PATCH /service-fields/:id` (permissions: `service_field.update`)
+- `DELETE /service-fields/:id` (permissions: `service_field.delete`)
+
+Notes:
+
+- `GET /service-fields` requires `serviceId` as a query parameter.
+- `DELETE /service-fields/:id` is blocked if there are existing `ServiceRequestFieldValue` rows linked to that field.
+
+## DTOs
+
+- `CreateServiceFieldDto` (`src/modules/service-field/dto/create-service-field.dto.ts`)
+- `UpdateServiceFieldDto` (`src/modules/service-field/dto/update-service-field.dto.ts`) is a `PartialType(CreateServiceFieldDto)`.
+
+## Relevant code entry points
+
+- `src/modules/service-field/service-field.controller.ts`
+- `src/modules/service-field/service-field.service.ts`
+- `src/modules/service-field/dto/*.ts`

@@ -9,13 +9,13 @@ export enum RegistrationApprovalRole {
 export class ApprovePendingRegistrationDto {
   @IsNotEmpty()
   @IsString()
-  unitId: string; // admin assigns unit
+  unitId!: string; // admin assigns unit
 
   @IsNotEmpty()
   @IsEnum(RegistrationApprovalRole)
-  role: RegistrationApprovalRole;
+  role!: RegistrationApprovalRole;
 
   @IsNotEmpty()
   @IsBoolean()
-  isPrimary: boolean; // admin decides if this is primary resident
+  isPrimary!: boolean; // admin decides if this is primary resident
 }

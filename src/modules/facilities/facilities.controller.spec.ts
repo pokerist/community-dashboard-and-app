@@ -12,11 +12,16 @@ describe('FacilitiesController', () => {
         {
           provide: FacilitiesService,
           useValue: {
-            findAll: jest.fn().mockResolvedValue([]),
+            findAllForActor: jest.fn().mockResolvedValue([]),
           },
         },
       ],
-    }).compile();
+    })
+      .overrideGuard(require('../auth/guards/jwt-auth.guard').JwtAuthGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(require('../auth/guards/permissions.guard').PermissionsGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get<FacilitiesController>(FacilitiesController);
   });
@@ -26,7 +31,7 @@ describe('FacilitiesController', () => {
   });
 
   it('list should return array', async () => {
-    const res = await controller.findAll();
+    const res = await controller.findAll({ user: { id: 'u1', permissions: [], roles: [] } } as any);
     expect(res).toEqual([]);
   });
 });

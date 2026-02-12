@@ -5,10 +5,10 @@ export class AssignUserDto {
   @ApiProperty({ example: 'user-uuid-1234' })
   @IsNotEmpty()
   @IsString()
-  userId: string;
+  userId!: string;
 
   @ApiProperty({ example: 'OWNER', enum: ['OWNER', 'TENANT', 'FAMILY'] })
   @IsNotEmpty()
   @IsEnum(['OWNER', 'TENANT', 'FAMILY'])
-  role: 'OWNER' | 'TENANT' | 'FAMILY';
+  role!: 'OWNER' | 'TENANT' | 'FAMILY';
 }

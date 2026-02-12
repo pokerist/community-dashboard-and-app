@@ -1,50 +1,59 @@
-# Service Module
+# Service Module (`src/modules/service`)
 
-## Purpose & Role in the System
-Defines available maintenance and service offerings with customizable forms. Supports eligibility rules based on resident type and unit status.
+## What this module is responsible for
 
-## Controllers, Services, and Key Classes
-- **Controllers**: `ServiceController`
-- **Services**: `ServiceService`
-- **Files**: `src/modules/service/service.controller.ts`, `src/modules/service/service.service.ts`
+This module manages the **service catalog** (the list of services residents can request), for example:
 
-## Key Features
-- Service categorization (MAINTENANCE, RECREATION, etc.)
-- Dynamic form fields via ServiceField relations
-- Eligibility filtering (ALL, DELIVERED_ONLY, NON_DELIVERED_ONLY)
-- Request tracking and statistics
+- Maintenance
+- Security
+- Admin / facilities requests
 
-## API Endpoints
-*(Detailed endpoint documentation needed - requires reading controller code)*
+It does not create service requests; that is handled by the Service Request module.
 
-## DTOs and Validation Rules
-*(DTO definitions needed - requires reading dto files)*
+## Key data models (Prisma)
 
-## Data Relationships
-- **Service** has many `ServiceField`s
-- **Service** has many `ServiceRequest`s
+From `prisma/schema.prisma`:
 
-## Business Logic and Workflow Rules
-1. **Eligibility Rules**:
-   - ALL: Available to all residents
-   - DELIVERED_ONLY: Only delivered units
-   - NON_DELIVERED_ONLY: Only non-delivered units
+- `Service`
+  - `name`, `category`, `description`
+  - `status` (visibility toggle: `true` = active/visible)
+  - `unitEligibility` (`ALL`, `DELIVERED_ONLY`, `NON_DELIVERED_ONLY`)
+  - `startingPrice` (Decimal)
+  - relation: `formFields` (`ServiceField[]`)
+  - relation: `requests` (`ServiceRequest[]`)
 
-2. **Processing Time**: Estimated completion time tracking
+## Authentication / authorization
 
-3. **Active Status**: Enable/disable services
+All routes require:
 
-## File References
-- Controller: `src/modules/service/service.controller.ts`
-- Service: `src/modules/service/service.service.ts`
-- DTOs: `src/modules/service/dto/`
-- Database Model: `prisma/schema.prisma` (Service model)
+- `JwtAuthGuard`
+- `PermissionsGuard` via `@Permissions(...)`
 
-## External Integrations
-- **Prisma ORM**: Database operations
+Permissions are defined per endpoint in `src/modules/service/service.controller.ts`.
 
-## Missing Information
-- Complete API endpoints
-- DTO specifications
-- Example usage
-- Business logic details
+## API surface (controller)
+
+Base route: `/services`
+
+- `POST /services` (permissions: `service.create`)
+- `GET /services?status=active|inactive|all` (permissions: `service.read`)
+- `GET /services/:id` (permissions: `service.read`)
+- `PATCH /services/:id` (permissions: `service.update`)
+- `DELETE /services/:id` (permissions: `service.delete`)
+
+Notes:
+
+- `GET /services` includes `formFields` ordered by `order` (used by the Community App to render a dynamic form).
+- `DELETE /services/:id` is blocked if there are existing `ServiceRequest`s linked to the service; use `PATCH` to set `status=false` instead.
+
+## DTOs
+
+- `CreateServiceDto` (`src/modules/service/dto/create-service.dto.ts`)
+  - `startingPrice` is a **string** in the DTO (stored as Decimal in DB).
+- `UpdateServiceDto` (`src/modules/service/dto/update-service.dto.ts`) is a `PartialType(CreateServiceDto)`.
+
+## Relevant code entry points
+
+- `src/modules/service/service.controller.ts`
+- `src/modules/service/service.service.ts`
+- `src/modules/service/dto/*.ts`

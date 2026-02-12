@@ -17,17 +17,17 @@ class CreateSlotConfigDto {
   @IsInt()
   @Min(0)
   @Max(6)
-  dayOfWeek: number;
+  dayOfWeek!: number;
 
   @IsString()
-  startTime: string;
+  startTime!: string;
 
   @IsString()
-  endTime: string;
+  endTime!: string;
 
   @IsInt()
   @Min(1)
-  slotDurationMinutes: number;
+  slotDurationMinutes!: number;
 
   @IsOptional()
   @IsInt()
@@ -36,7 +36,7 @@ class CreateSlotConfigDto {
 
 class CreateSlotExceptionDto {
   @IsString()
-  date: string; // ISO string
+  date!: string; // ISO string
 
   @IsBoolean()
   @IsOptional()
@@ -61,7 +61,7 @@ class CreateSlotExceptionDto {
 
 export class CreateFacilityDto {
   @IsString()
-  name: string;
+  name!: string;
 
   @IsOptional()
   @IsString()

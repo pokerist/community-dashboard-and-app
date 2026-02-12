@@ -16,9 +16,13 @@
     "incremental": true,
     "skipLibCheck": true,
     "strictNullChecks": true,
+    "strictPropertyInitialization": true,
     "forceConsistentCasingInFileNames": true,
     "noImplicitAny": false,
+    "useUnknownInCatchVariables": true,
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false,
-  }
+    "types": ["node", "jest", "express", "multer"]
+  },
+  
 }

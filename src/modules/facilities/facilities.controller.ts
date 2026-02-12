@@ -7,6 +7,7 @@ import {
   Patch,
   Delete,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { FacilitiesService } from './facilities.service';
@@ -30,17 +31,25 @@ export class FacilitiesController {
   }
 
   @Get()
-  @Permissions('facility.view_all')
+  @Permissions('facility.view_all', 'facility.view_own')
   @ApiOperation({ summary: 'Get all facilities with configs' })
-  findAll() {
-    return this.facilitiesService.findAll();
+  findAll(@Req() req: any) {
+    return this.facilitiesService.findAllForActor({
+      actorUserId: req.user?.id,
+      permissions: Array.isArray(req.user?.permissions) ? req.user.permissions : [],
+      roles: Array.isArray(req.user?.roles) ? req.user.roles : [],
+    });
   }
 
   @Get(':id')
   @Permissions('facility.view_all', 'facility.view_own')
   @ApiOperation({ summary: 'Get facility by ID' })
-  findOne(@Param('id') id: string) {
-    return this.facilitiesService.findOne(id);
+  findOne(@Param('id') id: string, @Req() req: any) {
+    return this.facilitiesService.findOneForActor(id, {
+      actorUserId: req.user?.id,
+      permissions: Array.isArray(req.user?.permissions) ? req.user.permissions : [],
+      roles: Array.isArray(req.user?.roles) ? req.user.roles : [],
+    });
   }
 
   @Patch(':id')

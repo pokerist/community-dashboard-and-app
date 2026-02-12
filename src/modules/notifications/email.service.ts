@@ -40,8 +40,8 @@ export class EmailService {
       this.logger.log(
         `Email sent successfully to ${recipient}: ${info.messageId}`,
       );
-    } catch (error) {
-      this.logger.error(`Failed to send email to ${recipient}`, error);
+    } catch (error: unknown) {
+      this.logger.error(`Failed to send email to ${recipient}`, error as any);
       throw error;
     }
   }

@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateComplaintDto, UpdateComplaintDto } from './dto/complaints.dto';
@@ -47,7 +48,7 @@ export class ComplaintsService {
   }
 
   // --- 1. CREATE ---
-  async create(dto: CreateComplaintDto) {
+  async create(dto: CreateComplaintDto & { reporterId: string }) {
     // Access Control: Check if user has active access to the unit (if provided)
     if (dto.unitId) {
       await getActiveUnitAccess(this.prisma, dto.reporterId, dto.unitId);
@@ -132,6 +133,22 @@ export class ComplaintsService {
     return complaint;
   }
 
+  async findOneForActor(
+    id: string,
+    ctx: { actorUserId: string; permissions: string[] },
+  ) {
+    const complaint = await this.findOne(id);
+
+    const canViewAll = ctx.permissions.includes('complaint.view_all');
+    if (canViewAll) return complaint;
+
+    if (complaint.reporterId !== ctx.actorUserId) {
+      throw new ForbiddenException('You do not have access to this complaint');
+    }
+
+    return complaint;
+  }
+
   // --- 4. UPDATE (Handles all patching, including status and assignedToId) ---
   async update(id: string, dto: UpdateComplaintDto) {
     await this.findOne(id);
@@ -181,6 +198,20 @@ export class ComplaintsService {
     return this.prisma.complaint.delete({
       where: { id },
     });
+  }
+
+  async removeForActor(
+    id: string,
+    ctx: { actorUserId: string; permissions: string[] },
+  ) {
+    const complaint = await this.findOne(id);
+
+    const canDeleteAll = ctx.permissions.includes('complaint.delete_all');
+    if (!canDeleteAll && complaint.reporterId !== ctx.actorUserId) {
+      throw new ForbiddenException('You do not have access to this complaint');
+    }
+
+    return this.remove(id);
   }
 
   /**

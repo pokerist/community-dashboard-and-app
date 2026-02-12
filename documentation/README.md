@@ -160,10 +160,12 @@ Each module has detailed documentation in its respective directory:
 ### Core System Modules
 - [Authentication](./auth/) - User auth, JWT tokens, RBAC permissions
 - [Referrals](./referrals/) - Invitation-based user onboarding system
-- [Residents](./residents/) - User management (Residents, Owners, Tenants, Admins)
+- [Users](./users/) - Admin user management (Users + Resident/Owner/Tenant/Admin profiles)
 
 ### Property Management
 - [Units](./units/) - Property unit management and resident assignments
+- [Owners](./owners/) - Owner onboarding, family operations, and owner-related APIs
+- [Leases](./leases/) - Lease lifecycle, tenant onboarding, and lease-related APIs
 - [Invoices](./invoices/) - Financial billing and payment tracking
 
 ### Community Services

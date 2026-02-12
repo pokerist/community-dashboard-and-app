@@ -1,4 +1,11 @@
-import { Controller, Post, Body, Request } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  NotFoundException,
+  Post,
+  Request,
+} from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
@@ -24,20 +31,17 @@ export class AuthController {
     // Pass whichever exists: email or phone
     const identifier = dto.email || dto.phone;
     if (!identifier) {
-      throw new Error('Either email or phone must be provided');
+      throw new BadRequestException('Either email or phone must be provided');
     }
     return this.authService.login(identifier, dto.password);
   }
 
-  // @Post('register')
-  // @ApiOperation({ summary: 'Register a new user' })
-  // register(@Body() dto: RegisterDto) {
-  //   return this.authService.register(dto.email, dto.password, dto.nameEN, dto.nameAR);
-  // }
-
   @Post('signup-with-referral')
   @ApiOperation({ summary: 'Signup a new user via referral invitation' })
   signupWithReferral(@Body() dto: SignupWithReferralDto) {
+    if (process.env.ENABLE_REFERRAL_SIGNUP !== 'true') {
+      throw new NotFoundException();
+    }
     return this.authService.signupWithReferral(dto);
   }
 
@@ -64,7 +68,15 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   verifyEmail(@Body() dto: VerifyEmailDto, @Request() req: any) {
-    return this.authService.verifyEmail(dto, req.user.sub);
+    return this.authService.verifyEmail(dto, req.user.id);
+  }
+
+  @Post('send-email-verification')
+  @ApiOperation({ summary: 'Send an email verification token' })
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  sendEmailVerification(@Request() req: any) {
+    return this.authService.sendEmailVerification(req.user.id);
   }
 
   @Post('send-phone-otp')
@@ -72,7 +84,7 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   sendPhoneOtp(@Body() dto: SendPhoneOtpDto, @Request() req: any) {
-    return this.authService.sendPhoneOtp(dto, req.user.sub);
+    return this.authService.sendPhoneOtp(dto, req.user.id);
   }
 
   @Post('verify-phone-otp')
@@ -80,6 +92,6 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   verifyPhoneOtp(@Body() dto: VerifyPhoneOtpDto, @Request() req: any) {
-    return this.authService.verifyPhoneOtp(dto, req.user.sub);
+    return this.authService.verifyPhoneOtp(dto, req.user.id);
   }
 }

@@ -16,7 +16,7 @@ export class CreateLeaseDto {
   @ApiProperty({ example: 'unit-uuid-here', description: 'The ID of the Unit' })
   @IsUUID()
   @IsNotEmpty()
-  unitId: string;
+  unitId!: string;
 
   @ApiProperty({
     example: 'user-owner-uuid',
@@ -24,25 +24,25 @@ export class CreateLeaseDto {
   })
   @IsUUID()
   @IsNotEmpty()
-  ownerId: string;
+  ownerId!: string;
 
   @ApiProperty({ example: '2024-01-01T00:00:00.000Z' })
   @IsDate()
   @Type(() => Date)
   @IsNotEmpty()
-  startDate: Date;
+  startDate!: Date;
 
   @ApiProperty({ example: '2025-01-01T00:00:00.000Z' })
   @IsDate()
   @Type(() => Date)
   @IsNotEmpty()
-  endDate: Date;
+  endDate!: Date;
 
   @ApiProperty({ example: 5000.0 })
   @Type(() => Number)
   @IsNumber()
   @IsNotEmpty()
-  monthlyRent: number;
+  monthlyRent!: number;
 
   @ApiPropertyOptional({ example: 2500.0 })
   @Type(() => Number)
@@ -65,7 +65,7 @@ export class CreateLeaseDto {
   })
   @IsEmail()
   @IsNotEmpty()
-  tenantEmail: string;
+  tenantEmail!: string;
 
   @ApiPropertyOptional({
     example: '123456789',

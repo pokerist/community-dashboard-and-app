@@ -147,14 +147,14 @@ export class PendingRegistrationsService {
       },
     });
 
-    await prisma.resident.create({
+    const resident = await prisma.resident.create({
       data: {
         userId: user.id,
         nationalId: pending.nationalId,
       },
     });
 
-    return user;
+    return { user, resident };
   }
 
   private async assignRole(userId: string, role: string, prisma: any) {
@@ -174,7 +174,7 @@ export class PendingRegistrationsService {
   }
 
   private async assignResidentUnit(
-    userId: string,
+    residentId: string,
     dto: ApprovePendingRegistrationDto,
     prisma: any,
   ) {
@@ -191,7 +191,7 @@ export class PendingRegistrationsService {
 
     await prisma.residentUnit.create({
       data: {
-        residentId: userId,
+        residentId,
         unitId: dto.unitId,
         isPrimary: dto.isPrimary,
       },
@@ -226,9 +226,9 @@ export class PendingRegistrationsService {
       await this.lockPendingRegistration(id, prisma);
       await this.checkUniqueness(pending, prisma);
 
-      const user = await this.createUserAndResident(pending, prisma);
+      const { user, resident } = await this.createUserAndResident(pending, prisma);
       await this.assignRole(user.id, dto.role, prisma);
-      await this.assignResidentUnit(user.id, dto, prisma);
+      await this.assignResidentUnit(resident.id, dto, prisma);
       await this.finalizeApproval(id, user.id, prisma);
 
       return user;

@@ -469,7 +469,7 @@ export class LeasesService {
           result.tenantUser.email,
           content,
         );
-      } catch (e) {
+      } catch (e: unknown) {
         console.error('LEASE WELCOME EMAIL FAILED', e);
       }
     }
@@ -606,7 +606,7 @@ export class LeasesService {
           result.cascade.endedAt,
         );
         await this.updateTenantUserStatus(this.prisma, result.cascade.tenantId);
-      } catch (e) {
+      } catch (e: unknown) {
         console.error('LEASE UPDATE CASCADE FAILED', e);
       }
     }
@@ -692,7 +692,7 @@ export class LeasesService {
           result.cascade.endedAt,
         );
         await this.updateTenantUserStatus(this.prisma, result.cascade.tenantId);
-      } catch (e) {
+      } catch (e: unknown) {
         console.error('LEASE DELETE CASCADE FAILED', e);
       }
     }
@@ -850,7 +850,7 @@ export class LeasesService {
         `;
       try {
         await this.emailService.sendEmail(subject, result.user.email, content);
-      } catch (e) {
+      } catch (e: unknown) {
         console.error('TENANT WELCOME EMAIL FAILED', e);
       }
     }
@@ -962,7 +962,7 @@ export class LeasesService {
           result.terminationDate,
         );
         await this.updateTenantUserStatus(this.prisma, result.tenantId);
-      } catch (e) {
+      } catch (e: unknown) {
         console.error('LEASE TERMINATION CASCADE FAILED', e);
         // Don't fail termination if cascades fail; DB state is already consistent for the lease/unit.
       }
@@ -984,7 +984,7 @@ export class LeasesService {
           `;
       try {
         await this.emailService.sendEmail(subject, lease.tenant.email, content);
-      } catch (e) {
+      } catch (e: unknown) {
         console.error('LEASE TERMINATION EMAIL FAILED', e);
       }
     }

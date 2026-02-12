@@ -14,11 +14,12 @@ import { ComplaintStatus, Priority } from '@prisma/client';
 export class CreateComplaintDto {
   @ApiProperty({
     example: 'd290f1ee-6c54-4b01-90e6-d701748f0851',
-    description: 'The UUID of the user submitting the complaint.',
+    description:
+      'The UUID of the user submitting the complaint. In production this is derived from the JWT; clients should omit it.',
   })
   @IsUUID()
-  @IsNotEmpty()
-  reporterId: string;
+  @IsOptional()
+  reporterId?: string;
 
   @ApiProperty({
     example: 'a01a01a0-b1b1-c2c2-d3d3-e4e4e4e4e4e4',
@@ -35,7 +36,7 @@ export class CreateComplaintDto {
   })
   @IsString()
   @IsNotEmpty()
-  description: string;
+  description!: string;
 
   @ApiProperty({
     example: 'Noise',
@@ -43,7 +44,7 @@ export class CreateComplaintDto {
   })
   @IsString()
   @IsNotEmpty()
-  category: string;
+  category!: string;
 
   @ApiProperty({
     example: Priority.MEDIUM,
@@ -93,7 +94,5 @@ export class UpdateComplaintDto extends PartialType(CreateComplaintDto) {
   })
   @IsString()
   @IsOptional()
-  // NOTE: This field (resolutionNotes) MUST be added to your schema if you want to use it.
-  // We include it here for completeness, but the Prisma service will fail if the column is missing.
   resolutionNotes?: string;
 }

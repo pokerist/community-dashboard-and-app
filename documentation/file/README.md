@@ -1,80 +1,88 @@
-# File Module
+# File Module (`src/modules/file`)
 
-## Purpose & Role in the System
-The File module handles file uploads, storage, and retrieval for the community dashboard. It supports attachments for service requests, profile photos, and other documents with bucket-based organization.
+## What this module is responsible for
 
-## Controllers, Services, and Key Classes
-- **Controllers**: `FileController`
-- **Services**: `FileService`
-- **Key Classes**:
-  - Interfaces: `FileUploadResult`
-  - Adapters: File storage implementations
-  - Files: `src/modules/file/file.controller.ts`, `src/modules/file/file.service.ts`
+This module is the backend’s file gateway:
 
-## API Endpoints
+- Upload files to object storage (Supabase adapter) and create a `File` DB record.
+- Stream files back to clients.
+- Delete files (with category-based restrictions and access checks).
 
-### 1. Upload Attachment
-- **Endpoint**: `POST /files/upload/attachment`
-- **Method**: Multipart form-data with 'file' key
-- **Permissions**: Implied through usage context
-- **Response**: `FileUploadResult` with file metadata
+Most other modules do not upload binary data directly; they upload via this module and then pass `fileId` to other endpoints (e.g., `attachmentIds`).
 
-### 2. Delete File
-- **Endpoint**: `DELETE /files/:fileId`
-- **Permissions**: Context-dependent
-- **Response**: Success confirmation
+## Key data models (Prisma)
 
-### 3. Stream File
-- **Endpoint**: `GET /files/:fileId/stream`
-- **Permissions**: Context-dependent
-- **Response**: File stream
+From `prisma/schema.prisma`:
 
-## Data Relationships
-- **File** can be attached to:
-  - User profile photos (`User.profilePhoto`)
-  - Service request attachments (`Attachment.serviceRequest`)
-  - Invoice documents (`Attachment.invoice`)
-  - Lease contracts (`Lease.contractFile`)
+- `File`
+  - `key` is the storage key used by the storage adapter (bucket is derived from `category`).
+  - optional relations are created by other modules by storing `fileId` on their records:
+    - `User.profilePhotoId`
+    - `User.nationalIdFileId`
+    - `Lease.contractFileId`
+    - `Attachment.fileId`
+- `Attachment`
+  - links `fileId` to a business entity via:
+    - explicit relations (`serviceRequestId`, `invoiceId`, `incidentId`)
+    - and/or polymorphic `entity/entityId` (e.g., `SERVICE_REQUEST`, `COMPLAINT`, `VIOLATION`, `INCIDENT`)
 
-## Business Logic and Workflow Rules
-1. **Bucket Organization**:
-   - `service-attachments`: For service request files
-   - `profile-photos`: For user profile images
+## Authentication / authorization
 
-2. **Metadata Storage**: File info stored in database with Supabase keys
+All routes require:
 
-3. **Stream Serving**: Direct streaming for file access
+- `JwtAuthGuard` (JWT required)
 
-## Example Usage
+Read access for `GET /files/:fileId/stream` is enforced in `FileService.getFileStreamForActor`:
 
-**Upload attachment**:
-```bash
-POST /files/upload/attachment
-Authorization: Bearer <token>
-Content-Type: multipart/form-data
+- SUPER_ADMIN role bypasses checks.
+- User can read their own `profilePhotoId` / `nationalIdFileId`.
+- Lease contract files can be read by users with ACTIVE `UnitAccess` to the lease unit.
+- Attachment-linked files can be read if the user has access to the parent entity:
+  - Service Requests: `service_request.view_all` OR `service_request.view_own` + creator match.
+  - Complaints: `complaint.view_all` OR `complaint.view_own` + reporter match.
+  - Violations: `violation.view_all` OR `violation.view_own` + (direct target OR ACTIVE `UnitAccess` to the unit).
+  - Incidents: `incidents.view`.
+  - Invoice documents (if `attachment.invoiceId` is used): `invoice.view_all` OR `invoice.view_own` + (direct resident OR ACTIVE `UnitAccess` to the unit).
 
-file: <binary file data>
-```
+Delete access for `DELETE /files/:fileId` is enforced in `FileService.deleteFileForActor`:
 
-**Response**:
-```json
-{
-  "id": "file-123",
-  "key": "service-attachments/uuid-filename.jpg",
-  "name": "receipt.jpg",
-  "mimeType": "image/jpeg",
-  "size": 2048576,
-  "url": "https://supabase-url/storage/v1/object/service-attachments/uuid-filename.jpg"
-}
-```
+- Identity docs (`FileCategory.NATIONAL_ID`) cannot be deleted (business rule).
+- SUPER_ADMIN role bypasses ownership checks (still blocked by identity-doc rule).
+- Users can delete their own profile photo.
+- Other deletes require passing the same “read access” checks.
 
-## File References
-- Controller: `src/modules/file/file.controller.ts`
-- Service: `src/modules/file/file.service.ts`
-- Adapters: `src/modules/file/adapters/`
-- Database Model: `prisma/schema.prisma` (File, Attachment models)
-- Interface: `src/common/interfaces/file-storage.interface.ts`
+## Storage buckets
 
-## External Integrations
-- **Supabase Storage**: Cloud file storage
-- **Prisma ORM**: File metadata persistence
+Bucket is derived from `File.category`:
+
+- `PROFILE_PHOTO` -> `profile-photos`
+- `SERVICE_ATTACHMENT` -> `service-attachments`
+- Identity docs (`NATIONAL_ID`, `CONTRACT`, `DELEGATE_ID`, `WORKER_ID`, `MARRIAGE_CERTIFICATE`, `BIRTH_CERTIFICATE`, `DELIVERY`) -> `identity-docs`
+
+## API surface (controller)
+
+Base route: `/files`
+
+Uploads (multipart `file` field):
+
+- `POST /files/upload/profile-photo`
+- `POST /files/upload/national-id`
+- `POST /files/upload/contract`
+- `POST /files/upload/delegate-id`
+- `POST /files/upload/worker-id`
+- `POST /files/upload/marriage-certificate`
+- `POST /files/upload/birth-certificate`
+- `POST /files/upload/service-attachment`
+
+Read/delete:
+
+- `GET /files/:fileId/stream`
+- `DELETE /files/:fileId`
+
+## Relevant code entry points
+
+- `src/modules/file/file.controller.ts`
+- `src/modules/file/file.service.ts`
+- `src/modules/file/adapters/supabase-storage.adapter.ts`
+- `src/common/interfaces/file-storage.interface.ts`
+

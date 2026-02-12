@@ -3,6 +3,7 @@ import {
   UnauthorizedException,
   ForbiddenException,
   BadRequestException,
+  NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
@@ -17,6 +18,8 @@ import { VerifyEmailDto } from './dto/verify-email.dto';
 import { SendPhoneOtpDto } from './dto/send-phone-otp.dto';
 import { VerifyPhoneOtpDto } from './dto/verify-phone-otp.dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { ReferralConvertedEvent } from '../../events/contracts/referral-converted.event';
 
 @Injectable()
 export class AuthService {
@@ -26,6 +29,7 @@ export class AuthService {
     private permissionCache: PermissionCacheService,
     private referralsService: ReferralsService,
     private notificationsService: NotificationsService,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   // ================= LOGIN =================
@@ -38,20 +42,26 @@ export class AuthService {
       include: { roles: { include: { role: true } } },
     });
 
-    // Check if still pending registration (email OR phone)
-    const pending = await this.prisma.pendingRegistration.findFirst({
-      where: {
-        OR: [
-          { email: identifier, status: 'PENDING' },
-          { phone: identifier, status: 'PENDING' },
-        ],
-      },
-    });
+    // Pending registrations are currently shelved (admin-driven onboarding is used).
+    // Keep this check behind a feature flag for future re-enablement.
+    const pendingRegistrationsEnabled =
+      process.env.ENABLE_PENDING_REGISTRATIONS === 'true';
 
-    if (pending) {
-      throw new UnauthorizedException(
-        'Your registration is not approved yet. Please wait for admin approval.',
-      );
+    if (pendingRegistrationsEnabled) {
+      const pending = await this.prisma.pendingRegistration.findFirst({
+        where: {
+          OR: [
+            { email: identifier, status: 'PENDING' },
+            { phone: identifier, status: 'PENDING' },
+          ],
+        },
+      });
+
+      if (pending) {
+        throw new UnauthorizedException(
+          'Your registration is not approved yet. Please wait for admin approval.',
+        );
+      }
     }
 
     if (!user) throw new UnauthorizedException('Invalid credentials');
@@ -162,11 +172,14 @@ export class AuthService {
 
   // ================= SIGNUP WITH REFERRAL =================
   async signupWithReferral(dto: SignupWithReferralDto) {
+    if (process.env.ENABLE_REFERRAL_SIGNUP !== 'true') {
+      throw new NotFoundException();
+    }
     const { phone, name, password } = dto;
 
-    return this.prisma.$transaction(async (tx) => {
+    const { tokens, convertedReferral, createdUser } = await this.prisma.$transaction(async (tx) => {
       // Validate referral exists and is valid
-      const validation = await this.referralsService.validateReferral(phone);
+      const validation = await this.referralsService.validateReferral(phone, tx);
       if (!validation.valid) {
         console.error(
           `Referral validation failed for phone ${phone}: ${validation.message || 'Unknown reason'}`,
@@ -207,25 +220,39 @@ export class AuthService {
       });
 
       // Convert the referral
-      try {
-        await this.referralsService.convertReferral(phone, user.id);
-      } catch (error) {
-        console.error(
-          `Failed to convert referral for phone ${phone}, user ID ${user.id}: ${error.message}`,
-        );
-        throw error;
-      }
+      const convertedReferral = await this.referralsService.convertReferral(
+        phone,
+        user.id,
+        tx,
+      );
 
-      // Generate tokens
-      try {
-        return await this.generateTokens(user);
-      } catch (error) {
-        console.error(
-          `Failed to generate tokens for user ID ${user.id}: ${error.message}`,
-        );
-        throw error;
-      }
+      const tokens = await this.generateTokens(user, tx);
+
+      return { tokens, convertedReferral, createdUser: user };
     });
+
+    try {
+      const referrerName =
+        convertedReferral.referrer?.nameEN ||
+        convertedReferral.referrer?.nameAR ||
+        'User';
+      this.eventEmitter.emit(
+        'referral.converted',
+        new ReferralConvertedEvent(
+          convertedReferral.id,
+          convertedReferral.referrerId,
+          referrerName,
+          createdUser.id,
+          (createdUser.nameEN ?? createdUser.nameAR ?? createdUser.phone) as string,
+        ),
+      );
+    } catch (err: unknown) {
+      // Don’t fail signup if notifications fail.
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('Failed to emit referral.converted event:', message);
+    }
+
+    return tokens;
   }
 
   // ================= REFRESH TOKEN =================
@@ -294,7 +321,12 @@ export class AuthService {
 
     // Generate secure token
     const rawToken = crypto.randomBytes(32).toString('hex');
-    const tokenHash = await bcrypt.hash(rawToken, 12);
+    // Use a deterministic digest so we can look up the token efficiently during reset.
+    // Backwards compatibility: resetPassword also supports legacy bcrypt-hashed tokens.
+    const tokenHash = crypto
+      .createHash('sha256')
+      .update(rawToken)
+      .digest('hex');
 
     // Store token
     await this.prisma.passwordResetToken.create({
@@ -352,19 +384,36 @@ export class AuthService {
   async resetPassword(dto: ResetPasswordDto) {
     const { token, newPassword } = dto;
 
-    // Find token
-    const storedToken = await this.prisma.passwordResetToken.findFirst({
-      where: { usedAt: null, expiresAt: { gt: new Date() } },
+    const now = new Date();
+
+    // Prefer deterministic lookup (new tokens).
+    const tokenDigest = crypto.createHash('sha256').update(token).digest('hex');
+
+    let storedToken = await this.prisma.passwordResetToken.findUnique({
+      where: { tokenHash: tokenDigest },
     });
 
+    // Fallback: legacy tokens stored with bcrypt.
     if (!storedToken) {
-      throw new BadRequestException('Invalid or expired token');
+      const candidates = await this.prisma.passwordResetToken.findMany({
+        where: { usedAt: null, expiresAt: { gt: now } },
+        orderBy: { createdAt: 'desc' },
+        take: 200,
+      });
+
+      for (const candidate of candidates) {
+        const hash = candidate.tokenHash;
+        if (typeof hash !== 'string' || !hash.startsWith('$2')) continue;
+        const match = await bcrypt.compare(token, hash).catch(() => false);
+        if (match) {
+          storedToken = candidate;
+          break;
+        }
+      }
     }
 
-    // Verify token
-    const isValid = await bcrypt.compare(token, storedToken.tokenHash);
-    if (!isValid) {
-      throw new BadRequestException('Invalid token');
+    if (!storedToken || storedToken.usedAt || storedToken.expiresAt <= now) {
+      throw new BadRequestException('Invalid or expired token');
     }
 
     // Mark as used
@@ -397,6 +446,7 @@ export class AuthService {
 
     const storedToken = await this.prisma.emailVerificationToken.findFirst({
       where: { userId, usedAt: null, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: 'desc' },
     });
 
     if (!storedToken) {
@@ -421,9 +471,67 @@ export class AuthService {
     return { message: 'Email verified successfully' };
   }
 
+  // ================= SEND EMAIL VERIFICATION =================
+  async sendEmailVerification(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true },
+    });
+
+    if (!user?.email) {
+      throw new BadRequestException('User has no email address on file');
+    }
+
+    // Invalidate existing tokens for this user
+    await this.prisma.emailVerificationToken.updateMany({
+      where: { userId, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = await bcrypt.hash(rawToken, 12);
+
+    await this.prisma.emailVerificationToken.create({
+      data: {
+        userId,
+        tokenHash,
+        expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1 hour
+      },
+    });
+
+    const verifyLink = `${process.env.FRONTEND_URL}/verify-email?token=${rawToken}`;
+
+    await this.notificationsService.sendNotification(
+      {
+        type: 'OTP',
+        title: 'Verify your email',
+        messageEn: `Use this token to verify your email: ${rawToken}\n\nOr click: ${verifyLink}`,
+        channels: ['EMAIL'],
+        targetAudience: 'SPECIFIC_RESIDENCES',
+        audienceMeta: { userIds: [userId] },
+      },
+      undefined,
+    );
+
+    return { message: 'Verification email sent' };
+  }
+
   // ================= SEND PHONE OTP =================
   async sendPhoneOtp(dto: SendPhoneOtpDto, userId: string) {
     const { phone } = dto;
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { phone: true },
+    });
+
+    if (!user?.phone) {
+      throw new BadRequestException('User has no phone number on file');
+    }
+
+    if (user.phone !== phone) {
+      throw new BadRequestException('Phone does not match the current profile');
+    }
 
     // Invalidate existing OTPs
     await this.prisma.phoneVerificationOtp.updateMany({

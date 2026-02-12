@@ -3,17 +3,23 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateViolationDto, UpdateViolationDto } from './dto/violations.dto';
 import { InvoicesService } from '../invoices/invoices.service';
 import { ViolationStatus, InvoiceStatus, InvoiceType } from '@prisma/client';
+import { ViolationsQueryDto } from './dto/violations-query.dto';
+import { paginate } from '../../common/utils/pagination.util';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { ViolationIssuedEvent } from '../../events/contracts/violation-issued.event';
 
 @Injectable()
 export class ViolationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly invoicesService: InvoicesService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   // Helper to generate sequential numbers (VIO-00001)
@@ -33,7 +39,7 @@ export class ViolationsService {
     const violationNumber = await this.generateViolationNumber();
     const { attachmentIds = [], ...violationData } = dto;
 
-    return this.prisma.$transaction(async (tx) => {
+    const violation = await this.prisma.$transaction(async (tx) => {
       // 1. Create the Violation Record
       const violation = await tx.violation.create({
         data: {
@@ -76,16 +82,77 @@ export class ViolationsService {
 
       return violation;
     });
+
+    try {
+      const recipientUserIds = await this.resolveViolationRecipients({
+        unitId: dto.unitId,
+        residentId: dto.residentId,
+      });
+
+      this.eventEmitter.emit(
+        'violation.issued',
+        new ViolationIssuedEvent(
+          violation.id,
+          violation.violationNumber,
+          violation.unitId,
+          recipientUserIds,
+          violation.type,
+          Number(dto.fineAmount),
+        ),
+      );
+    } catch (err: unknown) {
+      // Don’t fail violation issuance if notifications fail.
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('Failed to emit violation.issued event:', message);
+    }
+
+    return violation;
   }
 
-  async findAll() {
-    return this.prisma.violation.findMany({
+  private async resolveViolationRecipients(input: {
+    unitId: string;
+    residentId?: string;
+  }): Promise<string[]> {
+    if (input.residentId) return [input.residentId];
+
+    const primaryResidentUnit = await this.prisma.residentUnit.findFirst({
+      where: { unitId: input.unitId, isPrimary: true },
+      select: { resident: { select: { userId: true } } },
+    });
+
+    const primaryUserId = primaryResidentUnit?.resident?.userId;
+    return primaryUserId ? [primaryUserId] : [];
+  }
+
+  async findAll(query: ViolationsQueryDto) {
+    const {
+      status,
+      unitId,
+      residentId,
+      issuedById,
+      createdAtFrom,
+      createdAtTo,
+      ...baseQuery
+    } = query;
+
+    const filters: Record<string, any> = {
+      status,
+      unitId,
+      residentId,
+      issuedById,
+      createdAtFrom,
+      createdAtTo,
+    };
+
+    return paginate(this.prisma.violation, baseQuery, {
+      searchFields: ['violationNumber', 'type', 'description'],
+      additionalFilters: filters,
       include: {
         unit: { select: { unitNumber: true, projectName: true } },
         resident: { select: { nameEN: true, email: true } },
+        issuedBy: { select: { nameEN: true } },
         invoices: { select: { id: true, status: true, invoiceNumber: true } },
       },
-      orderBy: { createdAt: 'desc' },
     });
   }
 
@@ -107,11 +174,44 @@ export class ViolationsService {
     return violation;
   }
 
+  async findOneForActor(
+    id: string,
+    ctx: { actorUserId: string; permissions: string[] },
+  ) {
+    const violation = await this.findOne(id);
+
+    const canViewAll = ctx.permissions.includes('violation.view_all');
+    if (canViewAll) return violation;
+
+    const isDirectTarget =
+      violation.residentId && violation.residentId === ctx.actorUserId;
+
+    if (!isDirectTarget) {
+      const hasActiveUnitAccess = await this.prisma.unitAccess.findFirst({
+        where: {
+          userId: ctx.actorUserId,
+          unitId: violation.unitId,
+          status: 'ACTIVE',
+        },
+        select: { id: true, canViewFinancials: true },
+      });
+
+      if (!hasActiveUnitAccess || !hasActiveUnitAccess.canViewFinancials) {
+        throw new ForbiddenException('You do not have access to this violation');
+      }
+    }
+
+    return violation;
+  }
+
   async update(id: string, dto: UpdateViolationDto) {
     await this.findOne(id);
     return this.prisma.violation.update({
       where: { id },
-      data: dto,
+      data: {
+        status: dto.status,
+        appealStatus: dto.appealStatus,
+      },
     });
   }
 

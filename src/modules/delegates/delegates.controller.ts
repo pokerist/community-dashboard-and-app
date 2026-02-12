@@ -7,55 +7,60 @@ import {
   Patch,
   Delete,
   UseGuards,
+  Req,
 } from '@nestjs/common';
 import { DelegatesService } from './delegates.service';
 import { CreateDelegateDto } from './dto/create-delegate.dto';
 import { UpdateDelegateDto } from './dto/update-delegate.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 
+@ApiTags('Delegates')
 @Controller('delegates')
 @UseGuards(JwtAuthGuard)
+@ApiBearerAuth()
 export class DelegatesController {
   constructor(private readonly delegatesService: DelegatesService) {}
 
   @Post('request')
-  createRequest(@Body() dto: CreateDelegateDto) {
-    // TODO: get userId from auth
-    const requestedBy = 'user-id'; // req.user.id
-    return this.delegatesService.createDelegateRequest(dto, requestedBy);
+  @ApiOperation({ summary: 'Owner requests delegate access for a unit' })
+  createRequest(@Body() dto: CreateDelegateDto, @Req() req: any) {
+    return this.delegatesService.createDelegateRequest(dto, req.user.id);
   }
 
   @Post(':id/approve')
-  approve(@Param('id') id: string) {
-    // TODO: get approvedBy from auth
-    const approvedBy = 'admin-id'; // req.user.id
-    return this.delegatesService.approveDelegate(id, approvedBy);
+  @ApiOperation({ summary: 'Admin approves a pending delegate request' })
+  approve(@Param('id') id: string, @Req() req: any) {
+    return this.delegatesService.approveDelegate(id, req.user.id);
   }
 
   @Post(':id/revoke')
-  revoke(@Param('id') id: string) {
-    // TODO: get revokedBy from auth
-    const revokedBy = 'user-id'; // req.user.id
-    return this.delegatesService.revokeDelegate(id, revokedBy);
+  @ApiOperation({ summary: 'Admin/owner revokes delegate access immediately' })
+  revoke(@Param('id') id: string, @Req() req: any) {
+    return this.delegatesService.revokeDelegate(id, req.user.id);
   }
 
   @Get('pending')
-  getPendingRequests() {
-    return this.delegatesService.getPendingRequests();
+  @ApiOperation({ summary: 'Admin lists pending delegate requests' })
+  getPendingRequests(@Req() req: any) {
+    return this.delegatesService.getPendingRequests(req.user.id);
   }
 
   @Get('unit/:unitId')
-  getDelegatesForUnit(@Param('unitId') unitId: string) {
-    return this.delegatesService.getDelegatesForUnit(unitId);
+  @ApiOperation({ summary: 'Admin/owner lists delegates for a unit' })
+  getDelegatesForUnit(@Param('unitId') unitId: string, @Req() req: any) {
+    return this.delegatesService.getDelegatesForUnit(unitId, req.user.id);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateDelegateDto) {
-    return this.delegatesService.updateDelegate(id, dto);
+  @ApiOperation({ summary: 'Admin/owner updates delegate permissions/dates' })
+  update(@Param('id') id: string, @Body() dto: UpdateDelegateDto, @Req() req: any) {
+    return this.delegatesService.updateDelegate(id, dto, req.user.id);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.delegatesService.remove(id);
+  @ApiOperation({ summary: 'Admin hard-deletes a delegate UnitAccess row (use with care)' })
+  remove(@Param('id') id: string, @Req() req: any) {
+    return this.delegatesService.remove(id, req.user.id);
   }
 }

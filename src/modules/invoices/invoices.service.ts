@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateInvoiceDto, UpdateInvoiceDto } from './dto/invoices.dto';
@@ -48,6 +49,23 @@ export class InvoicesService {
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
+
+  private isSuperAdminRole(roles: unknown): boolean {
+    return (
+      Array.isArray(roles) &&
+      roles.some(
+        (r) => typeof r === 'string' && r.toUpperCase() === 'SUPER_ADMIN',
+      )
+    );
+  }
+
+  private canViewAllInvoices(ctx: { permissions: string[]; roles: string[] }) {
+    return (
+      this.isSuperAdminRole(ctx.roles) ||
+      (Array.isArray(ctx.permissions) &&
+        ctx.permissions.includes('invoice.view_all'))
+    );
+  }
 
   // Helper to generate the next invoice number using a DB-backed sequence
   // This uses an atomic increment on the InvoiceSequence model to guarantee
@@ -262,20 +280,20 @@ export class InvoicesService {
           }
 
           return created;
-        } catch (err: any) {
-          lastError = err;
+        } catch (error: unknown) {
+          lastError = error;
           if (
-            err instanceof Prisma.PrismaClientKnownRequestError &&
-            err.code === 'P2002'
+            error instanceof Prisma.PrismaClientKnownRequestError &&
+            error.code === 'P2002'
           ) {
-            const target = (err.meta?.target as string[]) ?? [];
+            const target = (error.meta?.target as string[]) ?? [];
             if (target.includes('invoiceNumber')) {
-              if (attempt === maxAttempts - 1) throw err;
+              if (attempt === maxAttempts - 1) throw error;
               // collision - try again
               continue;
             }
           }
-          throw err;
+          throw error;
         }
       }
 
@@ -324,6 +342,38 @@ export class InvoicesService {
     return invoice;
   }
 
+  async findOneForActor(
+    id: string,
+    ctx: { actorUserId: string; permissions: string[]; roles: string[] },
+  ) {
+    const invoice = await this.findOne(id);
+
+    if (this.canViewAllInvoices(ctx)) return invoice;
+
+    if (!ctx.permissions?.includes('invoice.view_own')) {
+      throw new ForbiddenException('You do not have access to this invoice');
+    }
+
+    if (invoice.residentId && invoice.residentId === ctx.actorUserId) {
+      return invoice;
+    }
+
+    const hasActiveUnitAccess = await this.prisma.unitAccess.findFirst({
+      where: {
+        userId: ctx.actorUserId,
+        unitId: invoice.unitId,
+        status: 'ACTIVE',
+      },
+      select: { id: true, canViewFinancials: true },
+    });
+
+    if (!hasActiveUnitAccess || !hasActiveUnitAccess.canViewFinancials) {
+      throw new ForbiddenException('You do not have access to this invoice');
+    }
+
+    return invoice;
+  }
+
   async findByResident(residentId: string) {
     return this.prisma.invoice.findMany({
       where: { residentId },
@@ -332,6 +382,27 @@ export class InvoicesService {
       },
       orderBy: { dueDate: 'asc' },
     });
+  }
+
+  async findByResidentForActor(
+    residentId: string,
+    ctx: { actorUserId: string; permissions: string[]; roles: string[] },
+  ) {
+    if (this.canViewAllInvoices(ctx)) {
+      return this.findByResident(residentId);
+    }
+
+    if (!ctx.permissions?.includes('invoice.view_own')) {
+      throw new ForbiddenException('You do not have access to invoices');
+    }
+
+    if (residentId !== ctx.actorUserId) {
+      throw new ForbiddenException(
+        'You can only view invoices for your own account',
+      );
+    }
+
+    return this.findByResident(ctx.actorUserId);
   }
 
   async update(id: string, dto: UpdateInvoiceDto) {
@@ -426,6 +497,40 @@ export class InvoicesService {
 
   async findAllUnitFees() {
     return this.prisma.unitFee.findMany({
+      include: {
+        unit: { select: { unitNumber: true, projectName: true } },
+        invoice: { select: { status: true, invoiceNumber: true } },
+      },
+      orderBy: { billingMonth: 'desc' },
+    });
+  }
+
+  async findAllUnitFeesForActor(ctx: {
+    actorUserId: string;
+    permissions: string[];
+    roles: string[];
+  }) {
+    const canViewAll =
+      this.isSuperAdminRole(ctx.roles) ||
+      (Array.isArray(ctx.permissions) &&
+        ctx.permissions.includes('unit_fee.view_all'));
+
+    if (canViewAll) return this.findAllUnitFees();
+
+    if (!ctx.permissions?.includes('unit_fee.view_own')) {
+      throw new ForbiddenException('You do not have access to unit fees');
+    }
+
+    const unitAccessRows = await this.prisma.unitAccess.findMany({
+      where: { userId: ctx.actorUserId, status: 'ACTIVE', canViewFinancials: true },
+      select: { unitId: true },
+    });
+
+    const unitIds = Array.from(new Set(unitAccessRows.map((r) => r.unitId)));
+    if (unitIds.length === 0) return [];
+
+    return this.prisma.unitFee.findMany({
+      where: { unitId: { in: unitIds } },
       include: {
         unit: { select: { unitNumber: true, projectName: true } },
         invoice: { select: { status: true, invoiceNumber: true } },

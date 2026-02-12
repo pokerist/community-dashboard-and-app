@@ -7,7 +7,6 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { EmailService } from '../notifications/email.service';
-import { AuthorityResolver } from '../../common/utils/authority-resolver.util';
 import * as bcrypt from 'bcrypt';
 import { CreateOwnerWithUnitDto } from './dto/create-owner-with-unit.dto';
 import {
@@ -18,10 +17,11 @@ import {
   UpdateProfileDto,
   UpdateFamilyProfileDto,
 } from './dto/update-profile.dto';
+import { FileService } from '../file/file.service';
 import {
+  $Enums,
   UnitStatus,
   UserStatusEnum,
-  UnitAccessRole,
   Resident,
 } from '@prisma/client';
 
@@ -30,9 +30,9 @@ export class OwnersService {
   constructor(
     private prisma: PrismaService,
     private emailService: EmailService,
+    private fileService: FileService,
   ) {}
   async createOwnerWithUnit(dto: CreateOwnerWithUnitDto, createdBy: string) {
-    try {
       // Keep expensive work (bcrypt) out of the DB transaction to avoid Prisma tx timeouts (P2028).
       const chars =
         'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -104,6 +104,7 @@ export class OwnersService {
               email: dto.email ?? undefined,
               phone: dto.phone ?? undefined,
               passwordHash,
+              nationalIdFileId: dto.nationalIdPhotoId,
               userStatus: dto.email ? UserStatusEnum.ACTIVE : UserStatusEnum.INVITED,
               signupSource: 'dashboard',
             },
@@ -180,10 +181,87 @@ export class OwnersService {
       }
 
       return { message: 'Owner created successfully', ...result };
-    } catch (e) {
-      console.error('OWNER CREATION FAILED', e);
-      throw e;
+  }
+
+  private validateProfileImage(file: Express.Multer.File) {
+    const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/jpg'];
+    if (!allowedMimeTypes.includes(file.mimetype)) {
+      throw new BadRequestException('Only JPEG and PNG images are allowed');
     }
+
+    const maxSize = 2 * 1024 * 1024; // 2MB
+    if (file.size > maxSize) {
+      throw new BadRequestException('File size must be less than 2MB');
+    }
+  }
+
+  private validateImageOrPdf(file: Express.Multer.File) {
+    const allowedMimeTypes = [
+      'image/jpeg',
+      'image/png',
+      'image/jpg',
+      'application/pdf',
+    ];
+    if (!allowedMimeTypes.includes(file.mimetype)) {
+      throw new BadRequestException(
+        'Only JPEG, PNG images and PDF files are allowed',
+      );
+    }
+
+    const maxSize = 5 * 1024 * 1024; // 5MB
+    if (file.size > maxSize) {
+      throw new BadRequestException('File size must be less than 5MB');
+    }
+  }
+
+  async uploadOwnProfilePhoto(userId: string, file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('File is missing.');
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    this.validateProfileImage(file);
+
+    const uploaded = await this.fileService.handleUpload(
+      file,
+      'profile-photos',
+      $Enums.FileCategory.PROFILE_PHOTO,
+    );
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { profilePhotoId: uploaded.id },
+    });
+
+    return uploaded;
+  }
+
+  async uploadOwnNationalIdPhoto(userId: string, file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('File is missing.');
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    this.validateImageOrPdf(file);
+
+    const uploaded = await this.fileService.handleUpload(
+      file,
+      'identity-docs',
+      $Enums.FileCategory.NATIONAL_ID,
+    );
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { nationalIdFileId: uploaded.id },
+    });
+
+    return uploaded;
   }
 
 
@@ -201,7 +279,7 @@ export class OwnersService {
       <p><a href="https://app.alkarma.com/login">Login here</a></p>
     `;
       await this.emailService.sendEmail(subject, email, content);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('EMAIL SENDING FAILED', err);
     }
   }
@@ -221,246 +299,225 @@ export class OwnersService {
       <p>You have been added to a unit by an owner. You can now access community facilities and services.</p>
     `;
       await this.emailService.sendEmail(subject, email, content);
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('FAMILY EMAIL SENDING FAILED', err);
     }
   }
 
   async findAll() {
-    try {
-      return this.prisma.owner.findMany({
-        include: { user: true },
-      });
-    } catch (e) {
-      console.error('FAILED TO FETCH OWNERS', e);
-      throw e;
-    }
+    return this.prisma.owner.findMany({
+      include: { user: true },
+    });
   }
 
   async findOne(id: string) {
-    try {
-      const owner = await this.prisma.owner.findUnique({
-        where: { id },
-        include: { user: true },
-      });
-      if (!owner) {
-        throw new BadRequestException('Owner not found');
-      }
-      return owner;
-    } catch (e) {
-      console.error('FAILED TO FIND OWNER', e);
-      throw e;
+    const owner = await this.prisma.owner.findUnique({
+      where: { id },
+      include: { user: true },
+    });
+    if (!owner) {
+      throw new BadRequestException('Owner not found');
     }
+    return owner;
   }
 
   async remove(id: string) {
-    try {
-      const owner = await this.findOne(id);
+    const owner = await this.findOne(id);
 
-      return this.prisma.$transaction(async (tx) => {
-        // Get the owner's user and unit access
-        const user = await tx.user.findUnique({
-          where: { id: owner.userId },
-        });
-
-        const unitAccess = await tx.unitAccess.findFirst({
-          where: {
-            userId: owner.userId,
-            role: 'OWNER',
-            status: 'ACTIVE',
-          },
-        });
-
-        // Delete the owner record
-        await tx.owner.delete({
-          where: { id },
-        });
-
-        // If owner had unit access, update unit status back to HELD
-        if (unitAccess) {
-          await tx.unit.update({
-            where: { id: unitAccess.unitId },
-            data: { status: 'UNRELEASED' as any },
-          });
-        }
-
-        return owner;
+    return this.prisma.$transaction(async (tx) => {
+      // Get the owner's user and unit access
+      const user = await tx.user.findUnique({
+        where: { id: owner.userId },
       });
-    } catch (e) {
-      console.error('FAILED TO REMOVE OWNER', e);
-      throw e;
-    }
+
+      const unitAccess = await tx.unitAccess.findFirst({
+        where: {
+          userId: owner.userId,
+          role: 'OWNER',
+          status: 'ACTIVE',
+        },
+      });
+
+      // Delete the owner record
+      await tx.owner.delete({
+        where: { id },
+      });
+
+      // If owner had unit access, update unit status back to HELD
+      if (unitAccess) {
+        await tx.unit.update({
+          where: { id: unitAccess.unitId },
+          data: { status: 'UNRELEASED' as any },
+        });
+      }
+
+      return owner;
+    });
   }
 
   // Method to remove a user from a unit (for family/tenants)
   async removeUserFromUnit(userId: string, unitId: string, removedBy: string) {
-    try {
-      const result = await this.prisma.$transaction(
-        async (tx) => {
-          const unit = await tx.unit.findUnique({
-            where: { id: unitId },
-            select: { id: true },
-          });
-          if (!unit) throw new NotFoundException('Unit not found');
+    const result = await this.prisma.$transaction(
+      async (tx) => {
+        const unit = await tx.unit.findUnique({
+          where: { id: unitId },
+          select: { id: true },
+        });
+        if (!unit) throw new NotFoundException('Unit not found');
 
-          const isAdmin = await tx.admin.findUnique({
-            where: { userId: removedBy },
-            select: { id: true },
-          });
+        const isAdmin = await tx.admin.findUnique({
+          where: { userId: removedBy },
+          select: { id: true },
+        });
 
-          const activeLease = await tx.lease.findFirst({
-            where: { unitId, status: 'ACTIVE' },
-            select: { tenantId: true },
-          });
+        const activeLease = await tx.lease.findFirst({
+          where: { unitId, status: 'ACTIVE' },
+          select: { tenantId: true },
+        });
 
-          // Permission model:
-          // - Admin can revoke access for the unit.
-          // - Otherwise, only the "current resident" can revoke THEIR FAMILY members from the unit:
-          //   - If ACTIVE lease exists => tenant is current resident
-          //   - Else => owner is current resident
-          if (!isAdmin) {
-            if (activeLease?.tenantId) {
-              if (activeLease.tenantId !== removedBy) {
-                throw new ForbiddenException(
-                  'Only the active tenant or admin can remove family members from this unit',
-                );
-              }
-            } else {
-              const ownerAccess = await tx.unitAccess.findFirst({
-                where: {
-                  unitId,
-                  userId: removedBy,
-                  role: 'OWNER',
-                  status: 'ACTIVE',
-                },
-                select: { id: true },
-              });
-              if (!ownerAccess) {
-                throw new ForbiddenException(
-                  'Only the unit owner or admin can remove family members from this unit',
-                );
-              }
-            }
-          }
-
-          const accessToRevoke = await tx.unitAccess.findFirst({
-            where: {
-              unitId,
-              userId,
-              status: 'ACTIVE',
-            },
-            select: { id: true, role: true, user: { select: { email: true } } },
-          });
-
-          if (!accessToRevoke) {
-            throw new BadRequestException('User does not have access to this unit');
-          }
-
-          // To keep lease/unit state consistent, tenant removal must go through lease termination.
-          if (accessToRevoke.role === 'TENANT') {
-            throw new BadRequestException(
-              'Cannot remove tenant access from here. Terminate the lease instead.',
-            );
-          }
-
-          // Ownership changes are handled by the owner/unit onboarding flows, not this endpoint.
-          if (accessToRevoke.role === 'OWNER') {
-            throw new BadRequestException(
-              'Cannot remove owner access from here. Use the ownership management flow instead.',
-            );
-          }
-
-          if (accessToRevoke.role !== 'FAMILY') {
-            throw new BadRequestException(
-              'Only FAMILY access can be removed from this endpoint',
-            );
-          }
-
-          // Non-admins can only revoke access for family members linked to the current resident.
-          if (!isAdmin) {
-            // Resolve current resident id without pulling nested includes.
-            const currentResidentId = activeLease?.tenantId
-              ? (
-                  await tx.resident.findUnique({
-                    where: { userId: activeLease.tenantId },
-                    select: { id: true },
-                  })
-                )?.id
-              : (
-                  await tx.residentUnit.findFirst({
-                    where: { unitId, isPrimary: true },
-                    select: { residentId: true },
-                  })
-                )?.residentId;
-
-            if (!currentResidentId) {
-              throw new BadRequestException(
-                'No current resident found for this unit',
+        // Permission model:
+        // - Admin can revoke access for the unit.
+        // - Otherwise, only the "current resident" can revoke THEIR FAMILY members from the unit:
+        //   - If ACTIVE lease exists => tenant is current resident
+        //   - Else => owner is current resident
+        if (!isAdmin) {
+          if (activeLease?.tenantId) {
+            if (activeLease.tenantId !== removedBy) {
+              throw new ForbiddenException(
+                'Only the active tenant or admin can remove family members from this unit',
               );
             }
-
-            const targetResident = await tx.resident.findUnique({
-              where: { userId },
-              select: { id: true },
-            });
-            if (!targetResident) {
-              throw new BadRequestException('Target user is not a resident');
-            }
-
-            const isLinkedFamily = await tx.familyMember.findFirst({
+          } else {
+            const ownerAccess = await tx.unitAccess.findFirst({
               where: {
-                primaryResidentId: currentResidentId,
-                familyResidentId: targetResident.id,
+                unitId,
+                userId: removedBy,
+                role: 'OWNER',
                 status: 'ACTIVE',
               },
               select: { id: true },
             });
-            if (!isLinkedFamily) {
+            if (!ownerAccess) {
               throw new ForbiddenException(
-                'You can only remove your own family members from this unit',
+                'Only the unit owner or admin can remove family members from this unit',
               );
             }
           }
+        }
 
-          await tx.unitAccess.updateMany({
-            where: { id: accessToRevoke.id, status: 'ACTIVE' },
-            data: { status: 'REVOKED', endsAt: new Date() },
+        const accessToRevoke = await tx.unitAccess.findFirst({
+          where: {
+            unitId,
+            userId,
+            status: 'ACTIVE',
+          },
+          select: { id: true, role: true, user: { select: { email: true } } },
+        });
+
+        if (!accessToRevoke) {
+          throw new BadRequestException(
+            'User does not have access to this unit',
+          );
+        }
+
+        // To keep lease/unit state consistent, tenant removal must go through lease termination.
+        if (accessToRevoke.role === 'TENANT') {
+          throw new BadRequestException(
+            'Cannot remove tenant access from here. Terminate the lease instead.',
+          );
+        }
+
+        // Ownership changes are handled by the owner/unit onboarding flows, not this endpoint.
+        if (accessToRevoke.role === 'OWNER') {
+          throw new BadRequestException(
+            'Cannot remove owner access from here. Use the ownership management flow instead.',
+          );
+        }
+
+        if (accessToRevoke.role !== 'FAMILY') {
+          throw new BadRequestException(
+            'Only FAMILY access can be removed from this endpoint',
+          );
+        }
+
+        // Non-admins can only revoke access for family members linked to the current resident.
+        if (!isAdmin) {
+          // Resolve current resident id without pulling nested includes.
+          const currentResidentId = activeLease?.tenantId
+            ? (
+                await tx.resident.findUnique({
+                  where: { userId: activeLease.tenantId },
+                  select: { id: true },
+                })
+              )?.id
+            : (
+                await tx.residentUnit.findFirst({
+                  where: { unitId, isPrimary: true },
+                  select: { residentId: true },
+                })
+              )?.residentId;
+
+          if (!currentResidentId) {
+            throw new BadRequestException('No current resident found for this unit');
+          }
+
+          const targetResident = await tx.resident.findUnique({
+            where: { userId },
+            select: { id: true },
           });
+          if (!targetResident) {
+            throw new BadRequestException('Target user is not a resident');
+          }
 
-          return {
-            message: 'User access revoked successfully',
-            email: accessToRevoke.user?.email ?? null,
-          };
-        },
-        { timeout: 20000 },
-      );
+          const isLinkedFamily = await tx.familyMember.findFirst({
+            where: {
+              primaryResidentId: currentResidentId,
+              familyResidentId: targetResident.id,
+              status: 'ACTIVE',
+            },
+            select: { id: true },
+          });
+          if (!isLinkedFamily) {
+            throw new ForbiddenException(
+              'You can only remove your own family members from this unit',
+            );
+          }
+        }
 
-      // Send email outside the DB transaction (avoid Prisma tx timeouts / rollback on email issues).
-      if (result.email) {
-        const subject = `Access Revoked - Alkarma Community`;
-        const content = `
+        await tx.unitAccess.updateMany({
+          where: { id: accessToRevoke.id, status: 'ACTIVE' },
+          data: { status: 'REVOKED', endsAt: new Date() },
+        });
+
+        return {
+          message: 'User access revoked successfully',
+          email: accessToRevoke.user?.email ?? null,
+        };
+      },
+      { timeout: 20000 },
+    );
+
+    // Send email outside the DB transaction (avoid Prisma tx timeouts / rollback on email issues).
+    if (result.email) {
+      const subject = `Access Revoked - Alkarma Community`;
+      const content = `
           <h2>Access Revoked</h2>
           <p>Your access to unit ${unitId} has been revoked.</p>
           <p>If you believe this was done in error, please contact the administration.</p>
         `;
-        void this.emailService.sendEmail(subject, result.email, content).catch((e) => {
-          console.error('REMOVE USER EMAIL FAILED', e);
-        });
-      }
-
-      return { message: result.message };
-    } catch (e) {
-      console.error('FAILED TO REMOVE USER FROM UNIT', e);
-      throw e;
+      void this.emailService.sendEmail(subject, result.email, content).catch((e: unknown) => {
+        console.error('REMOVE USER EMAIL FAILED', e);
+      });
     }
+
+    return { message: result.message };
   }
 
   // ===== PROFILE MANAGEMENT =====
 
   // Update own profile
   async updateOwnProfile(userId: string, dto: UpdateProfileDto) {
-    try {
-      return this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async (tx) => {
         // Check national ID uniqueness if provided
         if (dto.nationalId) {
           const existingNationalId = await tx.resident.findFirst({
@@ -516,10 +573,6 @@ export class OwnersService {
 
         return updatedUser;
       });
-    } catch (e) {
-      console.error('UPDATE OWN PROFILE FAILED', e);
-      throw e;
-    }
   }
 
   // Update family member profile (owner only)
@@ -528,8 +581,7 @@ export class OwnersService {
     familyUserId: string,
     dto: UpdateFamilyProfileDto,
   ) {
-    try {
-      return this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async (tx) => {
         // Check if owner has access to this family member
         const familyAccess = await tx.unitAccess.findFirst({
           where: {
@@ -598,10 +650,6 @@ export class OwnersService {
 
         return updatedUser;
       });
-    } catch (e) {
-      console.error('FAMILY UPDATE PROFILE FAILED', e);
-      throw e;
-    }
   }
 
   // ===== FAMILY MANAGEMENT =====
@@ -816,7 +864,7 @@ export class OwnersService {
         result.residentId,
         result.grantedBy,
       );
-    } catch (e) {
+    } catch (e: unknown) {
       console.error('CREATE FAMILY UNIT ACCESS FAILED (OUTSIDE TX)', e);
       // Don't throw error here as the main transaction succeeded
     }
@@ -825,7 +873,7 @@ export class OwnersService {
     if (dto.email) {
       try {
         await this.sendFamilyWelcomeEmail(dto.email, dto.name, result.randomPassword);
-      } catch (e) {
+      } catch (e: unknown) {
         console.error('FAMILY WELCOME EMAIL FAILED', e);
       }
     }
@@ -915,93 +963,86 @@ export class OwnersService {
 
   // Get family members for unit (owner/tenant only)
   async getFamilyMembers(unitId: string, requesterId: string) {
-    try {
-      const unit = await this.prisma.unit.findUnique({
-        where: { id: unitId },
-        select: { id: true },
-      });
-      if (!unit) {
-        throw new BadRequestException('Unit not found');
-      }
+    const unit = await this.prisma.unit.findUnique({
+      where: { id: unitId },
+      select: { id: true },
+    });
+    if (!unit) {
+      throw new BadRequestException('Unit not found');
+    }
 
-      const isAdmin = await this.prisma.admin.findUnique({
-        where: { userId: requesterId },
-        select: { id: true },
-      });
+    const isAdmin = await this.prisma.admin.findUnique({
+      where: { userId: requesterId },
+      select: { id: true },
+    });
 
-      // Check requester has access to unit
-      if (!isAdmin) {
-        const access = await this.prisma.unitAccess.findFirst({
-          where: {
-            unitId,
-            userId: requesterId,
-            role: { in: ['OWNER', 'TENANT'] },
-            status: 'ACTIVE',
-          },
-        });
-
-        if (!access) {
-          throw new ForbiddenException('You do not have access to this unit');
-        }
-      }
-
-      // Resolve the "current resident" for this unit:
-      // - If there's an ACTIVE lease, the tenant is the current resident.
-      // - Otherwise, fall back to the primary owner resident mapping.
-      const activeLease = await this.prisma.lease.findFirst({
-        where: { unitId, status: 'ACTIVE' },
-        select: {
-          tenant: {
-            select: {
-              resident: { select: { id: true } },
-            },
-          },
-        },
-      });
-
-      const currentResidentId =
-        activeLease?.tenant?.resident?.id ??
-        (
-          await this.prisma.residentUnit.findFirst({
-            where: { unitId, isPrimary: true },
-            select: { residentId: true },
-          })
-        )?.residentId;
-
-      if (!currentResidentId) return [];
-
-      const familyLinks = await this.prisma.familyMember.findMany({
-        where: { primaryResidentId: currentResidentId, status: 'ACTIVE' },
-        select: { familyResident: { select: { userId: true } } },
-      });
-      const familyUserIds = familyLinks
-        .map((f) => f.familyResident?.userId)
-        .filter(Boolean) as string[];
-
-      if (familyUserIds.length === 0) return [];
-
-      // Get family members (unit access records), filtered to the current resident's family only.
-      const familyMembers = await this.prisma.unitAccess.findMany({
+    // Check requester has access to unit
+    if (!isAdmin) {
+      const access = await this.prisma.unitAccess.findFirst({
         where: {
           unitId,
-          role: 'FAMILY',
+          userId: requesterId,
+          role: { in: ['OWNER', 'TENANT'] },
           status: 'ACTIVE',
-          userId: { in: familyUserIds },
-        },
-        include: {
-          user: {
-            include: {
-              resident: true,
-            },
-          },
         },
       });
 
-      return familyMembers;
-    } catch (e) {
-      console.error('GET FAMILY MEMBERS FAILED', e);
-      throw e;
+      if (!access) {
+        throw new ForbiddenException('You do not have access to this unit');
+      }
     }
+
+    // Resolve the "current resident" for this unit:
+    // - If there's an ACTIVE lease, the tenant is the current resident.
+    // - Otherwise, fall back to the primary owner resident mapping.
+    const activeLease = await this.prisma.lease.findFirst({
+      where: { unitId, status: 'ACTIVE' },
+      select: {
+        tenant: {
+          select: {
+            resident: { select: { id: true } },
+          },
+        },
+      },
+    });
+
+    const currentResidentId =
+      activeLease?.tenant?.resident?.id ??
+      (
+        await this.prisma.residentUnit.findFirst({
+          where: { unitId, isPrimary: true },
+          select: { residentId: true },
+        })
+      )?.residentId;
+
+    if (!currentResidentId) return [];
+
+    const familyLinks = await this.prisma.familyMember.findMany({
+      where: { primaryResidentId: currentResidentId, status: 'ACTIVE' },
+      select: { familyResident: { select: { userId: true } } },
+    });
+    const familyUserIds = familyLinks
+      .map((f) => f.familyResident?.userId)
+      .filter(Boolean) as string[];
+
+    if (familyUserIds.length === 0) return [];
+
+    // Get family members (unit access records), filtered to the current resident's family only.
+    return this.prisma.unitAccess.findMany({
+      where: {
+        unitId,
+        role: 'FAMILY',
+        status: 'ACTIVE',
+        userId: { in: familyUserIds },
+      },
+      include: {
+        user: {
+          include: {
+            resident: true,
+          },
+        },
+      },
+    });
   }
 
   // Helper method to get current resident for a unit
@@ -1038,38 +1079,33 @@ export class OwnersService {
     residentId: string,
     grantedBy: string,
   ) {
-    try {
-      // Get all active units for the resident
-      const activeUnits = await this.prisma.residentUnit.findMany({
-        where: {
-          residentId,
-        },
-        select: { unitId: true },
-      });
+    // Get all active units for the resident
+    const activeUnits = await this.prisma.residentUnit.findMany({
+      where: {
+        residentId,
+      },
+      select: { unitId: true },
+    });
 
-      // Create unit access for family member in all active units
-      for (const unit of activeUnits) {
-        await this.prisma.unitAccess.create({
-          data: {
-            unitId: unit.unitId,
-            userId: familyUserId,
-            role: 'FAMILY',
-            delegateType: 'FAMILY',
-            startsAt: new Date(),
-            grantedBy: grantedBy,
-            status: 'ACTIVE',
-            source: 'FAMILY_AUTO',
-            canViewFinancials: false,
-            canReceiveBilling: false,
-            canBookFacilities: true,
-            canGenerateQR: false,
-            canManageWorkers: false,
-          },
-        });
-      }
-    } catch (e) {
-      console.error('CREATE FAMILY UNIT ACCESS FAILED (OUTSIDE TX)', e);
-      throw e;
+    // Create unit access for family member in all active units
+    for (const unit of activeUnits) {
+      await this.prisma.unitAccess.create({
+        data: {
+          unitId: unit.unitId,
+          userId: familyUserId,
+          role: 'FAMILY',
+          delegateType: 'FAMILY',
+          startsAt: new Date(),
+          grantedBy: grantedBy,
+          status: 'ACTIVE',
+          source: 'FAMILY_AUTO',
+          canViewFinancials: false,
+          canReceiveBilling: false,
+          canBookFacilities: true,
+          canGenerateQR: false,
+          canManageWorkers: false,
+        },
+      });
     }
   }
 }

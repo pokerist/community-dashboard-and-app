@@ -4,13 +4,14 @@ import {
   IsString,
   IsNotEmpty,
   IsArray,
+  IsUUID,
 } from 'class-validator';
 import { Priority } from '@prisma/client';
 
 export class CreateIncidentDto {
   @IsNotEmpty()
   @IsString()
-  type: string;
+  type!: string;
 
   @IsOptional()
   @IsString()
@@ -22,17 +23,18 @@ export class CreateIncidentDto {
 
   @IsNotEmpty()
   @IsString()
-  description: string;
+  description!: string;
 
   @IsEnum(Priority)
-  priority: Priority;
+  @IsNotEmpty()
+  priority!: Priority;
 
   @IsOptional()
-  @IsString()
+  @IsUUID('4', { message: 'Unit ID must be a valid UUID.' })
   unitId?: string;
 
   @IsOptional()
   @IsArray()
-  @IsString({ each: true })
+  @IsUUID('4', { each: true, message: 'Each attachment ID must be a valid UUID.' })
   attachmentIds?: string[];
 }

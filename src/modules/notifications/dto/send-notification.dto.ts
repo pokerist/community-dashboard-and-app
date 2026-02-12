@@ -11,15 +11,15 @@ import { Channel, Audience, NotificationType } from '@prisma/client';
 export class SendNotificationDto {
   @IsEnum(NotificationType)
   @IsNotEmpty()
-  type: NotificationType;
+  type!: NotificationType;
 
   @IsString()
   @IsNotEmpty()
-  title: string;
+  title!: string;
 
   @IsString()
   @IsNotEmpty()
-  messageEn: string;
+  messageEn!: string;
 
   @IsString()
   @IsOptional()
@@ -27,11 +27,11 @@ export class SendNotificationDto {
 
   @IsArray()
   @IsEnum(Channel, { each: true })
-  channels: Channel[];
+  channels!: Channel[];
 
   @IsEnum(Audience)
   @IsNotEmpty()
-  targetAudience: Audience;
+  targetAudience!: Audience;
 
   @IsOptional()
   audienceMeta?: any;

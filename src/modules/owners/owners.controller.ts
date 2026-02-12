@@ -22,7 +22,6 @@ import {
 } from './dto/update-profile.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
-import { AuthorityResolver } from '../../common/utils/authority-resolver.util';
 
 @Controller('owners')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -73,11 +72,7 @@ export class OwnersController {
     @UploadedFile() file: Express.Multer.File,
     @Req() req: any,
   ) {
-    // This would integrate with file service
-    // For now, return placeholder
-    return {
-      message: 'Profile photo upload endpoint - integrate with file service',
-    };
+    return this.ownersService.uploadOwnProfilePhoto(req.user.id, file);
   }
 
   @Post('upload/national-id-photo')
@@ -86,12 +81,7 @@ export class OwnersController {
     @UploadedFile() file: Express.Multer.File,
     @Req() req: any,
   ) {
-    // This would integrate with file service
-    // For now, return placeholder
-    return {
-      message:
-        'National ID photo upload endpoint - integrate with file service',
-    };
+    return this.ownersService.uploadOwnNationalIdPhoto(req.user.id, file);
   }
 
   // ===== FAMILY MANAGEMENT =====

@@ -6,5 +6,5 @@ export class UpdateUnitStatusDto {
   @ApiProperty({ example: 'OCCUPIED', enum: UnitStatus })
   @IsNotEmpty()
   @IsEnum(UnitStatus)
-  status: UnitStatus;
+  status!: UnitStatus;
 }

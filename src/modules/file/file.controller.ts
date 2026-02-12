@@ -8,12 +8,16 @@ import {
   Get,
   Res,
   BadRequestException,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { FileService } from './file.service';
 import { FileUploadResult } from '../../common/interfaces/file-storage.interface';
 import type { Response } from 'express';
 import { $Enums } from '@prisma/client';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 // Define the bucket name constants centrally
 const ATTACHMENTS_BUCKET = 'service-attachments';
@@ -52,12 +56,16 @@ function validateImage(file: Express.Multer.File) {
   }
 }
 
+@ApiBearerAuth()
+@ApiTags('Files')
 @Controller('files')
+@UseGuards(JwtAuthGuard)
 export class FileController {
   constructor(private readonly fileService: FileService) {}
 
   // Specific upload endpoints as per guide
   @Post('upload/profile-photo')
+  @ApiOperation({ summary: 'Upload a profile photo' })
   @UseInterceptors(FileInterceptor('file'))
   async uploadProfilePhoto(
     @UploadedFile() file: Express.Multer.File,
@@ -74,6 +82,7 @@ export class FileController {
   }
 
   @Post('upload/national-id')
+  @ApiOperation({ summary: 'Upload a national ID document (image/pdf)' })
   @UseInterceptors(FileInterceptor('file'))
   async uploadNationalId(
     @UploadedFile() file: Express.Multer.File,
@@ -90,6 +99,7 @@ export class FileController {
   }
 
   @Post('upload/contract')
+  @ApiOperation({ summary: 'Upload a contract document (image/pdf)' })
   @UseInterceptors(FileInterceptor('file'))
   async uploadContract(
     @UploadedFile() file: Express.Multer.File,
@@ -106,6 +116,7 @@ export class FileController {
   }
 
   @Post('upload/delegate-id')
+  @ApiOperation({ summary: 'Upload a delegate ID document (image/pdf)' })
   @UseInterceptors(FileInterceptor('file'))
   async uploadDelegateId(
     @UploadedFile() file: Express.Multer.File,
@@ -122,6 +133,7 @@ export class FileController {
   }
 
   @Post('upload/worker-id')
+  @ApiOperation({ summary: 'Upload a worker ID document (image/pdf)' })
   @UseInterceptors(FileInterceptor('file'))
   async uploadWorkerId(
     @UploadedFile() file: Express.Multer.File,
@@ -138,6 +150,7 @@ export class FileController {
   }
 
   @Post('upload/marriage-certificate')
+  @ApiOperation({ summary: 'Upload a marriage certificate (image/pdf)' })
   @UseInterceptors(FileInterceptor('file'))
   async uploadMarriageCertificate(
     @UploadedFile() file: Express.Multer.File,
@@ -149,11 +162,12 @@ export class FileController {
     return this.fileService.handleUpload(
       file,
       IDENTITY_DOCS_BUCKET,
-      'MARRIAGE_CERTIFICATE' as $Enums.FileCategory,
+      $Enums.FileCategory.MARRIAGE_CERTIFICATE,
     );
   }
 
   @Post('upload/birth-certificate')
+  @ApiOperation({ summary: 'Upload a birth certificate (image/pdf)' })
   @UseInterceptors(FileInterceptor('file'))
   async uploadBirthCertificate(
     @UploadedFile() file: Express.Multer.File,
@@ -165,11 +179,12 @@ export class FileController {
     return this.fileService.handleUpload(
       file,
       IDENTITY_DOCS_BUCKET,
-      'BIRTH_CERTIFICATE' as $Enums.FileCategory,
+      $Enums.FileCategory.BIRTH_CERTIFICATE,
     );
   }
 
   @Post('upload/service-attachment')
+  @ApiOperation({ summary: 'Upload a service attachment (image/pdf)' })
   @UseInterceptors(FileInterceptor('file'))
   async uploadServiceAttachment(
     @UploadedFile() file: Express.Multer.File,
@@ -187,10 +202,13 @@ export class FileController {
 
   // DELETE /files/:fileId
   @Delete(':fileId')
-  async deleteFile(@Param('fileId') fileId: string) {
-    // You'd need logic here to determine the correct bucket based on file usage (e.g., by checking the File table)
-    // For simplicity, we assume one bucket for attachments here, but in production, you'd check file relations.
-    await this.fileService.deleteFile(fileId, ATTACHMENTS_BUCKET);
+  @ApiOperation({ summary: 'Delete a file (access-controlled)' })
+  async deleteFile(@Param('fileId') fileId: string, @Req() req: any) {
+    await this.fileService.deleteFileForActor(fileId, {
+      actorUserId: req.user.id,
+      permissions: Array.isArray(req.user.permissions) ? req.user.permissions : [],
+      roles: Array.isArray(req.user.roles) ? req.user.roles : [],
+    });
     return {
       success: true,
       message: 'File and all associated records deleted.',
@@ -199,11 +217,13 @@ export class FileController {
 
   // GET /files/:fileId/stream
   @Get(':fileId/stream')
-  async getFile(@Param('fileId') fileId: string, @Res() res: Response) {
-    const stream = await this.fileService.getFileStream(
-      fileId,
-      ATTACHMENTS_BUCKET,
-    );
+  @ApiOperation({ summary: 'Stream a file (access-controlled)' })
+  async getFile(@Param('fileId') fileId: string, @Req() req: any, @Res() res: Response) {
+    const stream = await this.fileService.getFileStreamForActor(fileId, {
+      actorUserId: req.user.id,
+      permissions: Array.isArray(req.user.permissions) ? req.user.permissions : [],
+      roles: Array.isArray(req.user.roles) ? req.user.roles : [],
+    });
     // pipe the stream to the response
     stream.pipe(res);
   }

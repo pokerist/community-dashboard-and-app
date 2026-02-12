@@ -10,7 +10,7 @@ export class ValidateReferralDto {
   @Matches(/^\+?\d{9,15}$/, {
     message: 'Phone number must be a valid format',
   })
-  phone: string;
+  phone!: string;
 }
 
 export class ValidateReferralResponseDto {
@@ -18,7 +18,7 @@ export class ValidateReferralResponseDto {
     description: 'Whether a valid referral exists for this phone',
     example: true,
   })
-  valid: boolean;
+  valid!: boolean;
 
   @ApiProperty({
     description: 'Name of the referrer if valid',
@@ -31,5 +31,5 @@ export class ValidateReferralResponseDto {
     description: 'Message providing additional information',
     example: 'Referral found for this phone number.',
   })
-  message: string;
+  message!: string;
 }

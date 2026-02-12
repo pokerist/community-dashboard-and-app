@@ -14,7 +14,7 @@ export class AddTenantToLeaseDto {
   })
   @IsEmail()
   @IsNotEmpty()
-  tenantEmail: string;
+  tenantEmail!: string;
 
   @ApiProperty({
     example: '123456789',
@@ -22,12 +22,12 @@ export class AddTenantToLeaseDto {
   })
   @IsString()
   @IsNotEmpty()
-  tenantNationalId: string;
+  tenantNationalId!: string;
 
   @ApiProperty({ example: 'John Doe', description: 'The name of the tenant' })
   @IsString()
   @IsNotEmpty()
-  name: string;
+  name!: string;
 
   @ApiProperty({
     example: '+201234567890',
@@ -35,7 +35,7 @@ export class AddTenantToLeaseDto {
   })
   @IsString()
   @IsNotEmpty()
-  phone: string;
+  phone!: string;
 
   @ApiPropertyOptional({
     example: 'file-uuid-here',

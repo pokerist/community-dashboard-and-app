@@ -34,6 +34,16 @@ export class IncidentsService {
     const incidentNumber = await this.generateIncidentNumber();
 
     return this.prisma.$transaction(async (tx) => {
+      if (incidentData.unitId) {
+        const unitExists = await tx.unit.findUnique({
+          where: { id: incidentData.unitId },
+          select: { id: true },
+        });
+        if (!unitExists) {
+          throw new BadRequestException('Unit not found');
+        }
+      }
+
       const incident = await tx.incident.create({
         data: {
           ...incidentData,
@@ -47,6 +57,7 @@ export class IncidentsService {
       if (attachmentIds.length > 0) {
         const attachmentsData = attachmentIds.map((fileId) => ({
           fileId: fileId,
+          incidentId: incident.id,
           entityId: incident.id,
           entity: 'INCIDENT',
         }));

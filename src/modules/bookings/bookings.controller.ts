@@ -30,8 +30,8 @@ export class BookingsController {
   @ApiOperation({
     summary: 'Create a booking with full slot validation & rule checks',
   })
-  create(@Body() dto: CreateBookingDto) {
-    return this.bookingsService.create(dto);
+  create(@Body() dto: CreateBookingDto, @Request() req) {
+    return this.bookingsService.createForActor(req.user.id, dto);
   }
 
   @Get()
@@ -50,8 +50,12 @@ export class BookingsController {
   @Get(':id')
   @Permissions('booking.view_all', 'booking.view_own')
   @ApiOperation({ summary: 'Get booking by ID' })
-  findOne(@Param('id') id: string) {
-    return this.bookingsService.findOne(id);
+  findOne(@Param('id') id: string, @Request() req) {
+    return this.bookingsService.findOneForActor(id, {
+      actorUserId: req.user.id,
+      permissions: Array.isArray(req.user.permissions) ? req.user.permissions : [],
+      roles: Array.isArray(req.user.roles) ? req.user.roles : [],
+    });
   }
 
   @Patch(':id/status')

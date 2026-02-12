@@ -4,9 +4,10 @@ import { BookingsController } from './bookings.controller';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { FacilitiesModule } from '../facilities/facilities.module';
 import { AuthModule } from '../auth/auth.module';
+import { ClubhouseModule } from '../clubhouse/clubhouse.module';
 
 @Module({
-  imports: [PrismaModule, FacilitiesModule, AuthModule],
+  imports: [PrismaModule, FacilitiesModule, AuthModule, ClubhouseModule],
   controllers: [BookingsController],
   providers: [BookingsService],
 })

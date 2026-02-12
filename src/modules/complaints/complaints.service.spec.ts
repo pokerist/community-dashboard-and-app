@@ -7,7 +7,7 @@ import { CreateComplaintDto, UpdateComplaintDto } from './dto/complaints.dto';
 import { InvoicesService } from '../invoices/invoices.service';
 
 // --- MOCK PRISMA SERVICE ---
-const mockPrismaService = {
+const mockPrismaService: any = {
   complaint: {
     findFirst: jest.fn(),
     create: jest.fn(),
@@ -16,7 +16,12 @@ const mockPrismaService = {
     update: jest.fn(),
     delete: jest.fn(),
   },
+  attachment: {
+    createMany: jest.fn(),
+  },
 };
+
+mockPrismaService.$transaction = jest.fn(async (cb: any) => cb(mockPrismaService));
 
 describe('ComplaintsService', () => {
   let service: ComplaintsService;
@@ -49,7 +54,7 @@ describe('ComplaintsService', () => {
 
   // --- TEST: SEQUENTIAL NUMBERING ---
   describe('create', () => {
-    const createDto: CreateComplaintDto = {
+    const createDto: CreateComplaintDto & { reporterId: string } = {
       reporterId: 'user-1-uuid',
       description: 'Loud party next door.',
       category: 'Noise',

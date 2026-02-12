@@ -9,6 +9,9 @@ import { CreateReferralDto } from './dto/create-referral.dto';
 import { ReferralQueryDto } from './dto/referral-query.dto';
 import { ValidateReferralResponseDto } from './dto/validate-referral.dto';
 import { ReferralStatus } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { ReferralCreatedEvent } from '../../events/contracts/referral-created.event';
+import type { Prisma } from '@prisma/client';
 interface PaginatedResult<T> {
   data: T[];
   meta: {
@@ -21,7 +24,10 @@ interface PaginatedResult<T> {
 
 @Injectable()
 export class ReferralsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private eventEmitter: EventEmitter2,
+  ) {}
 
   async create(createReferralDto: CreateReferralDto, referrerId: string) {
     const { friendFullName, friendMobile, message } = createReferralDto;
@@ -29,7 +35,7 @@ export class ReferralsService {
     // Check if referrer is trying to refer themselves
     const referrer = await this.prisma.user.findUnique({
       where: { id: referrerId },
-      select: { phone: true },
+      select: { phone: true, nameEN: true, nameAR: true },
     });
 
     if (!referrer) {
@@ -72,8 +78,25 @@ export class ReferralsService {
       },
     });
 
-    // TODO: Trigger invitation delivery (SMS/WhatsApp/Email)
-    // For now, just return the referral
+    const inviteeUser = await this.prisma.user.findFirst({
+      where: { phone: friendMobile },
+      select: { id: true },
+    });
+
+    const referrerName =
+      referrer.nameEN || referrer.nameAR || referral.referrer.nameEN || referral.referrer.nameAR || 'User';
+
+    this.eventEmitter.emit(
+      'referral.created',
+      new ReferralCreatedEvent(
+        referral.id,
+        referrerId,
+        referrerName,
+        friendFullName,
+        friendMobile,
+        inviteeUser?.id ?? undefined,
+      ),
+    );
 
     return referral;
   }
@@ -149,8 +172,13 @@ export class ReferralsService {
     };
   }
 
-  async validateReferral(phone: string): Promise<ValidateReferralResponseDto> {
-    const referral = await this.prisma.referral.findFirst({
+  async validateReferral(
+    phone: string,
+    prismaClient?: Prisma.TransactionClient,
+  ): Promise<ValidateReferralResponseDto> {
+    const prisma = prismaClient || this.prisma;
+
+    const referral = await prisma.referral.findFirst({
       where: {
         friendMobile: phone,
         status: {
@@ -210,8 +238,14 @@ export class ReferralsService {
     });
   }
 
-  async convertReferral(phone: string, userId: string) {
-    const referral = await this.prisma.referral.findFirst({
+  async convertReferral(
+    phone: string,
+    userId: string,
+    prismaClient?: Prisma.TransactionClient,
+  ) {
+    const prisma = prismaClient || this.prisma;
+
+    const referral = await prisma.referral.findFirst({
       where: {
         friendMobile: phone,
         status: {
@@ -227,11 +261,14 @@ export class ReferralsService {
     }
 
     // Update referral status and link to converted user
-    return this.prisma.referral.update({
+    return prisma.referral.update({
       where: { id: referral.id },
       data: {
         status: ReferralStatus.CONVERTED,
         convertedUserId: userId,
+      },
+      include: {
+        referrer: { select: { id: true, nameEN: true, nameAR: true } },
       },
     });
   }

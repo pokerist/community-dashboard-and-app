@@ -10,5 +10,5 @@ export class GenerateUtilityInvoicesDto {
   })
   @IsDateString()
   @IsNotEmpty()
-  billingMonth: string;
+  billingMonth!: string;
 }

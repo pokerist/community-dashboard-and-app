@@ -8,6 +8,9 @@ import { IncidentCreatedEvent } from '../contracts/incident-created.event';
 import { IncidentResolvedEvent } from '../contracts/incident-resolved.event';
 import { BookingApprovedEvent } from '../contracts/booking-approved.event';
 import { BookingCancelledEvent } from '../contracts/booking-cancelled.event';
+import { ReferralCreatedEvent } from '../contracts/referral-created.event';
+import { ReferralConvertedEvent } from '../contracts/referral-converted.event';
+import { ViolationIssuedEvent } from '../contracts/violation-issued.event';
 import { NotificationType, Channel, Audience } from '@prisma/client';
 
 @Injectable()
@@ -46,7 +49,7 @@ export class NotificationListener {
       });
 
       this.logger.log(`Payment reminder sent for invoice ${payload.invoiceId}`);
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error(
         `Failed to send notification for invoice ${payload.invoiceId}`,
         error,
@@ -84,7 +87,7 @@ export class NotificationListener {
       this.logger.log(
         `Emergency alert sent for incident ${payload.incidentNumber}`,
       );
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error(
         `Failed to send notification for incident ${payload.incidentId}`,
         error,
@@ -108,7 +111,7 @@ export class NotificationListener {
         type: NotificationType.MAINTENANCE_ALERT,
         title: 'Incident Resolved',
         messageEn: `The ${payload.type} incident (${payload.incidentNumber}) has been resolved. Response time: ${Math.floor(payload.responseTime / 60)} minutes.`,
-        channels: [Channel.IN_APP],
+        channels: [Channel.IN_APP, Channel.EMAIL],
         targetAudience: audience,
         audienceMeta,
       });
@@ -116,7 +119,7 @@ export class NotificationListener {
       this.logger.log(
         `Resolution notification sent for incident ${payload.incidentNumber}`,
       );
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error(
         `Failed to send resolution notification for incident ${payload.incidentId}`,
         error,
@@ -142,7 +145,7 @@ export class NotificationListener {
       this.logger.log(
         `Booking confirmation sent for booking ${payload.bookingId}`,
       );
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error(
         `Failed to send booking confirmation for booking ${payload.bookingId}`,
         error,
@@ -160,7 +163,7 @@ export class NotificationListener {
         type: NotificationType.EVENT_NOTIFICATION,
         title: 'Booking Cancelled',
         messageEn: `Your booking for ${payload.facilityName} on ${payload.date.toDateString()} from ${payload.startTime} to ${payload.endTime} has been cancelled.`,
-        channels: [Channel.IN_APP],
+        channels: [Channel.IN_APP, Channel.EMAIL],
         targetAudience: Audience.SPECIFIC_RESIDENCES,
         audienceMeta: { userIds: [payload.userId] },
       });
@@ -168,9 +171,92 @@ export class NotificationListener {
       this.logger.log(
         `Booking cancellation notification sent for booking ${payload.bookingId}`,
       );
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error(
         `Failed to send booking cancellation notification for booking ${payload.bookingId}`,
+        error,
+      );
+    }
+  }
+
+  @OnEvent('referral.created')
+  async handleReferralCreatedEvent(payload: ReferralCreatedEvent) {
+    this.logger.log(`Handling referral created: ${payload.referralId}`);
+
+    try {
+      // Notify referrer (confirmation)
+      await this.notificationsService.sendNotification({
+        type: NotificationType.EVENT_NOTIFICATION,
+        title: 'Referral created',
+        messageEn: `Your referral invitation for ${payload.friendFullName} (${payload.friendMobile}) has been created.`,
+        channels: [Channel.IN_APP, Channel.EMAIL],
+        targetAudience: Audience.SPECIFIC_RESIDENCES,
+        audienceMeta: { userIds: [payload.referrerId] },
+      });
+
+      // If the invitee is already a user, notify them as well.
+      if (payload.inviteeUserId) {
+        await this.notificationsService.sendNotification({
+          type: NotificationType.EVENT_NOTIFICATION,
+          title: "You've been invited",
+          messageEn: `${payload.referrerName} invited you to join the community.`,
+          channels: [Channel.IN_APP, Channel.EMAIL],
+          targetAudience: Audience.SPECIFIC_RESIDENCES,
+          audienceMeta: { userIds: [payload.inviteeUserId] },
+        });
+      }
+    } catch (error: unknown) {
+      this.logger.error(
+        `Failed to send referral notifications for referral ${payload.referralId}`,
+        error,
+      );
+    }
+  }
+
+  @OnEvent('referral.converted')
+  async handleReferralConvertedEvent(payload: ReferralConvertedEvent) {
+    this.logger.log(`Handling referral converted: ${payload.referralId}`);
+
+    try {
+      await this.notificationsService.sendNotification({
+        type: NotificationType.EVENT_NOTIFICATION,
+        title: 'Referral converted',
+        messageEn: `${payload.convertedUserName} successfully signed up using your referral.`,
+        channels: [Channel.IN_APP, Channel.EMAIL],
+        targetAudience: Audience.SPECIFIC_RESIDENCES,
+        audienceMeta: { userIds: [payload.referrerId] },
+      });
+    } catch (error: unknown) {
+      this.logger.error(
+        `Failed to send referral converted notification for referral ${payload.referralId}`,
+        error,
+      );
+    }
+  }
+
+  @OnEvent('violation.issued')
+  async handleViolationIssuedEvent(payload: ViolationIssuedEvent) {
+    this.logger.log(`Handling violation issued: ${payload.violationNumber}`);
+
+    if (!payload.recipientUserIds || payload.recipientUserIds.length === 0) {
+      this.logger.warn(
+        `Violation ${payload.violationId} issued with no recipients. Skipping notification.`,
+      );
+      return;
+    }
+
+    try {
+      await this.notificationsService.sendNotification({
+        type: NotificationType.ANNOUNCEMENT,
+        title: 'New violation issued',
+        messageEn: `A violation (${payload.violationNumber}) has been issued: ${payload.type}. Fine amount: ${payload.fineAmount}.`,
+        channels: [Channel.IN_APP, Channel.EMAIL],
+        targetAudience: Audience.SPECIFIC_RESIDENCES,
+        audienceMeta: { userIds: payload.recipientUserIds },
+      });
+    } catch (error: unknown) {
+      this.logger.error(
+        `Failed to send violation notification for violation ${payload.violationId}`,
         error,
       );
     }

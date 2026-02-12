@@ -1,50 +1,75 @@
-# Incidents Module
+# Incidents Module (`src/modules/incidents`)
 
-## Purpose & Role in the System
-Manages security incidents and emergency reports within the community. Tracks incident details, priority levels, response times, and resolution status.
+## What this module is responsible for
 
-## Controllers, Services, and Key Classes
-- **Controllers**: `IncidentsController`
-- **Services**: `IncidentsService`
-- **Files**: `src/modules/incidents/incidents.controller.ts`, `src/modules/incidents/incidents.service.ts`
+The Incidents module tracks security/emergency incidents for dashboard workflows:
 
-## Key Features
-- Incident numbering (INC-XXXXX)
-- Priority-based handling (LOW, MEDIUM, HIGH, CRITICAL)
-- Status workflow: OPEN → RESOLVED → CLOSED
-- Response time tracking
-- Attachment support
+- Create an incident record (with optional unit link and attachments).
+- Dashboard summary metrics (cards).
+- Paginated searchable incident listing.
+- Resolve an incident and store response time.
 
-## API Endpoints
-*(Detailed endpoint documentation needed - requires reading controller code)*
+## Key data models (Prisma)
 
-## DTOs and Validation Rules
-*(DTO definitions needed - requires reading dto files)*
+From `prisma/schema.prisma`:
 
-## Data Relationships
-- **Incident** belongs to `Unit` (optional)
-- **Incident** has many `Attachment`s
-- **Incident** has many `Invoice`s
+- `Incident`
+  - `incidentNumber` is generated from a DB-backed sequence (`IncidentSequence`) as `INC-0001`, `INC-0002`, ...
+  - `status`: `OPEN` -> `RESOLVED`
+  - `reportedAt`, `resolvedAt`
+  - `responseTime` (stored in seconds in implementation)
+  - optional `unitId`
+  - `attachments`: linked via `Attachment.incidentId`
+- `IncidentSequence`
+  - Atomic counter used to generate sequential incident numbers
 
-## Business Logic and Workflow Rules
-1. **Sequential Numbering**: Auto-generated incident numbers
-2. **Priority Levels**: LOW, MEDIUM, HIGH, CRITICAL
-3. **Status Transitions**: OPEN → RESOLVED → CLOSED
-4. **Response Time Tracking**: Minutes/seconds from report to resolution
+## Authentication / authorization
 
-## File References
-- Controller: `src/modules/incidents/incidents.controller.ts`
-- Service: `src/modules/incidents/incidents.service.ts`
-- DTOs: `src/modules/incidents/dto/`
-- Database Model: `prisma/schema.prisma` (Incident model)
+All routes require:
 
-## External Integrations
-- **File Service**: Attachment handling
-- **Invoices Service**: Incident-related billing
-- **Prisma ORM**: Database operations
+- `JwtAuthGuard`
+- `PermissionsGuard` via `@Permissions(...)`
 
-## Missing Information
-- Complete API endpoint specifications
-- DTO validation rules
-- Example usage scenarios
-- Detailed business logic implementation
+Permissions are defined in `src/modules/incidents/incidents.controller.ts`.
+
+## API surface (controller)
+
+Base route: `/incidents`
+
+- `POST /incidents` (permissions: `incidents.create`)
+- `GET /incidents/cards` (permissions: `incidents.view`)
+- `GET /incidents/list` (permissions: `incidents.view`)
+- `PATCH /incidents/:id/resolve` (permissions: `incidents.resolve`)
+
+## Flow: Create incident (`POST /incidents`)
+
+Implementation notes (`IncidentsService.create`):
+
+- Generates `incidentNumber`.
+- Sets `status=OPEN` and `reportedAt=now()`.
+- If `unitId` is provided, the unit is validated to exist.
+- If `attachmentIds` are provided, creates `Attachment` rows linked to the incident (via `incidentId` and `entity/entityId`).
+- Emits event `incident.created`.
+
+## Flow: Resolve incident (`PATCH /incidents/:id/resolve`)
+
+Implementation notes (`IncidentsService.resolve`):
+
+- Only incidents with `status=OPEN` can be resolved.
+- Calculates `responseTime` as seconds between `reportedAt` and now.
+- Sets `status=RESOLVED` and `resolvedAt=now()`.
+- Emits event `incident.resolved`.
+
+## Listing (`GET /incidents/list`)
+
+Uses shared `paginate(...)` helper with:
+
+- Search fields: `type`, `location`, `residentName`, `description`, `incidentNumber`
+- Filters: `status`, `priority`, `unitId`, `reportedAtFrom/reportedAtTo`
+
+## Relevant code entry points
+
+- `src/modules/incidents/incidents.controller.ts`
+- `src/modules/incidents/incidents.service.ts`
+- `src/modules/incidents/dto/*.ts`
+

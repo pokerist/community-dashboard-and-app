@@ -22,17 +22,18 @@ export class PermissionCacheService implements OnModuleInit {
         await this.load();
         console.log('✅ Permissions loaded successfully');
         return;
-      } catch (error) {
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
         if (attempt === maxRetries) {
           console.error(
             '❌ Failed to load permissions after retries:',
-            error.message,
+            message,
           );
           return;
         }
         console.warn(
           `⚠️ Retry ${attempt}/${maxRetries} for permissions loading in ${delayMs * attempt}ms...`,
-          error.message,
+          message,
         );
         await new Promise((res) => setTimeout(res, delayMs * attempt));
       }

@@ -38,36 +38,12 @@ export async function paginate<T extends Record<string, any>>(
     select,
   } = options;
 
-  // Build where clause
-  const where: Record<string, any> = { ...additionalFilters };
-
-  // Add search conditions if search term is provided
-  if (search && searchFields.length > 0) {
-    where.OR = searchFields.map((field) => ({
-      [field]: {
-        contains: search,
-        mode: 'insensitive' as const,
-      },
-    }));
-  }
-
-  // Remove undefined filters
-  Object.keys(where).forEach((key) => {
-    if (where[key] === undefined || where[key] === null) {
-      delete where[key];
-    }
-  });
+  const where = buildWhereClause(additionalFilters, searchFields, search);
 
   // Build orderBy
-  let orderBy: Record<string, any> = {};
-  if (sortBy) {
-    orderBy[sortBy] = sortOrder;
-  } else {
-    // Default sort by createdAt desc if available
-    if ('createdAt' in model.fields) {
-      orderBy = { createdAt: 'desc' };
-    }
-  }
+  const orderBy: Record<string, any> = sortBy
+    ? { [sortBy]: sortOrder }
+    : { createdAt: 'desc' };
 
   const skip = (page - 1) * limit;
 
