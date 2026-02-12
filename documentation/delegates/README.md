@@ -2,7 +2,7 @@
 
 ## What this module is responsible for
 
-This module implements “unit delegation”:
+This module implements "unit delegation":
 
 - A unit **owner** submits a **delegate access request** for a specific unit.
 - The request is stored as a `UnitAccess` row with `role=DELEGATE` and `status=PENDING`.
@@ -17,7 +17,7 @@ Delegates are stored in the existing `UnitAccess` Prisma model:
 
 - `role = DELEGATE`
 - `delegateType`: `FAMILY | FRIEND | INTERIOR_DESIGNER`
-- `status`: uses `AccessStatus` (`PENDING`, `ACTIVE`, `REVOKED`, …)
+- `status`: uses `AccessStatus` (`PENDING`, `ACTIVE`, `REVOKED`, ...)
 - Validity window:
   - `startsAt` (required)
   - `endsAt` (optional)
@@ -62,8 +62,8 @@ Writes:
 
 Notifications:
 
-- Admins receive a “delegate request pending” notification (in-app + email).
-- Delegate receives a “request submitted” notification (in-app + email).
+- Admins receive a "delegate request pending" notification (in-app + email).
+- Delegate receives a "request submitted" notification (in-app + email).
 
 ### 2) Admin approves
 
@@ -81,7 +81,7 @@ Writes:
 
 Notifications:
 
-- Delegate receives “delegate access approved” (in-app + email).
+- Delegate receives "delegate access approved" (in-app + email).
 
 Credentials:
 
@@ -101,7 +101,19 @@ Writes:
 
 Notifications:
 
-- Delegate receives “delegate access revoked” (in-app + email).
+- Delegate receives "delegate access revoked" (in-app + email).
+
+## Relationship to Workers / Contractor access
+
+Delegates are the authority layer for "operational entry" (contractors/workers), distinct from visitors/deliveries.
+
+When `UnitAccess.role=DELEGATE` is ACTIVE and `canManageWorkers=true`, the delegate can:
+
+- Create contractor companies: `POST /contractors`
+- Register workers for a unit: `POST /workers`
+- Generate worker access QRs: `POST /workers/:id/qr`
+
+See `documentation/workers/README.md` for the worker/contractor flow and endpoint details.
 
 ## Security notes / enforcement points
 

@@ -9,7 +9,6 @@ import { HikCentralQrService } from './hikcentral/hikcentral-qr.service';
   imports: [PrismaModule, AuthModule],
   controllers: [AccessControlController],
   providers: [AccessControlService, HikCentralQrService],
-  exports: [AccessControlService],
+  exports: [AccessControlService, HikCentralQrService],
 })
 export class AccessControlModule {}
-

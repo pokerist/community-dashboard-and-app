@@ -47,6 +47,8 @@ Enums:
 - `AccessGrantPermission`: `ENTER`, `WORK`, `DELIVER`
 - `AccessStatus`: reused for QR lifecycle
 
+Note: for contractor/worker workflows (persistent worker identities + delegate authorization), prefer the Workers module (`documentation/workers/README.md`) and `POST /workers/:id/qr` over `POST /access-qrcodes` with `type=WORKER`.
+
 ## QR lifecycle behavior
 
 - On creation, QRs are stored with `status = ACTIVE`.

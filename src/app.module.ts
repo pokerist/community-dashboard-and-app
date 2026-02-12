@@ -25,6 +25,7 @@ import { OwnersModule } from './modules/owners/owners.module';
 import { DelegatesModule } from './modules/delegates/delegates.module';
 import { ClubhouseModule } from './modules/clubhouse/clubhouse.module';
 import { AccessControlModule } from './modules/access-control/access-control.module';
+import { WorkersModule } from './modules/workers/workers.module';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { AccessControlModule } from './modules/access-control/access-control.mod
     DelegatesModule,
     ClubhouseModule,
     AccessControlModule,
+    WorkersModule,
   ],
   controllers: [],
   providers: [],

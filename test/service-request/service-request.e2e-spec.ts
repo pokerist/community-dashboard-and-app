@@ -16,7 +16,10 @@ import { ServiceRequestService } from '../../src/modules/service-request/service
 import { CreateServiceRequestDto } from '../../src/modules/service-request/dto/create-service-request.dto';
 import { UpdateServiceRequestInternalDto } from '../../src/modules/service-request/dto/update-service-request-internal.dto';
 import { FieldValueDto } from '../../src/modules/service-request/dto/field-value.dto';
-import { Priority } from '@prisma/client';
+import { Priority, ServiceFieldType } from '@prisma/client';
+import { EventEmitterModule } from '@nestjs/event-emitter';
+import { JwtAuthGuard } from '../../src/modules/auth/guards/jwt-auth.guard';
+import { PermissionsGuard } from '../../src/modules/auth/guards/permissions.guard';
 
 // --- MOCK DATA ---
 const mockUserId = 'user-uuid-123';
@@ -36,6 +39,25 @@ const mockRequestResponse = {
 
 // Mock Prisma Service
 const mockPrismaService = {
+  role: {
+    findMany: jest.fn().mockResolvedValue([]),
+  },
+  unitAccess: {
+    findFirst: jest.fn().mockResolvedValue({
+      id: 'ua-1',
+      userId: mockUserId,
+      unitId: mockUnitId,
+      status: 'ACTIVE',
+      startsAt: new Date(Date.now() - 1000),
+      endsAt: null,
+    }),
+  },
+  unit: {
+    findUnique: jest.fn().mockResolvedValue({ status: 'DELIVERED' }),
+  },
+  user: {
+    findUnique: jest.fn().mockResolvedValue({ id: 'staff-uuid-444' }),
+  },
   serviceRequest: {
     create: jest.fn().mockResolvedValue(mockRequestResponse),
     // 1. Used by the controller findOne and service findUnique (after create, before update)
@@ -74,7 +96,15 @@ const mockPrismaService = {
           status: true, // <-- FIXED: Must be truthy to pass 'if (!service || !service.status)'
           unitEligibility: 'ALL', // Added for completeness
           // Mock the required formFields for validation
-          formFields: [{ id: mockFieldId, required: true }],
+          formFields: [
+            {
+              id: mockFieldId,
+              required: true,
+              type: ServiceFieldType.TEXT,
+              label: 'Test Field',
+              order: 1,
+            },
+          ],
         });
       }
       return null; // Return null if the serviceId is wrong or service not found
@@ -100,12 +130,33 @@ describe('ServiceRequestController (e2e)', () => {
 
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [ServiceRequestModule],
+      imports: [EventEmitterModule.forRoot(), ServiceRequestModule],
       // NOTE: This is a mocked integration test (HTTP layer + module wiring),
       // so Prisma MUST be overridden even if ServiceRequestModule imports PrismaModule.
     })
       .overrideProvider(PrismaService)
       .useValue(mockPrismaService)
+      .overrideGuard(JwtAuthGuard)
+      .useValue({
+        canActivate: (context: any) => {
+          const req = context.switchToHttp().getRequest();
+          req.user = {
+            id: mockUserId,
+            roles: ['SUPER_ADMIN'],
+            permissions: [
+              'service_request.create',
+              'service_request.assign',
+              'service_request.resolve',
+              'service_request.close',
+              'service_request.view_own',
+              'service_request.view_all',
+            ],
+          };
+          return true;
+        },
+      })
+      .overrideGuard(PermissionsGuard)
+      .useValue({ canActivate: () => true })
       .overrideInterceptor(APP_INTERCEPTOR)
       .useClass(MockUserInterceptor)
       .compile();
@@ -166,7 +217,7 @@ describe('ServiceRequestController (e2e)', () => {
       .then((response) => {
         // Expect failure message now that service is active in mock
         expect(response.body.message).toContain('Missing required fields');
-        expect(response.body.message).toContain(mockFieldId);
+        expect(response.body.message).toContain('Test Field');
       });
   });
 
