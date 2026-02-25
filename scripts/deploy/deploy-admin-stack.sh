@@ -14,7 +14,7 @@ ROOT_ENV_PROD="${ROOT_DIR}/.env.production"
 ROOT_ENV_PROD_EXAMPLE="${ROOT_DIR}/.env.production.example"
 ADMIN_ENV_PROD="${ROOT_DIR}/apps/admin-web/.env.production"
 ADMIN_ENV_PROD_EXAMPLE="${ROOT_DIR}/apps/admin-web/.env.production.example"
-PM2_ECOSYSTEM="${ROOT_DIR}/scripts/deploy/pm2.admin-stack.ecosystem.cjs"
+PM2_ECOSYSTEM="${ROOT_DIR}/scripts/deploy/pm2.admin-stack.ecosystem.js"
 AUTO_BOOTSTRAP_SERVER="${AUTO_BOOTSTRAP_SERVER:-true}"
 AUTO_OPEN_FIREWALL_PORTS="${AUTO_OPEN_FIREWALL_PORTS:-true}"
 AUTO_PM2_STARTUP="${AUTO_PM2_STARTUP:-true}"
@@ -469,8 +469,16 @@ npm run build
 
 note "Starting / reloading PM2 apps"
 cd "$ROOT_DIR"
-BACKEND_PORT="$BACKEND_PORT" FRONTEND_PORT="$FRONTEND_PORT" \
-  pm2 startOrReload "$PM2_ECOSYSTEM" --env production
+PM2_ACTION="start"
+if pm2 describe community-backend >/dev/null 2>&1 && pm2 describe community-admin-web >/dev/null 2>&1; then
+  PM2_ACTION="reload"
+fi
+if ! BACKEND_PORT="$BACKEND_PORT" FRONTEND_PORT="$FRONTEND_PORT" pm2 "$PM2_ACTION" "$PM2_ECOSYSTEM" --env production; then
+  warn "PM2 ${PM2_ACTION} failed with ecosystem file. Falling back to clean PM2 start."
+  pm2 delete community-backend >/dev/null 2>&1 || true
+  pm2 delete community-admin-web >/dev/null 2>&1 || true
+  BACKEND_PORT="$BACKEND_PORT" FRONTEND_PORT="$FRONTEND_PORT" pm2 start "$PM2_ECOSYSTEM" --env production
+fi
 pm2 save
 
 if [[ "$AUTO_PM2_STARTUP" == "true" ]]; then
