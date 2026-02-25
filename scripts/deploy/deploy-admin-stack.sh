@@ -442,6 +442,12 @@ npm run prisma:generate
 npx prisma migrate deploy
 npm run build
 
+if [[ "${RUN_DEMO_SEEDS:-false}" == "true" || "${RUN_DASHBOARD_LOAD_SEED:-false}" == "true" ]]; then
+  note "Running baseline Prisma seed"
+  source_env_file "$ROOT_ENV_PROD"
+  npx prisma db seed
+fi
+
 if [[ "${RUN_DEMO_SEEDS:-false}" == "true" ]]; then
   note "Seeding demo personas"
   source_env_file "$ROOT_ENV_PROD"
