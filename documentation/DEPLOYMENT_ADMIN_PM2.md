@@ -40,12 +40,17 @@ chmod +x deploy.sh scripts/deploy/deploy-admin-stack.sh
 
 What it auto-generates/configures if missing:
 - `.env.production` and `apps/admin-web/.env.production`
-- random `JWT_ACCESS_SECRET`
+- demo `JWT_ACCESS_SECRET` (same local demo default) if missing/placeholder
 - local PostgreSQL install/start (Ubuntu/Debian)
-- local DB + user + password and `DATABASE_URL` / `DIRECT_URL`
+- local DB + user + password (deterministic demo defaults) and `DATABASE_URL` / `DIRECT_URL`
 - PM2 install/startup + app processes
 - UFW ports `4002` / `4003` (if UFW is active)
 - provider mock flags when credentials are missing
+
+Default zero-touch demo DB values used by the script:
+- DB user: `community_user`
+- DB name: `community_dashboard`
+- DB password: `community123` (stored in `.env.production` as `AUTO_LOCAL_DB_PASSWORD`)
 
 ## Optional Manual Env Overrides (Advanced)
 If you want a real managed DB / real providers, edit these after first run:

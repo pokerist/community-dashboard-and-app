@@ -26,6 +26,8 @@ DEFAULT_DB_PORT="${DEFAULT_DB_PORT:-5432}"
 DEFAULT_DB_NAME="${DEFAULT_DB_NAME:-community_dashboard}"
 DEFAULT_DB_USER="${DEFAULT_DB_USER:-community_user}"
 DEFAULT_DB_SCHEMA="${DEFAULT_DB_SCHEMA:-public}"
+DEFAULT_DB_PASSWORD="${DEFAULT_DB_PASSWORD:-community123}"
+DEFAULT_JWT_SECRET="${DEFAULT_JWT_SECRET:-change-me-in-dev}"
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -60,15 +62,6 @@ run_root() {
 ensure_apt_pkg() {
   local pkg="$1"
   dpkg -s "$pkg" >/dev/null 2>&1 || MISSING_APT_PKGS+=("$pkg")
-}
-
-random_hex() {
-  node -e "console.log(require('crypto').randomBytes($1).toString('hex'))"
-}
-
-random_alnum() {
-  local len="$1"
-  node -e "const c=require('crypto');const s='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';let o='';for(let i=0;i<${len};i++)o+=s[c.randomInt(0,s.length)];console.log(o)"
 }
 
 get_env_value() {
@@ -128,10 +121,11 @@ provision_local_postgres_db() {
   current_db_url="$(get_env_value "$env_file" "DATABASE_URL")"
   jwt_secret="$(get_env_value "$env_file" "JWT_ACCESS_SECRET")"
 
-  # Auto-generate JWT secret if still placeholder/missing.
+  # For zero-touch demo deployments, use deterministic demo secret (matches local demo defaults)
+  # instead of generating a random secret.
   if [[ -z "$jwt_secret" || "$jwt_secret" == "CHANGE_ME_STRONG_SECRET" ]]; then
-    note "Generating JWT_ACCESS_SECRET"
-    upsert_env "$env_file" "JWT_ACCESS_SECRET" "$(random_hex 48)"
+    note "Applying default demo JWT_ACCESS_SECRET from script defaults"
+    upsert_env "$env_file" "JWT_ACCESS_SECRET" "$DEFAULT_JWT_SECRET"
   fi
 
   # If a real database URL is already set, keep it.
@@ -150,7 +144,7 @@ provision_local_postgres_db() {
   db_schema="$DEFAULT_DB_SCHEMA"
   db_pass="$(get_env_value "$env_file" "AUTO_LOCAL_DB_PASSWORD")"
   if [[ -z "$db_pass" ]]; then
-    db_pass="$(random_alnum 24)"
+    db_pass="$DEFAULT_DB_PASSWORD"
     upsert_env "$env_file" "AUTO_LOCAL_DB_PASSWORD" "$db_pass"
   fi
 
