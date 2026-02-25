@@ -93,6 +93,21 @@ postgres_show() {
   postgres_psql "SHOW ${key};" | tr -d '[:space:]'
 }
 
+restart_postgres_service() {
+  if have_cmd systemctl; then
+    if ! run_root systemctl restart postgresql; then
+      run_root systemctl status postgresql --no-pager -n 80 || true
+      echo "ERROR: Failed to restart PostgreSQL after updating pg_hba.conf" >&2
+      exit 1
+    fi
+  elif have_cmd service; then
+    if ! run_root service postgresql restart; then
+      echo "ERROR: Failed to restart PostgreSQL after updating pg_hba.conf" >&2
+      exit 1
+    fi
+  fi
+}
+
 ensure_postgres_installed_and_running() {
   if [[ "$AUTO_INSTALL_POSTGRES" != "true" ]]; then
     return
@@ -133,19 +148,28 @@ configure_local_postgres_trust_auth() {
 
   note "Configuring PostgreSQL localhost auth to trust (demo mode)"
   run_root cp "$hba_file" "${hba_file}.bak.deploy" || true
-  if ! run_root grep -q "CODEX_DEMO_TRUST_RULES" "$hba_file" 2>/dev/null; then
-    # Prepend explicit localhost trust rules so they win over any existing scram/md5 rules below.
-    run_root sed -i '1i# CODEX_DEMO_TRUST_RULES' "$hba_file"
-    run_root sed -i '1ihost    all             all             ::1/128                 trust' "$hba_file"
-    run_root sed -i '1ihost    all             all             127.0.0.1/32            trust' "$hba_file"
-    run_root sed -i '1ilocal   all             all                                     trust' "$hba_file"
-  fi
+  # Rebuild top section deterministically so trust rules always win and duplicates/bad pasted lines are removed.
+  local tmp_hba
+  tmp_hba="$(mktemp)"
+  run_root awk '
+    BEGIN {
+      print "# CODEX_DEMO_TRUST_RULES";
+      print "local   all             all                                     trust";
+      print "host    all             all             127.0.0.1/32            trust";
+      print "host    all             all             ::1/128                 trust";
+    }
+    /CODEX_DEMO_TRUST_RULES/ { next }
+    /^[[:space:]]*local[[:space:]]+all[[:space:]]+all[[:space:]]+/ { next }
+    /^[[:space:]]*host[[:space:]]+all[[:space:]]+all[[:space:]]+127\.0\.0\.1\/32[[:space:]]+/ { next }
+    /^[[:space:]]*host[[:space:]]+all[[:space:]]+all[[:space:]]+::1\/128[[:space:]]+/ { next }
+    /RUN_DEMO_SEEDS=true/ { next }
+    /deploy\.sh-d community_dashboa/ { next }
+    { print }
+  ' "$hba_file" > "$tmp_hba"
+  run_root cp "$tmp_hba" "$hba_file"
+  rm -f "$tmp_hba"
 
-  if have_cmd systemctl; then
-    run_root systemctl reload postgresql >/dev/null 2>&1 || run_root systemctl restart postgresql >/dev/null 2>&1 || true
-  elif have_cmd service; then
-    run_root service postgresql reload >/dev/null 2>&1 || run_root service postgresql restart >/dev/null 2>&1 || true
-  fi
+  restart_postgres_service
 }
 
 provision_local_postgres_db() {
@@ -349,6 +373,17 @@ if ! PGPASSWORD="$(get_env_value "$ROOT_ENV_PROD" "AUTO_LOCAL_DB_PASSWORD")" psq
   provision_local_postgres_db "$ROOT_ENV_PROD" true
   source_env_file "$ROOT_ENV_PROD"
   configure_local_postgres_trust_auth
+fi
+
+# Final hard fail with diagnosis if local TCP auth is still broken after trust setup.
+if ! psql -h "${DEFAULT_DB_HOST}" -p "${DEFAULT_DB_PORT}" -U "${DEFAULT_DB_USER}" -d "${DEFAULT_DB_NAME}" -c "select 1" >/dev/null 2>&1; then
+  warn "PostgreSQL TCP auth still failing after trust setup. Showing first localhost auth rules:"
+  HBA_FILE_NOW="$(postgres_show hba_file || true)"
+  if [[ -n "${HBA_FILE_NOW:-}" ]]; then
+    run_root grep -nE 'CODEX_DEMO_TRUST_RULES|127\.0\.0\.1/32|::1/128|local[[:space:]]+all[[:space:]]+all' "$HBA_FILE_NOW" | head -n 20 || true
+  fi
+  echo "ERROR: PostgreSQL auth bootstrap failed; aborting before Prisma." >&2
+  exit 1
 fi
 npm run prisma:generate
 npx prisma migrate deploy
