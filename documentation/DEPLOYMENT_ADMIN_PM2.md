@@ -29,32 +29,42 @@ sudo ufw allow 4002/tcp
 sudo ufw allow 4003/tcp
 ```
 
-## Prepare Env
-### Backend
-Copy:
+## Zero-Touch Quick Start (Clone + Run)
+For a fast online demo (insecure defaults, mock providers, local PostgreSQL), the script can now do almost everything automatically.
+
+From repo root on the server:
 ```bash
-cp .env.production.example .env.production
+chmod +x deploy.sh scripts/deploy/deploy-admin-stack.sh
+./deploy.sh
 ```
 
-Edit at minimum:
-- `DATABASE_URL`
-- `DIRECT_URL`
-- `JWT_ACCESS_SECRET`
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
-- notification provider credentials as needed
+What it auto-generates/configures if missing:
+- `.env.production` and `apps/admin-web/.env.production`
+- random `JWT_ACCESS_SECRET`
+- local PostgreSQL install/start (Ubuntu/Debian)
+- local DB + user + password and `DATABASE_URL` / `DIRECT_URL`
+- PM2 install/startup + app processes
+- UFW ports `4002` / `4003` (if UFW is active)
+- provider mock flags when credentials are missing
 
-### Admin Web
-Copy:
-```bash
-cp apps/admin-web/.env.production.example apps/admin-web/.env.production
-```
+## Optional Manual Env Overrides (Advanced)
+If you want a real managed DB / real providers, edit these after first run:
+- `.env.production`
+- `apps/admin-web/.env.production`
 
-Default generated value:
-- `VITE_API_BASE_URL=http://108.61.174.92:4003`
+Important production values later:
+- `DATABASE_URL`, `DIRECT_URL`
+- `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+- SMTP / Twilio / Expo Push / FCM credentials
 
 ## Deploy Command
-From repo root on the server:
+From repo root on the server (recommended wrapper):
+```bash
+chmod +x deploy.sh scripts/deploy/deploy-admin-stack.sh
+./deploy.sh
+```
+
+Direct script (same result):
 ```bash
 chmod +x scripts/deploy/deploy-admin-stack.sh
 ./scripts/deploy/deploy-admin-stack.sh
@@ -62,8 +72,22 @@ chmod +x scripts/deploy/deploy-admin-stack.sh
 
 ### Optional: Include Demo Data
 ```bash
-RUN_DEMO_SEEDS=true RUN_DASHBOARD_LOAD_SEED=true ./scripts/deploy/deploy-admin-stack.sh
+RUN_DEMO_SEEDS=true RUN_DASHBOARD_LOAD_SEED=true ./deploy.sh
 ```
+
+## What `deploy.sh` now handles automatically
+- Installs server prerequisites on Ubuntu/Debian when missing (via `apt`):
+  - `curl`, `git`, `build-essential`
+- Installs Node.js LTS (default `20.x`) if missing
+- Installs `pm2` globally if missing
+- Opens firewall ports `4002` / `4003` if `ufw` is installed and active
+- Configures `pm2 startup` (systemd) and saves PM2 process list
+
+Environment toggles (optional):
+- `AUTO_BOOTSTRAP_SERVER=false` → skip auto-install/bootstrap
+- `AUTO_OPEN_FIREWALL_PORTS=false` → skip UFW rules
+- `AUTO_PM2_STARTUP=false` → skip `pm2 startup`
+- `NODE_MAJOR=20` → change Node major installer target
 
 ## PM2 Commands
 ```bash
@@ -86,4 +110,3 @@ pm2 save
   - put Nginx/Caddy in front
   - enable HTTPS
   - restrict CORS to the final admin URL/domain
-
