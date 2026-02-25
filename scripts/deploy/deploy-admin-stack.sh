@@ -252,6 +252,18 @@ upsert_env() {
   fi
 }
 
+source_env_file() {
+  local file="$1"
+  if [[ ! -f "$file" ]]; then
+    echo "ERROR: Env file not found: $file" >&2
+    exit 1
+  fi
+  set -a
+  # shellcheck disable=SC1090
+  source "$file"
+  set +a
+}
+
 bootstrap_server
 
 note "Validating tooling"
@@ -291,16 +303,19 @@ cd "$ROOT_DIR"
 npm ci
 
 note "Building backend"
+source_env_file "$ROOT_ENV_PROD"
 npm run prisma:generate
 npx prisma migrate deploy
 npm run build
 
 if [[ "${RUN_DEMO_SEEDS:-false}" == "true" ]]; then
   note "Seeding demo personas"
+  source_env_file "$ROOT_ENV_PROD"
   npm run seed:mobile-personas
 fi
 if [[ "${RUN_DASHBOARD_LOAD_SEED:-false}" == "true" ]]; then
   note "Seeding realistic dashboard load data"
+  source_env_file "$ROOT_ENV_PROD"
   npm run seed:dashboard-load
 fi
 
@@ -309,9 +324,7 @@ cd "$ROOT_DIR/apps/admin-web"
 npm ci
 
 note "Building admin-web (API: $API_URL)"
-set -a
-source "$ADMIN_ENV_PROD"
-set +a
+source_env_file "$ADMIN_ENV_PROD"
 npm run build
 
 note "Starting / reloading PM2 apps"
