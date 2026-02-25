@@ -43,6 +43,7 @@ What it auto-generates/configures if missing:
 - demo `JWT_ACCESS_SECRET` (same local demo default) if missing/placeholder
 - local PostgreSQL install/start (Ubuntu/Debian)
 - local DB + user + password (deterministic demo defaults) and `DATABASE_URL` / `DIRECT_URL`
+- demo-only localhost PostgreSQL auth (`trust`) for zero-touch setup (security relaxed)
 - PM2 install/startup + app processes
 - UFW ports `4002` / `4003` (if UFW is active)
 - provider mock flags when credentials are missing

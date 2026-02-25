@@ -20,6 +20,7 @@ AUTO_OPEN_FIREWALL_PORTS="${AUTO_OPEN_FIREWALL_PORTS:-true}"
 AUTO_PM2_STARTUP="${AUTO_PM2_STARTUP:-true}"
 AUTO_INSTALL_POSTGRES="${AUTO_INSTALL_POSTGRES:-true}"
 AUTO_PROVISION_LOCAL_DB="${AUTO_PROVISION_LOCAL_DB:-true}"
+AUTO_LOCAL_DB_TRUST_AUTH="${AUTO_LOCAL_DB_TRUST_AUTH:-true}"
 NODE_MAJOR="${NODE_MAJOR:-20}"
 DEFAULT_DB_HOST="${DEFAULT_DB_HOST:-127.0.0.1}"
 DEFAULT_DB_PORT="${DEFAULT_DB_PORT:-5432}"
@@ -87,6 +88,11 @@ postgres_psql() {
   fi
 }
 
+postgres_show() {
+  local key="$1"
+  postgres_psql "SHOW ${key};" | tr -d '[:space:]'
+}
+
 ensure_postgres_installed_and_running() {
   if [[ "$AUTO_INSTALL_POSTGRES" != "true" ]]; then
     return
@@ -108,6 +114,38 @@ ensure_postgres_installed_and_running() {
     run_root systemctl start postgresql >/dev/null 2>&1 || true
   elif have_cmd service; then
     run_root service postgresql start >/dev/null 2>&1 || true
+  fi
+}
+
+configure_local_postgres_trust_auth() {
+  if [[ "$AUTO_LOCAL_DB_TRUST_AUTH" != "true" ]]; then
+    return
+  fi
+  ensure_postgres_installed_and_running
+  require_cmd psql
+
+  local hba_file current_local_rule
+  hba_file="$(postgres_show hba_file || true)"
+  if [[ -z "$hba_file" || ! -f "$hba_file" ]]; then
+    warn "Could not detect pg_hba.conf path. Skipping trust auth bootstrap."
+    return
+  fi
+
+  current_local_rule="$(grep -E '^[[:space:]]*host[[:space:]]+all[[:space:]]+all[[:space:]]+127\.0\.0\.1/32[[:space:]]+trust' "$hba_file" || true)"
+  if [[ -n "$current_local_rule" ]]; then
+    return
+  fi
+
+  note "Configuring PostgreSQL localhost auth to trust (demo mode)"
+  run_root cp "$hba_file" "${hba_file}.bak.deploy" || true
+  run_root sed -i -E "s#^[[:space:]]*local[[:space:]]+all[[:space:]]+all[[:space:]]+.*#local   all             all                                     trust#g" "$hba_file"
+  run_root sed -i -E "s#^[[:space:]]*host[[:space:]]+all[[:space:]]+all[[:space:]]+127\\.0\\.0\\.1/32[[:space:]]+.*#host    all             all             127.0.0.1/32            trust#g" "$hba_file"
+  run_root sed -i -E "s#^[[:space:]]*host[[:space:]]+all[[:space:]]+all[[:space:]]+::1/128[[:space:]]+.*#host    all             all             ::1/128                 trust#g" "$hba_file"
+
+  if have_cmd systemctl; then
+    run_root systemctl reload postgresql >/dev/null 2>&1 || run_root systemctl restart postgresql >/dev/null 2>&1 || true
+  elif have_cmd service; then
+    run_root service postgresql reload >/dev/null 2>&1 || run_root service postgresql restart >/dev/null 2>&1 || true
   fi
 }
 
@@ -134,6 +172,7 @@ provision_local_postgres_db() {
   fi
 
   ensure_postgres_installed_and_running
+  configure_local_postgres_trust_auth
   require_cmd psql
 
   local db_user db_name db_host db_port db_schema db_pass
@@ -304,6 +343,11 @@ npm ci
 
 note "Building backend"
 source_env_file "$ROOT_ENV_PROD"
+if ! PGPASSWORD="$(get_env_value "$ROOT_ENV_PROD" "AUTO_LOCAL_DB_PASSWORD")" psql \
+  -h "${DEFAULT_DB_HOST}" -p "${DEFAULT_DB_PORT}" -U "${DEFAULT_DB_USER}" -d "${DEFAULT_DB_NAME}" -c "select 1" >/dev/null 2>&1; then
+  warn "Local DB login test failed for ${DEFAULT_DB_USER}@${DEFAULT_DB_HOST}:${DEFAULT_DB_PORT}. Re-applying PostgreSQL demo trust auth."
+  configure_local_postgres_trust_auth
+fi
 npm run prisma:generate
 npx prisma migrate deploy
 npm run build
