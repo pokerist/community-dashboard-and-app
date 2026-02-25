@@ -469,16 +469,26 @@ npm run build
 
 note "Starting / reloading PM2 apps"
 cd "$ROOT_DIR"
-PM2_ACTION="start"
-if pm2 describe community-backend >/dev/null 2>&1 && pm2 describe community-admin-web >/dev/null 2>&1; then
-  PM2_ACTION="reload"
-fi
-if ! BACKEND_PORT="$BACKEND_PORT" FRONTEND_PORT="$FRONTEND_PORT" pm2 "$PM2_ACTION" "$PM2_ECOSYSTEM" --env production; then
-  warn "PM2 ${PM2_ACTION} failed with ecosystem file. Falling back to clean PM2 start."
-  pm2 delete community-backend >/dev/null 2>&1 || true
-  pm2 delete community-admin-web >/dev/null 2>&1 || true
-  BACKEND_PORT="$BACKEND_PORT" FRONTEND_PORT="$FRONTEND_PORT" pm2 start "$PM2_ECOSYSTEM" --env production
-fi
+pm2 delete community-backend >/dev/null 2>&1 || true
+pm2 delete community-admin-web >/dev/null 2>&1 || true
+pm2 delete pm2.admin-stack.ecosystem >/dev/null 2>&1 || true
+pm2 delete pm2.admin-stack.ecosystem.cjs >/dev/null 2>&1 || true
+pm2 delete pm2.admin-stack.ecosystem.js >/dev/null 2>&1 || true
+
+source_env_file "$ROOT_ENV_PROD"
+PORT="$BACKEND_PORT" pm2 start "$ROOT_DIR/dist/main.js" \
+  --name community-backend \
+  --cwd "$ROOT_DIR" \
+  --time \
+  --update-env
+
+source_env_file "$ADMIN_ENV_PROD"
+pm2 start npm \
+  --name community-admin-web \
+  --cwd "$ROOT_DIR/apps/admin-web" \
+  --time \
+  --update-env \
+  -- run preview -- --host 0.0.0.0 --port "$FRONTEND_PORT"
 pm2 save
 
 if [[ "$AUTO_PM2_STARTUP" == "true" ]]; then
