@@ -1,25 +1,81 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Express } from 'express';
 import { randomUUID } from 'crypto';
 import { Readable } from 'stream';
+import { createReadStream } from 'fs';
+import { promises as fs } from 'fs';
+import * as path from 'path';
 import {
   IFileStorageAdapter,
   FileUploadResult,
 } from '../../../common/interfaces/file-storage.interface';
 
 export class SupabaseStorageAdapter implements IFileStorageAdapter {
-  private client = createClient(
-    process.env.SUPABASE_URL as string,
-    process.env.SUPABASE_SERVICE_ROLE_KEY as string,
+  private client: SupabaseClient | null = null;
+  private readonly localStorageRoot = path.resolve(
+    process.cwd(),
+    '.local',
+    'file-storage',
   );
+
+  private isSupabaseConfigured(): boolean {
+    return !!(
+      process.env.SUPABASE_URL &&
+      process.env.SUPABASE_SERVICE_ROLE_KEY
+    );
+  }
+
+  private sanitizeFileName(name: string): string {
+    return String(name || 'file')
+      .replace(/[\\/:*?"<>|]+/g, '-')
+      .replace(/\s+/g, '-');
+  }
+
+  private localPathFor(bucket: string, key: string): string {
+    const safeKey = key.replace(/\\/g, '/');
+    return path.join(this.localStorageRoot, bucket, ...safeKey.split('/'));
+  }
+
+  private getClient(): SupabaseClient {
+    if (this.client) {
+      return this.client;
+    }
+
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!supabaseUrl || !serviceRoleKey) {
+      throw new Error(
+        'Supabase storage is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.',
+      );
+    }
+
+    this.client = createClient(supabaseUrl, serviceRoleKey);
+    return this.client;
+  }
 
   async uploadFile(
     file: Express.Multer.File,
     bucket: string,
   ): Promise<FileUploadResult> {
     const id = randomUUID();
-    const key = `${id}/${Date.now()}-${file.originalname}`;
-    const { error } = await this.client.storage
+    const key = `${id}/${Date.now()}-${this.sanitizeFileName(file.originalname)}`;
+
+    if (!this.isSupabaseConfigured()) {
+      const targetPath = this.localPathFor(bucket, key);
+      await fs.mkdir(path.dirname(targetPath), { recursive: true });
+      await fs.writeFile(targetPath, file.buffer);
+      return {
+        id,
+        key,
+        name: file.originalname,
+        mimeType: file.mimetype,
+        size: file.size,
+      };
+    }
+
+    const client = this.getClient();
+    const { error } = await client.storage
       .from(bucket)
       .upload(key, file.buffer, { contentType: file.mimetype, upsert: false });
     if (error) throw error;
@@ -33,7 +89,14 @@ export class SupabaseStorageAdapter implements IFileStorageAdapter {
   }
 
   async deleteFile(fileKey: string, bucket: string): Promise<void> {
-    const { error } = await this.client.storage.from(bucket).remove([fileKey]);
+    if (!this.isSupabaseConfigured()) {
+      const targetPath = this.localPathFor(bucket, fileKey);
+      await fs.unlink(targetPath).catch(() => undefined);
+      return;
+    }
+
+    const client = this.getClient();
+    const { error } = await client.storage.from(bucket).remove([fileKey]);
     if (error) throw error;
   }
 
@@ -41,7 +104,14 @@ export class SupabaseStorageAdapter implements IFileStorageAdapter {
     fileKey: string,
     bucket: string,
   ): Promise<NodeJS.ReadableStream> {
-    const { data, error } = await this.client.storage
+    if (!this.isSupabaseConfigured()) {
+      const targetPath = this.localPathFor(bucket, fileKey);
+      await fs.access(targetPath);
+      return createReadStream(targetPath);
+    }
+
+    const client = this.getClient();
+    const { data, error } = await client.storage
       .from(bucket)
       .download(fileKey);
     if (error) throw error;

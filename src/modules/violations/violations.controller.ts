@@ -54,6 +54,12 @@ export class ViolationsController {
     return this.violationsService.findAll(query);
   }
 
+  @Get('me')
+  @Permissions('violation.view_own')
+  findMine(@Req() req: Request) {
+    return this.violationsService.findMine((req as any).user?.id);
+  }
+
   @Get(':id')
   @Permissions('violation.view_own', 'violation.view_all')
   findOne(@Param('id') id: string, @Req() req: Request) {

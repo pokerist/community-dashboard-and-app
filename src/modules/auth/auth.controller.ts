@@ -2,6 +2,8 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Get,
+  Patch,
   NotFoundException,
   Post,
   Request,
@@ -16,6 +18,7 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { SendPhoneOtpDto } from './dto/send-phone-otp.dto';
 import { VerifyPhoneOtpDto } from './dto/verify-phone-otp.dto';
+import { UpdateMeProfileDto } from './dto/update-me-profile.dto';
 import { ApiOperation, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
@@ -93,5 +96,23 @@ export class AuthController {
   @ApiBearerAuth()
   verifyPhoneOtp(@Body() dto: VerifyPhoneOtpDto, @Request() req: any) {
     return this.authService.verifyPhoneOtp(dto, req.user.id);
+  }
+
+  @Get('me')
+  @ApiOperation({
+    summary: 'Get authenticated user bootstrap profile (mobile-friendly)',
+  })
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  me(@Request() req: any) {
+    return this.authService.getCurrentUserBootstrap(req.user.id);
+  }
+
+  @Patch('me/profile')
+  @ApiOperation({ summary: 'Update authenticated user display profile (mobile)' })
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  updateMeProfile(@Body() dto: UpdateMeProfileDto, @Request() req: any) {
+    return this.authService.updateCurrentUserBasicProfile(req.user.id, dto);
   }
 }

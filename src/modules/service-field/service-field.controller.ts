@@ -48,7 +48,7 @@ export class ServiceFieldController {
     description:
       'Returns the dynamic form fields for the given `serviceId`. Used by the Community App to render service request forms.',
   })
-  @Permissions('service_field.read')
+  @Permissions('service_field.read', 'service_request.create')
   findByService(@Query('serviceId') serviceId: string) {
     if (!serviceId) {
       // For Admin, you might want to fetch all fields, but for app, filter by service is key

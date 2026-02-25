@@ -1,5 +1,6 @@
 import {
   Controller,
+  Delete,
   Get,
   Post,
   Patch,
@@ -17,11 +18,11 @@ import {
 } from '@nestjs/swagger';
 import { NotificationsService } from './notifications.service';
 import { SendNotificationDto } from './dto/send-notification.dto';
+import { RegisterDeviceTokenDto } from './dto/register-device-token.dto';
+import { ListDeviceTokensDto } from './dto/list-device-tokens.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
-
-// ⭕ NOTE: Delivery for EMAIL is async and best-effort. SMS/PUSH/retries intentionally deferred.
 
 @ApiTags('Notifications')
 @Controller('notifications')
@@ -61,6 +62,26 @@ export class NotificationsController {
     return this.notificationsService.getUserNotifications(
       req.user.id,
       pageNum,
+      limitNum,
+    );
+  }
+
+  @Get('me/changes')
+  @Permissions('notification.view_own')
+  @ApiOperation({ summary: 'Get incremental notification changes for current user' })
+  @ApiResponse({
+    status: 200,
+    description: 'Incremental notification changes retrieved successfully',
+  })
+  async getUserNotificationChanges(
+    @Request() req,
+    @Query('after') after?: string,
+    @Query('limit') limit: string = '50',
+  ) {
+    const limitNum = parseInt(limit, 10);
+    return this.notificationsService.getUserNotificationChanges(
+      req.user.id,
+      after,
       limitNum,
     );
   }
@@ -117,5 +138,33 @@ export class NotificationsController {
       notificationId,
       req.user.id,
     );
+  }
+
+  @Post('device-tokens')
+  @Permissions('notification.view_own')
+  @ApiOperation({ summary: 'Register or refresh a push device token' })
+  registerDeviceToken(@Body() dto: RegisterDeviceTokenDto, @Request() req) {
+    return this.notificationsService.registerDeviceToken(req.user.id, dto);
+  }
+
+  @Delete('device-tokens/:id')
+  @Permissions('notification.view_own', 'notification.manage')
+  @ApiOperation({ summary: 'Revoke a push device token (own token or admin)' })
+  revokeDeviceToken(@Param('id') id: string, @Request() req) {
+    return this.notificationsService.revokeDeviceToken(id, req.user.id);
+  }
+
+  @Get('device-tokens')
+  @Permissions('notification.view_all')
+  @ApiOperation({ summary: 'List device tokens (Admin/debug)' })
+  listDeviceTokens(@Query() query: ListDeviceTokensDto) {
+    return this.notificationsService.listDeviceTokens(query);
+  }
+
+  @Get('admin/providers/status')
+  @Permissions('notification.manage')
+  @ApiOperation({ summary: 'Notification provider readiness (Admin/debug)' })
+  getProviderStatus() {
+    return this.notificationsService.getProviderStatus();
   }
 }

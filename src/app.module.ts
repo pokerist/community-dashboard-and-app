@@ -26,6 +26,9 @@ import { DelegatesModule } from './modules/delegates/delegates.module';
 import { ClubhouseModule } from './modules/clubhouse/clubhouse.module';
 import { AccessControlModule } from './modules/access-control/access-control.module';
 import { WorkersModule } from './modules/workers/workers.module';
+import { BannersModule } from './modules/banners/banners.module';
+import { SystemSettingsModule } from './modules/system-settings/system-settings.module';
+import { ReportsModule } from './modules/reports/reports.module';
 
 @Module({
   imports: [
@@ -56,6 +59,9 @@ import { WorkersModule } from './modules/workers/workers.module';
     ClubhouseModule,
     AccessControlModule,
     WorkersModule,
+    BannersModule,
+    SystemSettingsModule,
+    ReportsModule,
   ],
   controllers: [],
   providers: [],

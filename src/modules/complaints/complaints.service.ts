@@ -49,8 +49,35 @@ export class ComplaintsService {
 
   // --- 1. CREATE ---
   async create(dto: CreateComplaintDto & { reporterId: string }) {
-    // Access Control: Check if user has active access to the unit (if provided)
-    if (dto.unitId) {
+    return this.createInternal(dto, { enforceUnitAccess: true });
+  }
+
+  async createForAdmin(
+    dto: CreateComplaintDto,
+    ctx: { actorUserId?: string } = {},
+  ) {
+    const reporterId = dto.reporterId ?? ctx.actorUserId;
+    if (!reporterId) {
+      throw new BadRequestException(
+        'reporterId is required for admin complaint creation',
+      );
+    }
+
+    return this.createInternal(
+      {
+        ...dto,
+        reporterId,
+      },
+      { enforceUnitAccess: false },
+    );
+  }
+
+  private async createInternal(
+    dto: CreateComplaintDto & { reporterId: string },
+    options: { enforceUnitAccess: boolean },
+  ) {
+    // Resident flow checks active unit access; admin flow can bypass this.
+    if (options.enforceUnitAccess && dto.unitId) {
       await getActiveUnitAccess(this.prisma, dto.reporterId, dto.unitId);
     }
 
@@ -116,6 +143,17 @@ export class ComplaintsService {
         unit: { select: { unitNumber: true } },
         assignedTo: { select: { nameEN: true } },
       },
+    });
+  }
+
+  async findMine(reporterId: string) {
+    return this.prisma.complaint.findMany({
+      where: { reporterId },
+      include: {
+        unit: { select: { id: true, unitNumber: true, block: true, projectName: true } },
+        assignedTo: { select: { id: true, nameEN: true, nameAR: true } },
+      },
+      orderBy: { createdAt: 'desc' },
     });
   }
 

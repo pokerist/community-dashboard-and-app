@@ -16,6 +16,7 @@ import {
   CreateInvoiceDto,
   UpdateInvoiceDto,
   MarkAsPaidDto,
+  SimulateInvoicePaymentDto,
 } from './dto/invoices.dto';
 import { CreateUnitFeeDto, UpdateUnitFeeDto } from './dto/unit-fees.dto';
 import { GenerateUtilityInvoicesDto } from './dto/generate-invoice.dto';
@@ -89,6 +90,17 @@ export class InvoicesController {
     return this.invoicesService.findAll();
   }
 
+  // GET /invoices/me (Community App)
+  @Get('me')
+  @Permissions('invoice.view_own', 'invoice.view_all')
+  findMine(@Req() req: any) {
+    return this.invoicesService.findMineForActor({
+      actorUserId: req.user.id,
+      permissions: Array.isArray(req.user.permissions) ? req.user.permissions : [],
+      roles: Array.isArray(req.user.roles) ? req.user.roles : [],
+    });
+  }
+
   // GET /invoices/:id
   @Get(':id')
   @Permissions('invoice.view_all', 'invoice.view_own')
@@ -124,6 +136,25 @@ export class InvoicesController {
   markAsPaid(@Param('id') id: string, @Body() markAsPaidDto: MarkAsPaidDto) {
     // You can use the DTO here to process payment details if needed
     return this.invoicesService.markAsPaid(id);
+  }
+
+  // POST /invoices/:id/pay/simulate-self (Community App: Demo payment simulation)
+  @Post(':id/pay/simulate-self')
+  @Permissions('invoice.view_own', 'invoice.view_all')
+  @ApiOperation({
+    summary:
+      'Demo payment simulation for residents. Marks invoice as PAID after actor access checks.',
+  })
+  simulateSelfPayment(
+    @Param('id') id: string,
+    @Body() dto: SimulateInvoicePaymentDto,
+    @Req() req: any,
+  ) {
+    return this.invoicesService.simulatePaymentForActor(id, dto, {
+      actorUserId: req.user.id,
+      permissions: Array.isArray(req.user.permissions) ? req.user.permissions : [],
+      roles: Array.isArray(req.user.roles) ? req.user.roles : [],
+    });
   }
 
   // DELETE /invoices/:id (Admin: Cancel/Delete)

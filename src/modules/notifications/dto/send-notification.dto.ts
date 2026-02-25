@@ -5,6 +5,7 @@ import {
   IsArray,
   IsString,
   IsDateString,
+  IsObject,
 } from 'class-validator';
 import { Channel, Audience, NotificationType } from '@prisma/client';
 
@@ -35,6 +36,10 @@ export class SendNotificationDto {
 
   @IsOptional()
   audienceMeta?: any;
+
+  @IsOptional()
+  @IsObject()
+  payload?: Record<string, unknown>;
 
   @IsDateString()
   @IsOptional()

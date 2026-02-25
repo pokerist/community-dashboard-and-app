@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { DelegatesService } from './delegates.service';
 import { CreateDelegateDto } from './dto/create-delegate.dto';
+import { CreateDelegateByContactDto } from './dto/create-delegate-by-contact.dto';
 import { UpdateDelegateDto } from './dto/update-delegate.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
@@ -26,6 +27,15 @@ export class DelegatesController {
   @ApiOperation({ summary: 'Owner requests delegate access for a unit' })
   createRequest(@Body() dto: CreateDelegateDto, @Req() req: any) {
     return this.delegatesService.createDelegateRequest(dto, req.user.id);
+  }
+
+  @Post('request-by-contact')
+  @ApiOperation({
+    summary:
+      'Owner requests delegate access by contact info (creates invited user if needed)',
+  })
+  createRequestByContact(@Body() dto: CreateDelegateByContactDto, @Req() req: any) {
+    return this.delegatesService.createDelegateRequestByContact(dto, req.user.id);
   }
 
   @Post(':id/approve')

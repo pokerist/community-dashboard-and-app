@@ -11,7 +11,16 @@ import { BookingCancelledEvent } from '../contracts/booking-cancelled.event';
 import { ReferralCreatedEvent } from '../contracts/referral-created.event';
 import { ReferralConvertedEvent } from '../contracts/referral-converted.event';
 import { ViolationIssuedEvent } from '../contracts/violation-issued.event';
-import { NotificationType, Channel, Audience } from '@prisma/client';
+import { ServiceRequestCreatedEvent } from '../contracts/service-request-created.event';
+import { ServiceRequestStatusChangedEvent } from '../contracts/service-request-status-changed.event';
+import {
+  NotificationType,
+  Channel,
+  Audience,
+  InvoiceType,
+  ServiceRequestStatus,
+  ServiceCategory,
+} from '@prisma/client';
 
 @Injectable()
 export class NotificationListener {
@@ -38,14 +47,25 @@ export class NotificationListener {
     }
 
     try {
+      const channels =
+        payload.type === InvoiceType.FINE
+          ? [Channel.IN_APP]
+          : [Channel.IN_APP, Channel.PUSH, Channel.EMAIL];
       // Send payment reminder notification
       await this.notificationsService.sendNotification({
         type: NotificationType.PAYMENT_REMINDER,
         title: 'New Invoice Created',
         messageEn: `A new invoice of $${payload.amount} has been created for your unit. Due date: ${payload.dueDate.toDateString()}`,
-        channels: [Channel.IN_APP, Channel.EMAIL],
+        channels,
         targetAudience: Audience.SPECIFIC_RESIDENCES,
         audienceMeta: { userIds: [payload.residentId] },
+        payload: {
+          route: '/payments',
+          entityType: 'INVOICE',
+          entityId: payload.invoiceId,
+          eventKey: 'invoice.created',
+          invoiceType: payload.type,
+        },
       });
 
       this.logger.log(`Payment reminder sent for invoice ${payload.invoiceId}`);
@@ -137,9 +157,15 @@ export class NotificationListener {
         type: NotificationType.EVENT_NOTIFICATION,
         title: 'Booking Confirmed',
         messageEn: `Your booking for ${payload.facilityName} on ${payload.date.toDateString()} from ${payload.startTime} to ${payload.endTime} has been approved.`,
-        channels: [Channel.IN_APP, Channel.EMAIL],
+        channels: [Channel.IN_APP, Channel.PUSH, Channel.EMAIL],
         targetAudience: Audience.SPECIFIC_RESIDENCES,
         audienceMeta: { userIds: [payload.userId] },
+        payload: {
+          route: '/bookings',
+          entityType: 'BOOKING',
+          entityId: payload.bookingId,
+          eventKey: 'booking.approved',
+        },
       });
 
       this.logger.log(
@@ -163,9 +189,15 @@ export class NotificationListener {
         type: NotificationType.EVENT_NOTIFICATION,
         title: 'Booking Cancelled',
         messageEn: `Your booking for ${payload.facilityName} on ${payload.date.toDateString()} from ${payload.startTime} to ${payload.endTime} has been cancelled.`,
-        channels: [Channel.IN_APP, Channel.EMAIL],
+        channels: [Channel.IN_APP, Channel.PUSH, Channel.EMAIL],
         targetAudience: Audience.SPECIFIC_RESIDENCES,
         audienceMeta: { userIds: [payload.userId] },
+        payload: {
+          route: '/bookings',
+          entityType: 'BOOKING',
+          entityId: payload.bookingId,
+          eventKey: 'booking.cancelled',
+        },
       });
 
       this.logger.log(
@@ -250,13 +282,107 @@ export class NotificationListener {
         type: NotificationType.ANNOUNCEMENT,
         title: 'New violation issued',
         messageEn: `A violation (${payload.violationNumber}) has been issued: ${payload.type}. Fine amount: ${payload.fineAmount}.`,
-        channels: [Channel.IN_APP, Channel.EMAIL],
+        channels: [Channel.IN_APP, Channel.PUSH, Channel.EMAIL],
         targetAudience: Audience.SPECIFIC_RESIDENCES,
         audienceMeta: { userIds: payload.recipientUserIds },
+        payload: {
+          route: '/violations',
+          entityType: 'VIOLATION',
+          entityId: payload.violationId,
+          eventKey: 'violation.issued',
+          violationNumber: payload.violationNumber,
+          fineAmount: payload.fineAmount,
+        },
       });
     } catch (error: unknown) {
       this.logger.error(
         `Failed to send violation notification for violation ${payload.violationId}`,
+        error,
+      );
+    }
+  }
+
+  @OnEvent('service_request.created')
+  async handleServiceRequestCreated(payload: ServiceRequestCreatedEvent) {
+    try {
+      await this.notificationsService.sendNotification({
+        type: NotificationType.MAINTENANCE_ALERT,
+        title: 'Request submitted',
+        messageEn: `Your request for ${payload.serviceName} has been submitted successfully.`,
+        channels: [Channel.IN_APP],
+        targetAudience: Audience.SPECIFIC_RESIDENCES,
+        audienceMeta: { userIds: [payload.createdById] },
+        payload: {
+          route:
+            payload.serviceCategory === ServiceCategory.REQUESTS ||
+            payload.serviceCategory === ServiceCategory.ADMIN
+              ? '/requests'
+              : '/services',
+          entityType: 'SERVICE_REQUEST',
+          entityId: payload.serviceRequestId,
+          eventKey: 'service_request.created',
+          serviceId: payload.serviceId,
+          serviceCategory: payload.serviceCategory,
+          status: payload.status,
+        },
+      });
+    } catch (error: unknown) {
+      this.logger.error(
+        `Failed to send service request created notification for ${payload.serviceRequestId}`,
+        error,
+      );
+    }
+  }
+
+  @OnEvent('service_request.status_changed')
+  async handleServiceRequestStatusChanged(payload: ServiceRequestStatusChangedEvent) {
+    if (payload.oldStatus === payload.newStatus) return;
+
+    const pushStatuses = new Set<ServiceRequestStatus>([
+      ServiceRequestStatus.IN_PROGRESS,
+      ServiceRequestStatus.RESOLVED,
+      ServiceRequestStatus.CLOSED,
+    ]);
+
+    try {
+      const statusLabel = String(payload.newStatus).replace(/_/g, ' ').toLowerCase();
+      const title =
+        payload.newStatus === ServiceRequestStatus.IN_PROGRESS
+          ? 'Request accepted'
+          : payload.newStatus === ServiceRequestStatus.RESOLVED
+            ? 'Request resolved'
+            : payload.newStatus === ServiceRequestStatus.CLOSED
+              ? 'Request closed'
+              : 'Request updated';
+      const channels = pushStatuses.has(payload.newStatus)
+        ? [Channel.IN_APP, Channel.PUSH]
+        : [Channel.IN_APP];
+
+      await this.notificationsService.sendNotification({
+        type: NotificationType.MAINTENANCE_ALERT,
+        title,
+        messageEn: `Your ${payload.serviceName} request is now ${statusLabel}.`,
+        channels,
+        targetAudience: Audience.SPECIFIC_RESIDENCES,
+        audienceMeta: { userIds: [payload.createdById] },
+        payload: {
+          route:
+            payload.serviceCategory === ServiceCategory.REQUESTS ||
+            payload.serviceCategory === ServiceCategory.ADMIN
+              ? '/requests'
+              : '/services',
+          entityType: 'SERVICE_REQUEST',
+          entityId: payload.serviceRequestId,
+          eventKey: 'service_request.status_changed',
+          oldStatus: payload.oldStatus,
+          newStatus: payload.newStatus,
+          serviceId: payload.serviceId,
+          serviceCategory: payload.serviceCategory,
+        },
+      });
+    } catch (error: unknown) {
+      this.logger.error(
+        `Failed to send service request status notification for ${payload.serviceRequestId}`,
         error,
       );
     }

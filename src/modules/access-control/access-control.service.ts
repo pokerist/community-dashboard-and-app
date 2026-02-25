@@ -27,6 +27,14 @@ export class AccessControlService {
     private readonly hikCentralQr: HikCentralQrService,
   ) {}
 
+  private async isAdminUser(userId: string): Promise<boolean> {
+    const admin = await this.prisma.admin.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+    return !!admin;
+  }
+
   private defaultDurationForType(
     type: QRType,
   ): { value: number; unit: 'm' | 'h' } {
@@ -134,7 +142,10 @@ export class AccessControlService {
       throw new BadRequestException('visitorName is required for VISITOR QR');
     }
 
-    await this.assertCanGenerateQr(userId, dto.unitId);
+    const isAdmin = await this.isAdminUser(userId);
+    if (!isAdmin) {
+      await this.assertCanGenerateQr(userId, dto.unitId);
+    }
 
     const { validFrom, validTo } = this.computeValidity(
       dto.type,
@@ -239,17 +250,22 @@ export class AccessControlService {
   }
 
   async listQrCodes(userId: string, unitId?: string, includeInactive?: boolean) {
+    const isAdmin = await this.isAdminUser(userId);
     let accessForUnit:
       | Awaited<ReturnType<AccessControlService['assertHasActiveUnitAccess']>>
       | undefined;
-    if (unitId) accessForUnit = await this.assertHasActiveUnitAccess(userId, unitId);
+    if (unitId && !isAdmin) {
+      accessForUnit = await this.assertHasActiveUnitAccess(userId, unitId);
+    }
 
-    const canViewAllForUnit = accessForUnit?.role === UnitAccessRole.OWNER;
+    const canViewAllForUnit = isAdmin || accessForUnit?.role === UnitAccessRole.OWNER;
     const scopeWhere = unitId
       ? canViewAllForUnit
         ? { unitId }
         : { unitId, generatedById: userId }
-      : { generatedById: userId };
+      : isAdmin
+        ? {}
+        : { generatedById: userId };
 
     await this.prisma.accessQRCode.updateMany({
       where: {
@@ -277,11 +293,15 @@ export class AccessControlService {
     });
     if (!qr) throw new NotFoundException('QR code not found');
 
+    const isAdmin = await this.isAdminUser(userId);
     if (qr.generatedById !== userId) {
-      if (!qr.unitId) {
+      if (isAdmin) {
+        // Admin override path for dashboard operations.
+      } else if (!qr.unitId) {
         throw new ForbiddenException('You are not allowed to revoke this QR');
+      } else {
+        await this.assertIsUnitOwner(userId, qr.unitId);
       }
-      await this.assertIsUnitOwner(userId, qr.unitId);
     }
 
     if (qr.status !== AccessStatus.ACTIVE) {

@@ -14,6 +14,7 @@ export interface PaginatedResult<T> {
 export interface PaginationOptions {
   searchFields?: string[];
   additionalFilters?: Record<string, any>;
+  where?: Record<string, any>;
   include?: Record<string, any>;
   select?: Record<string, any>;
 }
@@ -34,11 +35,25 @@ export async function paginate<T extends Record<string, any>>(
   const {
     searchFields = [],
     additionalFilters = {},
+    where: baseWhere,
     include,
     select,
   } = options;
 
-  const where = buildWhereClause(additionalFilters, searchFields, search);
+  const derivedWhere = buildWhereClause(additionalFilters, searchFields, search);
+  const hasBaseWhere =
+    !!baseWhere && typeof baseWhere === 'object' && Object.keys(baseWhere).length > 0;
+  const hasDerivedWhere =
+    !!derivedWhere &&
+    typeof derivedWhere === 'object' &&
+    Object.keys(derivedWhere).length > 0;
+
+  const where =
+    hasBaseWhere && hasDerivedWhere
+      ? { AND: [baseWhere, derivedWhere] }
+      : hasBaseWhere
+        ? baseWhere
+        : derivedWhere;
 
   // Build orderBy
   const orderBy: Record<string, any> = sortBy

@@ -23,7 +23,10 @@
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "prisma:generate": "npx prisma generate",
-    "prisma:migrate": "npx prisma migrate dev"
+    "prisma:migrate": "npx prisma migrate dev",
+    "seed:mobile-personas": "ts-node scripts/seed-mobile-personas.ts",
+    "seed:dashboard-load": "ts-node scripts/reset-dashboard-data.ts",
+    "smoke:mobile-personas": "powershell -ExecutionPolicy Bypass -File scripts/mobile-persona-smoke.ps1"
   },
   "dependencies": {
     "@nestjs/common": "^10.0.0",
@@ -47,9 +50,11 @@
     "nodemailer": "^7.0.12",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
+    "pdf-lib": "^1.17.1",
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.8.1",
-    "swagger-ui-express": "^5.0.1"
+    "swagger-ui-express": "^5.0.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.0.0",

@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateDelegateDto } from './dto/create-delegate.dto';
+import { CreateDelegateByContactDto } from './dto/create-delegate-by-contact.dto';
 import { UpdateDelegateDto } from './dto/update-delegate.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import {
@@ -115,6 +116,116 @@ export class DelegatesService {
       },
       undefined,
     );
+  }
+
+  private async ensureCommunityRole(userId: string) {
+    const communityRole = await this.prisma.role.findUnique({
+      where: { name: 'COMMUNITY_USER' },
+      select: { id: true },
+    });
+    if (!communityRole) return;
+
+    const existing = await this.prisma.userRole.findUnique({
+      where: {
+        userId_roleId: {
+          userId,
+          roleId: communityRole.id,
+        },
+      },
+      select: { userId: true },
+    });
+    if (existing) return;
+
+    await this.prisma.userRole.create({
+      data: {
+        userId,
+        roleId: communityRole.id,
+      },
+    });
+  }
+
+  async createDelegateRequestByContact(
+    dto: CreateDelegateByContactDto,
+    requestedBy: string,
+  ) {
+    const email = dto.email.trim().toLowerCase();
+    const phone = dto.phone.trim();
+    const name = dto.name.trim();
+    if (!email) throw new BadRequestException('email is required');
+    if (!phone) throw new BadRequestException('phone is required');
+    if (!name) throw new BadRequestException('name is required');
+
+    const [existingByEmail, existingByPhone] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { email },
+        select: { id: true, email: true, phone: true, nameEN: true },
+      }),
+      this.prisma.user.findFirst({
+        where: { phone },
+        select: { id: true, email: true, phone: true, nameEN: true },
+      }),
+    ]);
+
+    if (
+      existingByEmail &&
+      existingByPhone &&
+      existingByEmail.id !== existingByPhone.id
+    ) {
+      throw new BadRequestException(
+        'Email and phone belong to different existing users',
+      );
+    }
+
+    let userId = existingByEmail?.id ?? existingByPhone?.id;
+    if (userId) {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: {
+          nameEN: name || undefined,
+          email,
+          phone,
+        },
+      });
+      await this.ensureCommunityRole(userId);
+    } else {
+      const communityRole = await this.prisma.role.findUnique({
+        where: { name: 'COMMUNITY_USER' },
+        select: { id: true },
+      });
+
+      const created = await this.prisma.user.create({
+        data: {
+          nameEN: name,
+          email,
+          phone,
+          signupSource: 'mobile_delegate_request',
+          userStatus: 'INVITED' as any,
+          roles: communityRole
+            ? {
+                create: [{ roleId: communityRole.id }],
+              }
+            : undefined,
+        },
+        select: { id: true },
+      });
+      userId = created.id;
+    }
+
+    const createDto: CreateDelegateDto = {
+      userId,
+      unitId: dto.unitId,
+      type: dto.type,
+      idFileId: dto.idFileId,
+      startsAt: dto.startsAt,
+      endsAt: dto.endsAt,
+      canViewFinancials: dto.canViewFinancials,
+      canReceiveBilling: dto.canReceiveBilling,
+      canBookFacilities: dto.canBookFacilities,
+      canGenerateQR: dto.canGenerateQR,
+      canManageWorkers: dto.canManageWorkers,
+    };
+
+    return this.createDelegateRequest(createDto, requestedBy);
   }
 
   // Create delegate request (by owner)

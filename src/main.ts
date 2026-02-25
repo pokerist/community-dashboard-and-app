@@ -59,10 +59,16 @@ async function bootstrap() {
   SwaggerModule.setup('api', app, document);
   // ------------------------------------------
 
-  // Enable CORS if you are running a frontend on a different port (e.g., React on 3001)
-  // app.enableCors();
+  // Frontend admin/mobile apps run on separate local ports during development.
+  // Keep this configurable and permissive by default for local integration.
+  app.enableCors({
+    origin:
+      process.env.CORS_ORIGIN?.split(',').map((v) => v.trim()) ?? true,
+    credentials: true,
+  });
 
-  await app.listen(3000);
+  const port = Number(process.env.PORT || 3000);
+  await app.listen(port);
   console.log(`Application is running on: ${await app.getUrl()}`);
   console.log(
     `Swagger documentation is available at: ${await app.getUrl()}/api`,

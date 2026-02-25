@@ -4,14 +4,18 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   EligibilityType,
   InvoiceType,
+  Priority as PriorityEnum,
   ServiceFieldType,
   ServiceRequestStatus,
   UnitStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { ServiceRequestCreatedEvent } from '../../events/contracts/service-request-created.event';
+import { ServiceRequestStatusChangedEvent } from '../../events/contracts/service-request-status-changed.event';
 import { getActiveUnitAccess } from '../../common/utils/unit-access.util';
 import { InvoicesService } from '../invoices/invoices.service';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
@@ -39,6 +43,7 @@ export class ServiceRequestService {
   constructor(
     private prisma: PrismaService,
     private invoicesService: InvoicesService,
+    private eventEmitter: EventEmitter2,
   ) {}
 
   /**
@@ -234,14 +239,37 @@ export class ServiceRequestService {
     });
 
     // 7) Return a rich response.
-    return this.prisma.serviceRequest.findUnique({
+    const createdRequest = await this.prisma.serviceRequest.findUnique({
       where: { id: request.id },
       include: {
-        service: { select: { name: true, category: true } },
+        service: { select: { id: true, name: true, category: true } },
         attachments: { include: { file: true } },
         fieldValues: { include: { field: true } },
       },
     });
+
+    if (createdRequest) {
+      try {
+        this.eventEmitter.emit(
+          'service_request.created',
+          new ServiceRequestCreatedEvent(
+            createdRequest.id,
+            createdRequest.createdById,
+            createdRequest.serviceId,
+            String(createdRequest.service?.name ?? 'Service request'),
+            createdRequest.service?.category ?? null,
+            createdRequest.unitId ?? null,
+            createdRequest.status,
+            (createdRequest.priority as PriorityEnum) ?? PriorityEnum.MEDIUM,
+          ),
+        );
+      } catch (error) {
+        // Don't fail the primary flow if notification emission fails.
+        void error;
+      }
+    }
+
+    return createdRequest;
   }
 
   /**
@@ -364,7 +392,7 @@ export class ServiceRequestService {
     dto: UpdateServiceRequestInternalDto,
     ctx: { actorUserId: string; permissions: string[]; roles: string[] },
   ) {
-    await this.findOne(id);
+    const existing = await this.findOne(id);
 
     const isSuperAdmin = isSuperAdminRole(ctx.roles);
     const perms = Array.isArray(ctx.permissions) ? ctx.permissions : [];
@@ -415,10 +443,42 @@ export class ServiceRequestService {
       }
     }
 
-    return this.prisma.serviceRequest.update({
+    const updated = await this.prisma.serviceRequest.update({
       where: { id },
       data: dto,
     });
+
+    if (
+      dto.status &&
+      existing.status &&
+      dto.status !== existing.status
+    ) {
+      try {
+        const service = await this.prisma.service.findUnique({
+          where: { id: existing.serviceId },
+          select: { id: true, name: true, category: true },
+        });
+        this.eventEmitter.emit(
+          'service_request.status_changed',
+          new ServiceRequestStatusChangedEvent(
+            existing.id,
+            existing.createdById,
+            existing.serviceId,
+            String(service?.name ?? 'Service request'),
+            service?.category ?? null,
+            existing.unitId ?? null,
+            existing.status,
+            dto.status,
+            existing.priority,
+            ctx.actorUserId,
+          ),
+        );
+      } catch (error) {
+        void error;
+      }
+    }
+
+    return updated;
   }
 }
 

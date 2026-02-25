@@ -183,7 +183,13 @@ Each module has detailed documentation in its respective directory:
 ### Additional Modules
 - [Service](./service/) - Service catalog management
 - [Service-Field](./service-field/) - Dynamic service form fields
-- [Access Control (QR Codes)](./access-control/access-control-api.md) - QR generation, tracking, and HikCentral integration layer
+- [Access Control (QR Codes)](./access-control/README.md) - QR generation, tracking, and HikCentral integration layer
+
+### Cross-Cutting Guides
+- [System Flows Map](./FLOWS.md) - End-to-end flow inventory across onboarding, operations, billing, and access.
+- [Mobile Integration Guide](./mobile/README.md) - Screen-by-screen API mapping and mobile integration notes.
+- [Postman Collection (Mobile Core)](./postman/community-dashboard-mobile.postman_collection.json) - Import-ready collection with auth/refresh middleware.
+- [Postman Environment (Local)](./postman/community-dashboard-mobile.postman_environment.json) - Ready-to-edit local variables.
 
 ## API Documentation
 

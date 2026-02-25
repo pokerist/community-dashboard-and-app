@@ -45,7 +45,7 @@ export class ServiceController {
     description:
       'Lists service types. Use `status=active` (default) for active only, `status=inactive` for inactive only, or `status=all` for both active and inactive services.',
   })
-  @Permissions('service.read')
+  @Permissions('service.read', 'service_request.create')
   findAll(@Query('status') status?: string) {
     let filter: boolean | undefined;
 
@@ -59,7 +59,7 @@ export class ServiceController {
   // GET /services/:id (Admin: View details)
   @Get(':id')
   @ApiOperation({ summary: 'Get a service by id' })
-  @Permissions('service.read')
+  @Permissions('service.read', 'service_request.create')
   findOne(@Param('id') id: string) {
     return this.serviceService.findOne(id);
   }

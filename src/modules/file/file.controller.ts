@@ -18,11 +18,22 @@ import { FileUploadResult } from '../../common/interfaces/file-storage.interface
 import type { Response } from 'express';
 import { $Enums } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { extname } from 'path';
 
 // Define the bucket name constants centrally
 const ATTACHMENTS_BUCKET = 'service-attachments';
 const PROFILE_BUCKET = 'profile-photos';
 const IDENTITY_DOCS_BUCKET = 'identity-docs';
+
+function inferMimeTypeFromName(name?: string | null) {
+  const ext = extname(name ?? '').toLowerCase();
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  if (ext === '.png') return 'image/png';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.gif') return 'image/gif';
+  if (ext === '.pdf') return 'application/pdf';
+  return null;
+}
 
 // Validation functions
 function validateImageOrPdf(file: Express.Multer.File) {
@@ -200,6 +211,23 @@ export class FileController {
     );
   }
 
+  @Post('upload/brand-logo')
+  @ApiOperation({ summary: 'Upload a brand logo image (admin branding settings)' })
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadBrandLogo(
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<FileUploadResult> {
+    if (!file) {
+      throw new BadRequestException('File is missing.');
+    }
+    validateImage(file);
+    return this.fileService.handleUpload(
+      file,
+      ATTACHMENTS_BUCKET,
+      $Enums.FileCategory.SERVICE_ATTACHMENT,
+    );
+  }
+
   // DELETE /files/:fileId
   @Delete(':fileId')
   @ApiOperation({ summary: 'Delete a file (access-controlled)' })
@@ -219,12 +247,27 @@ export class FileController {
   @Get(':fileId/stream')
   @ApiOperation({ summary: 'Stream a file (access-controlled)' })
   async getFile(@Param('fileId') fileId: string, @Req() req: any, @Res() res: Response) {
-    const stream = await this.fileService.getFileStreamForActor(fileId, {
+    const { file, stream } = await this.fileService.getFileStreamWithMetaForActor(fileId, {
       actorUserId: req.user.id,
       permissions: Array.isArray(req.user.permissions) ? req.user.permissions : [],
       roles: Array.isArray(req.user.roles) ? req.user.roles : [],
     });
-    // pipe the stream to the response
+    const contentType =
+      file.mimeType?.trim() ||
+      inferMimeTypeFromName(file.name) ||
+      inferMimeTypeFromName(file.key) ||
+      'application/octet-stream';
+    res.setHeader('Content-Type', contentType);
+    if (typeof file.size === 'number' && Number.isFinite(file.size) && file.size >= 0) {
+      res.setHeader('Content-Length', String(file.size));
+    }
+    res.setHeader('Cache-Control', 'private, max-age=60');
+    if (file.name?.trim()) {
+      res.setHeader(
+        'Content-Disposition',
+        `inline; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+      );
+    }
     stream.pipe(res);
   }
 }

@@ -38,19 +38,16 @@ export class WorkersService {
     return !!admin;
   }
 
-  private async assertDelegateCanManageWorkers(userId: string, unitId: string) {
+  private async assertUnitAccessCanManageWorkers(userId: string, unitId: string) {
     const access = await getActiveUnitAccess(this.prisma, userId, unitId);
-    if (access.role !== UnitAccessRole.DELEGATE) {
-      throw new ForbiddenException('Only delegates can manage workers');
-    }
     if (!access.canManageWorkers) {
       throw new ForbiddenException('You do not have permission to manage workers');
     }
     return access;
   }
 
-  private async assertDelegateCanGenerateWorkerQr(userId: string, unitId: string) {
-    const access = await this.assertDelegateCanManageWorkers(userId, unitId);
+  private async assertUnitAccessCanGenerateWorkerQr(userId: string, unitId: string) {
+    const access = await this.assertUnitAccessCanManageWorkers(userId, unitId);
     if (!access.canGenerateQR) {
       throw new ForbiddenException(
         'You do not have permission to generate QR codes for this unit',
@@ -90,7 +87,7 @@ export class WorkersService {
   async createContractor(dto: CreateContractorDto, userId: string) {
     const admin = await this.isAdmin(userId);
     if (!admin) {
-      await this.assertDelegateCanManageWorkers(userId, dto.unitId);
+      await this.assertUnitAccessCanManageWorkers(userId, dto.unitId);
     }
 
     const existing = await this.prisma.contractor.findFirst({
@@ -175,11 +172,15 @@ export class WorkersService {
 
   async createWorker(dto: CreateWorkerDto, userId: string) {
     const admin = await this.isAdmin(userId);
+    let access: Awaited<ReturnType<WorkersService['assertUnitAccessCanManageWorkers']>> | null =
+      null;
     if (!admin) {
-      await this.assertDelegateCanManageWorkers(userId, dto.unitId);
-      await this.assertActiveContractorMember(userId, dto.contractorId, {
-        write: true,
-      });
+      access = await this.assertUnitAccessCanManageWorkers(userId, dto.unitId);
+      if (access.role === UnitAccessRole.DELEGATE) {
+        await this.assertActiveContractorMember(userId, dto.contractorId, {
+          write: true,
+        });
+      }
     }
 
     const contractor = await this.prisma.contractor.findUnique({
@@ -302,11 +303,15 @@ export class WorkersService {
     if (!worker) throw new NotFoundException('Worker not found');
 
     const admin = await this.isAdmin(userId);
+    let access: Awaited<ReturnType<WorkersService['assertUnitAccessCanManageWorkers']>> | null =
+      null;
     if (!admin) {
-      await this.assertDelegateCanManageWorkers(userId, worker.unitId);
-      await this.assertActiveContractorMember(userId, worker.contractorId, {
-        write: true,
-      });
+      access = await this.assertUnitAccessCanManageWorkers(userId, worker.unitId);
+      if (access.role === UnitAccessRole.DELEGATE) {
+        await this.assertActiveContractorMember(userId, worker.contractorId, {
+          write: true,
+        });
+      }
     }
 
     const accessProfileUpdates: any = {};
@@ -362,9 +367,13 @@ export class WorkersService {
     }
 
     const admin = await this.isAdmin(userId);
+    let access: Awaited<ReturnType<WorkersService['assertUnitAccessCanGenerateWorkerQr']>> | null =
+      null;
     if (!admin) {
-      await this.assertDelegateCanGenerateWorkerQr(userId, worker.unitId);
-      await this.assertActiveContractorMember(userId, worker.contractorId);
+      access = await this.assertUnitAccessCanGenerateWorkerQr(userId, worker.unitId);
+      if (access.role === UnitAccessRole.DELEGATE) {
+        await this.assertActiveContractorMember(userId, worker.contractorId);
+      }
     }
 
     const { validFrom, validTo } = this.computeWorkerValidity(dto.validFrom, dto.validTo);

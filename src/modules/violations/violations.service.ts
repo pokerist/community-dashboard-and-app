@@ -69,7 +69,7 @@ export class ViolationsService {
 
       // 3. Automatically Create the Invoice (Financial Consequence)
       if (dto.fineAmount > 0) {
-        await this.invoicesService.generateInvoice({
+        await this.invoicesService.generateInvoiceTx(tx, {
           unitId: dto.unitId,
           residentId: dto.residentId,
           type: InvoiceType.FINE,
@@ -153,6 +153,34 @@ export class ViolationsService {
         issuedBy: { select: { nameEN: true } },
         invoices: { select: { id: true, status: true, invoiceNumber: true } },
       },
+    });
+  }
+
+  async findMine(actorUserId: string) {
+    const unitAccessRows = await this.prisma.unitAccess.findMany({
+      where: {
+        userId: actorUserId,
+        status: 'ACTIVE',
+        canViewFinancials: true,
+      },
+      select: { unitId: true },
+    });
+
+    const unitIds = Array.from(new Set(unitAccessRows.map((r) => r.unitId)));
+
+    return this.prisma.violation.findMany({
+      where: {
+        OR: [
+          { residentId: actorUserId },
+          ...(unitIds.length > 0 ? [{ unitId: { in: unitIds } }] : []),
+        ],
+      },
+      include: {
+        unit: { select: { id: true, unitNumber: true, block: true, projectName: true } },
+        invoices: { select: { id: true, invoiceNumber: true, status: true, amount: true, dueDate: true } },
+        issuedBy: { select: { id: true, nameEN: true, nameAR: true } },
+      },
+      orderBy: { createdAt: 'desc' },
     });
   }
 

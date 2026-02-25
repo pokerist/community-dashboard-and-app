@@ -73,19 +73,19 @@ export class AdminUsersController {
     );
   }
 
-  @Get(':id')
+  @Get(':id([0-9a-fA-F-]{36})')
   @Permissions('user.read')
   getUser(@Param('id') id: string) {
     return this.usersService.getUserWithRelations(id);
   }
 
-  @Patch(':id')
+  @Patch(':id([0-9a-fA-F-]{36})')
   @Permissions('user.update')
   updateUser(@Param('id') id: string, @Body() dto: UpdateUserDto) {
     return this.usersService.updateUser(id, dto);
   }
 
-  @Delete(':id')
+  @Delete(':id([0-9a-fA-F-]{36})')
   @HttpCode(HttpStatus.NO_CONTENT)
   @Permissions('user.delete')
   deactivateUser(@Param('id') id: string) {

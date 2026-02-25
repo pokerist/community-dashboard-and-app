@@ -7,6 +7,7 @@ import {
   Param,
   Body,
   Query,
+  Request,
   HttpCode,
   HttpStatus,
   UseGuards,
@@ -29,6 +30,16 @@ export class UnitsController {
   constructor(private readonly unitsService: UnitsService) {}
 
   // ----- CRUD -----
+  @Get('my')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('unit.view_own', 'unit.view_all')
+  findMyUnits(@Query() query: UnitQueryDto, @Request() req: any) {
+    return this.unitsService.findMyUnits(req.user.id, query, {
+      permissions: Array.isArray(req.user.permissions) ? req.user.permissions : [],
+      roles: Array.isArray(req.user.roles) ? req.user.roles : [],
+    });
+  }
+
   @Get()
   @HttpCode(HttpStatus.OK)
   @Permissions('unit.view_all')

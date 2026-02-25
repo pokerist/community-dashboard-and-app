@@ -17,6 +17,7 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { SendPhoneOtpDto } from './dto/send-phone-otp.dto';
 import { VerifyPhoneOtpDto } from './dto/verify-phone-otp.dto';
+import { UpdateMeProfileDto } from './dto/update-me-profile.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ReferralConvertedEvent } from '../../events/contracts/referral-converted.event';
@@ -116,6 +117,305 @@ export class AuthService {
     );
 
     return this.generateTokens(user);
+  }
+
+  async getCurrentUserBootstrap(userId: string) {
+    const user: any = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        roles: { include: { role: true } },
+        resident: {
+          include: {
+            residentUnits: {
+              include: {
+                unit: {
+                  select: {
+                    id: true,
+                    unitNumber: true,
+                    block: true,
+                    projectName: true,
+                    status: true,
+                    type: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        owner: { select: { id: true, userId: true } },
+        tenant: { select: { id: true, userId: true } },
+        admin: { select: { id: true, userId: true, status: true } },
+        unitAccesses: {
+          where: { status: 'ACTIVE' },
+          include: {
+            unit: {
+              select: {
+                id: true,
+                unitNumber: true,
+                block: true,
+                projectName: true,
+                status: true,
+                type: true,
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        },
+        profilePhoto: {
+          select: {
+            id: true,
+            name: true,
+            mimeType: true,
+            size: true,
+          },
+        },
+      },
+    });
+
+    if (!user) throw new NotFoundException('User not found');
+
+    const roleNames = user.roles.map((r) => r.role.name);
+    const resolvedPermissions = this.permissionCache.resolveUserPermissions(
+      roleNames,
+    ) as any;
+    const permissions = Array.isArray(resolvedPermissions)
+      ? resolvedPermissions
+      : resolvedPermissions instanceof Set
+        ? Array.from(resolvedPermissions)
+        : [];
+
+    const activeUnitsById = new Map<
+      string,
+      {
+        id: string;
+        unitNumber: string | null;
+        block: string | null;
+        projectName: string | null;
+        status: any;
+        type: any;
+        accesses: any[];
+        legacyResidentLinks: any[];
+      }
+    >();
+
+    for (const access of user.unitAccesses) {
+      if (!access.unit) continue;
+      const existing = activeUnitsById.get(access.unit.id);
+      if (existing) {
+        existing.accesses.push({
+          id: access.id,
+          role: access.role,
+          status: access.status,
+          startsAt: access.startsAt,
+          endsAt: access.endsAt,
+          delegateType: access.delegateType,
+          source: access.source,
+          canViewFinancials: access.canViewFinancials,
+          canReceiveBilling: access.canReceiveBilling,
+          canBookFacilities: access.canBookFacilities,
+          canGenerateQR: access.canGenerateQR,
+          canManageWorkers: access.canManageWorkers,
+        });
+      } else {
+        activeUnitsById.set(access.unit.id, {
+          id: access.unit.id,
+          unitNumber: access.unit.unitNumber ?? null,
+          block: access.unit.block ?? null,
+          projectName: access.unit.projectName ?? null,
+          status: access.unit.status,
+          type: access.unit.type,
+          accesses: [
+            {
+              id: access.id,
+              role: access.role,
+              status: access.status,
+              startsAt: access.startsAt,
+              endsAt: access.endsAt,
+              delegateType: access.delegateType,
+              source: access.source,
+              canViewFinancials: access.canViewFinancials,
+              canReceiveBilling: access.canReceiveBilling,
+              canBookFacilities: access.canBookFacilities,
+              canGenerateQR: access.canGenerateQR,
+              canManageWorkers: access.canManageWorkers,
+            },
+          ],
+          legacyResidentLinks: [],
+        });
+      }
+    }
+
+    const legacyResidentLinks =
+      user.resident?.residentUnits?.map((ru) => ({
+        residentUnitId: ru.id,
+        isPrimary: ru.isPrimary,
+        unitId: ru.unitId,
+        unit: ru.unit
+          ? {
+              id: ru.unit.id,
+              unitNumber: ru.unit.unitNumber ?? null,
+              block: ru.unit.block ?? null,
+              projectName: ru.unit.projectName ?? null,
+              status: ru.unit.status,
+              type: ru.unit.type,
+            }
+          : null,
+      })) ?? [];
+
+    for (const link of legacyResidentLinks) {
+      if (!link.unit) continue;
+      const existing = activeUnitsById.get(link.unit.id);
+      if (existing) {
+        existing.legacyResidentLinks.push({
+          residentUnitId: link.residentUnitId,
+          isPrimary: link.isPrimary,
+        });
+      } else {
+        activeUnitsById.set(link.unit.id, {
+          id: link.unit.id,
+          unitNumber: link.unit.unitNumber,
+          block: link.unit.block,
+          projectName: link.unit.projectName,
+          status: link.unit.status,
+          type: link.unit.type,
+          accesses: [],
+          legacyResidentLinks: [
+            {
+              residentUnitId: link.residentUnitId,
+              isPrimary: link.isPrimary,
+            },
+          ],
+        });
+      }
+    }
+
+    const units = Array.from(activeUnitsById.values());
+
+    const allAccesses = units.flatMap((u) => u.accesses ?? []);
+    const accessRoles = new Set(
+      allAccesses
+        .map((a) => (typeof a.role === 'string' ? a.role.toUpperCase() : ''))
+        .filter(Boolean),
+    );
+    const hasOwnerAccess = accessRoles.has('OWNER') || Boolean(user.owner);
+    const hasTenantAccess = accessRoles.has('TENANT') || Boolean(user.tenant);
+    const hasFamilyAccess = accessRoles.has('FAMILY');
+    const hasDelegateAccess = accessRoles.has('DELEGATE');
+    const canManageWorkers = allAccesses.some((a) => a.canManageWorkers === true);
+    const canGenerateQr = allAccesses.some((a) => a.canGenerateQR === true);
+    const canBookFacilities = allAccesses.some((a) => a.canBookFacilities === true);
+    const canViewFinancials = allAccesses.some(
+      (a) => a.canViewFinancials === true || a.canReceiveBilling === true,
+    );
+    const isPreDeliveryOwner = units.some(
+      (u) =>
+        String(u.status ?? '').toUpperCase() === 'NOT_DELIVERED' &&
+        (u.accesses ?? []).some(
+          (a) => String(a.role ?? '').toUpperCase() === 'OWNER',
+        ),
+    );
+
+    let resolvedPersona:
+      | 'PRE_DELIVERY_OWNER'
+      | 'CONTRACTOR'
+      | 'AUTHORIZED'
+      | 'OWNER'
+      | 'TENANT'
+      | 'FAMILY'
+      | 'RESIDENT' = 'RESIDENT';
+    if (isPreDeliveryOwner) resolvedPersona = 'PRE_DELIVERY_OWNER';
+    else if (hasDelegateAccess && canManageWorkers) resolvedPersona = 'CONTRACTOR';
+    else if (hasDelegateAccess) resolvedPersona = 'AUTHORIZED';
+    else if (hasOwnerAccess) resolvedPersona = 'OWNER';
+    else if (hasTenantAccess) resolvedPersona = 'TENANT';
+    else if (hasFamilyAccess) resolvedPersona = 'FAMILY';
+
+    const permissionSet = new Set(permissions);
+
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        phone: user.phone,
+        nameEN: user.nameEN,
+        nameAR: user.nameAR,
+        userStatus: user.userStatus,
+        signupSource: user.signupSource,
+        emailVerifiedAt: user.emailVerifiedAt,
+        phoneVerifiedAt: user.phoneVerifiedAt,
+        lastLoginAt: user.lastLoginAt,
+        profilePhoto: user.profilePhoto
+          ? {
+              id: user.profilePhoto.id,
+              name: user.profilePhoto.name,
+              mimeType: user.profilePhoto.mimeType,
+              size: user.profilePhoto.size,
+            }
+          : null,
+      },
+      roles: roleNames,
+      permissions,
+      profileKinds: {
+        resident: Boolean(user.resident),
+        owner: Boolean(user.owner),
+        tenant: Boolean(user.tenant),
+        admin: Boolean(user.admin),
+      },
+      residentProfile: user.resident
+        ? {
+            id: user.resident.id,
+            nationalId: user.resident.nationalId,
+            dateOfBirth: user.resident.dateOfBirth,
+            relationship: user.resident.relationship,
+          }
+        : null,
+      units,
+      legacyResidentLinks,
+      personaHints: {
+        resolvedPersona,
+        isOwner: hasOwnerAccess,
+        isTenant: hasTenantAccess,
+        isFamily: hasFamilyAccess,
+        isDelegate: hasDelegateAccess,
+        isPreDeliveryOwner,
+        canManageWorkers,
+      },
+      featureAvailability: {
+        canViewBanners: permissionSet.has('banner.view'),
+        canUseServices:
+          permissionSet.has('service.read') ||
+          permissionSet.has('service_request.create'),
+        canUseBookings:
+          permissionSet.has('booking.create') || canBookFacilities,
+        canUseComplaints: permissionSet.has('complaint.report'),
+        canUseQr: permissionSet.has('qr.generate') && canGenerateQr,
+        canViewFinance:
+          permissionSet.has('invoice.view_own') &&
+          permissionSet.has('violation.view_own') &&
+          canViewFinancials,
+        canManageHousehold:
+          hasOwnerAccess || hasTenantAccess || hasDelegateAccess || canManageWorkers,
+      },
+    };
+  }
+
+  async updateCurrentUserBasicProfile(userId: string, dto: UpdateMeProfileDto) {
+    const nameEN = dto.nameEN?.trim();
+    const nameAR = dto.nameAR?.trim();
+
+    if (!nameEN && !nameAR) {
+      throw new BadRequestException('At least one profile field must be provided');
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        ...(nameEN ? { nameEN } : {}),
+        ...(nameAR ? { nameAR } : {}),
+      },
+    });
+
+    return this.getCurrentUserBootstrap(userId);
   }
 
   // ================= REGISTER =================

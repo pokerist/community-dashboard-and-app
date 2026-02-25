@@ -298,6 +298,8 @@ const ROLES = {
 
     // Invoices / Services
     'invoice.view_own',
+    'service.read',
+    'service_field.read',
     'service_request.view_own',
     'service_request.create',
 

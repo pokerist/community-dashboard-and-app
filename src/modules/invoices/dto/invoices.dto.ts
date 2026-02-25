@@ -111,3 +111,25 @@ export class MarkAsPaidDto {
   @IsOptional()
   transactionRef?: string;
 }
+
+export class SimulateInvoicePaymentDto {
+  @ApiProperty({ example: 'Card', description: 'Demo payment method label' })
+  @IsString()
+  @IsNotEmpty()
+  paymentMethod!: string;
+
+  @ApiProperty({ example: '4242', required: false })
+  @IsString()
+  @IsOptional()
+  cardLast4?: string;
+
+  @ApiProperty({ example: 'SIM-TRX-123456', required: false })
+  @IsString()
+  @IsOptional()
+  transactionRef?: string;
+
+  @ApiProperty({ example: 'Paid via demo simulation screen', required: false })
+  @IsString()
+  @IsOptional()
+  notes?: string;
+}

@@ -6,7 +6,11 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { CreateInvoiceDto, UpdateInvoiceDto } from './dto/invoices.dto';
+import {
+  CreateInvoiceDto,
+  SimulateInvoicePaymentDto,
+  UpdateInvoiceDto,
+} from './dto/invoices.dto';
 import {
   Prisma,
   Invoice,
@@ -160,6 +164,57 @@ export class InvoicesService {
    * or a fully polymorphic approach will require a schema migration (InvoiceSource).
    */
   async generateInvoice(dto: GenerateInvoiceDto) {
+    const newInvoice = await this.prisma.$transaction(async (tx) => {
+      return this.createGeneratedInvoiceInTx(tx, dto);
+    });
+
+    // Emit event outside the transaction
+    this.eventEmitter.emit(
+      'invoice.created',
+      new InvoiceCreatedEvent(
+        newInvoice.id,
+        newInvoice.unitId,
+        newInvoice.residentId,
+        newInvoice.amount.toNumber(),
+        newInvoice.dueDate,
+        newInvoice.type,
+      ),
+    );
+
+    return newInvoice;
+  }
+
+  /**
+   * Transaction-aware variant used by callers already inside a Prisma transaction.
+   * Note: the event is emitted immediately after invoice creation (before the outer
+   * transaction commits), so callers should use this only when later tx failure is
+   * unlikely or acceptable for demo/dev flows.
+   */
+  async generateInvoiceTx(
+    tx: Prisma.TransactionClient,
+    dto: GenerateInvoiceDto,
+  ) {
+    const newInvoice = await this.createGeneratedInvoiceInTx(tx, dto);
+
+    this.eventEmitter.emit(
+      'invoice.created',
+      new InvoiceCreatedEvent(
+        newInvoice.id,
+        newInvoice.unitId,
+        newInvoice.residentId,
+        newInvoice.amount.toNumber(),
+        newInvoice.dueDate,
+        newInvoice.type,
+      ),
+    );
+
+    return newInvoice;
+  }
+
+  private async createGeneratedInvoiceInTx(
+    tx: Prisma.TransactionClient,
+    dto: GenerateInvoiceDto,
+  ): Promise<Invoice> {
     const {
       unitId,
       residentId,
@@ -170,7 +225,7 @@ export class InvoicesService {
       invoiceNumber,
     } = dto;
 
-    const newInvoice = await this.prisma.$transaction(async (tx) => {
+    return (async () => {
       const maxAttempts = 5;
       let lastError: any = null;
 
@@ -298,22 +353,7 @@ export class InvoicesService {
       }
 
       throw lastError;
-    });
-
-    // Emit event outside the transaction
-    this.eventEmitter.emit(
-      'invoice.created',
-      new InvoiceCreatedEvent(
-        newInvoice.id,
-        newInvoice.unitId,
-        newInvoice.residentId,
-        newInvoice.amount.toNumber(),
-        newInvoice.dueDate,
-        newInvoice.type,
-      ),
-    );
-
-    return newInvoice;
+    })();
   }
 
   async findAll() {
@@ -405,6 +445,14 @@ export class InvoicesService {
     return this.findByResident(ctx.actorUserId);
   }
 
+  async findMineForActor(ctx: {
+    actorUserId: string;
+    permissions: string[];
+    roles: string[];
+  }) {
+    return this.findByResidentForActor(ctx.actorUserId, ctx);
+  }
+
   async update(id: string, dto: UpdateInvoiceDto) {
     await this.findOne(id); // Check existence
 
@@ -478,6 +526,37 @@ export class InvoicesService {
 
       return updatedInvoice;
     });
+  }
+
+  async simulatePaymentForActor(
+    id: string,
+    dto: SimulateInvoicePaymentDto,
+    ctx: { actorUserId: string; permissions: string[]; roles: string[] },
+  ) {
+    const invoice = await this.findOneForActor(id, ctx);
+    const updatedInvoice = await this.markAsPaid(invoice.id);
+
+    const paidAt =
+      updatedInvoice.paidDate instanceof Date
+        ? updatedInvoice.paidDate.toISOString()
+        : updatedInvoice.paidDate
+          ? new Date(updatedInvoice.paidDate as any).toISOString()
+          : new Date().toISOString();
+
+    return {
+      success: true,
+      invoice: updatedInvoice,
+      simulationReceipt: {
+        simulated: true,
+        paymentMethod: dto.paymentMethod,
+        cardLast4: dto.cardLast4 ?? null,
+        transactionRef:
+          dto.transactionRef?.trim() ||
+          `SIM-${Date.now().toString(36).toUpperCase()}`,
+        notes: dto.notes?.trim() || null,
+        paidAt,
+      },
+    };
   }
 
   async remove(id: string) {

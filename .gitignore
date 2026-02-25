@@ -2,6 +2,11 @@
 /dist
 /node_modules
 /build
+**/node_modules/
+**/build/
+**/dist/
+**/.expo/
+**/.next/
 
 # Logs
 logs
@@ -40,11 +45,15 @@ lerna-debug.log*
 .env.development.local
 .env.test.local
 .env.production.local
+.env.production
 .env.local
+apps/**/.env
+apps/**/.env.production
 
 # temp directory
 .temp
 .tmp
+.local/
 
 # Runtime data
 pids

@@ -10,7 +10,7 @@ import {
 } from '../../common/interfaces/file-storage.interface';
 import { SupabaseStorageAdapter } from './adapters/supabase-storage.adapter';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { $Enums } from '@prisma/client';
+import { $Enums, Audience, BannerStatus, Prisma } from '@prisma/client';
 
 const ATTACHMENTS_BUCKET = 'service-attachments';
 const PROFILE_BUCKET = 'profile-photos';
@@ -50,6 +50,95 @@ export class FileService {
       roles.some(
         (r) => typeof r === 'string' && r.toUpperCase() === 'SUPER_ADMIN',
       )
+    );
+  }
+
+  private readStringArrayFromJsonObject(
+    value: unknown,
+    key: 'userIds' | 'unitIds' | 'blocks',
+  ): string[] {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+    const raw = (value as Record<string, unknown>)[key];
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map((v) => (typeof v === 'string' ? v.trim() : ''))
+      .filter(Boolean);
+  }
+
+  private bannerAudienceMatches(
+    banner: { targetAudience: Audience; audienceMeta: Prisma.JsonValue | null },
+    scope: { userId: string; unitIds: Set<string>; blocks: Set<string> },
+  ) {
+    if (banner.targetAudience === Audience.ALL) return true;
+    if (banner.targetAudience === Audience.SPECIFIC_RESIDENCES) {
+      return this.readStringArrayFromJsonObject(banner.audienceMeta, 'userIds').includes(
+        scope.userId,
+      );
+    }
+    if (banner.targetAudience === Audience.SPECIFIC_UNITS) {
+      const ids = this.readStringArrayFromJsonObject(banner.audienceMeta, 'unitIds');
+      return ids.some((id) => scope.unitIds.has(id));
+    }
+    if (banner.targetAudience === Audience.SPECIFIC_BLOCKS) {
+      const blocks = this.readStringArrayFromJsonObject(banner.audienceMeta, 'blocks').map((b) =>
+        b.toLowerCase(),
+      );
+      for (const b of scope.blocks) {
+        if (blocks.includes(String(b).toLowerCase())) return true;
+      }
+      return false;
+    }
+    return false;
+  }
+
+  private async canReadBannerImageFile(
+    fileId: string,
+    ctx: { actorUserId: string; permissions: string[]; roles: string[] },
+  ) {
+    if (!ctx.permissions?.includes('banner.view')) return false;
+
+    const accesses = await this.prisma.unitAccess.findMany({
+      where: {
+        userId: ctx.actorUserId,
+        status: 'ACTIVE',
+      },
+      select: {
+        unitId: true,
+        unit: { select: { block: true } },
+      },
+    });
+    const unitIds = new Set(accesses.map((a) => a.unitId));
+    const blocks = new Set(
+      accesses.map((a) => a.unit?.block).filter((b): b is string => Boolean(b)),
+    );
+
+    const now = new Date();
+    const banners = await this.prisma.banner.findMany({
+      where: {
+        imageFileId: fileId,
+        status: BannerStatus.ACTIVE,
+        startDate: { lte: now },
+        endDate: { gte: now },
+      },
+      select: {
+        targetAudience: true,
+        audienceMeta: true,
+      },
+      take: 10,
+    });
+
+    return banners.some((banner) =>
+      this.bannerAudienceMatches(
+        {
+          targetAudience: banner.targetAudience,
+          audienceMeta: banner.audienceMeta as Prisma.JsonValue | null,
+        },
+        {
+          userId: ctx.actorUserId,
+          unitIds,
+          blocks,
+        },
+      ),
     );
   }
 
@@ -103,6 +192,10 @@ export class FileService {
     });
 
     if (owner?.profilePhotoId === fileId || owner?.nationalIdFileId === fileId) {
+      return;
+    }
+
+    if (await this.canReadBannerImageFile(fileId, ctx)) {
       return;
     }
 
@@ -285,5 +378,89 @@ export class FileService {
     const file = await this.getFileOrThrow(fileId);
     const bucket = this.resolveBucket(file.category);
     return this.storageAdapter.getFileStream(file.key, bucket);
+  }
+
+  async getFileStreamWithMetaForActor(
+    fileId: string,
+    ctx: { actorUserId: string; permissions: string[]; roles: string[] },
+  ): Promise<{
+    file: {
+      id: string;
+      key: string;
+      name: string;
+      mimeType: string | null;
+      size: number | null;
+      category: $Enums.FileCategory;
+    };
+    stream: NodeJS.ReadableStream;
+  }> {
+    await this.assertCanReadFile(fileId, ctx);
+
+    const file = await this.getFileOrThrow(fileId);
+    const bucket = this.resolveBucket(file.category);
+    const stream = await this.storageAdapter.getFileStream(file.key, bucket);
+    return { file, stream };
+  }
+
+  async getPublicActiveBannerImageStream(fileId: string): Promise<{
+    file: {
+      id: string;
+      key: string;
+      name: string;
+      mimeType: string | null;
+      size: number | null;
+      category: $Enums.FileCategory;
+    };
+    stream: NodeJS.ReadableStream;
+  }> {
+    const now = new Date();
+    const linkedBanner = await this.prisma.banner.findFirst({
+      where: {
+        imageFileId: fileId,
+        status: BannerStatus.ACTIVE,
+        startDate: { lte: now },
+        endDate: { gte: now },
+      },
+      select: { id: true },
+    });
+    if (!linkedBanner) {
+      throw new NotFoundException('Banner image not found');
+    }
+
+    const file = await this.getFileOrThrow(fileId);
+    const bucket = this.resolveBucket(file.category);
+    const stream = await this.storageAdapter.getFileStream(file.key, bucket);
+    return { file, stream };
+  }
+
+  async getPublicBrandLogoStream(fileId: string): Promise<{
+    file: {
+      id: string;
+      key: string;
+      name: string;
+      mimeType: string | null;
+      size: number | null;
+      category: $Enums.FileCategory;
+    };
+    stream: NodeJS.ReadableStream;
+  }> {
+    const brandRow = await this.prisma.systemSetting.findUnique({
+      where: { section: 'brand' },
+      select: { value: true },
+    });
+    const value =
+      brandRow?.value && typeof brandRow.value === 'object' && !Array.isArray(brandRow.value)
+        ? (brandRow.value as Record<string, unknown>)
+        : null;
+    const linkedFileId =
+      value && typeof value.logoFileId === 'string' ? value.logoFileId.trim() : '';
+    if (!linkedFileId || linkedFileId !== fileId) {
+      throw new NotFoundException('Brand logo not found');
+    }
+
+    const file = await this.getFileOrThrow(fileId);
+    const bucket = this.resolveBucket(file.category);
+    const stream = await this.storageAdapter.getFileStream(file.key, bucket);
+    return { file, stream };
   }
 }

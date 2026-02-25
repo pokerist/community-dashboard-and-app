@@ -48,12 +48,29 @@ export class ComplaintsController {
   }
 
   // ---------------------------
+  // STAFF: CREATE ON BEHALF (admin/demo tooling)
+  // ---------------------------
+  @Post('admin/create')
+  @Permissions('complaint.manage')
+  createForAdmin(@Body() dto: CreateComplaintDto, @Req() req: Request) {
+    return this.complaintsService.createForAdmin(dto, {
+      actorUserId: (req as any).user?.id,
+    });
+  }
+
+  // ---------------------------
   // STAFF: VIEW ALL
   // ---------------------------
   @Get()
   @Permissions('complaint.view_all')
   findAll(@Query() query: ComplaintsQueryDto) {
     return this.complaintsService.findAll(query);
+  }
+
+  @Get('me')
+  @Permissions('complaint.view_own')
+  findMine(@Req() req: Request) {
+    return this.complaintsService.findMine((req as any).user?.id);
   }
 
   // ---------------------------

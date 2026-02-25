@@ -61,6 +61,70 @@ export class UnitsService {
     });
   }
 
+  async findMyUnits(
+    actorUserId: string,
+    query: UnitQueryDto,
+    context?: { permissions?: string[]; roles?: string[] },
+  ) {
+    const permissions = Array.isArray(context?.permissions)
+      ? context!.permissions!
+      : [];
+    const canViewAll = permissions.includes('unit.view_all');
+    if (canViewAll) {
+      return this.findAll(query);
+    }
+
+    const { type, status, block, projectName, ...baseQuery } = query;
+
+    const where: Prisma.UnitWhereInput = {
+      ...(type ? { type } : {}),
+      ...(status ? { status } : {}),
+      ...(block ? { block } : {}),
+      ...(projectName ? { projectName } : {}),
+      OR: [
+        {
+          unitAccesses: {
+            some: {
+              userId: actorUserId,
+              status: 'ACTIVE',
+            },
+          },
+        },
+        {
+          residents: {
+            some: {
+              resident: {
+                userId: actorUserId,
+              },
+            },
+          },
+        },
+      ],
+    };
+
+    return paginate(this.prisma.unit, baseQuery, {
+      searchFields: ['unitNumber', 'projectName', 'block'],
+      where,
+      include: {
+        unitAccesses: {
+          where: { userId: actorUserId, status: 'ACTIVE' },
+          select: {
+            id: true,
+            role: true,
+            status: true,
+            startsAt: true,
+            endsAt: true,
+            canBookFacilities: true,
+            canGenerateQR: true,
+            canManageWorkers: true,
+            canViewFinancials: true,
+            canReceiveBilling: true,
+          },
+        },
+      },
+    });
+  }
+
   async findOne(id: string) {
     const unit = await this.prisma.unit.findUnique({
       where: { id },
