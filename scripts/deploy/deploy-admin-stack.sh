@@ -30,6 +30,7 @@ DEFAULT_DB_SCHEMA="${DEFAULT_DB_SCHEMA:-public}"
 DEFAULT_DB_PASSWORD="${DEFAULT_DB_PASSWORD:-community123}"
 DEFAULT_DB_SOCKET_DIR="${DEFAULT_DB_SOCKET_DIR:-/var/run/postgresql}"
 DEFAULT_JWT_SECRET="${DEFAULT_JWT_SECRET:-change-me-in-dev}"
+DETECTED_DB_RUNTIME="false"
 
 require_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -92,6 +93,38 @@ postgres_psql() {
 postgres_show() {
   local key="$1"
   postgres_psql "SHOW ${key};" | tr -d '[:space:]'
+}
+
+detect_postgres_runtime_settings() {
+  ensure_postgres_installed_and_running
+  require_cmd psql
+  local detected_port detected_socket_dirs first_socket_dir
+  detected_port="$(postgres_show port || true)"
+  detected_socket_dirs="$(postgres_show unix_socket_directories || true)"
+  if [[ -n "$detected_port" && "$detected_port" =~ ^[0-9]+$ ]]; then
+    DEFAULT_DB_PORT="$detected_port"
+  fi
+  if [[ -n "$detected_socket_dirs" ]]; then
+    first_socket_dir="${detected_socket_dirs%%,*}"
+    if [[ -n "$first_socket_dir" && "$first_socket_dir" != "''" ]]; then
+      DEFAULT_DB_SOCKET_DIR="$first_socket_dir"
+    fi
+  fi
+  DETECTED_DB_RUNTIME="true"
+}
+
+psql_socket_test() {
+  local err_file
+  err_file="$(mktemp)"
+  if psql -w -h "${DEFAULT_DB_SOCKET_DIR}" -p "${DEFAULT_DB_PORT}" -U "${DEFAULT_DB_USER}" -d "${DEFAULT_DB_NAME}" -c "select 1" >/dev/null 2>"$err_file"; then
+    rm -f "$err_file"
+    return 0
+  fi
+  echo "---- psql socket test stderr ----" >&2
+  cat "$err_file" >&2 || true
+  echo "---------------------------------" >&2
+  rm -f "$err_file"
+  return 1
 }
 
 restart_postgres_service() {
@@ -197,6 +230,9 @@ provision_local_postgres_db() {
   fi
 
   ensure_postgres_installed_and_running
+  if [[ "$DETECTED_DB_RUNTIME" != "true" ]]; then
+    detect_postgres_runtime_settings
+  fi
   configure_local_postgres_trust_auth
   require_cmd psql
 
@@ -371,7 +407,8 @@ npm ci
 
 note "Building backend"
 source_env_file "$ROOT_ENV_PROD"
-if ! psql -h "${DEFAULT_DB_SOCKET_DIR}" -p "${DEFAULT_DB_PORT}" -U "${DEFAULT_DB_USER}" -d "${DEFAULT_DB_NAME}" -c "select 1" >/dev/null 2>&1; then
+detect_postgres_runtime_settings
+if ! psql_socket_test; then
   warn "Local DB login test failed for ${DEFAULT_DB_USER}@${DEFAULT_DB_HOST}:${DEFAULT_DB_PORT}. Re-provisioning local DB credentials + demo trust auth."
   provision_local_postgres_db "$ROOT_ENV_PROD" true
   source_env_file "$ROOT_ENV_PROD"
@@ -379,7 +416,7 @@ if ! psql -h "${DEFAULT_DB_SOCKET_DIR}" -p "${DEFAULT_DB_PORT}" -U "${DEFAULT_DB
 fi
 
 # Final hard fail with diagnosis if local TCP auth is still broken after trust setup.
-if ! psql -h "${DEFAULT_DB_SOCKET_DIR}" -p "${DEFAULT_DB_PORT}" -U "${DEFAULT_DB_USER}" -d "${DEFAULT_DB_NAME}" -c "select 1" >/dev/null 2>&1; then
+if ! psql_socket_test; then
   warn "PostgreSQL local socket auth still failing after trust setup. Showing first localhost auth rules:"
   HBA_FILE_NOW="$(postgres_show hba_file || true)"
   if [[ -n "${HBA_FILE_NOW:-}" ]]; then
