@@ -131,7 +131,7 @@ configure_local_postgres_trust_auth() {
     return
   fi
 
-  current_local_rule="$(grep -E '^[[:space:]]*host[[:space:]]+all[[:space:]]+all[[:space:]]+127\.0\.0\.1/32[[:space:]]+trust' "$hba_file" || true)"
+  current_local_rule="$(run_root grep -E '^[[:space:]]*host[[:space:]]+all[[:space:]]+all[[:space:]]+127\.0\.0\.1/32[[:space:]]+trust' "$hba_file" 2>/dev/null || true)"
   if [[ -n "$current_local_rule" ]]; then
     return
   fi
@@ -151,6 +151,7 @@ configure_local_postgres_trust_auth() {
 
 provision_local_postgres_db() {
   local env_file="$1"
+  local force_repair="${2:-false}"
   if [[ "$AUTO_PROVISION_LOCAL_DB" != "true" ]]; then
     return
   fi
@@ -167,7 +168,7 @@ provision_local_postgres_db() {
   fi
 
   # If a real database URL is already set, keep it.
-  if [[ -n "$current_db_url" && "$current_db_url" != *"USER:PASSWORD"* ]]; then
+  if [[ "$force_repair" != "true" && -n "$current_db_url" && "$current_db_url" != *"USER:PASSWORD"* ]]; then
     return
   fi
 
@@ -345,7 +346,9 @@ note "Building backend"
 source_env_file "$ROOT_ENV_PROD"
 if ! PGPASSWORD="$(get_env_value "$ROOT_ENV_PROD" "AUTO_LOCAL_DB_PASSWORD")" psql \
   -h "${DEFAULT_DB_HOST}" -p "${DEFAULT_DB_PORT}" -U "${DEFAULT_DB_USER}" -d "${DEFAULT_DB_NAME}" -c "select 1" >/dev/null 2>&1; then
-  warn "Local DB login test failed for ${DEFAULT_DB_USER}@${DEFAULT_DB_HOST}:${DEFAULT_DB_PORT}. Re-applying PostgreSQL demo trust auth."
+  warn "Local DB login test failed for ${DEFAULT_DB_USER}@${DEFAULT_DB_HOST}:${DEFAULT_DB_PORT}. Re-provisioning local DB credentials + demo trust auth."
+  provision_local_postgres_db "$ROOT_ENV_PROD" true
+  source_env_file "$ROOT_ENV_PROD"
   configure_local_postgres_trust_auth
 fi
 npm run prisma:generate
