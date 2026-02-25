@@ -361,10 +361,23 @@ source_env_file() {
     echo "ERROR: Env file not found: $file" >&2
     exit 1
   fi
-  set -a
-  # shellcheck disable=SC1090
-  source "$file"
-  set +a
+  # Parse KEY=VALUE lines safely (handles values containing '&', '?', etc.)
+  eval "$(
+    python3 - "$file" <<'PY'
+import sys, shlex
+from pathlib import Path
+
+for raw in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
+    line = raw.strip()
+    if not line or line.startswith("#") or "=" not in raw:
+        continue
+    k, v = raw.split("=", 1)
+    k = k.strip()
+    if not k:
+        continue
+    print(f"export {k}={shlex.quote(v)}")
+PY
+  )"
 }
 
 bootstrap_server
