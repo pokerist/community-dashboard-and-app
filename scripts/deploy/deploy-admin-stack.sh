@@ -476,7 +476,16 @@ pm2 delete pm2.admin-stack.ecosystem.cjs >/dev/null 2>&1 || true
 pm2 delete pm2.admin-stack.ecosystem.js >/dev/null 2>&1 || true
 
 source_env_file "$ROOT_ENV_PROD"
-PORT="$BACKEND_PORT" pm2 start "$ROOT_DIR/dist/main.js" \
+BACKEND_ENTRY="$ROOT_DIR/dist/main.js"
+if [[ ! -f "$BACKEND_ENTRY" && -f "$ROOT_DIR/dist/src/main.js" ]]; then
+  BACKEND_ENTRY="$ROOT_DIR/dist/src/main.js"
+fi
+if [[ ! -f "$BACKEND_ENTRY" ]]; then
+  echo "ERROR: Backend entry not found (checked dist/main.js and dist/src/main.js)." >&2
+  exit 1
+fi
+
+PORT="$BACKEND_PORT" pm2 start "$BACKEND_ENTRY" \
   --name community-backend \
   --cwd "$ROOT_DIR" \
   --time \
