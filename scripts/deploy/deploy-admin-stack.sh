@@ -124,15 +124,10 @@ configure_local_postgres_trust_auth() {
   ensure_postgres_installed_and_running
   require_cmd psql
 
-  local hba_file current_local_rule
+  local hba_file
   hba_file="$(postgres_show hba_file || true)"
   if [[ -z "$hba_file" || ! -f "$hba_file" ]]; then
     warn "Could not detect pg_hba.conf path. Skipping trust auth bootstrap."
-    return
-  fi
-
-  current_local_rule="$(run_root grep -E '^[[:space:]]*host[[:space:]]+all[[:space:]]+all[[:space:]]+127\.0\.0\.1/32[[:space:]]+trust' "$hba_file" 2>/dev/null || true)"
-  if [[ -n "$current_local_rule" ]]; then
     return
   fi
 
