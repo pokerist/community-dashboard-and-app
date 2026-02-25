@@ -52,6 +52,7 @@ Default zero-touch demo DB values used by the script:
 - DB user: `community_user`
 - DB name: `community_dashboard`
 - DB password: `community123` (stored in `.env.production` as `AUTO_LOCAL_DB_PASSWORD`)
+- App DB URL is written as a local PostgreSQL **Unix socket** connection (`/var/run/postgresql`) for reliability in demo setup
 
 ## Optional Manual Env Overrides (Advanced)
 If you want a real managed DB / real providers, edit these after first run:

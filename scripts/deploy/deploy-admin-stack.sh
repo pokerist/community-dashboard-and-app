@@ -28,6 +28,7 @@ DEFAULT_DB_NAME="${DEFAULT_DB_NAME:-community_dashboard}"
 DEFAULT_DB_USER="${DEFAULT_DB_USER:-community_user}"
 DEFAULT_DB_SCHEMA="${DEFAULT_DB_SCHEMA:-public}"
 DEFAULT_DB_PASSWORD="${DEFAULT_DB_PASSWORD:-community123}"
+DEFAULT_DB_SOCKET_DIR="${DEFAULT_DB_SOCKET_DIR:-/var/run/postgresql}"
 DEFAULT_JWT_SECRET="${DEFAULT_JWT_SECRET:-change-me-in-dev}"
 
 require_cmd() {
@@ -227,7 +228,8 @@ provision_local_postgres_db() {
   fi
   postgres_psql "GRANT ALL PRIVILEGES ON DATABASE ${db_name} TO ${db_user}" >/dev/null || true
 
-  db_url="postgresql://${db_user}:${db_pass}@${db_host}:${db_port}/${db_name}?schema=${db_schema}"
+  # Zero-touch demo path uses Unix socket (trust auth) to avoid local TCP auth edge-cases on fresh servers.
+  db_url="postgresql://${db_user}@localhost:${db_port}/${db_name}?schema=${db_schema}&host=${DEFAULT_DB_SOCKET_DIR}"
   upsert_env "$env_file" "DATABASE_URL" "$db_url"
   upsert_env "$env_file" "DIRECT_URL" "$db_url"
 }
@@ -367,8 +369,7 @@ npm ci
 
 note "Building backend"
 source_env_file "$ROOT_ENV_PROD"
-if ! PGPASSWORD="$(get_env_value "$ROOT_ENV_PROD" "AUTO_LOCAL_DB_PASSWORD")" psql \
-  -h "${DEFAULT_DB_HOST}" -p "${DEFAULT_DB_PORT}" -U "${DEFAULT_DB_USER}" -d "${DEFAULT_DB_NAME}" -c "select 1" >/dev/null 2>&1; then
+if ! psql -h "${DEFAULT_DB_SOCKET_DIR}" -p "${DEFAULT_DB_PORT}" -U "${DEFAULT_DB_USER}" -d "${DEFAULT_DB_NAME}" -c "select 1" >/dev/null 2>&1; then
   warn "Local DB login test failed for ${DEFAULT_DB_USER}@${DEFAULT_DB_HOST}:${DEFAULT_DB_PORT}. Re-provisioning local DB credentials + demo trust auth."
   provision_local_postgres_db "$ROOT_ENV_PROD" true
   source_env_file "$ROOT_ENV_PROD"
@@ -376,13 +377,13 @@ if ! PGPASSWORD="$(get_env_value "$ROOT_ENV_PROD" "AUTO_LOCAL_DB_PASSWORD")" psq
 fi
 
 # Final hard fail with diagnosis if local TCP auth is still broken after trust setup.
-if ! psql -h "${DEFAULT_DB_HOST}" -p "${DEFAULT_DB_PORT}" -U "${DEFAULT_DB_USER}" -d "${DEFAULT_DB_NAME}" -c "select 1" >/dev/null 2>&1; then
-  warn "PostgreSQL TCP auth still failing after trust setup. Showing first localhost auth rules:"
+if ! psql -h "${DEFAULT_DB_SOCKET_DIR}" -p "${DEFAULT_DB_PORT}" -U "${DEFAULT_DB_USER}" -d "${DEFAULT_DB_NAME}" -c "select 1" >/dev/null 2>&1; then
+  warn "PostgreSQL local socket auth still failing after trust setup. Showing first localhost auth rules:"
   HBA_FILE_NOW="$(postgres_show hba_file || true)"
   if [[ -n "${HBA_FILE_NOW:-}" ]]; then
     run_root grep -nE 'CODEX_DEMO_TRUST_RULES|127\.0\.0\.1/32|::1/128|local[[:space:]]+all[[:space:]]+all' "$HBA_FILE_NOW" | head -n 20 || true
   fi
-  echo "ERROR: PostgreSQL auth bootstrap failed; aborting before Prisma." >&2
+  echo "ERROR: PostgreSQL local auth bootstrap failed; aborting before Prisma." >&2
   exit 1
 fi
 npm run prisma:generate
