@@ -310,8 +310,10 @@ upsert_env() {
   local file="$1"
   local key="$2"
   local value="$3"
+  local escaped_value
+  escaped_value="$(printf '%s' "$value" | sed 's/[&]/\\&/g')"
   if grep -qE "^${key}=" "$file"; then
-    sed -i "s#^${key}=.*#${key}=${value}#g" "$file"
+    sed -i "s#^${key}=.*#${key}=${escaped_value}#g" "$file"
   else
     echo "${key}=${value}" >> "$file"
   fi
