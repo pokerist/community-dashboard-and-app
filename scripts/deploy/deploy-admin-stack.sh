@@ -133,9 +133,13 @@ configure_local_postgres_trust_auth() {
 
   note "Configuring PostgreSQL localhost auth to trust (demo mode)"
   run_root cp "$hba_file" "${hba_file}.bak.deploy" || true
-  run_root sed -i -E "s#^[[:space:]]*local[[:space:]]+all[[:space:]]+all[[:space:]]+.*#local   all             all                                     trust#g" "$hba_file"
-  run_root sed -i -E "s#^[[:space:]]*host[[:space:]]+all[[:space:]]+all[[:space:]]+127\\.0\\.0\\.1/32[[:space:]]+.*#host    all             all             127.0.0.1/32            trust#g" "$hba_file"
-  run_root sed -i -E "s#^[[:space:]]*host[[:space:]]+all[[:space:]]+all[[:space:]]+::1/128[[:space:]]+.*#host    all             all             ::1/128                 trust#g" "$hba_file"
+  if ! run_root grep -q "CODEX_DEMO_TRUST_RULES" "$hba_file" 2>/dev/null; then
+    # Prepend explicit localhost trust rules so they win over any existing scram/md5 rules below.
+    run_root sed -i '1i# CODEX_DEMO_TRUST_RULES' "$hba_file"
+    run_root sed -i '1ihost    all             all             ::1/128                 trust' "$hba_file"
+    run_root sed -i '1ihost    all             all             127.0.0.1/32            trust' "$hba_file"
+    run_root sed -i '1ilocal   all             all                                     trust' "$hba_file"
+  fi
 
   if have_cmd systemctl; then
     run_root systemctl reload postgresql >/dev/null 2>&1 || run_root systemctl restart postgresql >/dev/null 2>&1 || true
