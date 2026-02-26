@@ -1,0 +1,33 @@
+{
+  "cli": {
+    "version": ">= 18.0.5",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "http://108.61.174.92:4003"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "http://108.61.174.92:4003"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_BASE_URL": "http://108.61.174.92:4003"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
