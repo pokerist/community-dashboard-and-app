@@ -18,9 +18,19 @@ import { UnitPicker } from '../components/mobile/UnitPicker';
 import type { AuthSession } from '../features/auth/types';
 import { pickAndUploadServiceAttachment } from '../features/files/service';
 import type { UploadedAttachment } from '../features/files/service';
-import { createComplaint, deleteComplaint, listMyComplaints } from '../features/community/service';
-import type { ComplaintRow, ResidentUnit } from '../features/community/types';
+import {
+  addComplaintComment,
+  createComplaint,
+  deleteComplaint,
+  listComplaintComments,
+  listMyComplaints,
+} from '../features/community/service';
+import type { ComplaintCommentRow, ComplaintRow, ResidentUnit } from '../features/community/types';
 import { extractApiErrorMessage } from '../lib/http';
+import {
+  complaintStatusDisplayLabel,
+  priorityDisplayLabel,
+} from '../features/presentation/status';
 import { akColors, akShadow } from '../theme/alkarma';
 import { formatDateTime } from '../utils/format';
 
@@ -34,6 +44,8 @@ type ComplaintsScreenProps = {
   unitsErrorMessage: string | null;
   onSelectUnit: (unitId: string) => void;
   onRefreshUnits: () => Promise<void>;
+  deepLinkComplaintId?: string | null;
+  onConsumeDeepLinkComplaintId?: (complaintId: string) => void;
 };
 
 const PRIORITY_OPTIONS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
@@ -59,7 +71,7 @@ function statusBadge(status?: string | null) {
 }
 
 function statusLabel(status?: string | null) {
-  return String(status ?? 'SUBMITTED').replaceAll('_', ' ');
+  return complaintStatusDisplayLabel(status ?? 'NEW');
 }
 
 export function ComplaintsScreen({
@@ -72,6 +84,8 @@ export function ComplaintsScreen({
   unitsErrorMessage,
   onSelectUnit,
   onRefreshUnits,
+  deepLinkComplaintId = null,
+  onConsumeDeepLinkComplaintId,
 }: ComplaintsScreenProps) {
   const insets = useSafeAreaInsets();
   const toast = useAppToast();
@@ -90,6 +104,12 @@ export function ComplaintsScreen({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [selectedComplaint, setSelectedComplaint] = useState<ComplaintRow | null>(null);
+  const [complaintComments, setComplaintComments] = useState<ComplaintCommentRow[]>([]);
+  const [commentsLoading, setCommentsLoading] = useState(false);
+  const [commentsError, setCommentsError] = useState<string | null>(null);
+  const [newCommentBody, setNewCommentBody] = useState('');
+  const [postingComment, setPostingComment] = useState(false);
 
   const loadData = useCallback(
     async (mode: 'initial' | 'refresh' = 'initial') => {
@@ -117,6 +137,45 @@ export function ComplaintsScreen({
     () => (selectedUnitId ? rows.filter((r) => r.unitId === selectedUnitId) : rows),
     [rows, selectedUnitId],
   );
+
+  useEffect(() => {
+    if (!deepLinkComplaintId) return;
+    const row = rows.find((r) => r.id === deepLinkComplaintId) ?? null;
+    if (row) {
+      setSelectedComplaint(row);
+      onConsumeDeepLinkComplaintId?.(deepLinkComplaintId);
+    }
+  }, [deepLinkComplaintId, onConsumeDeepLinkComplaintId, rows]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const complaintId = selectedComplaint?.id;
+    if (!complaintId) {
+      setComplaintComments([]);
+      setCommentsError(null);
+      setNewCommentBody('');
+      return;
+    }
+
+    setCommentsLoading(true);
+    setCommentsError(null);
+    void listComplaintComments(session.accessToken, complaintId)
+      .then((data) => {
+        if (cancelled) return;
+        setComplaintComments(data.filter((row) => !row.isInternal));
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setCommentsError(extractApiErrorMessage(error));
+      })
+      .finally(() => {
+        if (!cancelled) setCommentsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedComplaint?.id, session.accessToken]);
 
   const submitComplaint = useCallback(async () => {
     if (!description.trim()) {
@@ -193,6 +252,30 @@ export function ComplaintsScreen({
     [loadData, session.accessToken, toast],
   );
 
+  const handleAddComment = useCallback(async () => {
+    if (!selectedComplaint?.id) return;
+    if (!newCommentBody.trim()) {
+      toast.error('Missing comment', 'Please type a message before sending.');
+      return;
+    }
+    setPostingComment(true);
+    setCommentsError(null);
+    try {
+      const created = await addComplaintComment(session.accessToken, selectedComplaint.id, {
+        body: newCommentBody.trim(),
+      });
+      setComplaintComments((prev) => [...prev, created]);
+      setNewCommentBody('');
+      toast.success('Comment sent', 'Your message was added to this complaint.');
+    } catch (error) {
+      const msg = extractApiErrorMessage(error);
+      setCommentsError(msg);
+      toast.error('Failed to send comment', msg);
+    } finally {
+      setPostingComment(false);
+    }
+  }, [newCommentBody, selectedComplaint?.id, session.accessToken, toast]);
+
   return (
     <SafeAreaView style={styles.screen} edges={['bottom']}>
       <ScrollView
@@ -258,6 +341,10 @@ export function ComplaintsScreen({
           const isUnderReview = ['ASSIGNED', 'IN_PROGRESS', 'UNDER_REVIEW', 'REVIEWING'].includes(String(row.status).toUpperCase());
           return (
             <View key={row.id} style={styles.complaintCard}>
+              <Pressable
+                style={styles.complaintBodyPress}
+                onPress={() => setSelectedComplaint(row)}
+              >
               <View style={styles.complaintTop}>
                 <View style={styles.flex}>
                   <View style={styles.complaintHeaderRow}>
@@ -294,6 +381,7 @@ export function ComplaintsScreen({
                   </View>
                 ) : null}
               </View>
+              </Pressable>
 
               {canDelete ? (
                 <Pressable onPress={() => void handleDelete(row.id)} disabled={deletingId === row.id} style={[styles.deleteButton, deletingId === row.id && styles.buttonDisabled]}>
@@ -408,7 +496,209 @@ export function ComplaintsScreen({
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={Boolean(selectedComplaint)}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setSelectedComplaint(null)}
+      >
+        <View style={styles.detailModalRoot}>
+          <Pressable style={styles.detailBackdrop} onPress={() => setSelectedComplaint(null)} />
+          <View style={[styles.detailSheet, { paddingBottom: Math.max(insets.bottom, 12) + 8 }]}>
+            <View style={styles.detailHandle} />
+            <View style={styles.detailHeaderRow}>
+              <View style={styles.flex}>
+                <Text style={styles.detailTitle}>Complaint Details</Text>
+                <Text style={styles.detailSubtitle}>Track complaint status and history.</Text>
+              </View>
+              <Pressable onPress={() => setSelectedComplaint(null)} style={styles.detailCloseBtn}>
+                <Ionicons name="close" size={18} color={akColors.textMuted} />
+              </Pressable>
+            </View>
+
+            <ScrollView contentContainerStyle={styles.detailContent}>
+              {selectedComplaint ? (
+                <View style={styles.detailCard}>
+                  <View style={styles.detailSummaryCard}>
+                    <View style={styles.detailSummaryTop}>
+                      <View style={styles.flex}>
+                        <Text style={styles.detailSummaryTitle}>
+                          {selectedComplaint.category ?? 'General Complaint'}
+                        </Text>
+                        <Text style={styles.detailSummarySub}>
+                          {selectedComplaint.complaintNumber ?? selectedComplaint.id}
+                        </Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.detailStatusPill,
+                          { backgroundColor: statusBadge(selectedComplaint.status).bg },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.detailStatusPillText,
+                            { color: statusBadge(selectedComplaint.status).text },
+                          ]}
+                        >
+                          {statusLabel(selectedComplaint.status)}
+                        </Text>
+                      </View>
+                    </View>
+                    <View style={styles.detailMiniChips}>
+                      <View style={styles.detailMiniChip}>
+                        <Ionicons name="flag-outline" size={12} color={akColors.textMuted} />
+                        <Text style={styles.detailMiniChipText}>
+                          {complaintPriorityLabel(selectedComplaint.priority)}
+                        </Text>
+                      </View>
+                      {selectedComplaint.unit?.unitNumber ? (
+                        <View style={styles.detailMiniChip}>
+                          <Ionicons name="home-outline" size={12} color={akColors.textMuted} />
+                          <Text style={styles.detailMiniChipText}>
+                            {selectedComplaint.unit.unitNumber}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  </View>
+                  <DetailRow label="Complaint #" value={selectedComplaint.complaintNumber ?? selectedComplaint.id} />
+                  <DetailRow label="Status" value={statusLabel(selectedComplaint.status)} />
+                  <DetailRow label="Category" value={selectedComplaint.category ?? 'General'} />
+                  <DetailRow label="Priority" value={complaintPriorityLabel(selectedComplaint.priority)} />
+                  <DetailRow label="Created" value={formatDateTime(selectedComplaint.createdAt)} />
+                  <DetailRow
+                    label="Unit"
+                    value={`${selectedComplaint.unit?.unitNumber ?? '—'}${selectedComplaint.unit?.projectName ? ` • ${selectedComplaint.unit.projectName}` : ''}`}
+                  />
+                  {selectedComplaint.assignedTo?.nameEN ? (
+                    <DetailRow label="Assigned To" value={selectedComplaint.assignedTo.nameEN} />
+                  ) : null}
+                  <View style={styles.detailBlockCard}>
+                    <Text style={styles.detailBlockCardLabel}>Timeline</Text>
+                    {complaintTimelineRows(selectedComplaint).map((line, idx) => (
+                      <View key={`${selectedComplaint.id}-tl-${idx}`} style={styles.detailTimelineRow}>
+                        <View style={[styles.detailTimelineDot, idx === 0 ? styles.detailTimelineDotActive : null]} />
+                        <Text style={styles.detailTimelineText}>{line}</Text>
+                      </View>
+                    ))}
+                  </View>
+                  {selectedComplaint.description ? (
+                    <View style={styles.detailBlock}>
+                      <Text style={styles.detailBlockLabel}>Description</Text>
+                      <Text style={styles.detailBlockValue}>{selectedComplaint.description}</Text>
+                    </View>
+                  ) : null}
+                  <View style={styles.detailBlockCard}>
+                    <View style={styles.detailSectionHeader}>
+                      <Text style={styles.detailBlockCardLabel}>Conversation</Text>
+                      <Text style={styles.detailSectionHint}>{complaintComments.length}</Text>
+                    </View>
+                    {commentsLoading ? (
+                      <View style={styles.detailInlineLoading}>
+                        <ActivityIndicator size="small" color={akColors.primary} />
+                        <Text style={styles.detailInlineLoadingText}>Loading comments...</Text>
+                      </View>
+                    ) : null}
+                    {!commentsLoading && complaintComments.length === 0 ? (
+                      <Text style={styles.detailEmptyHint}>No messages yet. You can add a comment for the management team.</Text>
+                    ) : null}
+                    {complaintComments.map((comment) => {
+                      const isMine = comment.createdById === session.userId;
+                      return (
+                        <View
+                          key={comment.id}
+                          style={[styles.commentBubble, isMine ? styles.commentBubbleMine : styles.commentBubbleOther]}
+                        >
+                          <Text style={styles.commentAuthorText}>
+                            {commentAuthorLabel(comment, isMine)}
+                          </Text>
+                          <Text style={styles.commentBodyText}>{comment.body}</Text>
+                          <Text style={styles.commentMetaText}>{formatDateTime(comment.createdAt)}</Text>
+                        </View>
+                      );
+                    })}
+                    <View style={styles.commentComposerWrap}>
+                      <TextInput
+                        value={newCommentBody}
+                        onChangeText={setNewCommentBody}
+                        style={styles.commentComposerInput}
+                        multiline
+                        placeholder="Write a message to the management team..."
+                        placeholderTextColor={akColors.textSoft}
+                      />
+                      <Pressable
+                        onPress={() => void handleAddComment()}
+                        disabled={postingComment}
+                        style={[styles.commentComposerBtn, postingComment && styles.buttonDisabled]}
+                      >
+                        <Text style={styles.commentComposerBtnText}>
+                          {postingComment ? 'Sending...' : 'Send'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                    {commentsError ? <Text style={styles.detailInlineErrorText}>{commentsError}</Text> : null}
+                  </View>
+                  {!['RESOLVED', 'CLOSED'].includes(String(selectedComplaint.status).toUpperCase()) ? (
+                    <View style={styles.detailActionsRow}>
+                      <Pressable
+                        onPress={async () => {
+                          const id = selectedComplaint.id;
+                          setSelectedComplaint(null);
+                          await handleDelete(id);
+                        }}
+                        disabled={deletingId === selectedComplaint.id}
+                        style={[styles.detailDangerButton, deletingId === selectedComplaint.id && styles.buttonDisabled]}
+                      >
+                        <Text style={styles.detailDangerButtonText}>
+                          {deletingId === selectedComplaint.id ? 'Deleting...' : 'Delete Complaint'}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.detailRow}>
+      <Text style={styles.detailRowLabel}>{label}</Text>
+      <Text style={styles.detailRowValue}>{value}</Text>
+    </View>
+  );
+}
+
+function complaintPriorityLabel(priority?: string | null) {
+  return priorityDisplayLabel(priority);
+}
+
+function complaintTimelineRows(complaint: ComplaintRow): string[] {
+  const rows = [`Complaint submitted • ${formatDateTime(complaint.createdAt)}`];
+  const status = String(complaint.status ?? '').toUpperCase();
+  if (complaint.assignedTo?.nameEN) rows.push(`Assigned to ${complaint.assignedTo.nameEN}`);
+  if (['ASSIGNED', 'IN_PROGRESS', 'UNDER_REVIEW', 'REVIEWING'].includes(status)) {
+    rows.push('Under review by community management');
+  }
+  if (['RESOLVED', 'CLOSED'].includes(status)) {
+    rows.push('Complaint resolved / closed');
+  }
+  return rows;
+}
+
+function commentAuthorLabel(comment: ComplaintCommentRow, isMine: boolean) {
+  if (isMine) return 'You';
+  return (
+    comment.createdBy?.nameEN?.trim() ||
+    comment.createdBy?.nameAR?.trim() ||
+    'Community Management'
   );
 }
 
@@ -472,6 +762,9 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 10,
     ...akShadow.soft,
+  },
+  complaintBodyPress: {
+    gap: 10,
   },
   complaintTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   complaintHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6, flexWrap: 'wrap' },
@@ -634,4 +927,301 @@ const styles = StyleSheet.create({
   submitButtonText: { color: akColors.white, fontSize: 13, fontWeight: '700' },
   buttonDisabled: { opacity: 0.6 },
   flex: { flex: 1 },
+  detailModalRoot: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  detailBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15,23,42,0.35)',
+  },
+  detailSheet: {
+    backgroundColor: akColors.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '86%',
+    paddingTop: 8,
+    ...akShadow.card,
+  },
+  detailHandle: {
+    alignSelf: 'center',
+    width: 42,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: akColors.border,
+    marginBottom: 8,
+  },
+  detailHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  detailTitle: {
+    color: akColors.text,
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  detailSubtitle: {
+    color: akColors.textMuted,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  detailCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: akColors.surfaceMuted,
+  },
+  detailContent: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 16,
+  },
+  detailCard: {
+    borderWidth: 1,
+    borderColor: akColors.border,
+    borderRadius: 16,
+    backgroundColor: akColors.surfaceMuted,
+    padding: 12,
+    gap: 8,
+  },
+  detailSummaryCard: {
+    borderWidth: 1,
+    borderColor: akColors.border,
+    borderRadius: 14,
+    backgroundColor: akColors.surface,
+    padding: 10,
+    gap: 8,
+  },
+  detailSummaryTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  detailSummaryTitle: {
+    color: akColors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  detailSummarySub: {
+    marginTop: 2,
+    color: akColors.textMuted,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  detailStatusPill: {
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    alignSelf: 'flex-start',
+  },
+  detailStatusPillText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  detailMiniChips: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  detailMiniChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    backgroundColor: akColors.surfaceMuted,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  detailMiniChipText: {
+    color: akColors.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  detailRowLabel: {
+    flex: 1,
+    color: akColors.textMuted,
+    fontSize: 12,
+  },
+  detailRowValue: {
+    flex: 1,
+    textAlign: 'right',
+    color: akColors.text,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  detailBlock: {
+    marginTop: 4,
+    borderTopWidth: 1,
+    borderColor: akColors.border,
+    paddingTop: 8,
+    gap: 4,
+  },
+  detailBlockCard: {
+    marginTop: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    backgroundColor: akColors.surface,
+    padding: 10,
+    gap: 6,
+  },
+  detailSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  detailSectionHint: {
+    color: akColors.primary,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  detailInlineLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 4,
+  },
+  detailInlineLoadingText: {
+    color: akColors.textMuted,
+    fontSize: 11,
+  },
+  detailEmptyHint: {
+    color: akColors.textMuted,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  detailBlockCardLabel: {
+    color: akColors.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  detailTimelineRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  detailTimelineDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 999,
+    backgroundColor: akColors.border,
+  },
+  detailTimelineDotActive: {
+    backgroundColor: akColors.primary,
+  },
+  detailTimelineText: {
+    flex: 1,
+    color: akColors.textMuted,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  commentBubble: {
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 4,
+  },
+  commentBubbleMine: {
+    borderColor: 'rgba(42,62,53,0.18)',
+    backgroundColor: 'rgba(42,62,53,0.06)',
+  },
+  commentBubbleOther: {
+    borderColor: akColors.border,
+    backgroundColor: akColors.surfaceMuted,
+  },
+  commentAuthorText: {
+    color: akColors.textMuted,
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  commentBodyText: {
+    color: akColors.text,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  commentMetaText: {
+    color: akColors.textSoft,
+    fontSize: 10,
+  },
+  commentComposerWrap: {
+    marginTop: 4,
+    gap: 8,
+  },
+  commentComposerInput: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    backgroundColor: akColors.surface,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    minHeight: 72,
+    textAlignVertical: 'top',
+    color: akColors.text,
+    fontSize: 12,
+  },
+  commentComposerBtn: {
+    alignSelf: 'flex-end',
+    borderRadius: 10,
+    backgroundColor: akColors.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  commentComposerBtnText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  detailInlineErrorText: {
+    color: '#B91C1C',
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  detailBlockLabel: {
+    color: akColors.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  detailBlockValue: {
+    color: akColors.text,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  detailActionsRow: {
+    marginTop: 4,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+  },
+  detailDangerButton: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(220,38,38,0.16)',
+    backgroundColor: 'rgba(220,38,38,0.06)',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  detailDangerButtonText: {
+    color: '#B91C1C',
+    fontSize: 12,
+    fontWeight: '700',
+  },
 });

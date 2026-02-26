@@ -7,8 +7,17 @@ import {
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateComplaintDto, UpdateComplaintDto } from './dto/complaints.dto';
 import { ComplaintsQueryDto } from './dto/complaints-query.dto';
-import { ComplaintStatus, Priority, InvoiceType } from '@prisma/client';
+import { CreateComplaintCommentDto } from './dto/create-complaint-comment.dto';
+import {
+  ComplaintStatus,
+  Priority,
+  InvoiceType,
+  Channel,
+  Audience,
+  NotificationType,
+} from '@prisma/client';
 import { InvoicesService } from '../invoices/invoices.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { paginate } from '../../common/utils/pagination.util';
 import { getActiveUnitAccess } from '../../common/utils/unit-access.util';
 
@@ -17,6 +26,7 @@ export class ComplaintsService {
   constructor(
     private readonly prisma: PrismaService,
     private invoicesService: InvoicesService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   /**
@@ -50,6 +60,13 @@ export class ComplaintsService {
   // --- 1. CREATE ---
   async create(dto: CreateComplaintDto & { reporterId: string }) {
     return this.createInternal(dto, { enforceUnitAccess: true });
+  }
+
+  private canViewAllOrManage(permissions: string[] = []) {
+    return (
+      permissions.includes('complaint.view_all') ||
+      permissions.includes('complaint.manage')
+    );
   }
 
   async createForAdmin(
@@ -187,9 +204,83 @@ export class ComplaintsService {
     return complaint;
   }
 
+  async listCommentsForActor(
+    complaintId: string,
+    ctx: { actorUserId: string; permissions: string[] },
+  ) {
+    await this.findOneForActor(complaintId, ctx);
+    const canViewInternal = this.canViewAllOrManage(ctx.permissions);
+
+    return this.prisma.complaintComment.findMany({
+      where: {
+        complaintId,
+        ...(canViewInternal ? {} : { isInternal: false }),
+      },
+      include: {
+        createdBy: {
+          select: {
+            id: true,
+            nameEN: true,
+            nameAR: true,
+            email: true,
+            phone: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async addCommentForActor(
+    complaintId: string,
+    dto: CreateComplaintCommentDto,
+    ctx: { actorUserId: string; permissions: string[] },
+  ) {
+    const complaint = await this.findOneForActor(complaintId, ctx);
+    const canUseInternal = this.canViewAllOrManage(ctx.permissions);
+
+    if (dto.isInternal && !canUseInternal) {
+      throw new ForbiddenException('Internal comments are allowed for staff only');
+    }
+
+    const createdComment = await this.prisma.complaintComment.create({
+      data: {
+        complaintId: complaint.id,
+        createdById: ctx.actorUserId,
+        body: dto.body.trim(),
+        isInternal: Boolean(dto.isInternal && canUseInternal),
+      },
+      include: {
+        createdBy: {
+          select: {
+            id: true,
+            nameEN: true,
+            nameAR: true,
+            email: true,
+            phone: true,
+          },
+        },
+      },
+    });
+
+    const isStaffPublicReply =
+      this.canViewAllOrManage(ctx.permissions) && !createdComment.isInternal;
+    if (isStaffPublicReply && complaint.reporterId) {
+      await this.sendComplaintNotification({
+        reporterId: complaint.reporterId,
+        complaintId: complaint.id,
+        title: `Update on complaint ${complaint.complaintNumber ?? complaint.id.slice(0, 8)}`,
+        messageEn: createdComment.body.trim(),
+        eventKey: 'complaint.commented',
+      });
+    }
+
+    return createdComment;
+  }
+
   // --- 4. UPDATE (Handles all patching, including status and assignedToId) ---
   async update(id: string, dto: UpdateComplaintDto) {
-    await this.findOne(id);
+    const complaint = await this.findOne(id);
 
     const dataToUpdate: any = { ...dto };
 
@@ -213,10 +304,23 @@ export class ComplaintsService {
     }
 
     // 3. Send the merged data to Prisma (handles assignedToId, status, notes, and timestamp)
-    return this.prisma.complaint.update({
+    const previousStatus = complaint.status;
+    const updated = await this.prisma.complaint.update({
       where: { id },
       data: dataToUpdate,
     });
+
+    if (updated.reporterId && previousStatus !== updated.status) {
+      await this.sendComplaintNotification({
+        reporterId: updated.reporterId,
+        complaintId: updated.id,
+        title: `Complaint ${updated.complaintNumber ?? updated.id.slice(0, 8)} status updated`,
+        messageEn: `Your complaint status is now ${String(updated.status).replaceAll('_', ' ')}.`,
+        eventKey: 'complaint.status_changed',
+      });
+    }
+
+    return updated;
   }
 
   // --- 5. DELETE ---
@@ -320,9 +424,48 @@ export class ComplaintsService {
     const dataToUpdate: any = { status, resolutionNotes };
     dataToUpdate.resolvedAt = this.getResolutionTimestamp(status);
 
-    return this.prisma.complaint.update({
+    const updated = await this.prisma.complaint.update({
       where: { id },
       data: dataToUpdate,
     });
+
+    if (updated.reporterId) {
+      await this.sendComplaintNotification({
+        reporterId: updated.reporterId,
+        complaintId: updated.id,
+        title: `Complaint ${updated.complaintNumber ?? updated.id.slice(0, 8)} status updated`,
+        messageEn: `Your complaint status is now ${String(updated.status).replaceAll('_', ' ')}.`,
+        eventKey: 'complaint.status_changed',
+      });
+    }
+
+    return updated;
+  }
+
+  private async sendComplaintNotification(params: {
+    reporterId: string;
+    complaintId: string;
+    title: string;
+    messageEn: string;
+    eventKey: string;
+  }) {
+    try {
+      await this.notificationsService.sendNotification({
+        type: NotificationType.ANNOUNCEMENT,
+        title: params.title,
+        messageEn: params.messageEn,
+        channels: [Channel.IN_APP, Channel.PUSH],
+        targetAudience: Audience.SPECIFIC_RESIDENCES,
+        audienceMeta: { userIds: [params.reporterId] },
+        payload: {
+          route: '/complaints',
+          entityType: 'COMPLAINT',
+          entityId: params.complaintId,
+          eventKey: params.eventKey,
+        },
+      });
+    } catch {
+      // Notifications must not break complaint workflow mutations.
+    }
   }
 }

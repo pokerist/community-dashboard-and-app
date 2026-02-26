@@ -3,6 +3,7 @@
 import { Injectable, Logger, Inject } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { NotificationsService } from '../../modules/notifications/notifications.service';
+import { PrismaService } from '../../../prisma/prisma.service';
 import { InvoiceCreatedEvent } from '../contracts/invoice-created.event';
 import { IncidentCreatedEvent } from '../contracts/incident-created.event';
 import { IncidentResolvedEvent } from '../contracts/incident-resolved.event';
@@ -29,6 +30,7 @@ export class NotificationListener {
   constructor(
     @Inject(NotificationsService)
     private readonly notificationsService: NotificationsService,
+    private readonly prisma: PrismaService,
   ) {}
 
   // This method runs whenever an 'invoice.created' event is emitted
@@ -329,6 +331,49 @@ export class NotificationListener {
     } catch (error: unknown) {
       this.logger.error(
         `Failed to send service request created notification for ${payload.serviceRequestId}`,
+        error,
+      );
+    }
+
+    try {
+      const adminRecipients = await this.prisma.user.findMany({
+        where: {
+          roles: {
+            some: {
+              role: {
+                name: { in: ['SUPER_ADMIN', 'MANAGER'] },
+              },
+            },
+          },
+        },
+        select: { id: true },
+        take: 100,
+      });
+
+      const userIds = adminRecipients.map((u) => u.id).filter(Boolean);
+      if (userIds.length > 0) {
+        await this.notificationsService.sendNotification({
+          type: NotificationType.MAINTENANCE_ALERT,
+          title: 'New resident ticket submitted',
+          messageEn: `${payload.serviceName} was submitted and is waiting for review.`,
+          channels: [Channel.IN_APP],
+          targetAudience: Audience.SPECIFIC_RESIDENCES,
+          audienceMeta: { userIds },
+          payload: {
+            route: '/services',
+            entityType: 'SERVICE_REQUEST',
+            entityId: payload.serviceRequestId,
+            eventKey: 'service_request.created.admin',
+            serviceId: payload.serviceId,
+            serviceCategory: payload.serviceCategory,
+            unitId: payload.unitId,
+            createdById: payload.createdById,
+          },
+        });
+      }
+    } catch (error: unknown) {
+      this.logger.error(
+        `Failed to send admin ticket notification for ${payload.serviceRequestId}`,
         error,
       );
     }

@@ -4,6 +4,7 @@ import DateTimePicker, { type DateTimePickerEvent } from '@react-native-communit
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   ActivityIndicator,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -34,6 +35,8 @@ type AccessQrScreenProps = {
   unitsErrorMessage: string | null;
   onSelectUnit: (unitId: string) => void;
   onRefreshUnits: () => Promise<void>;
+  deepLinkAccessQrId?: string | null;
+  onConsumeDeepLinkAccessQrId?: (qrId: string) => void;
 };
 
 const QR_TYPES = ['VISITOR', 'DELIVERY', 'WORKER', 'SERVICE_PROVIDER', 'RIDESHARE', 'SELF'] as const;
@@ -136,6 +139,8 @@ export function AccessQrScreen({
   unitsErrorMessage,
   onSelectUnit,
   onRefreshUnits,
+  deepLinkAccessQrId = null,
+  onConsumeDeepLinkAccessQrId,
 }: AccessQrScreenProps) {
   const insets = useSafeAreaInsets();
   const toast = useAppToast();
@@ -152,6 +157,7 @@ export function AccessQrScreen({
   const [generatedQrRow, setGeneratedQrRow] = useState<AccessQrRow | null>(null);
   const [generatedQrImageBase64, setGeneratedQrImageBase64] = useState<string | null>(null);
   const [qrModalVisible, setQrModalVisible] = useState(false);
+  const [selectedQr, setSelectedQr] = useState<AccessQrRow | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -200,6 +206,15 @@ export function AccessQrScreen({
       }),
     [rows],
   );
+
+  useEffect(() => {
+    if (!deepLinkAccessQrId) return;
+    const row = rows.find((r) => r.id === deepLinkAccessQrId) ?? null;
+    if (row) {
+      setSelectedQr(row);
+      onConsumeDeepLinkAccessQrId?.(deepLinkAccessQrId);
+    }
+  }, [deepLinkAccessQrId, onConsumeDeepLinkAccessQrId, rows]);
 
   const requiresVisitorName = type === 'VISITOR';
   const selectedTypeMeta = typeMeta(type);
@@ -521,22 +536,24 @@ export function AccessQrScreen({
         const meta = typeMeta(row.type ?? 'QR');
         return (
           <View key={row.id} style={styles.historyCard}>
-            <View style={styles.historyTopRow}>
-              <View style={[styles.historyIconWrap, { backgroundColor: meta.tintBg }]}>
-                <Ionicons name={meta.icon} size={18} color={meta.tint} />
-              </View>
-              <View style={styles.flex}>
-                <View style={styles.historyTitleRow}>
-                  <Text style={styles.historyId}>{row.qrId ?? row.id}</Text>
-                  <View style={[styles.statusBadge, { backgroundColor: badge.bg, borderColor: badge.border }]}>
-                    <Text style={[styles.statusBadgeText, { color: badge.text }]}>{String(row.status ?? 'UNKNOWN')}</Text>
-                  </View>
+            <Pressable style={styles.historyBodyPress} onPress={() => setSelectedQr(row)}>
+              <View style={styles.historyTopRow}>
+                <View style={[styles.historyIconWrap, { backgroundColor: meta.tintBg }]}>
+                  <Ionicons name={meta.icon} size={18} color={meta.tint} />
                 </View>
-                <Text style={styles.historySub}>{formatTypeLabel(row.type)}{row.visitorName ? ` • ${row.visitorName}` : ''}</Text>
-                <Text style={styles.historyTime}>{formatDateTime(row.validFrom)} → {formatDateTime(row.validTo)}</Text>
+                <View style={styles.flex}>
+                  <View style={styles.historyTitleRow}>
+                    <Text style={styles.historyId}>{row.qrId ?? row.id}</Text>
+                    <View style={[styles.statusBadge, { backgroundColor: badge.bg, borderColor: badge.border }]}>
+                      <Text style={[styles.statusBadgeText, { color: badge.text }]}>{String(row.status ?? 'UNKNOWN')}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.historySub}>{formatTypeLabel(row.type)}{row.visitorName ? ` • ${row.visitorName}` : ''}</Text>
+                  <Text style={styles.historyTime}>{formatDateTime(row.validFrom)} → {formatDateTime(row.validTo)}</Text>
+                </View>
               </View>
-            </View>
-            {row.notes ? <Text style={styles.historyNote}>{row.notes}</Text> : null}
+              {row.notes ? <Text style={styles.historyNote}>{row.notes}</Text> : null}
+            </Pressable>
             <View style={styles.historyFooter}>
               <Text style={styles.historyCreated}>Created {formatDateTime(row.createdAt)}</Text>
               {isActive ? (
@@ -560,6 +577,78 @@ export function AccessQrScreen({
           else toast.info(title, description);
         }}
       />
+      <Modal
+        visible={Boolean(selectedQr)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSelectedQr(null)}
+      >
+        <View style={styles.detailRoot}>
+          <Pressable style={styles.detailBackdrop} onPress={() => setSelectedQr(null)} />
+          <View style={styles.detailSheet}>
+            <View style={styles.detailHandle} />
+            <View style={styles.detailHeaderRow}>
+              <View style={styles.flex}>
+                <Text style={styles.detailTitle}>QR Access Permit</Text>
+                <Text style={styles.detailSubtitle}>
+                  {selectedQr?.qrId ?? selectedQr?.id ?? '—'}
+                </Text>
+              </View>
+              <Pressable style={styles.detailCloseBtn} onPress={() => setSelectedQr(null)}>
+                <Ionicons name="close" size={18} color={akColors.textMuted} />
+              </Pressable>
+            </View>
+
+            <View style={styles.detailBody}>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Type</Text>
+                <Text style={styles.detailValue}>{formatTypeLabel(selectedQr?.type)}</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Status</Text>
+                <Text style={styles.detailValue}>{String(selectedQr?.status ?? 'UNKNOWN').replaceAll('_', ' ')}</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Visitor</Text>
+                <Text style={styles.detailValue}>{selectedQr?.visitorName?.trim() || 'Not provided'}</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Validity</Text>
+                <Text style={styles.detailValue}>
+                  {formatDateTime(selectedQr?.validFrom)} {'\n'}→ {formatDateTime(selectedQr?.validTo)}
+                </Text>
+              </View>
+              {selectedQr?.notes ? (
+                <View style={styles.detailNotesBox}>
+                  <Text style={styles.detailNotesLabel}>Notes</Text>
+                  <Text style={styles.detailNotesText}>{selectedQr.notes}</Text>
+                </View>
+              ) : null}
+            </View>
+
+            <View style={styles.detailActions}>
+              <Pressable style={styles.detailGhostBtn} onPress={() => setSelectedQr(null)}>
+                <Text style={styles.detailGhostBtnText}>Close</Text>
+              </Pressable>
+              {String(selectedQr?.status).toUpperCase() === 'ACTIVE' && selectedQr?.id ? (
+                <Pressable
+                  onPress={async () => {
+                    const id = selectedQr.id;
+                    setSelectedQr(null);
+                    await handleRevoke(id);
+                  }}
+                  style={[styles.detailDangerBtn, revokingId === selectedQr?.id && styles.buttonDisabled]}
+                  disabled={revokingId === selectedQr?.id}
+                >
+                  <Text style={styles.detailDangerBtnText}>
+                    {revokingId === selectedQr?.id ? 'Revoking...' : 'Revoke'}
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -766,6 +855,9 @@ const styles = StyleSheet.create({
     gap: 10,
     ...akShadow.soft,
   },
+  historyBodyPress: {
+    gap: 10,
+  },
   historyTopRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   historyIconWrap: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   historyTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
@@ -787,4 +879,131 @@ const styles = StyleSheet.create({
   },
   revokeButtonText: { color: '#B91C1C', fontSize: 11, fontWeight: '700' },
   flex: { flex: 1 },
+  detailRoot: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(15,23,42,0.18)',
+  },
+  detailBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15,23,42,0.22)',
+  },
+  detailSheet: {
+    backgroundColor: akColors.surface,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 18,
+    gap: 12,
+    ...akShadow.soft,
+  },
+  detailHandle: {
+    alignSelf: 'center',
+    width: 42,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: akColors.border,
+    opacity: 0.85,
+  },
+  detailHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  detailTitle: {
+    color: akColors.text,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  detailSubtitle: {
+    marginTop: 2,
+    color: akColors.textMuted,
+    fontSize: 12,
+  },
+  detailCloseBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: akColors.border,
+    backgroundColor: akColors.surfaceMuted,
+  },
+  detailBody: {
+    gap: 10,
+  },
+  detailRow: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    backgroundColor: akColors.surfaceMuted,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 4,
+  },
+  detailLabel: {
+    color: akColors.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  detailValue: {
+    color: akColors.text,
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 18,
+  },
+  detailNotesBox: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    backgroundColor: 'rgba(201,169,97,0.08)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 4,
+  },
+  detailNotesLabel: {
+    color: akColors.primary,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  detailNotesText: {
+    color: akColors.text,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  detailActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  detailGhostBtn: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    backgroundColor: akColors.surface,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  detailGhostBtnText: {
+    color: akColors.text,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  detailDangerBtn: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(220,38,38,0.18)',
+    backgroundColor: 'rgba(220,38,38,0.08)',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  detailDangerBtnText: {
+    color: '#B91C1C',
+    fontSize: 12,
+    fontWeight: '700',
+  },
 });

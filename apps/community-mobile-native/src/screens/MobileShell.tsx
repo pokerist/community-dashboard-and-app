@@ -22,6 +22,7 @@ import {
   useNotificationRealtime,
 } from '../features/notifications/realtime';
 import { ResidentHomeScreen } from './ResidentHomeScreen';
+import { CommunityUpdatesScreen } from './CommunityUpdatesScreen';
 import { NotificationsListScreen } from './NotificationsListScreen';
 import { SessionHomeScreen } from './SessionHomeScreen';
 import { ServicesRequestsScreen } from './ServicesRequestsScreen';
@@ -39,6 +40,7 @@ type MobileShellProps = {
 
 type RootTabsParamList = {
   Home: undefined;
+  CommunityUpdates: undefined;
   Notifications: undefined;
   Bookings: undefined;
   Services: undefined;
@@ -58,6 +60,8 @@ function tabIcon(routeName: keyof RootTabsParamList, color: string, size: number
       return <Ionicons name="home-outline" size={size} color={color} />;
     case 'Notifications':
       return <Ionicons name="notifications-outline" size={size} color={color} />;
+    case 'CommunityUpdates':
+      return <Ionicons name="megaphone-outline" size={size} color={color} />;
     case 'Bookings':
       return <Ionicons name="calendar-outline" size={size} color={color} />;
     case 'Services':
@@ -97,6 +101,17 @@ function MobileShellInner(props: MobileShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [currentRouteName, setCurrentRouteName] = useState<keyof RootTabsParamList>('Home');
   const [bootstrapProfile, setBootstrapProfile] = useState<AuthBootstrapProfile | null>(null);
+  const [pendingServiceRequestFocus, setPendingServiceRequestFocus] = useState<{
+    id: string;
+    mode: 'services' | 'requests';
+  } | null>(null);
+  const [pendingBookingId, setPendingBookingId] = useState<string | null>(null);
+  const [pendingComplaintId, setPendingComplaintId] = useState<string | null>(null);
+  const [pendingAccessQrId, setPendingAccessQrId] = useState<string | null>(null);
+  const [pendingFinanceFocus, setPendingFinanceFocus] = useState<{
+    entityType: 'INVOICE' | 'VIOLATION';
+    entityId: string;
+  } | null>(null);
   const units = useResidentUnits(props.session.accessToken);
   const realtime = useNotificationRealtime();
   const insets = useSafeAreaInsets();
@@ -146,27 +161,131 @@ function MobileShellInner(props: MobileShellProps) {
   }) => {
     if (!navigationRef.isReady()) return;
 
-    const route = String(payload.route ?? '').toLowerCase();
-    if (route.includes('payments') || route.includes('violations')) {
+    const route = String(payload.route ?? '')
+      .trim()
+      .toLowerCase()
+      .replace(/^\//, '');
+    const entityType = String(payload.entityType ?? '').toUpperCase();
+    const entityId = String(payload.entityId ?? '').trim();
+
+    const queueServiceRequestFocus = (mode: 'services' | 'requests') => {
+      if (entityType === 'SERVICE_REQUEST' && entityId) {
+        setPendingServiceRequestFocus({ id: entityId, mode });
+      }
+    };
+    const queueBookingFocus = () => {
+      if (entityType === 'BOOKING' && entityId) setPendingBookingId(entityId);
+    };
+    const queueComplaintFocus = () => {
+      if (entityType === 'COMPLAINT' && entityId) setPendingComplaintId(entityId);
+    };
+    const queueAccessQrFocus = () => {
+      if (
+        ['ACCESS_QR', 'ACCESS_QRCODE', 'QR_CODE'].includes(entityType) &&
+        entityId
+      ) {
+        setPendingAccessQrId(entityId);
+      }
+    };
+    const queueFinanceFocus = () => {
+      if ((entityType === 'INVOICE' || entityType === 'VIOLATION') && entityId) {
+        setPendingFinanceFocus({ entityType: entityType as 'INVOICE' | 'VIOLATION', entityId });
+      }
+    };
+
+    if (
+      route.includes('payments') ||
+      route.includes('finance') ||
+      route.includes('invoices') ||
+      route.includes('violations')
+    ) {
+      queueFinanceFocus();
       navigationRef.navigate('Finance');
       return;
     }
+    if (
+      route.includes('community-updates') ||
+      route.includes('community') ||
+      route.includes('announcement') ||
+      ['ANNOUNCEMENT', 'EVENT_NOTIFICATION', 'MAINTENANCE_ALERT', 'EMERGENCY_ALERT'].includes(
+        entityType,
+      )
+    ) {
+      navigationRef.navigate('CommunityUpdates');
+      return;
+    }
     if (route.includes('booking')) {
+      queueBookingFocus();
       navigationRef.navigate('Bookings');
       return;
     }
     if (route.includes('request')) {
+      queueServiceRequestFocus('requests');
       navigationRef.navigate('Requests');
       return;
     }
     if (route.includes('service')) {
+      queueServiceRequestFocus('services');
       navigationRef.navigate('Services');
       return;
     }
     if (route.includes('complaint')) {
+      queueComplaintFocus();
       navigationRef.navigate('Complaints');
       return;
     }
+    if (
+      route.includes('qr') ||
+      route.includes('access') ||
+      route.includes('visitor')
+    ) {
+      queueAccessQrFocus();
+      navigationRef.navigate('Access');
+      return;
+    }
+    if (route.includes('profile') || route.includes('account')) {
+      navigationRef.navigate('Profile');
+      return;
+    }
+    if (route.includes('household') || route.includes('family')) {
+      navigationRef.navigate('Household');
+      return;
+    }
+    if (route.includes('notification')) {
+      navigationRef.navigate('Notifications');
+      return;
+    }
+
+    if (entityType === 'INVOICE' || entityType === 'VIOLATION') {
+      queueFinanceFocus();
+      navigationRef.navigate('Finance');
+      return;
+    }
+    if (entityType === 'SERVICE_REQUEST') {
+      queueServiceRequestFocus('requests');
+      navigationRef.navigate('Requests');
+      return;
+    }
+    if (entityType === 'BOOKING') {
+      queueBookingFocus();
+      navigationRef.navigate('Bookings');
+      return;
+    }
+    if (['ACCESS_QR', 'ACCESS_QRCODE', 'QR_CODE'].includes(entityType)) {
+      queueAccessQrFocus();
+      navigationRef.navigate('Access');
+      return;
+    }
+    if (entityType === 'COMPLAINT') {
+      queueComplaintFocus();
+      navigationRef.navigate('Complaints');
+      return;
+    }
+    if (entityType === 'ACCESS_QR' || entityType === 'QR') {
+      navigationRef.navigate('Access');
+      return;
+    }
+
     navigationRef.navigate('Notifications');
   };
 
@@ -253,6 +372,7 @@ function MobileShellInner(props: MobileShellProps) {
               onRefreshUnits={units.refresh}
               onOpenMenu={() => setDrawerOpen(true)}
               onOpenNotifications={() => navigation.navigate('Notifications')}
+              onOpenCommunityUpdates={() => navigation.navigate('CommunityUpdates')}
               onOpenBookings={() => navigation.navigate('Bookings')}
               onOpenServices={() => navigation.navigate('Services')}
               onOpenRequests={() => navigation.navigate('Requests')}
@@ -266,7 +386,21 @@ function MobileShellInner(props: MobileShellProps) {
         </Tab.Screen>
 
         <Tab.Screen name="Notifications" options={hiddenTabOptions}>
-          {() => <NotificationsListScreen session={props.session} />}
+          {() => (
+            <NotificationsListScreen
+              session={props.session}
+              onOpenInAppRoute={(payload) => navigateFromPushPayload(payload)}
+            />
+          )}
+        </Tab.Screen>
+
+        <Tab.Screen name="CommunityUpdates" options={hiddenTabOptions}>
+          {() => (
+            <CommunityUpdatesScreen
+              session={props.session}
+              onOpenInAppRoute={(payload) => navigateFromPushPayload(payload)}
+            />
+          )}
         </Tab.Screen>
 
         <Tab.Screen name="Bookings" options={hiddenTabOptions}>
@@ -281,6 +415,10 @@ function MobileShellInner(props: MobileShellProps) {
               unitsErrorMessage={units.errorMessage}
               onSelectUnit={units.setSelectedUnitId}
               onRefreshUnits={units.refresh}
+              deepLinkBookingId={pendingBookingId}
+              onConsumeDeepLinkBookingId={(bookingId) =>
+                setPendingBookingId((current) => (current === bookingId ? null : current))
+              }
             />
           )}
         </Tab.Screen>
@@ -298,6 +436,20 @@ function MobileShellInner(props: MobileShellProps) {
               unitsErrorMessage={units.errorMessage}
               onSelectUnit={units.setSelectedUnitId}
               onRefreshUnits={units.refresh}
+              deepLinkTicketId={
+                pendingServiceRequestFocus?.mode === 'services'
+                  ? pendingServiceRequestFocus.id
+                  : null
+              }
+              onConsumeDeepLinkTicketId={(requestId) =>
+                setPendingServiceRequestFocus((current) =>
+                  current &&
+                  current.mode === 'services' &&
+                  current.id === requestId
+                    ? null
+                    : current,
+                )
+              }
             />
           )}
         </Tab.Screen>
@@ -315,6 +467,20 @@ function MobileShellInner(props: MobileShellProps) {
               unitsErrorMessage={units.errorMessage}
               onSelectUnit={units.setSelectedUnitId}
               onRefreshUnits={units.refresh}
+              deepLinkTicketId={
+                pendingServiceRequestFocus?.mode === 'requests'
+                  ? pendingServiceRequestFocus.id
+                  : null
+              }
+              onConsumeDeepLinkTicketId={(requestId) =>
+                setPendingServiceRequestFocus((current) =>
+                  current &&
+                  current.mode === 'requests' &&
+                  current.id === requestId
+                    ? null
+                    : current,
+                )
+              }
             />
           )}
         </Tab.Screen>
@@ -331,6 +497,12 @@ function MobileShellInner(props: MobileShellProps) {
               unitsErrorMessage={units.errorMessage}
               onSelectUnit={units.setSelectedUnitId}
               onRefreshUnits={units.refresh}
+              deepLinkComplaintId={pendingComplaintId}
+              onConsumeDeepLinkComplaintId={(complaintId) =>
+                setPendingComplaintId((current) =>
+                  current === complaintId ? null : current,
+                )
+              }
             />
           )}
         </Tab.Screen>
@@ -356,6 +528,10 @@ function MobileShellInner(props: MobileShellProps) {
               unitsErrorMessage={units.errorMessage}
               onSelectUnit={units.setSelectedUnitId}
               onRefreshUnits={units.refresh}
+              deepLinkAccessQrId={pendingAccessQrId}
+              onConsumeDeepLinkAccessQrId={(qrId) =>
+                setPendingAccessQrId((current) => (current === qrId ? null : current))
+              }
             />
           )}
         </Tab.Screen>
@@ -371,6 +547,16 @@ function MobileShellInner(props: MobileShellProps) {
               unitsRefreshing={units.isRefreshing}
               unitsLoading={units.isLoading}
               unitsErrorMessage={units.errorMessage}
+              deepLinkFocus={pendingFinanceFocus}
+              onConsumeDeepLinkFocus={(entityType, entityId) =>
+                setPendingFinanceFocus((current) =>
+                  current &&
+                  current.entityType === entityType &&
+                  current.entityId === entityId
+                    ? null
+                    : current,
+                )
+              }
             />
           )}
         </Tab.Screen>

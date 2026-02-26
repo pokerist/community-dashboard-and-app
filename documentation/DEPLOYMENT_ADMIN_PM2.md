@@ -11,6 +11,9 @@ Server target used in our current setup:
 ## Files Added
 - `scripts/deploy/deploy-admin-stack.sh`
 - `scripts/deploy/pm2.admin-stack.ecosystem.cjs`
+- `scripts/deploy/pm2.admin-stack.ecosystem.js`
+- `scripts/deploy/smoke-admin-stack.sh`
+- `scripts/deploy/nginx.community-dashboard.conf.example`
 - `.env.production.example`
 - `apps/admin-web/.env.production.example`
 
@@ -94,6 +97,11 @@ Environment toggles (optional):
 - `AUTO_BOOTSTRAP_SERVER=false` → skip auto-install/bootstrap
 - `AUTO_OPEN_FIREWALL_PORTS=false` → skip UFW rules
 - `AUTO_PM2_STARTUP=false` → skip `pm2 startup`
+- `AUTO_INSTALL_POSTGRES=false` → skip PostgreSQL package install
+- `AUTO_PROVISION_LOCAL_DB=false` → skip local DB/user provisioning
+- `AUTO_LOCAL_DB_TRUST_AUTH=false` → skip demo `pg_hba.conf` trust auth changes
+- `HEALTH_CHECK_AFTER_DEPLOY=false` → skip local HTTP health checks at end
+- `API_HEALTH_PATH=/api` → override backend health path used by deploy smoke
 - `NODE_MAJOR=20` → change Node major installer target
 
 ## PM2 Commands
@@ -106,6 +114,16 @@ pm2 restart community-admin-web
 pm2 save
 ```
 
+## Post-Deploy Smoke (Server)
+```bash
+npm run smoke:admin-stack:linux
+```
+
+Or directly:
+```bash
+SERVER_IP=108.61.174.92 FRONTEND_PORT=4002 BACKEND_PORT=4003 bash scripts/deploy/smoke-admin-stack.sh
+```
+
 ## URLs
 - Admin: `http://108.61.174.92:4002`
 - Backend: `http://108.61.174.92:4003`
@@ -113,6 +131,8 @@ pm2 save
 
 ## Notes
 - This is a direct-port deployment (no reverse proxy yet).
+- The deploy script now performs local health checks (`127.0.0.1:4002` and `127.0.0.1:4003/api`) after PM2 start and prints port listeners when checks fail.
+- PM2 ecosystem files now auto-detect backend build entry (`dist/main.js` or `dist/src/main.js`) for manual PM2 usage.
 - For production hardening later:
   - put Nginx/Caddy in front
   - enable HTTPS

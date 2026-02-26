@@ -1,9 +1,12 @@
 import { http } from '../../lib/http';
 import type {
   AccessQrRow,
+  AddServiceRequestCommentInput,
   Booking,
+  CancelServiceRequestInput,
   CommunityService,
   ComplaintRow,
+  ComplaintCommentRow,
   CreateAccessQrInput,
   CreateAccessQrResponse,
   CreateBookingInput,
@@ -23,6 +26,7 @@ import type {
   PaginatedResponse,
   ResidentUnit,
   ServiceRequestRow,
+  ServiceRequestCommentRow,
   DelegateAccessRow,
   DemoInvoicePaymentInput,
   DemoInvoicePaymentResponse,
@@ -112,6 +116,46 @@ export async function createServiceRequest(
   return response.data;
 }
 
+export async function getServiceRequestById(accessToken: string, requestId: string) {
+  const response = await http.get<ServiceRequestRow>(`/service-requests/${requestId}`, {
+    headers: authHeaders(accessToken),
+  });
+  return response.data;
+}
+
+export async function listServiceRequestComments(accessToken: string, requestId: string) {
+  const response = await http.get<ServiceRequestCommentRow[]>(`/service-requests/${requestId}/comments`, {
+    headers: authHeaders(accessToken),
+  });
+  return response.data;
+}
+
+export async function addServiceRequestComment(
+  accessToken: string,
+  requestId: string,
+  payload: AddServiceRequestCommentInput,
+) {
+  const response = await http.post<ServiceRequestCommentRow>(
+    `/service-requests/${requestId}/comments`,
+    payload,
+    { headers: authHeaders(accessToken) },
+  );
+  return response.data;
+}
+
+export async function cancelServiceRequest(
+  accessToken: string,
+  requestId: string,
+  payload?: CancelServiceRequestInput,
+) {
+  const response = await http.patch<ServiceRequestRow>(
+    `/service-requests/${requestId}/cancel`,
+    payload ?? {},
+    { headers: authHeaders(accessToken) },
+  );
+  return response.data;
+}
+
 export async function listMyComplaints(accessToken: string) {
   const response = await http.get<ComplaintRow[]>('/complaints/me', {
     headers: authHeaders(accessToken),
@@ -134,6 +178,26 @@ export async function deleteComplaint(accessToken: string, complaintId: string) 
     headers: authHeaders(accessToken),
   });
   return true;
+}
+
+export async function listComplaintComments(accessToken: string, complaintId: string) {
+  const response = await http.get<ComplaintCommentRow[]>(`/complaints/${complaintId}/comments`, {
+    headers: authHeaders(accessToken),
+  });
+  return response.data;
+}
+
+export async function addComplaintComment(
+  accessToken: string,
+  complaintId: string,
+  payload: { body: string },
+) {
+  const response = await http.post<ComplaintCommentRow>(
+    `/complaints/${complaintId}/comments`,
+    payload,
+    { headers: authHeaders(accessToken) },
+  );
+  return response.data;
 }
 
 export async function listAccessQrs(

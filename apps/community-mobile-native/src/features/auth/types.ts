@@ -5,6 +5,11 @@ export type AuthSession = {
   email: string;
 };
 
+export type SavedLoginCredentials = {
+  email: string;
+  password: string;
+};
+
 export type LoginPayload = {
   email: string;
   password: string;

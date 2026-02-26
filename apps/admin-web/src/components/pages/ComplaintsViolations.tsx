@@ -24,7 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from "../ui/table";
-import { Search, AlertTriangle, Ban, Plus } from "lucide-react";
+import { Search, AlertTriangle, Ban, Plus, Eye, Send, RefreshCw } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import apiClient from "../../lib/api-client";
 import {
@@ -32,10 +32,45 @@ import {
   extractRows,
   formatCurrencyEGP,
   formatDate,
+  formatDateTime,
   getPriorityColorClass,
   getStatusColorClass,
   humanizeEnum,
 } from "../../lib/live-data";
+import {
+  adminComplaintStatusLabel,
+  adminPriorityLabel,
+  adminViolationStatusLabel,
+} from "../../lib/status-labels";
+
+interface ComplaintListRow {
+  id: string;
+  complaintNumber?: string | null;
+  reporterId?: string | null;
+  unitId?: string | null;
+  category?: string | null;
+  description?: string | null;
+  priority?: string | null;
+  status?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  resolvedAt?: string | null;
+  resolutionNotes?: string | null;
+  reporter?: { id?: string; nameEN?: string | null; email?: string | null; phone?: string | null } | null;
+  unit?: { id?: string; unitNumber?: string | null; block?: string | null; projectName?: string | null } | null;
+  assignedTo?: { id?: string; nameEN?: string | null; email?: string | null } | null;
+}
+
+interface ComplaintCommentRow {
+  id: string;
+  body: string;
+  isInternal?: boolean;
+  createdAt?: string | null;
+  createdById?: string | null;
+  createdBy?: { id?: string; nameEN?: string | null; email?: string | null } | null;
+}
+
+const COMPLAINT_STATUSES = ["NEW", "IN_PROGRESS", "RESOLVED", "CLOSED"] as const;
 
 export function ComplaintsViolations() {
   const [isCreateComplaintOpen, setIsCreateComplaintOpen] = useState(false);
@@ -49,6 +84,18 @@ export function ComplaintsViolations() {
   const [isSubmittingComplaint, setIsSubmittingComplaint] = useState(false);
   const [isSubmittingViolation, setIsSubmittingViolation] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [complaintStatusFilter, setComplaintStatusFilter] = useState<string>("all");
+  const [isComplaintDialogOpen, setIsComplaintDialogOpen] = useState(false);
+  const [activeComplaintId, setActiveComplaintId] = useState<string | null>(null);
+  const [activeComplaint, setActiveComplaint] = useState<ComplaintListRow | null>(null);
+  const [complaintComments, setComplaintComments] = useState<ComplaintCommentRow[]>([]);
+  const [complaintDialogLoading, setComplaintDialogLoading] = useState(false);
+  const [complaintReplyText, setComplaintReplyText] = useState("");
+  const [complaintReplyInternal, setComplaintReplyInternal] = useState(false);
+  const [complaintReplySubmitting, setComplaintReplySubmitting] = useState(false);
+  const [complaintStatusDraft, setComplaintStatusDraft] = useState<string>("");
+  const [complaintStatusUpdating, setComplaintStatusUpdating] = useState(false);
+  const [complaintResolutionNotesDraft, setComplaintResolutionNotesDraft] = useState("");
   const [complaintFormData, setComplaintFormData] = useState({
     reporterId: "",
     unitId: "",
@@ -177,9 +224,111 @@ export function ComplaintsViolations() {
     }
   };
 
+  const loadComplaintDetail = useCallback(async (complaintId: string) => {
+    setComplaintDialogLoading(true);
+    try {
+      const [detailRes, commentsRes] = await Promise.all([
+        apiClient.get(`/complaints/${complaintId}`),
+        apiClient.get(`/complaints/${complaintId}/comments`),
+      ]);
+      const detail = detailRes.data as ComplaintListRow;
+      const comments = Array.isArray(commentsRes.data)
+        ? (commentsRes.data as ComplaintCommentRow[])
+        : [];
+      setActiveComplaint(detail);
+      setComplaintComments(comments);
+      setComplaintStatusDraft(String(detail.status ?? "NEW").toUpperCase());
+      setComplaintResolutionNotesDraft(detail.resolutionNotes ?? "");
+    } catch (error) {
+      toast.error("Failed to load complaint details", { description: errorMessage(error) });
+      setActiveComplaint(null);
+      setComplaintComments([]);
+    } finally {
+      setComplaintDialogLoading(false);
+    }
+  }, []);
+
+  const openComplaintDialog = useCallback(async (complaint: ComplaintListRow) => {
+    setActiveComplaintId(complaint.id);
+    setIsComplaintDialogOpen(true);
+    setComplaintReplyText("");
+    setComplaintReplyInternal(false);
+    await loadComplaintDetail(complaint.id);
+  }, [loadComplaintDetail]);
+
+  const closeComplaintDialog = useCallback(() => {
+    setIsComplaintDialogOpen(false);
+    setActiveComplaintId(null);
+    setActiveComplaint(null);
+    setComplaintComments([]);
+    setComplaintReplyText("");
+    setComplaintReplyInternal(false);
+    setComplaintStatusDraft("");
+    setComplaintResolutionNotesDraft("");
+  }, []);
+
+  const refreshActiveComplaint = useCallback(async () => {
+    if (!activeComplaintId) return;
+    await loadComplaintDetail(activeComplaintId);
+  }, [activeComplaintId, loadComplaintDetail]);
+
+  const submitComplaintReply = useCallback(async () => {
+    if (!activeComplaintId) return;
+    const body = complaintReplyText.trim();
+    if (!body) return;
+
+    setComplaintReplySubmitting(true);
+    try {
+      await apiClient.post(`/complaints/${activeComplaintId}/comments`, {
+        body,
+        isInternal: complaintReplyInternal,
+      });
+      toast.success(complaintReplyInternal ? "Internal note posted" : "Reply posted");
+      setComplaintReplyText("");
+      setComplaintReplyInternal(false);
+      await refreshActiveComplaint();
+    } catch (error) {
+      toast.error("Failed to post comment", { description: errorMessage(error) });
+    } finally {
+      setComplaintReplySubmitting(false);
+    }
+  }, [activeComplaintId, complaintReplyInternal, complaintReplyText, refreshActiveComplaint]);
+
+  const applyComplaintStatus = useCallback(async () => {
+    if (!activeComplaintId || !complaintStatusDraft) return;
+    const target = String(complaintStatusDraft).toUpperCase();
+    const requiresNotes = target === "RESOLVED" || target === "CLOSED";
+    if (requiresNotes && !complaintResolutionNotesDraft.trim()) {
+      toast.error("Resolution notes required", { description: "Add resolution notes before resolving or closing." });
+      return;
+    }
+
+    setComplaintStatusUpdating(true);
+    try {
+      await apiClient.patch(`/complaints/${activeComplaintId}/status`, {
+        status: target,
+        resolutionNotes: complaintResolutionNotesDraft.trim() || undefined,
+      });
+      toast.success("Complaint status updated");
+      await Promise.all([loadData(), refreshActiveComplaint()]);
+    } catch (error) {
+      toast.error("Failed to update complaint", { description: errorMessage(error) });
+    } finally {
+      setComplaintStatusUpdating(false);
+    }
+  }, [
+    activeComplaintId,
+    complaintStatusDraft,
+    complaintResolutionNotesDraft,
+    loadData,
+    refreshActiveComplaint,
+  ]);
+
   const filteredComplaints = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
     return complaintsData.filter((c: any) => {
+      const status = String(c.status ?? "").toUpperCase();
+      if (complaintStatusFilter !== "all" && status !== complaintStatusFilter) return false;
       if (!q) return true;
       return [
         c.complaintNumber,
@@ -195,7 +344,7 @@ export function ComplaintsViolations() {
         .filter(Boolean)
         .some((v) => String(v).toLowerCase().includes(q));
     });
-  }, [complaintsData, searchTerm]);
+  }, [complaintsData, complaintStatusFilter, searchTerm]);
 
   const filteredViolations = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
@@ -300,7 +449,7 @@ export function ComplaintsViolations() {
           </TabsList>
 
           <TabsContent value="complaints" className="m-0">
-            <div className="p-4 border-b border-[#E5E7EB] flex gap-4">
+            <div className="p-4 border-b border-[#E5E7EB] flex flex-col gap-4 lg:flex-row">
               <div className="flex-1 relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#64748B]" />
                 <Input
@@ -310,6 +459,23 @@ export function ComplaintsViolations() {
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
               </div>
+              <Select value={complaintStatusFilter} onValueChange={setComplaintStatusFilter}>
+                <SelectTrigger className="w-full lg:w-[220px]">
+                  <SelectValue placeholder="Filter by status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All statuses</SelectItem>
+                  {COMPLAINT_STATUSES.map((status) => (
+                    <SelectItem key={status} value={status}>
+                      {adminComplaintStatusLabel(status)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button variant="outline" onClick={() => void loadData()} disabled={isLoading}>
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Refresh
+              </Button>
               <Dialog open={isCreateComplaintOpen} onOpenChange={setIsCreateComplaintOpen}>
                 <DialogTrigger asChild>
                   <Button className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white rounded-lg gap-2">
@@ -437,6 +603,7 @@ export function ComplaintsViolations() {
                   <TableHead>Status</TableHead>
                   <TableHead>Assigned To</TableHead>
                   <TableHead>Date</TableHead>
+                  <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -459,23 +626,29 @@ export function ComplaintsViolations() {
                     </TableCell>
                     <TableCell>
                       <Badge className={getPriorityColorClass(complaint.priority)}>
-                        {humanizeEnum(complaint.priority)}
+                        {adminPriorityLabel(complaint.priority)}
                       </Badge>
                     </TableCell>
                     <TableCell>
                       <Badge className={getStatusColorClass(complaint.status)}>
-                        {humanizeEnum(complaint.status)}
+                        {adminComplaintStatusLabel(complaint.status)}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-[#64748B]">
                       {complaint.assignedTo?.nameEN ?? complaint.assignedToId ?? "Unassigned"}
                     </TableCell>
                     <TableCell className="text-[#64748B]">{formatDate(complaint.createdAt)}</TableCell>
+                    <TableCell>
+                      <Button variant="ghost" size="sm" onClick={() => void openComplaintDialog(complaint)}>
+                        <Eye className="w-4 h-4 mr-1" />
+                        Open
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))}
                 {!isLoading && filteredComplaints.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="text-center py-10 text-[#64748B]">
+                    <TableCell colSpan={10} className="text-center py-10 text-[#64748B]">
                       No complaints found.
                     </TableCell>
                   </TableRow>
@@ -645,7 +818,7 @@ export function ComplaintsViolations() {
                     <TableCell className="text-[#1E293B]">{formatCurrencyEGP(violation.fineAmount)}</TableCell>
                     <TableCell>
                       <Badge className={getStatusColorClass(violation.status)}>
-                        {humanizeEnum(violation.status)}
+                        {adminViolationStatusLabel(violation.status)}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-[#64748B]">{formatDate(violation.createdAt ?? violation.issuedAt)}</TableCell>
@@ -664,6 +837,229 @@ export function ComplaintsViolations() {
           </TabsContent>
         </Tabs>
       </Card>
+
+      <Dialog
+        open={isComplaintDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) closeComplaintDialog();
+          else setIsComplaintDialogOpen(true);
+        }}
+      >
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Complaint Details</DialogTitle>
+            <DialogDescription>
+              Review complaint information, update workflow status, and reply to the resident.
+            </DialogDescription>
+          </DialogHeader>
+
+          {complaintDialogLoading ? (
+            <div className="py-10 flex items-center justify-center">
+              <span className="text-sm text-[#64748B]">Loading complaint...</span>
+            </div>
+          ) : activeComplaint ? (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <Card className="p-4 lg:col-span-2">
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <h4 className="text-[#1E293B]">{activeComplaint.category || "Complaint"}</h4>
+                      <p className="text-xs text-[#64748B] mt-1">
+                        Complaint ID: {activeComplaint.complaintNumber ?? activeComplaint.id}
+                      </p>
+                    </div>
+                    <Badge className={getStatusColorClass(activeComplaint.status)}>
+                      {adminComplaintStatusLabel(activeComplaint.status || "NEW")}
+                    </Badge>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4 text-sm">
+                    <div>
+                      <p className="text-[#64748B]">Resident</p>
+                      <p className="text-[#1E293B]">{activeComplaint.reporter?.nameEN || "—"}</p>
+                      <p className="text-xs text-[#64748B]">
+                        {activeComplaint.reporter?.email || activeComplaint.reporter?.phone || "—"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[#64748B]">Unit</p>
+                      <p className="text-[#1E293B]">
+                        {activeComplaint.unit?.block ? `${activeComplaint.unit.block} • ` : ""}
+                        {activeComplaint.unit?.unitNumber ?? "—"}
+                      </p>
+                      <p className="text-xs text-[#64748B]">
+                        Priority: {adminPriorityLabel(activeComplaint.priority || "MEDIUM")}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[#64748B]">Submitted</p>
+                      <p className="text-[#1E293B]">{formatDateTime(activeComplaint.createdAt)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[#64748B]">Last Updated</p>
+                      <p className="text-[#1E293B]">{formatDateTime(activeComplaint.updatedAt)}</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 pt-4 border-t border-[#E5E7EB] space-y-2">
+                    <p className="text-[#64748B] text-sm">Resident Complaint</p>
+                    <p className="text-sm text-[#1E293B] whitespace-pre-wrap break-words">
+                      {activeComplaint.description || "—"}
+                    </p>
+                  </div>
+
+                  {activeComplaint.resolutionNotes ? (
+                    <div className="mt-4 pt-4 border-t border-[#E5E7EB] space-y-2">
+                      <p className="text-[#64748B] text-sm">Resolution Notes</p>
+                      <p className="text-sm text-[#334155] whitespace-pre-wrap break-words">
+                        {activeComplaint.resolutionNotes}
+                      </p>
+                    </div>
+                  ) : null}
+                </Card>
+
+                <Card className="p-4 space-y-4">
+                  <div>
+                    <Label className="mb-2 block">Update Status</Label>
+                    <Select value={complaintStatusDraft} onValueChange={setComplaintStatusDraft}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Choose status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {COMPLAINT_STATUSES.map((status) => (
+                          <SelectItem key={status} value={status}>
+                            {adminComplaintStatusLabel(status)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="complaintResolutionNotes">Resolution Notes</Label>
+                    <Textarea
+                      id="complaintResolutionNotes"
+                      rows={4}
+                      placeholder="Required when resolving or closing the complaint"
+                      value={complaintResolutionNotesDraft}
+                      onChange={(e) => setComplaintResolutionNotesDraft(e.target.value)}
+                    />
+                  </div>
+
+                  <Button
+                    className="w-full bg-[#00B386] hover:bg-[#00B386]/90 text-white"
+                    onClick={() => void applyComplaintStatus()}
+                    disabled={
+                      complaintStatusUpdating ||
+                      !complaintStatusDraft ||
+                      complaintStatusDraft === String(activeComplaint.status || "").toUpperCase()
+                    }
+                  >
+                    {complaintStatusUpdating ? "Updating..." : "Apply Status"}
+                  </Button>
+
+                  <div className="pt-4 border-t border-[#E5E7EB] space-y-2">
+                    <p className="text-sm text-[#64748B]">Quick Actions</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button variant="outline" size="sm" onClick={() => setComplaintStatusDraft("IN_PROGRESS")}>
+                        In Progress
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => setComplaintStatusDraft("RESOLVED")}>
+                        Resolved
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => setComplaintStatusDraft("CLOSED")}>
+                        Close
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => void refreshActiveComplaint()}>
+                        Refresh
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+              </div>
+
+              <Card className="p-4 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-[#1E293B]">Conversation</h4>
+                    <p className="text-sm text-[#64748B]">
+                      Public replies are visible to the resident. Internal notes remain staff-only.
+                    </p>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => void refreshActiveComplaint()}>
+                    Refresh Thread
+                  </Button>
+                </div>
+
+                <div className="space-y-3 max-h-[340px] overflow-y-auto pr-1">
+                  {complaintComments.length === 0 ? (
+                    <div className="rounded-lg border border-dashed border-[#CBD5E1] p-4 text-sm text-[#64748B]">
+                      No comments yet on this complaint.
+                    </div>
+                  ) : (
+                    complaintComments.map((comment) => (
+                      <div
+                        key={comment.id}
+                        className={`rounded-xl border p-3 ${
+                          comment.isInternal ? "border-[#F59E0B]/20 bg-[#FFFBEB]" : "border-[#E5E7EB] bg-white"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm font-medium text-[#1E293B]">
+                              {comment.createdBy?.nameEN || comment.createdBy?.email || "User"}
+                            </p>
+                            {comment.isInternal ? (
+                              <Badge className="bg-[#F59E0B]/10 text-[#F59E0B]">Internal</Badge>
+                            ) : (
+                              <Badge className="bg-[#10B981]/10 text-[#10B981]">Public</Badge>
+                            )}
+                          </div>
+                          <span className="text-xs text-[#64748B]">{formatDateTime(comment.createdAt)}</span>
+                        </div>
+                        <p className="text-sm text-[#334155] whitespace-pre-wrap mt-2">{comment.body}</p>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="space-y-3 border-t border-[#E5E7EB] pt-4">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="complaintReplyText">Reply / Note</Label>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        id="complaintReplyInternal"
+                        checked={complaintReplyInternal}
+                        onCheckedChange={setComplaintReplyInternal}
+                      />
+                      <span className="text-sm text-[#64748B]">Internal note</span>
+                    </div>
+                  </div>
+                  <Textarea
+                    id="complaintReplyText"
+                    rows={4}
+                    placeholder={complaintReplyInternal ? "Visible to staff only..." : "Reply to the resident..."}
+                    value={complaintReplyText}
+                    onChange={(e) => setComplaintReplyText(e.target.value)}
+                  />
+                  <div className="flex justify-end">
+                    <Button
+                      className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white"
+                      onClick={() => void submitComplaintReply()}
+                      disabled={complaintReplySubmitting || !complaintReplyText.trim()}
+                    >
+                      <Send className="w-4 h-4 mr-2" />
+                      {complaintReplySubmitting ? "Sending..." : "Post Reply"}
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            </div>
+          ) : (
+            <div className="py-8 text-sm text-[#64748B]">Select a complaint to view details.</div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

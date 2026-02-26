@@ -48,14 +48,24 @@ const DEMO_ACCOUNTS = [
 type LoginScreenProps = {
   isSubmitting: boolean;
   errorMessage: string | null;
-  onSubmit: (email: string, password: string) => Promise<void>;
+  canBiometricQuickSignIn?: boolean;
+  biometricLabel?: string | null;
+  onSubmit: (
+    email: string,
+    password: string,
+    options?: { rememberCredentials?: boolean },
+  ) => Promise<void>;
+  onBiometricSignIn?: () => Promise<void>;
   onOpenRegister: () => void;
 };
 
 export function LoginScreen({
   isSubmitting,
   errorMessage,
+  canBiometricQuickSignIn = false,
+  biometricLabel = null,
   onSubmit,
+  onBiometricSignIn,
   onOpenRegister,
 }: LoginScreenProps) {
   const insets = useSafeAreaInsets();
@@ -64,6 +74,7 @@ export function LoginScreen({
   const [password, setPassword] = useState('pass123');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
+  const [isBiometricSubmitting, setIsBiometricSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [showCredentials, setShowCredentials] = useState(true);
 
@@ -90,9 +101,22 @@ export function LoginScreen({
     }
 
     try {
-      await onSubmit(email, password);
+      await onSubmit(email, password, { rememberCredentials: rememberMe });
     } catch {
       // handled by auth hook
+    }
+  };
+
+  const handleBiometric = async () => {
+    if (!onBiometricSignIn || !canBiometricQuickSignIn || isSubmitting) return;
+    setLocalError(null);
+    setIsBiometricSubmitting(true);
+    try {
+      await onBiometricSignIn();
+    } catch {
+      // surfaced by auth hook
+    } finally {
+      setIsBiometricSubmitting(false);
     }
   };
 
@@ -232,15 +256,27 @@ export function LoginScreen({
 
               <Pressable
                 style={styles.outlineButton}
-                onPress={() => fillDemo(DEMO_ACCOUNTS[0])}
+                onPress={handleBiometric}
+                disabled={!canBiometricQuickSignIn || isBiometricSubmitting || isSubmitting}
               >
                 <MaterialCommunityIcons
                   name="fingerprint"
                   size={18}
-                  color={brandPrimary}
+                  color={canBiometricQuickSignIn ? brandPrimary : akColors.textSoft}
                   style={{ marginRight: 8 }}
                 />
-                <Text style={styles.outlineButtonText}>Sign in with Biometrics</Text>
+                <Text
+                  style={[
+                    styles.outlineButtonText,
+                    !canBiometricQuickSignIn && styles.outlineButtonTextDisabled,
+                  ]}
+                >
+                  {isBiometricSubmitting
+                    ? 'Authenticating...'
+                    : canBiometricQuickSignIn
+                      ? `Sign in with ${biometricLabel || 'Biometrics'}`
+                      : 'Biometric sign-in unavailable'}
+                </Text>
               </Pressable>
             </View>
 
@@ -497,6 +533,9 @@ const styles = StyleSheet.create({
     color: akColors.text,
     fontSize: 14,
     fontWeight: '600',
+  },
+  outlineButtonTextDisabled: {
+    color: akColors.textSoft,
   },
   footerBlock: {
     alignItems: 'center',

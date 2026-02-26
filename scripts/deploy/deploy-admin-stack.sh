@@ -21,6 +21,8 @@ AUTO_PM2_STARTUP="${AUTO_PM2_STARTUP:-true}"
 AUTO_INSTALL_POSTGRES="${AUTO_INSTALL_POSTGRES:-true}"
 AUTO_PROVISION_LOCAL_DB="${AUTO_PROVISION_LOCAL_DB:-true}"
 AUTO_LOCAL_DB_TRUST_AUTH="${AUTO_LOCAL_DB_TRUST_AUTH:-true}"
+HEALTH_CHECK_AFTER_DEPLOY="${HEALTH_CHECK_AFTER_DEPLOY:-true}"
+API_HEALTH_PATH="${API_HEALTH_PATH:-/api}"
 NODE_MAJOR="${NODE_MAJOR:-20}"
 DEFAULT_DB_HOST="${DEFAULT_DB_HOST:-127.0.0.1}"
 DEFAULT_DB_PORT="${DEFAULT_DB_PORT:-5432}"
@@ -49,6 +51,10 @@ note() {
 
 warn() {
   echo "WARN: $*" >&2
+}
+
+info() {
+  echo "INFO: $*"
 }
 
 run_root() {
@@ -125,6 +131,11 @@ psql_socket_test() {
   echo "---------------------------------" >&2
   rm -f "$err_file"
   return 1
+}
+
+http_head_code() {
+  local url="$1"
+  curl -sS -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || true
 }
 
 restart_postgres_service() {
@@ -514,6 +525,23 @@ if [[ "$AUTO_PM2_STARTUP" == "true" ]]; then
   fi
 fi
 
+if [[ "$HEALTH_CHECK_AFTER_DEPLOY" == "true" ]]; then
+  note "Running post-deploy health checks"
+  sleep 2
+  BACKEND_LOCAL_CODE="$(http_head_code "http://127.0.0.1:${BACKEND_PORT}${API_HEALTH_PATH}")"
+  ADMIN_LOCAL_CODE="$(http_head_code "http://127.0.0.1:${FRONTEND_PORT}/")"
+  if [[ "$BACKEND_LOCAL_CODE" =~ ^[23] ]] && [[ "$ADMIN_LOCAL_CODE" =~ ^[23] ]]; then
+    info "Local health checks passed (backend=${BACKEND_LOCAL_CODE}, admin=${ADMIN_LOCAL_CODE})"
+  else
+    warn "Local health checks not fully passing (backend=${BACKEND_LOCAL_CODE:-n/a}, admin=${ADMIN_LOCAL_CODE:-n/a})"
+    if have_cmd ss; then
+      info "Listening ports snapshot:"
+      ss -ltnp 2>/dev/null | grep -E ":${BACKEND_PORT}|:${FRONTEND_PORT}" || true
+    fi
+    warn "Inspect PM2 logs if needed: pm2 logs community-backend / pm2 logs community-admin-web"
+  fi
+fi
+
 echo ""
 echo "Deployment complete."
 echo "Admin URL   : $ADMIN_URL"
@@ -523,6 +551,7 @@ echo "Server IP   : ${SERVER_IP}"
 echo "Env file    : ${ROOT_ENV_PROD}"
 echo "Admin env   : ${ADMIN_ENV_PROD}"
 echo "Note        : Provider mocks auto-enabled when credentials are missing."
+echo "Health      : http://127.0.0.1:${BACKEND_PORT}${API_HEALTH_PATH} | http://127.0.0.1:${FRONTEND_PORT}/"
 echo ""
 echo "PM2 status:"
 pm2 status

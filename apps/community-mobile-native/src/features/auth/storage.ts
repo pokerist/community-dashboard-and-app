@@ -1,7 +1,8 @@
 import * as SecureStore from 'expo-secure-store';
-import type { AuthSession } from './types';
+import type { AuthSession, SavedLoginCredentials } from './types';
 
 const SESSION_KEY = 'alkarma.community.auth.session';
+const SAVED_LOGIN_KEY = 'alkarma.community.auth.saved-login';
 
 async function secureSetItem(key: string, value: string) {
   try {
@@ -70,4 +71,33 @@ export async function loadAuthSession(): Promise<AuthSession | null> {
 
 export async function clearAuthSession(): Promise<void> {
   await secureDeleteItem(SESSION_KEY);
+}
+
+export async function saveLoginCredentials(
+  credentials: SavedLoginCredentials,
+): Promise<void> {
+  await secureSetItem(SAVED_LOGIN_KEY, JSON.stringify(credentials));
+}
+
+export async function loadLoginCredentials(): Promise<SavedLoginCredentials | null> {
+  const raw = await secureGetItem(SAVED_LOGIN_KEY);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<SavedLoginCredentials>;
+    if (
+      typeof parsed.email !== 'string' ||
+      typeof parsed.password !== 'string' ||
+      !parsed.email.trim() ||
+      !parsed.password
+    ) {
+      return null;
+    }
+    return { email: parsed.email, password: parsed.password };
+  } catch {
+    return null;
+  }
+}
+
+export async function clearLoginCredentials(): Promise<void> {
+  await secureDeleteItem(SAVED_LOGIN_KEY);
 }

@@ -26,7 +26,8 @@
     "prisma:migrate": "npx prisma migrate dev",
     "seed:mobile-personas": "ts-node scripts/seed-mobile-personas.ts",
     "seed:dashboard-load": "ts-node scripts/reset-dashboard-data.ts",
-    "smoke:mobile-personas": "powershell -ExecutionPolicy Bypass -File scripts/mobile-persona-smoke.ps1"
+    "smoke:mobile-personas": "powershell -ExecutionPolicy Bypass -File scripts/mobile-persona-smoke.ps1",
+    "smoke:admin-stack:linux": "bash scripts/deploy/smoke-admin-stack.sh"
   },
   "dependencies": {
     "@nestjs/common": "^10.0.0",

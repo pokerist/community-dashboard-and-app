@@ -4,6 +4,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import {
   ActivityIndicator,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -21,19 +22,29 @@ import type { AuthSession } from '../features/auth/types';
 import { pickAndUploadServiceAttachment } from '../features/files/service';
 import type { UploadedAttachment } from '../features/files/service';
 import {
+  addServiceRequestComment,
+  cancelServiceRequest,
   createServiceRequest,
+  getServiceRequestById,
   listMyServiceRequests,
+  listServiceRequestComments,
   listServices,
 } from '../features/community/service';
 import type {
   CommunityService,
   CreateServiceRequestInput,
+  CancelServiceRequestInput,
   DynamicFieldValueInput,
   ResidentUnit,
   ServiceField,
+  ServiceRequestCommentRow,
   ServiceRequestRow,
 } from '../features/community/types';
 import { extractApiErrorMessage } from '../lib/http';
+import {
+  priorityDisplayLabel,
+  serviceRequestStatusDisplayLabel,
+} from '../features/presentation/status';
 import { akColors, akShadow } from '../theme/alkarma';
 import { formatCurrency, formatDateTime } from '../utils/format';
 
@@ -48,10 +59,9 @@ type ServicesRequestsScreenProps = {
   unitsErrorMessage: string | null;
   onSelectUnit: (unitId: string) => void;
   onRefreshUnits: () => Promise<void>;
+  deepLinkTicketId?: string | null;
+  onConsumeDeepLinkTicketId?: (requestId: string) => void;
 };
-
-const PRIORITY_OPTIONS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
-type PriorityOption = (typeof PRIORITY_OPTIONS)[number];
 
 function humanizeEnumToken(value?: string | null): string {
   return String(value ?? '')
@@ -90,23 +100,26 @@ function eligibilityLabel(value?: string | null): string {
   }
 }
 
-function priorityLabel(value?: string | null): string {
-  switch (String(value ?? '').toUpperCase()) {
-    case 'LOW':
-      return 'Low';
-    case 'MEDIUM':
-      return 'Normal';
-    case 'HIGH':
-      return 'High';
-    case 'CRITICAL':
-      return 'Urgent';
-    default:
-      return humanizeEnumToken(value || 'Normal');
-  }
+function canUserCancelTicket(status?: string | null): boolean {
+  return String(status ?? '').toUpperCase() === 'NEW';
 }
 
-function statusLabel(value?: string | null): string {
-  return humanizeEnumToken(value || 'New');
+function ticketStatusTone(status?: string | null): 'neutral' | 'success' | 'danger' | 'warning' {
+  const key = String(status ?? '').toUpperCase();
+  if (key === 'RESOLVED' || key === 'CLOSED') return 'success';
+  if (key === 'REJECTED' || key === 'CANCELLED') return 'danger';
+  if (key === 'IN_PROGRESS') return 'warning';
+  return 'neutral';
+}
+
+function commentAuthorLabel(comment: ServiceRequestCommentRow, session: AuthSession): string {
+  if (comment.createdById && comment.createdById === session.userId) return 'You';
+  const display =
+    comment.createdBy?.nameEN?.trim() ||
+    comment.createdBy?.nameAR?.trim() ||
+    comment.createdBy?.email?.trim() ||
+    comment.createdBy?.phone?.trim();
+  return display || 'Management';
 }
 
 function userFieldLabel(field: ServiceField): string {
@@ -146,6 +159,8 @@ export function ServicesRequestsScreen({
   unitsErrorMessage,
   onSelectUnit,
   onRefreshUnits,
+  deepLinkTicketId = null,
+  onConsumeDeepLinkTicketId,
 }: ServicesRequestsScreenProps) {
   const insets = useSafeAreaInsets();
   const toast = useAppToast();
@@ -153,20 +168,23 @@ export function ServicesRequestsScreen({
   const [requests, setRequests] = useState<ServiceRequestRow[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedServiceId, setSelectedServiceId] = useState<string | null>(null);
-  const [description, setDescription] = useState('');
-  const [priority, setPriority] = useState<PriorityOption>('MEDIUM');
   const [fieldTextDrafts, setFieldTextDrafts] = useState<Record<string, string>>({});
   const [fieldBoolDrafts, setFieldBoolDrafts] = useState<Record<string, boolean>>({});
   const [fieldFileDrafts, setFieldFileDrafts] = useState<Record<string, UploadedAttachment>>({});
-  const [attachments, setAttachments] = useState<UploadedAttachment[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
   const [uploadingFieldId, setUploadingFieldId] = useState<string | null>(null);
+  const [ticketModalOpen, setTicketModalOpen] = useState(false);
+  const [ticketLoading, setTicketLoading] = useState(false);
+  const [activeTicket, setActiveTicket] = useState<ServiceRequestRow | null>(null);
+  const [ticketComments, setTicketComments] = useState<ServiceRequestCommentRow[]>([]);
+  const [ticketCommentDraft, setTicketCommentDraft] = useState('');
+  const [ticketCommentSubmitting, setTicketCommentSubmitting] = useState(false);
+  const [ticketCancelling, setTicketCancelling] = useState(false);
   const isRequestsMode = mode === 'requests';
 
   const loadData = useCallback(
@@ -296,6 +314,39 @@ export function ServicesRequestsScreen({
     return result;
   }, [fieldBoolDrafts, fieldTextDrafts]);
 
+  const buildFallbackDescription = useCallback(
+    (service: CommunityService, fields: ServiceField[]) => {
+      const parts: string[] = [];
+
+      for (const field of fields) {
+        const type = String(field.type ?? '').toUpperCase();
+        if (type === 'BOOLEAN') {
+          if (!Object.prototype.hasOwnProperty.call(fieldBoolDrafts, field.id)) continue;
+          parts.push(`${userFieldLabel(field)}: ${fieldBoolDrafts[field.id] ? 'Yes' : 'No'}`);
+          continue;
+        }
+
+        if (type === 'FILE') {
+          const file = fieldFileDrafts[field.id];
+          if (!file) continue;
+          parts.push(`${userFieldLabel(field)}: ${file.name || 'Attachment uploaded'}`);
+          continue;
+        }
+
+        const raw = (fieldTextDrafts[field.id] ?? '').trim();
+        if (!raw) continue;
+        parts.push(`${userFieldLabel(field)}: ${raw}`);
+      }
+
+      if (parts.length > 0) {
+        return parts.join(' | ').slice(0, 900);
+      }
+
+      return `Submitted from mobile app for ${service.name}`;
+    },
+    [fieldBoolDrafts, fieldFileDrafts, fieldTextDrafts],
+  );
+
   const submitRequest = useCallback(async () => {
     if (!selectedUnitId) {
       setSubmitError('Select a unit first.');
@@ -310,23 +361,19 @@ export function ServicesRequestsScreen({
       );
       return;
     }
-    if (!description.trim()) {
-      setSubmitError('Description is required.');
-      toast.error('Missing description', 'Please provide request details.');
-      return;
-    }
-
     setIsSubmitting(true);
     setSubmitError(null);
     setSuccessMessage(null);
     try {
+      const fieldValues = buildFieldValues(selectedService.formFields ?? []);
       const payload: CreateServiceRequestInput = {
         serviceId: selectedService.id,
         unitId: selectedUnitId,
-        description: description.trim(),
-        priority,
-        attachmentIds: attachments.map((a) => a.id),
-        fieldValues: buildFieldValues(selectedService.formFields ?? []),
+        description: buildFallbackDescription(
+          selectedService,
+          selectedService.formFields ?? [],
+        ),
+        fieldValues,
       };
       await createServiceRequest(session.accessToken, payload);
       setSuccessMessage(isRequestsMode ? 'Request submitted.' : 'Service request submitted.');
@@ -334,8 +381,6 @@ export function ServicesRequestsScreen({
         isRequestsMode ? 'Request submitted' : 'Service request submitted',
         'Your request was sent successfully.',
       );
-      setDescription('');
-      setAttachments([]);
       setFieldTextDrafts({});
       setFieldBoolDrafts({});
       setFieldFileDrafts({});
@@ -349,37 +394,14 @@ export function ServicesRequestsScreen({
     }
   }, [
     buildFieldValues,
-    description,
+    buildFallbackDescription,
     loadData,
-    priority,
     selectedService,
     selectedUnitId,
     session.accessToken,
-    attachments,
     isRequestsMode,
     toast,
   ]);
-
-  const uploadAttachment = useCallback(async () => {
-    setIsUploadingAttachment(true);
-    setSubmitError(null);
-    try {
-      const uploaded = await pickAndUploadServiceAttachment(session.accessToken);
-      if (!uploaded) return;
-      setAttachments((prev) => [...prev, uploaded]);
-      toast.success('Attachment uploaded');
-    } catch (error) {
-      const msg = extractApiErrorMessage(error);
-      setSubmitError(msg);
-      toast.error('Attachment upload failed', msg);
-    } finally {
-      setIsUploadingAttachment(false);
-    }
-  }, [session.accessToken, toast]);
-
-  const removeAttachment = useCallback((fileId: string) => {
-    setAttachments((prev) => prev.filter((a) => a.id !== fileId));
-  }, []);
 
   const uploadDynamicFieldFile = useCallback(
     async (field: ServiceField) => {
@@ -400,6 +422,125 @@ export function ServicesRequestsScreen({
     },
     [session.accessToken, setFieldFile, toast],
   );
+
+  const loadTicketDetails = useCallback(
+    async (requestId: string) => {
+      setTicketLoading(true);
+      try {
+        const [ticket, comments] = await Promise.all([
+          getServiceRequestById(session.accessToken, requestId),
+          listServiceRequestComments(session.accessToken, requestId),
+        ]);
+        setActiveTicket(ticket);
+        setTicketComments(comments);
+      } catch (error) {
+        const msg = extractApiErrorMessage(error);
+        toast.error('Unable to load ticket', msg);
+      } finally {
+        setTicketLoading(false);
+      }
+    },
+    [session.accessToken, toast],
+  );
+
+  const openTicket = useCallback(
+    async (ticket: ServiceRequestRow) => {
+      setTicketModalOpen(true);
+      setActiveTicket(ticket);
+      setTicketComments(ticket.comments ?? []);
+      setTicketCommentDraft('');
+      await loadTicketDetails(ticket.id);
+    },
+    [loadTicketDetails],
+  );
+
+  const closeTicketModal = useCallback(() => {
+    setTicketModalOpen(false);
+    setTicketCommentDraft('');
+  }, []);
+
+  useEffect(() => {
+    if (!deepLinkTicketId) return;
+    let cancelled = false;
+
+    (async () => {
+      setTicketModalOpen(true);
+      setActiveTicket(null);
+      setTicketComments([]);
+      setTicketCommentDraft('');
+      await loadTicketDetails(deepLinkTicketId);
+      if (!cancelled) {
+        onConsumeDeepLinkTicketId?.(deepLinkTicketId);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [deepLinkTicketId, loadTicketDetails, onConsumeDeepLinkTicketId]);
+
+  const submitTicketComment = useCallback(async () => {
+    if (!activeTicket) return;
+    const body = ticketCommentDraft.trim();
+    if (!body) {
+      toast.info('Add a comment', 'Write a short message first.');
+      return;
+    }
+
+    setTicketCommentSubmitting(true);
+    try {
+      const created = await addServiceRequestComment(session.accessToken, activeTicket.id, {
+        body,
+      });
+      setTicketComments((prev) => [...prev, created]);
+      setTicketCommentDraft('');
+      toast.success('Comment added');
+      await loadData('refresh');
+    } catch (error) {
+      toast.error('Comment failed', extractApiErrorMessage(error));
+    } finally {
+      setTicketCommentSubmitting(false);
+    }
+  }, [
+    activeTicket,
+    ticketCommentDraft,
+    toast,
+    session.accessToken,
+    loadData,
+  ]);
+
+  const cancelActiveTicket = useCallback(async () => {
+    if (!activeTicket) return;
+    if (!canUserCancelTicket(activeTicket.status)) {
+      toast.info(
+        'Cancellation unavailable',
+        'This request is already under review or completed.',
+      );
+      return;
+    }
+    setTicketCancelling(true);
+    try {
+      const payload: CancelServiceRequestInput = {};
+      const updated = await cancelServiceRequest(session.accessToken, activeTicket.id, payload);
+      setActiveTicket(updated);
+      toast.success(
+        isRequestsMode ? 'Request cancelled' : 'Service request cancelled',
+      );
+      await loadTicketDetails(activeTicket.id);
+      await loadData('refresh');
+    } catch (error) {
+      toast.error('Cancel failed', extractApiErrorMessage(error));
+    } finally {
+      setTicketCancelling(false);
+    }
+  }, [
+    activeTicket,
+    isRequestsMode,
+    loadData,
+    loadTicketDetails,
+    session.accessToken,
+    toast,
+  ]);
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom']}>
@@ -527,70 +668,11 @@ export function ServicesRequestsScreen({
               </View>
             ) : null}
 
-            <Text style={styles.label}>Priority</Text>
-            <View style={styles.priorityRow}>
-              {PRIORITY_OPTIONS.map((value) => {
-                const active = priority === value;
-                return (
-                  <Pressable
-                    key={value}
-                    onPress={() => setPriority(value)}
-                    style={[styles.priorityChip, active && styles.priorityChipActive]}
-                  >
-                    <Text style={[styles.priorityChipText, active && styles.priorityChipTextActive]}>
-                      {priorityLabel(value)}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-
-            <Text style={styles.label}>Description</Text>
-            <TextInput
-              value={description}
-              onChangeText={setDescription}
-              multiline
-              numberOfLines={4}
-              style={[styles.input, styles.multilineInput]}
-              placeholder="Describe the issue / request details"
-              placeholderTextColor="#94A3B8"
-            />
-
-            <View style={styles.attachmentsHeader}>
-              <Text style={styles.label}>Attachments (optional)</Text>
-              <Pressable
-                onPress={() => void uploadAttachment()}
-                disabled={isUploadingAttachment}
-                style={[styles.ghostButton, isUploadingAttachment && styles.buttonDisabled]}
-              >
-                <Text style={styles.ghostButtonText}>
-                  {isUploadingAttachment ? 'Uploading...' : 'Upload File'}
-                </Text>
-              </Pressable>
-            </View>
-            {attachments.length > 0 ? (
-              <View style={styles.attachmentsList}>
-                {attachments.map((file) => (
-                  <View key={file.id} style={styles.attachmentItem}>
-                    <View style={styles.flex}>
-                      <Text style={styles.attachmentName} numberOfLines={1}>
-                        {file.name}
-                      </Text>
-                      <Text style={styles.attachmentMeta}>{file.id}</Text>
-                    </View>
-                    <Pressable onPress={() => removeAttachment(file.id)}>
-                      <Text style={styles.removeAttachmentText}>Remove</Text>
-                    </Pressable>
-                  </View>
-                ))}
-              </View>
-            ) : (
-              <Text style={styles.dynamicHint}>No attachments uploaded yet.</Text>
-            )}
-
             {(selectedService?.formFields?.length ?? 0) > 0 ? (
               <View style={styles.dynamicFieldsBlock}>
-                <Text style={styles.dynamicFieldsTitle}>Dynamic Fields</Text>
+                <Text style={styles.dynamicFieldsTitle}>
+                  {isRequestsMode ? 'Request Details' : 'Service Details'}
+                </Text>
                 {(selectedService?.formFields ?? []).map((field) => (
                   <DynamicFieldInput
                     key={field.id}
@@ -606,7 +688,7 @@ export function ServicesRequestsScreen({
                   />
                 ))}
                 <Text style={styles.dynamicHint}>
-                  Dynamic field values are validated by the backend service template.
+                  Fill only the fields required for this {isRequestsMode ? 'request type' : 'service'}.
                 </Text>
               </View>
             ) : null}
@@ -638,22 +720,197 @@ export function ServicesRequestsScreen({
           <Text style={styles.emptyText}>No service requests yet for the selected unit.</Text>
         ) : (
           visibleRequests.map((row) => (
-            <View key={row.id} style={styles.itemCard}>
+            <Pressable key={row.id} style={styles.itemCard} onPress={() => void openTicket(row)}>
               <View style={styles.itemHeader}>
                 <View style={styles.flex}>
                   <Text style={styles.itemTitle}>{row.service?.name ?? 'Service Request'}</Text>
                   <Text style={styles.itemSub}>
-                    {priorityLabel(row.priority)} • {statusLabel(row.status)}
+                    {priorityDisplayLabel(row.priority)} • {serviceRequestStatusDisplayLabel(row.status)}
                   </Text>
                 </View>
                 <Text style={styles.itemMetaDate}>{formatDateTime(row.requestedAt)}</Text>
               </View>
               <Text style={styles.itemDesc}>{row.description ?? '—'}</Text>
+              {row.comments?.[0]?.body ? (
+                <View style={styles.ticketPreviewComment}>
+                  <Ionicons name="chatbubble-ellipses-outline" size={13} color={akColors.textMuted} />
+                  <Text style={styles.ticketPreviewCommentText} numberOfLines={1}>
+                    {row.comments[0].body}
+                  </Text>
+                </View>
+              ) : null}
               <Text style={styles.itemSub}>Updated: {formatDateTime(row.updatedAt)}</Text>
-            </View>
+            </Pressable>
           ))
         )}
       </ScreenCard>
+      <Modal
+        visible={ticketModalOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={closeTicketModal}
+      >
+        <View style={styles.ticketModalBackdrop}>
+          <Pressable style={styles.ticketModalBackdropTap} onPress={closeTicketModal} />
+          <View style={[styles.ticketModalSheet, { paddingBottom: Math.max(insets.bottom, 12) + 10 }]}>
+            <View style={styles.ticketModalHandle} />
+            <View style={styles.ticketModalHeader}>
+              <View style={styles.flex}>
+                <Text style={styles.ticketModalTitle}>
+                  {activeTicket?.service?.name ?? (isRequestsMode ? 'Request' : 'Service Request')}
+                </Text>
+                <Text style={styles.ticketModalSubtitle}>
+                  Ticket details, status updates, and replies
+                </Text>
+              </View>
+              <Pressable onPress={closeTicketModal} style={styles.iconRoundButton}>
+                <Ionicons name="close" size={18} color={akColors.text} />
+              </Pressable>
+            </View>
+
+            {ticketLoading ? (
+              <View style={styles.ticketLoadingBox}>
+                <ActivityIndicator color={akColors.primary} />
+              </View>
+            ) : activeTicket ? (
+              <>
+                <View style={styles.ticketMetaCard}>
+                  <View style={styles.ticketMetaRow}>
+                    <Text style={styles.ticketMetaLabel}>Status</Text>
+                    <View
+                      style={[
+                        styles.ticketStatusPill,
+                        ticketStatusTone(activeTicket.status) === 'success' && styles.ticketStatusPillSuccess,
+                        ticketStatusTone(activeTicket.status) === 'danger' && styles.ticketStatusPillDanger,
+                        ticketStatusTone(activeTicket.status) === 'warning' && styles.ticketStatusPillWarning,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.ticketStatusPillText,
+                          ticketStatusTone(activeTicket.status) === 'success' && styles.ticketStatusPillTextSuccess,
+                          ticketStatusTone(activeTicket.status) === 'danger' && styles.ticketStatusPillTextDanger,
+                          ticketStatusTone(activeTicket.status) === 'warning' && styles.ticketStatusPillTextWarning,
+                        ]}
+                      >
+                        {serviceRequestStatusDisplayLabel(activeTicket.status)}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={styles.ticketMetaValue}>
+                    Submitted: {formatDateTime(activeTicket.requestedAt)}
+                  </Text>
+                  <Text style={styles.ticketMetaValue}>
+                    Last update: {formatDateTime(activeTicket.updatedAt)}
+                  </Text>
+                  {activeTicket.description ? (
+                    <View style={styles.ticketDescriptionBox}>
+                      <Text style={styles.ticketMetaLabel}>Summary</Text>
+                      <Text style={styles.ticketDescriptionText}>{activeTicket.description}</Text>
+                    </View>
+                  ) : null}
+                </View>
+
+                <View style={styles.ticketCommentsHeader}>
+                  <Text style={styles.ticketCommentsTitle}>Conversation</Text>
+                  <Text style={styles.ticketCommentsCount}>{ticketComments.length}</Text>
+                </View>
+
+                <ScrollView style={styles.ticketCommentsList} contentContainerStyle={styles.ticketCommentsListContent}>
+                  {ticketComments.length === 0 ? (
+                    <Text style={styles.ticketEmptyComments}>
+                      No replies yet. You can send a message to the management team.
+                    </Text>
+                  ) : (
+                    ticketComments.map((comment) => {
+                      const mine = comment.createdById === session.userId;
+                      return (
+                        <View
+                          key={comment.id}
+                          style={[
+                            styles.ticketCommentBubble,
+                            mine ? styles.ticketCommentBubbleMine : styles.ticketCommentBubbleOther,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.ticketCommentAuthor,
+                              mine && styles.ticketCommentAuthorMine,
+                            ]}
+                          >
+                            {commentAuthorLabel(comment, session)}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.ticketCommentBody,
+                              mine && styles.ticketCommentBodyMine,
+                            ]}
+                          >
+                            {comment.body}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.ticketCommentTime,
+                              mine && styles.ticketCommentTimeMine,
+                            ]}
+                          >
+                            {formatDateTime(comment.createdAt)}
+                          </Text>
+                        </View>
+                      );
+                    })
+                  )}
+                </ScrollView>
+
+                <View style={styles.ticketComposer}>
+                  <TextInput
+                    value={ticketCommentDraft}
+                    onChangeText={setTicketCommentDraft}
+                    style={[styles.input, styles.ticketComposerInput]}
+                    placeholder="Write a reply..."
+                    placeholderTextColor="#94A3B8"
+                    multiline
+                    numberOfLines={3}
+                  />
+                  <View style={styles.ticketComposerActions}>
+                    <Pressable
+                      style={[
+                        styles.ghostActionButton,
+                        (!canUserCancelTicket(activeTicket.status) || ticketCancelling) && styles.buttonDisabled,
+                      ]}
+                      disabled={!canUserCancelTicket(activeTicket.status) || ticketCancelling}
+                      onPress={() => void cancelActiveTicket()}
+                    >
+                      <Text style={styles.ghostActionButtonDangerText}>
+                        {ticketCancelling ? 'Cancelling...' : 'Cancel Request'}
+                      </Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.primarySolidButton, ticketCommentSubmitting && styles.buttonDisabled]}
+                      disabled={ticketCommentSubmitting}
+                      onPress={() => void submitTicketComment()}
+                    >
+                      {ticketCommentSubmitting ? (
+                        <ActivityIndicator size="small" color="#fff" />
+                      ) : (
+                        <>
+                          <Ionicons name="send" size={14} color="#fff" />
+                          <Text style={styles.primarySolidButtonText}>Send</Text>
+                        </>
+                      )}
+                    </Pressable>
+                  </View>
+                  {!canUserCancelTicket(activeTicket.status) ? (
+                    <Text style={styles.ticketCancelHint}>
+                      Cancellation is available only while the request is still pending review.
+                    </Text>
+                  ) : null}
+                </View>
+              </>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
       </ScrollView>
     </SafeAreaView>
   );
@@ -728,7 +985,7 @@ function DynamicFieldInput({
               <Text style={styles.attachmentName} numberOfLines={1}>
                 {fileValue.name}
               </Text>
-              <Text style={styles.attachmentMeta}>{fileValue.id}</Text>
+              <Text style={styles.attachmentMeta}>Ready to submit</Text>
             </View>
             <Pressable onPress={onClearFile}>
               <Text style={styles.removeAttachmentText}>Remove</Text>
@@ -738,16 +995,7 @@ function DynamicFieldInput({
           <Text style={styles.dynamicHint}>Upload a file to populate this field.</Text>
         )}
 
-        <TextInput
-          value={textValue}
-          onChangeText={onTextChange}
-          style={styles.input}
-          placeholder="Optional: paste file ID manually"
-          placeholderTextColor="#94A3B8"
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-        <Text style={styles.dynamicMeta}>Stored value (file ID)</Text>
+        {/* file ID is stored internally after upload; never shown to end users */}
       </View>
     );
   }
@@ -857,7 +1105,7 @@ function placeholderForType(type: string): string {
     case 'NUMBER':
       return 'Enter number';
     case 'FILE':
-      return 'File UUID (upload flow next)';
+      return 'Upload an attachment';
     default:
       return 'Enter value';
   }
@@ -870,17 +1118,17 @@ const styles = StyleSheet.create({
   },
   container: {
     padding: 16,
-    gap: 14,
+    gap: 16,
     backgroundColor: akColors.bg,
   },
   headerCard: {
     backgroundColor: akColors.surface,
-    borderRadius: 20,
+    borderRadius: 22,
     borderWidth: 1,
     borderColor: akColors.border,
     paddingHorizontal: 18,
-    paddingVertical: 16,
-    gap: 10,
+    paddingVertical: 18,
+    gap: 8,
     ...akShadow.soft,
   },
   headerTitle: {
@@ -911,9 +1159,10 @@ const styles = StyleSheet.create({
   },
   hero: {
     backgroundColor: '#0F172A',
-    borderRadius: 16,
+    borderRadius: 20,
     padding: 16,
-    gap: 6,
+    gap: 7,
+    ...akShadow.card,
   },
   heroBadge: {
     color: '#93C5FD',
@@ -947,7 +1196,7 @@ const styles = StyleSheet.create({
   serviceGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 12,
   },
   noServicesBox: {
     borderRadius: 12,
@@ -963,20 +1212,20 @@ const styles = StyleSheet.create({
   choiceChip: {
     width: '48%',
     borderWidth: 1,
-    borderColor: 'rgba(226,232,240,0.72)',
-    borderRadius: 18,
+    borderColor: 'rgba(226,232,240,0.84)',
+    borderRadius: 20,
     padding: 14,
-    gap: 7,
-    backgroundColor: 'rgba(255,255,255,0.9)',
-    minHeight: 126,
+    gap: 8,
+    backgroundColor: 'rgba(255,255,255,0.88)',
+    minHeight: 132,
     shadowColor: '#0F172A',
-    shadowOpacity: 0.06,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.05,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
     elevation: 2,
   },
   choiceChipActive: {
-    backgroundColor: 'rgba(42,62,53,0.92)',
+    backgroundColor: 'rgba(42,62,53,0.94)',
     borderColor: 'rgba(255,255,255,0.15)',
     shadowColor: akColors.primaryDark,
     shadowOpacity: 0.18,
@@ -1013,6 +1262,7 @@ const styles = StyleSheet.create({
     color: akColors.text,
     fontWeight: '700',
     fontSize: 14,
+    lineHeight: 18,
   },
   choiceChipTitleActive: {
     color: '#fff',
@@ -1023,7 +1273,7 @@ const styles = StyleSheet.create({
     lineHeight: 14,
   },
   choiceChipMetaActive: {
-    color: akColors.text,
+    color: 'rgba(255,255,255,0.88)',
   },
   choiceChipSub: {
     color: akColors.textMuted,
@@ -1035,11 +1285,12 @@ const styles = StyleSheet.create({
   },
   serviceInfo: {
     borderWidth: 1,
-    borderColor: akColors.border,
-    borderRadius: 12,
-    backgroundColor: akColors.surfaceMuted,
-    padding: 10,
-    gap: 4,
+    borderColor: 'rgba(226,232,240,0.9)',
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    padding: 12,
+    gap: 5,
+    ...akShadow.soft,
   },
   serviceInfoTitle: {
     color: akColors.text,
@@ -1143,10 +1394,10 @@ const styles = StyleSheet.create({
   },
   dynamicFieldsBlock: {
     borderWidth: 1,
-    borderColor: akColors.border,
-    borderRadius: 14,
-    backgroundColor: akColors.surfaceMuted,
-    padding: 10,
+    borderColor: 'rgba(226,232,240,0.9)',
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    padding: 12,
     gap: 10,
   },
   dynamicFieldsTitle: {
@@ -1166,7 +1417,7 @@ const styles = StyleSheet.create({
   dynamicMeta: {
     color: akColors.textSoft,
     fontSize: 10,
-    textTransform: 'uppercase',
+    textTransform: 'none',
   },
   dynamicHint: {
     color: akColors.textMuted,
@@ -1225,11 +1476,11 @@ const styles = StyleSheet.create({
   },
   itemCard: {
     borderWidth: 1,
-    borderColor: akColors.border,
-    borderRadius: 14,
-    padding: 12,
-    gap: 5,
-    backgroundColor: akColors.surface,
+    borderColor: 'rgba(226,232,240,0.9)',
+    borderRadius: 16,
+    padding: 13,
+    gap: 6,
+    backgroundColor: '#FFFFFF',
     ...akShadow.soft,
   },
   itemHeader: {
@@ -1259,5 +1510,270 @@ const styles = StyleSheet.create({
   itemMetaDate: {
     color: akColors.textSoft,
     fontSize: 10,
+  },
+  ticketPreviewComment: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 2,
+  },
+  ticketPreviewCommentText: {
+    color: akColors.textMuted,
+    fontSize: 11,
+    flex: 1,
+  },
+  ticketModalBackdrop: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(15, 23, 42, 0.18)',
+  },
+  ticketModalBackdropTap: {
+    flex: 1,
+  },
+  ticketModalSheet: {
+    backgroundColor: akColors.bg,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    maxHeight: '88%',
+    borderTopWidth: 1,
+    borderColor: akColors.border,
+  },
+  ticketModalHandle: {
+    width: 46,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: '#CBD5E1',
+    alignSelf: 'center',
+    marginBottom: 10,
+  },
+  ticketModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    marginBottom: 10,
+  },
+  ticketModalTitle: {
+    color: akColors.text,
+    fontWeight: '700',
+    fontSize: 16,
+  },
+  ticketModalSubtitle: {
+    color: akColors.textMuted,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  iconRoundButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: akColors.border,
+    backgroundColor: akColors.surface,
+  },
+  ticketLoadingBox: {
+    minHeight: 200,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ticketMetaCard: {
+    borderWidth: 1,
+    borderColor: akColors.border,
+    backgroundColor: akColors.surface,
+    borderRadius: 14,
+    padding: 12,
+    gap: 6,
+    ...akShadow.soft,
+  },
+  ticketMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  ticketMetaLabel: {
+    color: akColors.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  ticketMetaValue: {
+    color: akColors.text,
+    fontSize: 12,
+  },
+  ticketDescriptionBox: {
+    marginTop: 4,
+    gap: 4,
+    borderTopWidth: 1,
+    borderTopColor: akColors.border,
+    paddingTop: 8,
+  },
+  ticketDescriptionText: {
+    color: akColors.text,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  ticketStatusPill: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    backgroundColor: akColors.surfaceMuted,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  ticketStatusPillSuccess: {
+    borderColor: akColors.successBorder,
+    backgroundColor: akColors.successBg,
+  },
+  ticketStatusPillDanger: {
+    borderColor: 'rgba(239,68,68,0.25)',
+    backgroundColor: 'rgba(254,226,226,0.75)',
+  },
+  ticketStatusPillWarning: {
+    borderColor: 'rgba(245,158,11,0.28)',
+    backgroundColor: 'rgba(254,243,199,0.75)',
+  },
+  ticketStatusPillText: {
+    color: akColors.text,
+    fontWeight: '700',
+    fontSize: 11,
+  },
+  ticketStatusPillTextSuccess: {
+    color: akColors.success,
+  },
+  ticketStatusPillTextDanger: {
+    color: '#B91C1C',
+  },
+  ticketStatusPillTextWarning: {
+    color: '#B45309',
+  },
+  ticketCommentsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    marginBottom: 6,
+    paddingHorizontal: 2,
+  },
+  ticketCommentsTitle: {
+    color: akColors.text,
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  ticketCommentsCount: {
+    color: akColors.primary,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  ticketCommentsList: {
+    maxHeight: 240,
+  },
+  ticketCommentsListContent: {
+    gap: 8,
+    paddingBottom: 6,
+  },
+  ticketEmptyComments: {
+    color: akColors.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+    paddingVertical: 8,
+  },
+  ticketCommentBubble: {
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 4,
+    maxWidth: '92%',
+  },
+  ticketCommentBubbleMine: {
+    alignSelf: 'flex-end',
+    backgroundColor: 'rgba(42,62,53,0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(42,62,53,0.28)',
+  },
+  ticketCommentBubbleOther: {
+    alignSelf: 'flex-start',
+    backgroundColor: akColors.surface,
+    borderWidth: 1,
+    borderColor: akColors.border,
+  },
+  ticketCommentAuthor: {
+    color: akColors.primary,
+    fontWeight: '700',
+    fontSize: 11,
+  },
+  ticketCommentAuthorMine: {
+    color: 'rgba(255,255,255,0.86)',
+  },
+  ticketCommentBody: {
+    color: akColors.text,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  ticketCommentBodyMine: {
+    color: '#FFFFFF',
+  },
+  ticketCommentTime: {
+    color: akColors.textSoft,
+    fontSize: 10,
+  },
+  ticketCommentTimeMine: {
+    color: 'rgba(255,255,255,0.72)',
+  },
+  ticketComposer: {
+    marginTop: 10,
+    gap: 8,
+  },
+  ticketComposerInput: {
+    minHeight: 76,
+    textAlignVertical: 'top',
+  },
+  ticketComposerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  ghostActionButton: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    backgroundColor: akColors.surface,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ghostActionButtonDangerText: {
+    color: '#B91C1C',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  primarySolidButton: {
+    minWidth: 112,
+    borderRadius: 12,
+    backgroundColor: akColors.primary,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    ...akShadow.soft,
+  },
+  primarySolidButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  ticketCancelHint: {
+    color: akColors.textSoft,
+    fontSize: 11,
+    lineHeight: 16,
   },
 });

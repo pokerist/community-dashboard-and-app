@@ -1,0 +1,43 @@
+name: CI Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-typecheck:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://user:pass@localhost:5432/community_dashboard?schema=public
+      DIRECT_URL: postgresql://user:pass@localhost:5432/community_dashboard?schema=public
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Backend install
+        run: npm ci
+
+      - name: Backend build
+        run: npm run build
+
+      - name: Admin install
+        working-directory: apps/admin-web
+        run: npm ci
+
+      - name: Admin build
+        working-directory: apps/admin-web
+        run: npm run build
+
+      - name: Mobile install
+        working-directory: apps/community-mobile-native
+        run: npm ci
+
+      - name: Mobile typecheck
+        working-directory: apps/community-mobile-native
+        run: npx tsc --noEmit

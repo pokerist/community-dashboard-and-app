@@ -87,6 +87,12 @@ type ComposeForm = {
   title: string;
   messageEn: string;
   messageAr: string;
+  appRoute: string;
+  openInAppLabel: string;
+  entityType: string;
+  entityId: string;
+  ctaLabel: string;
+  externalUrl: string;
   targetAudience: (typeof AUDIENCES)[number];
   channels: string[];
   scheduledAtLocal: string;
@@ -100,6 +106,12 @@ const defaultComposeForm: ComposeForm = {
   title: "",
   messageEn: "",
   messageAr: "",
+  appRoute: "",
+  openInAppLabel: "",
+  entityType: "",
+  entityId: "",
+  ctaLabel: "",
+  externalUrl: "",
   targetAudience: "ALL",
   channels: ["IN_APP"],
   scheduledAtLocal: "",
@@ -131,6 +143,16 @@ function audienceSummary(row: NotificationRow): string {
   const blocksRaw = meta.blocks ?? meta.block;
   const blocks = Array.isArray(blocksRaw) ? blocksRaw : blocksRaw ? [blocksRaw] : [];
   return `${blocks.length} blocks`;
+}
+
+function isCommunityUpdateType(type?: string | null): boolean {
+  const normalized = String(type ?? "").toUpperCase();
+  return (
+    normalized === "ANNOUNCEMENT" ||
+    normalized === "EVENT_NOTIFICATION" ||
+    normalized === "MAINTENANCE_ALERT" ||
+    normalized === "EMERGENCY_ALERT"
+  );
 }
 
 export function NotificationCenter() {
@@ -233,6 +255,61 @@ export function NotificationCenter() {
     [unitOptions],
   );
 
+  const composeValidationHints = useMemo(() => {
+    const hints: Array<{ level: "warn" | "error"; text: string }> = [];
+    const route = compose.appRoute.trim();
+    const entityType = compose.entityType.trim();
+    const entityId = compose.entityId.trim();
+    const externalUrl = compose.externalUrl.trim();
+
+    if (entityId && !entityType) {
+      hints.push({ level: "error", text: "Entity ID is set but Entity Type is missing." });
+    }
+    if (entityType && !entityId) {
+      hints.push({ level: "warn", text: "Entity Type is set without Entity ID. Mobile will open the screen but may not open a specific record." });
+    }
+    if (route && !route.startsWith("/")) {
+      hints.push({ level: "warn", text: 'Open In App Route should usually start with "/" (example: /payments).' });
+    }
+    if (externalUrl && !/^https?:\/\//i.test(externalUrl)) {
+      hints.push({ level: "warn", text: "CTA External Link should include http:// or https:// for predictable behavior." });
+    }
+    if (isCommunityUpdateType(compose.type) && !compose.channels.includes("IN_APP")) {
+      hints.push({ level: "warn", text: "Community updates are typically sent via IN_APP so they appear in the Community Updates feed." });
+    }
+    if ((route || entityType || entityId) && !compose.channels.includes("IN_APP")) {
+      hints.push({ level: "warn", text: "Deep-link metadata is most useful when IN_APP channel is enabled." });
+    }
+    return hints;
+  }, [compose]);
+
+  const composePreview = useMemo(() => {
+    const title = compose.title.trim() || "Community Update";
+    const body =
+      compose.messageEn.trim() ||
+      "Preview of the notification message that will appear on the resident mobile app.";
+    const community = isCommunityUpdateType(compose.type);
+    return {
+      title,
+      body,
+      typeLabel: humanizeEnum(compose.type || "ANNOUNCEMENT"),
+      audienceLabel: humanizeEnum(compose.targetAudience || "ALL"),
+      channelsLabel: compose.channels.map((c) => humanizeEnum(c)).join(" • ") || "None",
+      routeLabel: compose.appRoute.trim() || "—",
+      entityLabel:
+        compose.entityType.trim() || compose.entityId.trim()
+          ? `${compose.entityType.trim() || "?"}${compose.entityId.trim() ? ` • ${compose.entityId.trim().slice(0, 8)}…` : ""}`
+          : "—",
+      externalUrl: compose.externalUrl.trim(),
+      externalLabel: compose.ctaLabel.trim() || "Open Link",
+      openInAppLabel: compose.openInAppLabel.trim() || "Open in App",
+      isCommunity: community,
+      timestamp: compose.scheduledAtLocal
+        ? formatDateTime(new Date(compose.scheduledAtLocal).toISOString())
+        : "Sent immediately",
+    };
+  }, [compose]);
+
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter((row) => {
@@ -276,6 +353,64 @@ export function NotificationCenter() {
     return { blocks: compose.selectedBlocks };
   };
 
+  const applyAnnouncementPreset = (
+    preset: "community" | "maintenance" | "event" | "emergency",
+  ) => {
+    setCompose((p) => {
+      const base = {
+        ...p,
+        targetAudience: "ALL" as ComposeForm["targetAudience"],
+        channels: Array.from(new Set(["IN_APP", "PUSH", ...p.channels])),
+        appRoute: p.appRoute || "/community-updates",
+        openInAppLabel: p.openInAppLabel || "View Update",
+      };
+
+      if (preset === "maintenance") {
+        return {
+          ...base,
+          type: "MAINTENANCE_ALERT",
+          title: p.title || "Maintenance Notice",
+          ctaLabel: p.ctaLabel || "Learn More",
+          messageEn:
+            p.messageEn ||
+            "Scheduled maintenance is in progress. Some services may be temporarily affected. We will share updates once work is completed.",
+        };
+      }
+      if (preset === "event") {
+        return {
+          ...base,
+          type: "EVENT_NOTIFICATION",
+          title: p.title || "Community Event Update",
+          ctaLabel: p.ctaLabel || "View Event",
+          messageEn:
+            p.messageEn ||
+            "A community event update has been published. Please review the details and timing in the announcement.",
+        };
+      }
+      if (preset === "emergency") {
+        return {
+          ...base,
+          type: "EMERGENCY_ALERT",
+          channels: Array.from(new Set(["IN_APP", "PUSH", "SMS", ...p.channels])),
+          title: p.title || "Important Community Alert",
+          ctaLabel: p.ctaLabel || "Open Details",
+          messageEn:
+            p.messageEn ||
+            "An urgent community alert has been issued. Please review the instructions immediately and follow management guidance.",
+        };
+      }
+      return {
+        ...base,
+        type: "ANNOUNCEMENT",
+        title: p.title || "Community Update",
+        ctaLabel: p.ctaLabel || "Read More",
+        messageEn:
+          p.messageEn ||
+          "A new community update is available. Please review the latest announcement for details.",
+      };
+    });
+  };
+
   const handleSend = async () => {
     if (!compose.title.trim() || !compose.messageEn.trim()) {
       toast.error("Title and message are required");
@@ -311,6 +446,32 @@ export function NotificationCenter() {
       };
       if (compose.scheduledAtLocal) {
         payload.scheduledAt = new Date(compose.scheduledAtLocal).toISOString();
+      }
+      const payloadMeta: Record<string, unknown> = {};
+      if (compose.appRoute.trim()) payloadMeta.route = compose.appRoute.trim();
+      if (compose.openInAppLabel.trim()) {
+        payloadMeta.openInAppLabel = compose.openInAppLabel.trim();
+      }
+      if (compose.entityType.trim()) payloadMeta.entityType = compose.entityType.trim().toUpperCase();
+      if (compose.entityId.trim()) payloadMeta.entityId = compose.entityId.trim();
+      if (compose.ctaLabel.trim()) {
+        payloadMeta.ctaLabel = compose.ctaLabel.trim();
+        payloadMeta.ctaText = compose.ctaLabel.trim();
+      }
+      if (compose.externalUrl.trim()) {
+        payloadMeta.externalUrl = compose.externalUrl.trim();
+        payloadMeta.ctaUrl = compose.externalUrl.trim();
+      }
+      if (
+        compose.type === "ANNOUNCEMENT" ||
+        compose.type === "EVENT_NOTIFICATION" ||
+        compose.type === "MAINTENANCE_ALERT" ||
+        compose.type === "EMERGENCY_ALERT"
+      ) {
+        payloadMeta.eventKey = "community_update";
+      }
+      if (Object.keys(payloadMeta).length > 0) {
+        payload.payload = payloadMeta;
       }
       await apiClient.post("/notifications", payload);
       toast.success("Notification submitted to backend");
@@ -395,6 +556,43 @@ export function NotificationCenter() {
                   Uses <code>/notifications</code>. SMS/PUSH delivery depends on backend provider setup.
                 </DialogDescription>
               </DialogHeader>
+              <div className="flex flex-wrap gap-2 rounded-lg border border-[#E5E7EB] bg-[#F8FAFC] p-3">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => applyAnnouncementPreset("community")}
+                  className="border-[#CBD5E1] bg-white"
+                >
+                  Community Update Preset
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => applyAnnouncementPreset("maintenance")}
+                  className="border-[#CBD5E1] bg-white"
+                >
+                  Maintenance Preset
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => applyAnnouncementPreset("event")}
+                  className="border-[#CBD5E1] bg-white"
+                >
+                  Event Preset
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => applyAnnouncementPreset("emergency")}
+                  className="border-[#FECACA] bg-white text-[#991B1B] hover:bg-[#FEF2F2]"
+                >
+                  Emergency Preset
+                </Button>
+                <div className="text-xs text-[#64748B] self-center">
+                  Presets configure type, audience, and channels for common community broadcasts.
+                </div>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Type</Label>
@@ -440,6 +638,78 @@ export function NotificationCenter() {
                   <Label>Message (Arabic - Optional)</Label>
                   <Textarea rows={5} value={compose.messageAr} onChange={(e) => setCompose((p) => ({ ...p, messageAr: e.target.value }))} />
                 </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Open In App Route (Optional)</Label>
+                  <Input
+                    placeholder="/community-updates"
+                    value={compose.appRoute}
+                    onChange={(e) => setCompose((p) => ({ ...p, appRoute: e.target.value }))}
+                  />
+                  <p className="text-xs text-[#64748B]">
+                    Example: <code>/community-updates</code>, <code>/payments</code>, <code>/services</code>
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label>Open In App Button Label (Optional)</Label>
+                  <Input
+                    placeholder="View Details"
+                    value={compose.openInAppLabel}
+                    onChange={(e) => setCompose((p) => ({ ...p, openInAppLabel: e.target.value }))}
+                  />
+                  <p className="text-xs text-[#64748B]">
+                    Used by mobile for the internal navigation button text (defaults to "Open in App").
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Entity Type (Optional)</Label>
+                  <Input
+                    placeholder="SERVICE_REQUEST | INVOICE | VIOLATION"
+                    value={compose.entityType}
+                    onChange={(e) => setCompose((p) => ({ ...p, entityType: e.target.value }))}
+                  />
+                  <p className="text-xs text-[#64748B]">
+                    Used by mobile deep-link fallback and detail opening logic.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label>Entity ID (Optional)</Label>
+                  <Input
+                    placeholder="UUID of the related record"
+                    value={compose.entityId}
+                    onChange={(e) => setCompose((p) => ({ ...p, entityId: e.target.value }))}
+                  />
+                  <p className="text-xs text-[#64748B]">
+                    Example: service request ID to open the ticket directly on mobile.
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>CTA External Link (Optional)</Label>
+                <Input
+                  placeholder="https://example.com/update-details"
+                  value={compose.externalUrl}
+                  onChange={(e) => setCompose((p) => ({ ...p, externalUrl: e.target.value }))}
+                />
+                <p className="text-xs text-[#64748B]">
+                  Mobile community updates screen will show an "Open Link" action when provided.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label>CTA Button Label (Optional)</Label>
+                <Input
+                  placeholder="Read More"
+                  value={compose.ctaLabel}
+                  onChange={(e) => setCompose((p) => ({ ...p, ctaLabel: e.target.value }))}
+                />
+                <p className="text-xs text-[#64748B]">
+                  Used by mobile for the external link button text (defaults to "Open Link").
+                </p>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -516,6 +786,130 @@ export function NotificationCenter() {
                   </select>
                 </div>
               ) : null}
+
+              {composeValidationHints.length > 0 ? (
+                <Card className="p-3 space-y-2 border border-[#FDE68A] bg-[#FFFBEB]">
+                  <p className="text-sm font-medium text-[#92400E]">Compose Validation Hints</p>
+                  <div className="space-y-1">
+                    {composeValidationHints.map((hint, idx) => (
+                      <p
+                        key={`${hint.level}-${idx}`}
+                        className={`text-xs ${hint.level === "error" ? "text-[#991B1B]" : "text-[#92400E]"}`}
+                      >
+                        {hint.level === "error" ? "Error:" : "Hint:"} {hint.text}
+                      </p>
+                    ))}
+                  </div>
+                </Card>
+              ) : null}
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <Card className="p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium text-[#1E293B]">Notification Preview</p>
+                    <Badge className="bg-[#0B5FFF]/10 text-[#0B5FFF]">
+                      {composePreview.typeLabel}
+                    </Badge>
+                  </div>
+                  <div className="rounded-xl border border-[#E5E7EB] bg-white p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-[#0F172A] break-words">{composePreview.title}</p>
+                        <p className="text-xs text-[#64748B] mt-1">{composePreview.timestamp}</p>
+                      </div>
+                      <Bell className="w-4 h-4 text-[#64748B] mt-0.5" />
+                    </div>
+                    <p className="text-sm text-[#334155] mt-3 whitespace-pre-wrap break-words line-clamp-4">
+                      {composePreview.body}
+                    </p>
+                    <div className="grid grid-cols-2 gap-2 mt-4 text-xs">
+                      <div className="rounded-lg bg-[#F8FAFC] p-2">
+                        <p className="text-[#64748B]">Audience</p>
+                        <p className="text-[#1E293B] mt-1">{composePreview.audienceLabel}</p>
+                      </div>
+                      <div className="rounded-lg bg-[#F8FAFC] p-2">
+                        <p className="text-[#64748B]">Channels</p>
+                        <p className="text-[#1E293B] mt-1 break-words">{composePreview.channelsLabel}</p>
+                      </div>
+                      <div className="rounded-lg bg-[#F8FAFC] p-2 col-span-2">
+                        <p className="text-[#64748B]">Deep Link</p>
+                        <p className="text-[#1E293B] mt-1 break-words">
+                          Route: {composePreview.routeLabel}
+                        </p>
+                        <p className="text-[#64748B] mt-1 break-words">
+                          Entity: {composePreview.entityLabel}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+
+                <Card className="p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium text-[#1E293B]">Mobile Rendering Preview</p>
+                    <Badge
+                      className={
+                        composePreview.isCommunity
+                          ? "bg-[#10B981]/10 text-[#10B981]"
+                          : "bg-[#64748B]/10 text-[#64748B]"
+                      }
+                    >
+                      {composePreview.isCommunity ? "Community Update" : "Personal Notification"}
+                    </Badge>
+                  </div>
+                  <div className="rounded-2xl border border-[#E5E7EB] bg-[#F8FAFC] p-4 space-y-3">
+                    {composePreview.isCommunity ? (
+                      <>
+                        <div className="rounded-2xl bg-white border border-[#E2E8F0] p-4 space-y-2 shadow-sm">
+                          <div className="flex items-center justify-between gap-3">
+                            <p className="text-sm font-semibold text-[#0F172A] break-words">{composePreview.title}</p>
+                            <Badge className="bg-[#0B5FFF]/10 text-[#0B5FFF]">Update</Badge>
+                          </div>
+                          <p className="text-sm text-[#475569] whitespace-pre-wrap break-words line-clamp-4">
+                            {composePreview.body}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {compose.appRoute.trim() ? (
+                            <Button type="button" size="sm" variant="outline" className="border-[#CBD5E1]" disabled>
+                              {composePreview.openInAppLabel}
+                            </Button>
+                          ) : null}
+                          {compose.externalUrl.trim() ? (
+                            <Button type="button" size="sm" className="bg-[#00B386] hover:bg-[#00B386]/90 text-white" disabled>
+                              {composePreview.externalLabel}
+                            </Button>
+                          ) : null}
+                          {!compose.appRoute.trim() && !compose.externalUrl.trim() ? (
+                            <p className="text-xs text-[#64748B]">No CTA actions configured.</p>
+                          ) : null}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="rounded-xl bg-white border border-[#E2E8F0] p-4">
+                        <p className="text-sm font-semibold text-[#0F172A] break-words">{composePreview.title}</p>
+                        <p className="text-sm text-[#475569] mt-2 whitespace-pre-wrap break-words line-clamp-5">
+                          {composePreview.body}
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {compose.appRoute.trim() ? (
+                            <Badge className="bg-[#0B5FFF]/10 text-[#0B5FFF]">Open in app</Badge>
+                          ) : null}
+                          {compose.externalUrl.trim() ? (
+                            <Badge className="bg-[#10B981]/10 text-[#10B981]">External link</Badge>
+                          ) : null}
+                          {!compose.appRoute.trim() && !compose.externalUrl.trim() ? (
+                            <Badge className="bg-[#64748B]/10 text-[#64748B]">Info only</Badge>
+                          ) : null}
+                        </div>
+                      </div>
+                    )}
+                    <p className="text-xs text-[#64748B]">
+                      Preview reflects current form values and mobile payload usage (route/entity/CTA), not backend delivery logs.
+                    </p>
+                  </div>
+                </Card>
+              </div>
 
               <DialogFooter>
                 <Button variant="outline" onClick={() => setIsComposeOpen(false)} disabled={isSubmitting}>Cancel</Button>

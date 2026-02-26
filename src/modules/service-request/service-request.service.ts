@@ -7,8 +7,12 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   EligibilityType,
+  Audience,
+  Channel,
   InvoiceType,
+  NotificationType,
   Priority as PriorityEnum,
+  ServiceCategory,
   ServiceFieldType,
   ServiceRequestStatus,
   UnitStatus,
@@ -18,7 +22,10 @@ import { ServiceRequestCreatedEvent } from '../../events/contracts/service-reque
 import { ServiceRequestStatusChangedEvent } from '../../events/contracts/service-request-status-changed.event';
 import { getActiveUnitAccess } from '../../common/utils/unit-access.util';
 import { InvoicesService } from '../invoices/invoices.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
+import { CreateServiceRequestCommentDto } from './dto/create-service-request-comment.dto';
+import { CancelServiceRequestDto } from './dto/cancel-service-request.dto';
 import { UpdateServiceRequestInternalDto } from './dto/update-service-request-internal.dto';
 
 function isSuperAdminRole(roles: unknown): boolean {
@@ -43,6 +50,7 @@ export class ServiceRequestService {
   constructor(
     private prisma: PrismaService,
     private invoicesService: InvoicesService,
+    private notificationsService: NotificationsService,
     private eventEmitter: EventEmitter2,
   ) {}
 
@@ -343,6 +351,12 @@ export class ServiceRequestService {
       orderBy: { requestedAt: 'desc' },
       include: {
         service: { select: { name: true } },
+        comments: {
+          where: { isInternal: false },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { id: true, body: true, createdAt: true, createdById: true },
+        },
       },
     });
   }
@@ -356,6 +370,14 @@ export class ServiceRequestService {
         service: true,
         attachments: { include: { file: true } },
         fieldValues: { include: { field: true } },
+        comments: {
+          orderBy: { createdAt: 'asc' },
+          include: {
+            createdBy: {
+              select: { id: true, nameEN: true, nameAR: true, email: true, phone: true },
+            },
+          },
+        },
       },
     });
 
@@ -422,6 +444,14 @@ export class ServiceRequestService {
           );
         }
         if (
+          dto.status === ServiceRequestStatus.CANCELLED &&
+          !perms.includes('service_request.close')
+        ) {
+          throw new ForbiddenException(
+            'You do not have permission to cancel service requests',
+          );
+        }
+        if (
           (dto.status === ServiceRequestStatus.NEW ||
             dto.status === ServiceRequestStatus.IN_PROGRESS) &&
           !perms.includes('service_request.assign')
@@ -479,6 +509,163 @@ export class ServiceRequestService {
     }
 
     return updated;
+  }
+
+  async listCommentsForActor(
+    id: string,
+    ctx: { actorUserId: string; permissions: string[]; roles: string[] },
+  ) {
+    const request = await this.findOneForActor(id, ctx);
+    const canViewAll =
+      isSuperAdminRole(ctx.roles) ||
+      (Array.isArray(ctx.permissions) &&
+        ctx.permissions.includes('service_request.view_all'));
+
+    return this.prisma.serviceRequestComment.findMany({
+      where: {
+        requestId: request.id,
+        ...(canViewAll ? {} : { isInternal: false }),
+      },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        createdBy: {
+          select: { id: true, nameEN: true, nameAR: true, email: true, phone: true },
+        },
+      },
+    });
+  }
+
+  async addCommentForActor(
+    id: string,
+    dto: CreateServiceRequestCommentDto,
+    ctx: { actorUserId: string; permissions: string[]; roles: string[] },
+  ) {
+    const request = await this.findOneForActor(id, ctx);
+    const canViewAll =
+      isSuperAdminRole(ctx.roles) ||
+      (Array.isArray(ctx.permissions) &&
+        ctx.permissions.includes('service_request.view_all'));
+
+    if (dto.isInternal && !canViewAll) {
+      throw new ForbiddenException('Internal comments are allowed for staff only');
+    }
+
+    const comment = await this.prisma.serviceRequestComment.create({
+      data: {
+        requestId: request.id,
+        createdById: ctx.actorUserId,
+        body: dto.body.trim(),
+        isInternal: canViewAll ? Boolean(dto.isInternal) : false,
+      },
+      include: {
+        createdBy: {
+          select: { id: true, nameEN: true, nameAR: true, email: true, phone: true },
+        },
+      },
+    });
+
+    if (canViewAll && !comment.isInternal && request.createdById !== ctx.actorUserId) {
+      try {
+        const serviceCategory =
+          (request.service as any)?.category ?? ServiceCategory.OTHER;
+        await this.notificationsService.sendNotification({
+          type: NotificationType.MAINTENANCE_ALERT,
+          title: 'New update on your request',
+          messageEn: `The management team replied to your ${String((request.service as any)?.name ?? 'service request')}.`,
+          channels: [Channel.IN_APP, Channel.PUSH],
+          targetAudience: Audience.SPECIFIC_RESIDENCES,
+          audienceMeta: { userIds: [request.createdById] },
+          payload: {
+            route:
+              serviceCategory === ServiceCategory.REQUESTS ||
+              serviceCategory === ServiceCategory.ADMIN
+                ? '/requests'
+                : '/services',
+            entityType: 'SERVICE_REQUEST',
+            entityId: request.id,
+            eventKey: 'service_request.comment_added',
+          },
+        });
+      } catch (error) {
+        void error;
+      }
+    }
+
+    return comment;
+  }
+
+  async cancelForActor(
+    id: string,
+    dto: CancelServiceRequestDto,
+    ctx: { actorUserId: string; permissions: string[]; roles: string[] },
+  ) {
+    const request = await this.findOneForActor(id, ctx);
+
+    if (request.createdById !== ctx.actorUserId) {
+      throw new ForbiddenException('Only the requester can cancel this ticket');
+    }
+
+    if (request.status !== ServiceRequestStatus.NEW) {
+      throw new BadRequestException(
+        'This request can no longer be cancelled because it is already under review or completed.',
+      );
+    }
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.serviceRequest.update({
+        where: { id: request.id },
+        data: { status: ServiceRequestStatus.CANCELLED },
+      });
+
+      const reason = dto.reason?.trim();
+      if (reason) {
+        await tx.serviceRequestComment.create({
+          data: {
+            requestId: request.id,
+            createdById: ctx.actorUserId,
+            body: `Cancelled by owner: ${reason}`,
+            isInternal: false,
+          },
+        });
+      } else {
+        await tx.serviceRequestComment.create({
+          data: {
+            requestId: request.id,
+            createdById: ctx.actorUserId,
+            body: 'Cancelled by owner',
+            isInternal: false,
+          },
+        });
+      }
+
+      return updated;
+    });
+
+    try {
+      const service = await this.prisma.service.findUnique({
+        where: { id: request.serviceId },
+        select: { id: true, name: true, category: true },
+      });
+      this.eventEmitter.emit(
+        'service_request.status_changed',
+        new ServiceRequestStatusChangedEvent(
+          request.id,
+          request.createdById,
+          request.serviceId,
+          String(service?.name ?? 'Service request'),
+          service?.category ?? null,
+          request.unitId ?? null,
+          request.status,
+          ServiceRequestStatus.CANCELLED,
+          request.priority,
+          ctx.actorUserId,
+        ),
+      );
+    } catch (error) {
+      void error;
+    }
+
+    return result;
   }
 }
 

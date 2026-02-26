@@ -58,6 +58,14 @@ type HouseholdHubScreenProps = {
 
 type SectionKey = 'family' | 'delegates' | 'staff';
 
+function householdLabel(value?: string | null): string {
+  return String(value ?? '')
+    .trim()
+    .replace(/[_-]+/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 export function HouseholdHubScreen({
   session,
   units,
@@ -848,11 +856,11 @@ export function HouseholdHubScreen({
                       <View style={styles.rowHeader}>
                         <Text style={styles.rowTitle}>{String(name)}</Text>
                         <View style={styles.statusPill}>
-                          <Text style={styles.statusPillText}>{row.status ?? 'ACTIVE'}</Text>
+                          <Text style={styles.statusPillText}>{householdLabel(row.status || 'ACTIVE')}</Text>
                         </View>
                       </View>
                       <Text style={styles.rowSub}>
-                        {relation ? `Relation: ${relation}` : 'Family access'}
+                        {relation ? `Relation: ${householdLabel(relation)}` : 'Family access'}
                         {row.user?.phone ? ` • ${row.user.phone}` : ''}
                       </Text>
                       <View style={styles.rowActions}>
@@ -1030,11 +1038,11 @@ export function HouseholdHubScreen({
                       <View style={styles.rowHeader}>
                         <Text style={styles.rowTitle}>{String(name)}</Text>
                         <View style={styles.statusPill}>
-                          <Text style={styles.statusPillText}>{row.status ?? 'UNKNOWN'}</Text>
+                          <Text style={styles.statusPillText}>{householdLabel(row.status || 'UNKNOWN')}</Text>
                         </View>
                       </View>
                       <Text style={styles.rowSub}>
-                        {row.delegateType ? `${row.delegateType}` : 'DELEGATE'}
+                        {row.delegateType ? householdLabel(row.delegateType) : 'Delegate'}
                         {row.user?.phone ? ` • ${row.user.phone}` : ''}
                       </Text>
                       <Text style={styles.rowSub}>
@@ -1121,7 +1129,7 @@ export function HouseholdHubScreen({
                     <View style={{ flex: 1 }}>
                       <Text style={styles.simpleRowTitle}>{contractor.name}</Text>
                       <Text style={styles.simpleRowSub}>
-                        {contractor.status ?? 'ACTIVE'}
+                          {householdLabel(contractor.status ?? 'ACTIVE')}
                         {contractor.createdAt ? ` • ${formatDateTime(contractor.createdAt)}` : ''}
                       </Text>
                     </View>
@@ -1280,14 +1288,14 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 16,
-    gap: 12,
+    gap: 14,
   },
   headerCard: {
     backgroundColor: akColors.surface,
     borderRadius: akRadius.card,
     borderWidth: 1,
     borderColor: akColors.border,
-    padding: 14,
+    padding: 16,
     gap: 10,
     ...akShadow.soft,
   },
@@ -1325,11 +1333,11 @@ const styles = StyleSheet.create({
   },
   segmentRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 10,
   },
   segmentChip: {
     flex: 1,
-    minHeight: 40,
+    minHeight: 42,
     borderRadius: 999,
     borderWidth: 1,
     borderColor: akColors.border,
@@ -1355,7 +1363,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: akColors.border,
     padding: 14,
-    gap: 8,
+    gap: 10,
     ...akShadow.soft,
   },
   cardTitle: {
@@ -1441,11 +1449,11 @@ const styles = StyleSheet.create({
   },
   rowCard: {
     backgroundColor: akColors.surface,
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: akColors.border,
-    padding: 12,
-    gap: 7,
+    padding: 13,
+    gap: 8,
     ...akShadow.soft,
   },
   rowHeader: {
@@ -1517,8 +1525,8 @@ const styles = StyleSheet.create({
   },
   statusPill: {
     borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
     borderWidth: 1,
     borderColor: akColors.border,
     backgroundColor: akColors.surfaceMuted,
@@ -1593,7 +1601,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingVertical: 8,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderBottomColor: akColors.border,
   },

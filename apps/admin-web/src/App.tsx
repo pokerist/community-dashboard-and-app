@@ -5,6 +5,7 @@ import { DashboardOverview } from "./components/pages/DashboardOverview";
 import { ResidentManagement } from "./components/pages/ResidentManagement";
 import { UnitsManagement } from "./components/pages/UnitsManagement";
 import { ServiceManagement } from "./components/pages/ServiceManagement";
+import { TicketsInbox } from "./components/pages/TicketsInbox";
 import { AccessControl } from "./components/pages/AccessControl";
 import { LeaseManagement } from "./components/pages/LeaseManagement";
 import { ComplaintsViolations } from "./components/pages/ComplaintsViolations";
@@ -35,6 +36,7 @@ const VALID_SECTIONS = new Set([
   "residents",
   "units",
   "services",
+  "tickets",
   "access",
   "lease",
   "complaints",
@@ -144,6 +146,8 @@ export default function App() {
         return <UnitsManagement />;
       case "services":
         return <ServiceManagement />;
+      case "tickets":
+        return <TicketsInbox />;
       case "access":
         return <AccessControl />;
       case "lease":

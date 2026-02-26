@@ -19,6 +19,7 @@ import {
   getAuthBootstrapProfile,
   updateAuthBootstrapProfile,
 } from '../features/auth/profile';
+import { unitStatusDisplayLabel } from '../features/presentation/status';
 import { akColors, akRadius, akShadow } from '../theme/alkarma';
 import { formatDateTime } from '../utils/format';
 
@@ -260,7 +261,7 @@ export function SessionHomeScreen({
                 <Text style={styles.inlinePanelSub}>
                   {unit.projectName ?? 'Project'}
                   {unit.block ? ` • Block ${unit.block}` : ''}
-                  {unit.status ? ` • ${String(unit.status).replaceAll('_', ' ')}` : ''}
+                  {unit.status ? ` • ${unitStatusDisplayLabel(unit.status)}` : ''}
                 </Text>
                 {roleLabels ? (
                   <Text style={styles.inlinePanelSub}>Access: {roleLabels}</Text>
@@ -359,11 +360,11 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 16,
     paddingBottom: 110,
-    gap: 14,
+    gap: 16,
   },
   profileHero: {
     borderRadius: 24,
-    padding: 16,
+    padding: 18,
     gap: 14,
     ...akShadow.card,
   },
@@ -446,7 +447,7 @@ const styles = StyleSheet.create({
     borderColor: akColors.border,
     borderRadius: akRadius.card,
     padding: 14,
-    gap: 8,
+    gap: 10,
     ...akShadow.soft,
   },
   cardTitle: {
@@ -484,9 +485,9 @@ const styles = StyleSheet.create({
   inlinePanel: {
     borderWidth: 1,
     borderColor: akColors.border,
-    borderRadius: 10,
+    borderRadius: 12,
     backgroundColor: akColors.surfaceMuted,
-    padding: 10,
+    padding: 11,
     gap: 3,
     marginTop: 2,
   },
@@ -510,9 +511,9 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
     borderColor: 'rgba(42,62,53,0.18)',
-    backgroundColor: 'rgba(42,62,53,0.06)',
+    backgroundColor: 'rgba(42,62,53,0.07)',
     paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingVertical: 6,
   },
   permissionChipText: {
     color: akColors.primary,
@@ -587,7 +588,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     borderColor: akColors.border,
-    padding: 14,
+    padding: 16,
     gap: 10,
     ...akShadow.card,
   },

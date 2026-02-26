@@ -42,6 +42,11 @@ import type {
 } from '../features/community/types';
 import { buildPayables, filterPayablesByUnit } from '../features/community/payables';
 import { useNotificationRealtime } from '../features/notifications/realtime';
+import {
+  communityUpdateTitle,
+  isPersonalNotification,
+  isCommunityUpdateNotification,
+} from '../features/notifications/presentation';
 import { extractApiErrorMessage } from '../lib/http';
 import { akColors, akRadius, akShadow } from '../theme/alkarma';
 import { formatCurrency, formatDateTime } from '../utils/format';
@@ -57,6 +62,7 @@ type ResidentHomeScreenProps = {
   onSelectUnit: (unitId: string) => void;
   onRefreshUnits: () => Promise<void>;
   onOpenNotifications: () => void;
+  onOpenCommunityUpdates: () => void;
   onOpenMenu: () => void;
   onOpenBookings: () => void;
   onOpenServices: () => void;
@@ -87,6 +93,7 @@ export function ResidentHomeScreen({
   onSelectUnit,
   onRefreshUnits,
   onOpenNotifications,
+  onOpenCommunityUpdates,
   onOpenMenu,
   onOpenBookings,
   onOpenServices,
@@ -352,7 +359,17 @@ export function ResidentHomeScreen({
     [quickActions],
   );
 
-  const communityUpdates = useMemo(() => notifications.rows.slice(0, 3), [notifications.rows]);
+  const communityUpdates = useMemo(
+    () =>
+      notifications.rows
+        .filter((item) => isCommunityUpdateNotification(item))
+        .slice(0, 3),
+    [notifications.rows],
+  );
+  const personalUnreadCount = useMemo(
+    () => notifications.rows.filter((item) => !item.isRead && isPersonalNotification(item)).length,
+    [notifications.rows],
+  );
   const upcomingPayments = useMemo(() => {
     const allPayables = buildPayables(snapshotRows.invoices, snapshotRows.violations);
     return filterPayablesByUnit(allPayables, selectedUnitId).slice(0, 2);
@@ -422,16 +439,28 @@ export function ResidentHomeScreen({
           <Pressable onPress={onOpenMenu} style={styles.heroIconButton}>
             <Ionicons name="menu-outline" size={20} color="#fff" />
           </Pressable>
-          <Pressable
-            onPress={() => setUnitSheetOpen(true)}
-            style={styles.heroUnitPill}
-          >
-            <Ionicons name="home-outline" size={14} color="#fff" />
-            <Text style={styles.heroUnitPillText}>
-              {selectedUnit?.unitNumber ?? 'My Unit'}
-            </Text>
-            <Ionicons name="chevron-down" size={14} color="rgba(255,255,255,0.9)" />
-          </Pressable>
+          <View style={styles.heroRightActions}>
+            <Pressable onPress={onOpenNotifications} style={styles.heroIconButton}>
+              <Ionicons name="notifications-outline" size={18} color="#fff" />
+              {personalUnreadCount > 0 ? (
+                <View style={styles.heroBellBadge}>
+                  <Text style={styles.heroBellBadgeText}>
+                    {personalUnreadCount > 9 ? '9+' : personalUnreadCount}
+                  </Text>
+                </View>
+              ) : null}
+            </Pressable>
+            <Pressable
+              onPress={() => setUnitSheetOpen(true)}
+              style={styles.heroUnitPill}
+            >
+              <Ionicons name="home-outline" size={14} color="#fff" />
+              <Text style={styles.heroUnitPillText}>
+                {selectedUnit?.unitNumber ?? 'My Unit'}
+              </Text>
+              <Ionicons name="chevron-down" size={14} color="rgba(255,255,255,0.9)" />
+            </Pressable>
+          </View>
         </View>
 
         <Text style={styles.heroTitle}>Good Morning, {greetingName} 👋</Text>
@@ -662,7 +691,7 @@ export function ResidentHomeScreen({
       <View style={styles.homeSection}>
         <View style={styles.sectionHeader}>
           <Text style={styles.homeSectionTitle}>Community Updates</Text>
-          <Pressable onPress={onOpenNotifications}>
+          <Pressable onPress={onOpenCommunityUpdates}>
             <Text style={styles.linkText}>View All</Text>
           </Pressable>
         </View>
@@ -679,7 +708,7 @@ export function ResidentHomeScreen({
           </View>
         ) : (
           communityUpdates.map((item) => (
-            <Pressable key={item.id} style={styles.feedCard} onPress={onOpenNotifications}>
+            <Pressable key={item.id} style={styles.feedCard} onPress={onOpenCommunityUpdates}>
               <View
                 style={[
                   styles.feedIconBubble,
@@ -694,7 +723,7 @@ export function ResidentHomeScreen({
               </View>
               <View style={styles.flex}>
                 <Text style={styles.feedTitle} numberOfLines={1}>
-                  {item.title || item.type || 'Community Update'}
+                  {communityUpdateTitle(item)}
                 </Text>
                 <Text style={styles.feedMeta} numberOfLines={1}>
                   {formatDateTime(item.sentAt || item.createdAt)}
@@ -888,8 +917,13 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     gap: 8,
   },
-  heroUnitPill: {
+  heroRightActions: {
     marginLeft: 'auto',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  heroUnitPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -910,6 +944,26 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.10)',
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
+  },
+  heroBellBadge: {
+    position: 'absolute',
+    top: -3,
+    right: -2,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 3,
+    backgroundColor: '#EF4444',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.8)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroBellBadgeText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '800',
   },
   heroBadge: {
     color: akColors.gold,

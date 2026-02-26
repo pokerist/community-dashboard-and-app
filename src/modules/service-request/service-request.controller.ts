@@ -13,6 +13,8 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
+import { CreateServiceRequestCommentDto } from './dto/create-service-request-comment.dto';
+import { CancelServiceRequestDto } from './dto/cancel-service-request.dto';
 import { UpdateServiceRequestInternalDto } from './dto/update-service-request-internal.dto';
 import { ServiceRequestService } from './service-request.service';
 
@@ -74,6 +76,59 @@ export class ServiceRequestController {
   @Permissions('service_request.view_own', 'service_request.view_all')
   findOne(@Param('id') id: string, @Req() req: any) {
     return this.serviceRequestService.findOneForActor(id, {
+      actorUserId: req.user.id,
+      permissions: Array.isArray(req.user.permissions) ? req.user.permissions : [],
+      roles: Array.isArray(req.user.roles) ? req.user.roles : [],
+    });
+  }
+
+  @Get(':id/comments')
+  @ApiOperation({
+    summary: 'List service request comments',
+    description:
+      'Returns comments for a service request. Residents see only non-internal comments.',
+  })
+  @Permissions('service_request.view_own', 'service_request.view_all')
+  listComments(@Param('id') id: string, @Req() req: any) {
+    return this.serviceRequestService.listCommentsForActor(id, {
+      actorUserId: req.user.id,
+      permissions: Array.isArray(req.user.permissions) ? req.user.permissions : [],
+      roles: Array.isArray(req.user.roles) ? req.user.roles : [],
+    });
+  }
+
+  @Post(':id/comments')
+  @ApiOperation({
+    summary: 'Add a comment to a service request',
+    description:
+      'Adds a comment to the ticket. Internal comments are restricted to staff/admin users.',
+  })
+  @Permissions('service_request.view_own', 'service_request.view_all')
+  addComment(
+    @Param('id') id: string,
+    @Body() dto: CreateServiceRequestCommentDto,
+    @Req() req: any,
+  ) {
+    return this.serviceRequestService.addCommentForActor(id, dto, {
+      actorUserId: req.user.id,
+      permissions: Array.isArray(req.user.permissions) ? req.user.permissions : [],
+      roles: Array.isArray(req.user.roles) ? req.user.roles : [],
+    });
+  }
+
+  @Patch(':id/cancel')
+  @ApiOperation({
+    summary: 'Cancel my service request',
+    description:
+      'Allows the requester to cancel a request before it is accepted/in-progress by staff.',
+  })
+  @Permissions('service_request.view_own')
+  cancel(
+    @Param('id') id: string,
+    @Body() dto: CancelServiceRequestDto,
+    @Req() req: any,
+  ) {
+    return this.serviceRequestService.cancelForActor(id, dto, {
       actorUserId: req.user.id,
       permissions: Array.isArray(req.user.permissions) ? req.user.permissions : [],
       roles: Array.isArray(req.user.roles) ? req.user.roles : [],

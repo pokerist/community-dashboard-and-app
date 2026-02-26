@@ -16,6 +16,7 @@ import { CreateComplaintDto, UpdateComplaintDto } from './dto/complaints.dto';
 import { ComplaintsQueryDto } from './dto/complaints-query.dto';
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { UpdateComplaintStatusDto } from './dto/update-status.dto';
+import { CreateComplaintCommentDto } from './dto/create-complaint-comment.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
@@ -80,6 +81,28 @@ export class ComplaintsController {
   @Permissions('complaint.view_own', 'complaint.view_all')
   findOne(@Param('id') id: string, @Req() req: Request) {
     return this.complaintsService.findOneForActor(id, {
+      actorUserId: (req as any).user?.id,
+      permissions: (req as any).user?.permissions ?? [],
+    });
+  }
+
+  @Get(':id/comments')
+  @Permissions('complaint.view_own', 'complaint.view_all')
+  listComments(@Param('id') id: string, @Req() req: Request) {
+    return this.complaintsService.listCommentsForActor(id, {
+      actorUserId: (req as any).user?.id,
+      permissions: (req as any).user?.permissions ?? [],
+    });
+  }
+
+  @Post(':id/comments')
+  @Permissions('complaint.view_own', 'complaint.view_all')
+  addComment(
+    @Param('id') id: string,
+    @Body() dto: CreateComplaintCommentDto,
+    @Req() req: Request,
+  ) {
+    return this.complaintsService.addCommentForActor(id, dto, {
       actorUserId: (req as any).user?.id,
       permissions: (req as any).user?.permissions ?? [],
     });

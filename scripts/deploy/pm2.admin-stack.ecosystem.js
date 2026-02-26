@@ -1,4 +1,5 @@
 const path = require('path');
+const fs = require('fs');
 
 const ROOT = path.resolve(__dirname, '..', '..');
 const BACKEND_PORT = process.env.BACKEND_PORT || '4003';
@@ -9,7 +10,9 @@ module.exports = {
     {
       name: 'community-backend',
       cwd: ROOT,
-      script: path.join(ROOT, 'dist', 'main.js'),
+      script: fs.existsSync(path.join(ROOT, 'dist', 'main.js'))
+        ? path.join(ROOT, 'dist', 'main.js')
+        : path.join(ROOT, 'dist', 'src', 'main.js'),
       exec_mode: 'fork',
       instances: 1,
       autorestart: true,
@@ -37,4 +40,3 @@ module.exports = {
     },
   ],
 };
-

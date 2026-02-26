@@ -3,6 +3,7 @@ import {
   Users,
   Building2,
   Wrench,
+  Inbox,
   QrCode,
   FileText,
   MessageSquare,
@@ -51,6 +52,11 @@ const menuItems = [
     title: "Services",
     icon: Wrench,
     url: "#services",
+  },
+  {
+    title: "Tickets Inbox",
+    icon: Inbox,
+    url: "#tickets",
   },
   {
     title: "Access Control",

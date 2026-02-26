@@ -306,6 +306,7 @@ enum ServiceRequestStatus {
   IN_PROGRESS
   RESOLVED
   CLOSED
+  CANCELLED
 }
 
 enum UserStatusLogSource {
@@ -404,7 +405,9 @@ model User {
   invoices Invoice[] @relation("user_invoices")
 
   // Service Requests
-  serviceRequests ServiceRequest[] @relation("creator_requests")
+  serviceRequests        ServiceRequest[]        @relation("creator_requests")
+  serviceRequestComments ServiceRequestComment[]
+  complaintComments      ComplaintComment[]
 
   // Access QRCodes
   qrCodesGenerated AccessQRCode[] @relation("generated_by")
@@ -765,11 +768,27 @@ model ServiceRequest {
   description  String
   fieldValues  ServiceRequestFieldValue[]
   attachments  Attachment[]               @relation("ServiceRequestAttachments")
+  comments     ServiceRequestComment[]
   requestedAt  DateTime                   @default(now())
   updatedAt    DateTime                   @updatedAt
   invoices     Invoice[]
 
   @@index([requestedAt])
+}
+
+model ServiceRequestComment {
+  id         String         @id @default(uuid())
+  request     ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  requestId   String
+  createdBy   User           @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdById String
+  body        String
+  isInternal  Boolean        @default(false)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([requestId, createdAt])
+  @@index([createdById])
 }
 
 model ServiceRequestFieldValue {
@@ -897,8 +916,24 @@ model Complaint {
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
   invoices        Invoice[]
+  comments        ComplaintComment[]
 
   @@index([createdAt])
+}
+
+model ComplaintComment {
+  id         String    @id @default(uuid())
+  complaint   Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
+  complaintId String
+  createdBy   User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdById String
+  body        String
+  isInternal  Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([complaintId, createdAt])
+  @@index([createdById])
 }
 
 model Violation {

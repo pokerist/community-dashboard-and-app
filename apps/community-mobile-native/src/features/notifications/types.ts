@@ -22,6 +22,9 @@ export type MobileNotificationRow = {
     entityType?: string;
     entityId?: string;
     eventKey?: string;
+    ctaLabel?: string;
+    ctaText?: string;
+    openInAppLabel?: string;
     [key: string]: unknown;
   } | null;
   logs: NotificationLogRow[];

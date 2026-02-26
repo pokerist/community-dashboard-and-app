@@ -4,6 +4,7 @@ import DateTimePicker, { type DateTimePickerEvent } from '@react-native-communit
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   ActivityIndicator,
+  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -25,6 +26,7 @@ import {
 } from '../features/community/service';
 import type { Booking, Facility, ResidentUnit } from '../features/community/types';
 import { extractApiErrorMessage } from '../lib/http';
+import { bookingStatusDisplayLabel } from '../features/presentation/status';
 import { akColors, akShadow } from '../theme/alkarma';
 import { formatDateOnly, formatDateTime, todayIsoDate } from '../utils/format';
 
@@ -38,6 +40,8 @@ type BookingsScreenProps = {
   unitsErrorMessage: string | null;
   onSelectUnit: (unitId: string) => void;
   onRefreshUnits: () => Promise<void>;
+  deepLinkBookingId?: string | null;
+  onConsumeDeepLinkBookingId?: (bookingId: string) => void;
 };
 
 type SlotOption = {
@@ -180,6 +184,8 @@ export function BookingsScreen({
   unitsErrorMessage,
   onSelectUnit,
   onRefreshUnits,
+  deepLinkBookingId = null,
+  onConsumeDeepLinkBookingId,
 }: BookingsScreenProps) {
   const insets = useSafeAreaInsets();
   const toast = useAppToast();
@@ -196,6 +202,7 @@ export function BookingsScreen({
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showStartTimePicker, setShowStartTimePicker] = useState(false);
   const [showEndTimePicker, setShowEndTimePicker] = useState(false);
@@ -255,6 +262,15 @@ export function BookingsScreen({
         : bookings,
     [bookings, selectedUnitId],
   );
+
+  useEffect(() => {
+    if (!deepLinkBookingId) return;
+    const booking = bookings.find((row) => row.id === deepLinkBookingId) ?? null;
+    if (booking) {
+      setSelectedBooking(booking);
+      onConsumeDeepLinkBookingId?.(deepLinkBookingId);
+    }
+  }, [bookings, deepLinkBookingId, onConsumeDeepLinkBookingId]);
 
   const submitBooking = useCallback(async () => {
     if (!selectedUnitId) {
@@ -574,7 +590,11 @@ export function BookingsScreen({
             const cancellable =
               booking.status === 'PENDING' || booking.status === 'APPROVED';
             return (
-              <View key={booking.id} style={styles.itemCard}>
+              <Pressable
+                key={booking.id}
+                style={styles.itemCard}
+                onPress={() => setSelectedBooking(booking)}
+              >
                 <View style={styles.itemHeader}>
                   <View style={styles.flex}>
                     <Text style={styles.itemTitle}>{booking.facility?.name ?? 'Facility Booking'}</Text>
@@ -602,13 +622,118 @@ export function BookingsScreen({
                     </Text>
                   </Pressable>
                 ) : null}
-              </View>
+              </Pressable>
             );
           })
         )}
       </ScreenCard>
       </ScrollView>
+      <Modal
+        visible={Boolean(selectedBooking)}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setSelectedBooking(null)}
+      >
+        <View style={styles.detailModalRoot}>
+          <Pressable style={styles.detailModalBackdrop} onPress={() => setSelectedBooking(null)} />
+          <View style={[styles.detailModalSheet, { paddingBottom: Math.max(insets.bottom, 12) + 8 }]}>
+            <View style={styles.detailHandle} />
+            <View style={styles.detailHeader}>
+              <View style={styles.flex}>
+                <Text style={styles.detailTitle}>Booking Details</Text>
+                <Text style={styles.detailSubtitle}>
+                  Review booking status, unit, and timing details.
+                </Text>
+              </View>
+              <Pressable style={styles.detailCloseButton} onPress={() => setSelectedBooking(null)}>
+                <Ionicons name="close" size={18} color={akColors.textMuted} />
+              </Pressable>
+            </View>
+            <ScrollView contentContainerStyle={styles.detailContent}>
+              {selectedBooking ? (
+                <View style={styles.detailCard}>
+                  <View style={styles.detailSummaryCard}>
+                    <View style={styles.detailSummaryTop}>
+                      <View style={styles.flex}>
+                        <Text style={styles.detailSummaryTitle}>
+                          {selectedBooking.facility?.name ?? 'Facility Booking'}
+                        </Text>
+                        <Text style={styles.detailSummarySub}>
+                          {formatDateOnly(selectedBooking.date)} • {selectedBooking.startTime} - {selectedBooking.endTime}
+                        </Text>
+                      </View>
+                      <View
+                        style={[
+                          styles.detailStatusPill,
+                          statusBadgeStyle(selectedBooking.status),
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.detailStatusPillText,
+                            statusBadgeTextStyle(selectedBooking.status),
+                          ]}
+                        >
+                          {bookingStatusLabel(selectedBooking.status)}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={styles.detailSummaryHint}>
+                      Unit {selectedBooking.unit?.unitNumber ?? '—'} • Booking #{selectedBooking.id.slice(0, 8)}
+                    </Text>
+                  </View>
+
+                  <DetailRow label="Facility" value={selectedBooking.facility?.name ?? 'Facility Booking'} />
+                  <DetailRow label="Status" value={bookingStatusLabel(selectedBooking.status)} />
+                  <DetailRow label="Date" value={formatDateOnly(selectedBooking.date)} />
+                  <DetailRow label="Time" value={`${selectedBooking.startTime} - ${selectedBooking.endTime}`} />
+                  <DetailRow label="Unit" value={selectedBooking.unit?.unitNumber ?? '—'} />
+                  <DetailRow
+                    label="Created / Updated"
+                    value={formatDateTime(selectedBooking.cancelledAt || selectedBooking.createdAt)}
+                  />
+                  <View style={styles.detailBlockCard}>
+                    <Text style={styles.detailBlockCardLabel}>Timeline</Text>
+                    {bookingTimelineRows(selectedBooking).map((line, idx) => (
+                      <View key={`${selectedBooking.id}-tl-${idx}`} style={styles.detailTimelineRow}>
+                        <View style={[styles.detailTimelineDot, idx === 0 ? styles.detailTimelineDotActive : null]} />
+                        <Text style={styles.detailTimelineText}>{line}</Text>
+                      </View>
+                    ))}
+                  </View>
+                  <View style={styles.detailPolicyBox}>
+                    <Ionicons name="information-circle-outline" size={14} color={akColors.textMuted} />
+                    <Text style={styles.detailPolicyText}>
+                      You can cancel a booking while it is pending or approved. Cancelled bookings remain visible in history.
+                    </Text>
+                  </View>
+                  {['PENDING', 'APPROVED'].includes(String(selectedBooking.status).toUpperCase()) ? (
+                    <Pressable
+                      onPress={() => void handleCancel(selectedBooking.id)}
+                      disabled={cancellingId === selectedBooking.id}
+                      style={[styles.detailActionDanger, cancellingId === selectedBooking.id && styles.buttonDisabled]}
+                    >
+                      <Text style={styles.detailActionDangerText}>
+                        {cancellingId === selectedBooking.id ? 'Cancelling...' : 'Cancel Booking'}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              ) : null}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.detailRow}>
+      <Text style={styles.detailRowLabel}>{label}</Text>
+      <Text style={styles.detailRowValue}>{value}</Text>
+    </View>
   );
 }
 
@@ -638,6 +763,20 @@ function statusBadgeTextStyle(status?: string) {
     default:
       return { color: akColors.textMuted };
   }
+}
+
+function bookingStatusLabel(status?: string) {
+  return bookingStatusDisplayLabel(status);
+}
+
+function bookingTimelineRows(booking: Booking): string[] {
+  const rows = [`Request submitted • ${formatDateTime(booking.createdAt)}`];
+  const status = String(booking.status ?? '').toUpperCase();
+  if (status === 'APPROVED') rows.push('Booking approved by management');
+  if (status === 'PENDING') rows.push('Waiting for approval');
+  if (status === 'REJECTED') rows.push('Booking request was rejected');
+  if (status === 'CANCELLED') rows.push(`Cancelled • ${formatDateTime(booking.cancelledAt || booking.createdAt)}`);
+  return rows;
 }
 
 const styles = StyleSheet.create({
@@ -967,6 +1106,195 @@ const styles = StyleSheet.create({
     padding: 12,
     gap: 4,
     backgroundColor: akColors.surface,
+  },
+  detailModalRoot: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  detailModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15,23,42,0.35)',
+  },
+  detailModalSheet: {
+    backgroundColor: akColors.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '86%',
+    paddingTop: 8,
+    ...akShadow.card,
+  },
+  detailHandle: {
+    alignSelf: 'center',
+    width: 42,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: akColors.border,
+    marginBottom: 8,
+  },
+  detailHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 8,
+  },
+  detailTitle: {
+    color: akColors.text,
+    fontSize: 17,
+    fontWeight: '700',
+  },
+  detailSubtitle: {
+    color: akColors.textMuted,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  detailCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: akColors.surfaceMuted,
+  },
+  detailContent: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 16,
+  },
+  detailCard: {
+    borderWidth: 1,
+    borderColor: akColors.border,
+    borderRadius: 16,
+    backgroundColor: akColors.surfaceMuted,
+    padding: 12,
+    gap: 8,
+  },
+  detailSummaryCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    backgroundColor: akColors.surface,
+    padding: 10,
+    gap: 6,
+  },
+  detailSummaryTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  detailSummaryTitle: {
+    color: akColors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  detailSummarySub: {
+    marginTop: 2,
+    color: akColors.textMuted,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  detailSummaryHint: {
+    color: akColors.textSoft,
+    fontSize: 10,
+  },
+  detailStatusPill: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    alignSelf: 'flex-start',
+  },
+  detailStatusPillText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  detailBlockCard: {
+    marginTop: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    backgroundColor: akColors.surface,
+    padding: 10,
+    gap: 6,
+  },
+  detailBlockCardLabel: {
+    color: akColors.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  detailTimelineRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  detailTimelineDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 999,
+    backgroundColor: akColors.border,
+  },
+  detailTimelineDotActive: {
+    backgroundColor: akColors.primary,
+  },
+  detailTimelineText: {
+    flex: 1,
+    color: akColors.textMuted,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  detailPolicyBox: {
+    marginTop: 2,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    backgroundColor: 'rgba(42,62,53,0.04)',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+  },
+  detailPolicyText: {
+    flex: 1,
+    color: akColors.textMuted,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  detailRowLabel: {
+    flex: 1,
+    color: akColors.textMuted,
+    fontSize: 12,
+  },
+  detailRowValue: {
+    flex: 1,
+    textAlign: 'right',
+    color: akColors.text,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  detailActionDanger: {
+    marginTop: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(220,38,38,0.16)',
+    backgroundColor: 'rgba(220,38,38,0.06)',
+    paddingVertical: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailActionDangerText: {
+    color: '#B91C1C',
+    fontSize: 12,
+    fontWeight: '700',
   },
   itemHeader: {
     flexDirection: 'row',

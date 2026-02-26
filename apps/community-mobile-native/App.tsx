@@ -57,7 +57,10 @@ export default function App() {
                   <LoginScreen
                     isSubmitting={auth.isSubmitting}
                     errorMessage={auth.errorMessage}
+                    canBiometricQuickSignIn={auth.canBiometricQuickSignIn}
+                    biometricLabel={auth.biometricLabel}
                     onSubmit={auth.signIn}
+                    onBiometricSignIn={auth.signInWithBiometrics}
                     onOpenRegister={() => setGuestRoute('register')}
                   />
                   <StatusBar style="dark" />

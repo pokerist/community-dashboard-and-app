@@ -126,6 +126,24 @@ export type ServiceRequestRow = {
   requestedAt?: string;
   updatedAt?: string;
   service?: { name?: string } | null;
+  comments?: ServiceRequestCommentRow[] | null;
+};
+
+export type ServiceRequestCommentRow = {
+  id: string;
+  requestId?: string;
+  body: string;
+  isInternal?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  createdById?: string;
+  createdBy?: {
+    id?: string;
+    nameEN?: string | null;
+    nameAR?: string | null;
+    email?: string | null;
+    phone?: string | null;
+  } | null;
 };
 
 export type ComplaintRow = {
@@ -147,6 +165,23 @@ export type ComplaintRow = {
     id?: string;
     nameEN?: string | null;
     nameAR?: string | null;
+  } | null;
+};
+
+export type ComplaintCommentRow = {
+  id: string;
+  complaintId?: string;
+  body: string;
+  isInternal?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+  createdById?: string;
+  createdBy?: {
+    id?: string;
+    nameEN?: string | null;
+    nameAR?: string | null;
+    email?: string | null;
+    phone?: string | null;
   } | null;
 };
 
@@ -259,6 +294,15 @@ export type CreateComplaintInput = {
   description: string;
   priority?: string;
   attachmentIds?: string[];
+};
+
+export type AddServiceRequestCommentInput = {
+  body: string;
+  isInternal?: boolean;
+};
+
+export type CancelServiceRequestInput = {
+  reason?: string;
 };
 
 export type DynamicFieldValueInput = {

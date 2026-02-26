@@ -190,6 +190,14 @@ Each module has detailed documentation in its respective directory:
 - [Mobile Integration Guide](./mobile/README.md) - Screen-by-screen API mapping and mobile integration notes.
 - [Postman Collection (Mobile Core)](./postman/community-dashboard-mobile.postman_collection.json) - Import-ready collection with auth/refresh middleware.
 - [Postman Environment (Local)](./postman/community-dashboard-mobile.postman_environment.json) - Ready-to-edit local variables.
+- [Architecture (Full Stack)](./ARCHITECTURE.md) - Backend/Admin/Mobile integration map and data flows.
+- [Run Local](./RUN_LOCAL.md) - End-to-end local startup for backend/admin/mobile.
+- [Run Demo](./RUN_DEMO.md) - Demo reset + seed + smoke checklist before presentations.
+- [Deployment (Domain + HTTPS)](./DEPLOYMENT.md) - Reverse proxy, HTTPS, and production-oriented deployment notes.
+- [Environment Matrix](./ENV_MATRIX.md) - Required/optional env vars by runtime target.
+- [Mobile Personas](./MOBILE_PERSONAS.md) - Persona-to-role mapping and feature visibility rules.
+- [Notification Payload Contract](./NOTIFICATION_PAYLOAD_CONTRACT.md) - Payload keys used by deep-linking and mobile actions.
+- [White-label Branding](./WHITE_LABEL_BRANDING.md) - Brand settings flow across admin/backend/mobile.
 
 ## API Documentation
 
