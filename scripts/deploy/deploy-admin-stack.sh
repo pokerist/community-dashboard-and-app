@@ -24,6 +24,8 @@ AUTO_LOCAL_DB_TRUST_AUTH="${AUTO_LOCAL_DB_TRUST_AUTH:-true}"
 HEALTH_CHECK_AFTER_DEPLOY="${HEALTH_CHECK_AFTER_DEPLOY:-true}"
 API_HEALTH_PATH="${API_HEALTH_PATH:-/api}"
 NODE_MAJOR="${NODE_MAJOR:-20}"
+PRISMA_SCHEMA_SYNC_MODE="${PRISMA_SCHEMA_SYNC_MODE:-dbpush}"
+PRISMA_DB_FORCE_RESET="${PRISMA_DB_FORCE_RESET:-false}"
 DEFAULT_DB_HOST="${DEFAULT_DB_HOST:-127.0.0.1}"
 DEFAULT_DB_PORT="${DEFAULT_DB_PORT:-5432}"
 DEFAULT_DB_NAME="${DEFAULT_DB_NAME:-community_dashboard}"
@@ -479,7 +481,17 @@ if ! psql_socket_test; then
   exit 1
 fi
 npm run prisma:generate
-npx prisma migrate deploy
+if [[ "$PRISMA_SCHEMA_SYNC_MODE" == "migrate" ]]; then
+  note "Applying Prisma migrations (migrate deploy)"
+  npx prisma migrate deploy
+else
+  note "Syncing Prisma schema directly (db push)"
+  if [[ "$PRISMA_DB_FORCE_RESET" == "true" ]]; then
+    npx prisma db push --force-reset --accept-data-loss
+  else
+    npx prisma db push
+  fi
+fi
 npm run build
 
 if [[ "${RUN_DEMO_SEEDS:-false}" == "true" || "${RUN_DASHBOARD_LOAD_SEED:-false}" == "true" ]]; then
