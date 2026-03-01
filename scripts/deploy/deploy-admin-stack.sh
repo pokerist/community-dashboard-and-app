@@ -383,6 +383,7 @@ source_env_file() {
   eval "$(
     python3 - "$file" <<'PY'
 import sys, shlex
+import re
 from pathlib import Path
 
 for raw in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
@@ -391,7 +392,8 @@ for raw in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
         continue
     k, v = raw.split("=", 1)
     k = k.strip()
-    if not k:
+    # Skip malformed env entries (for example leaked PEM/newline fragments).
+    if not k or not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", k):
         continue
     print(f"export {k}={shlex.quote(v)}")
 PY
