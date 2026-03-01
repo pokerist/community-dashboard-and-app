@@ -17,6 +17,7 @@
     },
     "android": {
       "package": "com.ssscomunity.app",
+      "googleServicesFile": "./google-services.json",
       "usesCleartextTraffic": true,
       "adaptiveIcon": {
         "foregroundImage": "./assets/Alkarma-community.png",
