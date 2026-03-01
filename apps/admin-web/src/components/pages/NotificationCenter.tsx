@@ -167,6 +167,7 @@ export function NotificationCenter() {
   const [detailsRow, setDetailsRow] = useState<NotificationRow | null>(null);
   const [compose, setCompose] = useState<ComposeForm>(defaultComposeForm);
   const [search, setSearch] = useState("");
+  const [viewMode, setViewMode] = useState<"all" | "send" | "scheduled" | "failed">("send");
   const [statusFilter, setStatusFilter] = useState("all");
   const [channelFilter, setChannelFilter] = useState("all");
   const [audienceFilter, setAudienceFilter] = useState("all");
@@ -313,6 +314,9 @@ export function NotificationCenter() {
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows.filter((row) => {
+      if (viewMode === "send" && row.status === "SCHEDULED") return false;
+      if (viewMode === "scheduled" && row.status !== "SCHEDULED") return false;
+      if (viewMode === "failed" && !row.logs.some((l) => String(l.status).toUpperCase() === "FAILED")) return false;
       if (statusFilter !== "all" && row.status !== statusFilter) return false;
       if (channelFilter !== "all" && !row.channels.includes(channelFilter)) return false;
       if (audienceFilter !== "all" && row.targetAudience !== audienceFilter) return false;
@@ -329,7 +333,7 @@ export function NotificationCenter() {
         .toLowerCase()
         .includes(q);
     });
-  }, [rows, search, statusFilter, channelFilter, audienceFilter, dateFrom, dateTo]);
+  }, [rows, search, statusFilter, channelFilter, audienceFilter, dateFrom, dateTo, viewMode]);
 
   const stats = useMemo(() => {
     let failed = 0;
@@ -933,6 +937,12 @@ export function NotificationCenter() {
       </div>
 
       <Card className="p-4 space-y-3">
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" variant={viewMode === "send" ? "default" : "outline"} onClick={() => setViewMode("send")}>Send</Button>
+          <Button size="sm" variant={viewMode === "scheduled" ? "default" : "outline"} onClick={() => setViewMode("scheduled")}>Scheduled</Button>
+          <Button size="sm" variant={viewMode === "failed" ? "default" : "outline"} onClick={() => setViewMode("failed")}>Failed</Button>
+          <Button size="sm" variant={viewMode === "all" ? "default" : "outline"} onClick={() => setViewMode("all")}>All</Button>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">
           <div className="xl:col-span-2 relative">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#94A3B8]" />
@@ -1101,7 +1111,14 @@ export function NotificationCenter() {
                         <TableCell className="font-mono text-xs">{log.recipient}</TableCell>
                         <TableCell><Badge className={getStatusColorClass(log.status)}>{humanizeEnum(log.status)}</Badge></TableCell>
                         <TableCell className="text-xs text-[#64748B]">{formatDateTime(log.updatedAt || log.createdAt)}</TableCell>
-                        <TableCell className="max-w-[360px] text-xs break-words whitespace-pre-wrap">{parseFailure(log.providerResponse) || "—"}</TableCell>
+                        <TableCell className="max-w-[360px] text-xs break-words whitespace-pre-wrap">
+                          {parseFailure(log.providerResponse) ? (
+                            <details>
+                              <summary className="cursor-pointer text-[#334155]">View Details</summary>
+                              <div className="mt-2">{parseFailure(log.providerResponse)}</div>
+                            </details>
+                          ) : "—"}
+                        </TableCell>
                       </TableRow>
                     ))}
                     {detailsRow.logs.length === 0 ? (

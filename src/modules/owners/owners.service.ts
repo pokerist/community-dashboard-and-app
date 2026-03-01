@@ -47,7 +47,7 @@ export class OwnersService {
       throw new BadRequestException('Owner English name is required');
     }
     const normalizedNameAR = (dto.nameAR ?? '').trim() || null;
-    const normalizedEmail = dto.email?.trim() || null;
+    const normalizedEmail = dto.email?.trim().toLowerCase() || null;
     const normalizedPhone = dto.phone.trim();
     if (!normalizedPhone) {
       throw new BadRequestException('Phone is required');
@@ -88,27 +88,81 @@ export class OwnersService {
 
     const result = await this.prisma.$transaction(
       async (tx) => {
+        let matchedUser: {
+          id: string;
+          email: string | null;
+          phone: string | null;
+          userStatus: UserStatusEnum;
+          nationalIdFileId: string | null;
+        } | null = null;
+
         if (normalizedEmail) {
-          const existingEmail = await tx.user.findUnique({
+          matchedUser = await tx.user.findUnique({
             where: { email: normalizedEmail },
-            select: { id: true },
+            select: {
+              id: true,
+              email: true,
+              phone: true,
+              userStatus: true,
+              nationalIdFileId: true,
+            },
           });
-          if (existingEmail) {
-            throw new ConflictException('Email already registered');
-          }
+        }
+        if (!matchedUser) {
+          matchedUser = await tx.user.findFirst({
+            where: { phone: normalizedPhone },
+            select: {
+              id: true,
+              email: true,
+              phone: true,
+              userStatus: true,
+              nationalIdFileId: true,
+            },
+          });
         }
 
-        const existingPhone = await tx.user.findFirst({
-          where: { phone: normalizedPhone },
-          select: { id: true },
-        });
-        if (existingPhone) {
+        if (matchedUser?.phone && matchedUser.phone !== normalizedPhone) {
+          throw new ConflictException(
+            'Provided phone does not match the existing account matched by email',
+          );
+        }
+        if (
+          matchedUser?.email &&
+          normalizedEmail &&
+          matchedUser.email.toLowerCase() !== normalizedEmail
+        ) {
+          throw new ConflictException(
+            'Provided email does not match the existing account matched by phone',
+          );
+        }
+
+        const existingEmailOther =
+          normalizedEmail && !matchedUser
+            ? await tx.user.findUnique({
+                where: { email: normalizedEmail },
+                select: { id: true },
+              })
+            : null;
+        if (existingEmailOther) {
+          throw new ConflictException('Email already registered');
+        }
+
+        const existingPhoneOther = !matchedUser
+          ? await tx.user.findFirst({
+              where: { phone: normalizedPhone },
+              select: { id: true },
+            })
+          : null;
+        if (existingPhoneOther) {
           throw new ConflictException('Phone already registered');
         }
 
         if (dto.nationalId?.trim()) {
           const existingNationalId = await tx.resident.findFirst({
-            where: { nationalId: dto.nationalId.trim() },
+            where: {
+              nationalId: dto.nationalId.trim(),
+              ...(matchedUser ? { userId: { not: matchedUser.id } } : {}),
+            },
             select: { id: true },
           });
           if (existingNationalId) {
@@ -276,52 +330,102 @@ export class OwnersService {
           });
         }
 
-        const user = await tx.user.create({
-          data: {
-            nameEN: normalizedNameEN,
-            nameAR: normalizedNameAR ?? undefined,
-            email: normalizedEmail ?? undefined,
-            phone: normalizedPhone,
-            passwordHash,
-            nationalIdFileId: dto.nationalIdPhotoId,
-            userStatus: UserStatusEnum.INVITED,
-            signupSource: 'dashboard',
+        const user = matchedUser
+          ? await tx.user.update({
+              where: { id: matchedUser.id },
+              data: {
+                nameEN: normalizedNameEN || undefined,
+                nameAR: normalizedNameAR ?? undefined,
+                email: matchedUser.email ?? normalizedEmail ?? undefined,
+                phone: matchedUser.phone ?? normalizedPhone,
+                nationalIdFileId:
+                  matchedUser.nationalIdFileId ?? dto.nationalIdPhotoId ?? undefined,
+                userStatus:
+                  matchedUser.userStatus === UserStatusEnum.DISABLED
+                    ? UserStatusEnum.INVITED
+                    : matchedUser.userStatus,
+              },
+            })
+          : await tx.user.create({
+              data: {
+                nameEN: normalizedNameEN,
+                nameAR: normalizedNameAR ?? undefined,
+                email: normalizedEmail ?? undefined,
+                phone: normalizedPhone,
+                passwordHash,
+                nationalIdFileId: dto.nationalIdPhotoId,
+                userStatus: UserStatusEnum.INVITED,
+                signupSource: 'dashboard',
+              },
+            });
+
+        const resident = await tx.resident.upsert({
+          where: { userId: user.id },
+          update: {
+            nationalId: dto.nationalId?.trim() || undefined,
+          },
+          create: {
+            userId: user.id,
+            nationalId: dto.nationalId?.trim() || undefined,
           },
         });
 
-        const resident = await tx.resident.create({
-          data: { userId: user.id, nationalId: dto.nationalId?.trim() || undefined },
+        await tx.owner.upsert({
+          where: { userId: user.id },
+          update: {},
+          create: { userId: user.id },
         });
 
-        await tx.owner.create({ data: { userId: user.id } });
+        const hasPrimaryUnit = await tx.residentUnit.findFirst({
+          where: { residentId: resident.id, isPrimary: true },
+          select: { id: true },
+        });
 
         for (let index = 0; index < normalizedAssignments.length; index++) {
           const assignment = normalizedAssignments[index];
 
-          await tx.residentUnit.create({
-            data: {
+          await tx.residentUnit.upsert({
+            where: {
+              residentId_unitId: {
+                residentId: resident.id,
+                unitId: assignment.unitId,
+              },
+            },
+            update: {},
+            create: {
               residentId: resident.id,
               unitId: assignment.unitId,
-              isPrimary: index === 0,
+              isPrimary: !hasPrimaryUnit && index === 0,
             },
           });
 
-          await tx.unitAccess.create({
-            data: {
+          const existingOwnerAccess = await tx.unitAccess.findFirst({
+            where: {
               unitId: assignment.unitId,
               userId: user.id,
               role: 'OWNER',
-              startsAt: new Date(),
-              grantedBy: createdBy,
               status: 'ACTIVE',
-              source: 'ADMIN_ASSIGNMENT',
-              canViewFinancials: true,
-              canReceiveBilling: true,
-              canBookFacilities: true,
-              canGenerateQR: true,
-              canManageWorkers: true,
             },
+            select: { id: true },
           });
+          if (!existingOwnerAccess) {
+            await tx.unitAccess.create({
+              data: {
+                unitId: assignment.unitId,
+                userId: user.id,
+                role: 'OWNER',
+                startsAt: new Date(),
+                grantedBy: createdBy,
+                status: 'ACTIVE',
+                source: 'ADMIN_ASSIGNMENT',
+                canViewFinancials: true,
+                canReceiveBilling: true,
+                canBookFacilities: true,
+                canGenerateQR: true,
+                canManageWorkers: true,
+              },
+            });
+          }
 
           await tx.unit.update({
             where: { id: assignment.unitId },
@@ -355,20 +459,23 @@ export class OwnersService {
           }
         }
 
-        await tx.userStatusLog.create({
-          data: {
-            userId: user.id,
-            newStatus: UserStatusEnum.INVITED,
-            source: 'ADMIN',
-            note: 'Owner created by admin (activation pending)',
-          },
-        });
+        if (!matchedUser) {
+          await tx.userStatusLog.create({
+            data: {
+              userId: user.id,
+              newStatus: UserStatusEnum.INVITED,
+              source: 'ADMIN',
+              note: 'Owner created by admin (activation pending)',
+            },
+          });
+        }
 
         return {
           userId: user.id,
           userEmail: user.email,
           userName: user.nameEN,
-          randomPassword,
+          randomPassword: matchedUser ? null : randomPassword,
+          reusedExistingUser: Boolean(matchedUser),
           assignedUnits: normalizedAssignments.map((x) => ({
             unitId: x.unitId,
             paymentMode: x.paymentMode,
@@ -379,12 +486,24 @@ export class OwnersService {
       { timeout: 30000 },
     );
 
-    if (result.userEmail && result.userName) {
+    if (result.userEmail && result.userName && result.randomPassword) {
       await this.sendWelcomeEmail(
         result.userEmail,
         result.userName,
         result.randomPassword,
       );
+    } else if (result.userEmail && result.userName) {
+      try {
+        const subject = `Alkarma Community - Unit ownership assignment updated`;
+        const content = `
+        <h2>Hello ${result.userName},</h2>
+        <p>Your account was linked to additional owner unit assignment(s).</p>
+        <p>You can sign in with your existing credentials.</p>
+      `;
+        await this.emailService.sendEmail(subject, result.userEmail, content);
+      } catch {
+        // best effort
+      }
     }
 
     return { message: 'Owner created successfully', ...result };

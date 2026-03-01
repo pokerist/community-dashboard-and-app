@@ -77,11 +77,11 @@ export async function sendPhoneOtpRequest(
 
 export async function verifyPhoneOtpRequest(
   accessToken: string,
-  otp: string,
+  firebaseIdToken: string,
 ): Promise<{ message?: string }> {
   const response = await http.post<{ message?: string }>(
     '/auth/verify-phone-otp',
-    { otp },
+    { firebaseIdToken },
     {
       headers: {
         Authorization: `Bearer ${accessToken}`,

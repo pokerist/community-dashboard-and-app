@@ -284,6 +284,7 @@ provision_local_postgres_db() {
 auto_mock_provider_flags() {
   local env_file="$1"
   local smtp_host smtp_user smtp_pass twilio_sid twilio_token twilio_num expo_token fcm_json fcm_proj fcm_email fcm_key
+  local email_mock sms_mock expo_mock fcm_mock
   smtp_host="$(get_env_value "$env_file" "SMTP_HOST")"
   smtp_user="$(get_env_value "$env_file" "SMTP_USER")"
   smtp_pass="$(get_env_value "$env_file" "SMTP_PASS")"
@@ -295,17 +296,21 @@ auto_mock_provider_flags() {
   fcm_proj="$(get_env_value "$env_file" "FCM_PROJECT_ID")"
   fcm_email="$(get_env_value "$env_file" "FCM_CLIENT_EMAIL")"
   fcm_key="$(get_env_value "$env_file" "FCM_PRIVATE_KEY")"
+  email_mock="$(get_env_value "$env_file" "EMAIL_MOCK_MODE")"
+  sms_mock="$(get_env_value "$env_file" "TWILIO_MOCK_MODE")"
+  expo_mock="$(get_env_value "$env_file" "EXPO_PUSH_MOCK_MODE")"
+  fcm_mock="$(get_env_value "$env_file" "FCM_MOCK_MODE")"
 
-  if [[ -z "$smtp_host" || -z "$smtp_user" || -z "$smtp_pass" ]]; then
+  if [[ -z "$email_mock" && ( -z "$smtp_host" || -z "$smtp_user" || -z "$smtp_pass" ) ]]; then
     upsert_env "$env_file" "EMAIL_MOCK_MODE" "true"
   fi
-  if [[ -z "$twilio_sid" || -z "$twilio_token" || -z "$twilio_num" ]]; then
+  if [[ -z "$sms_mock" && ( -z "$twilio_sid" || -z "$twilio_token" || -z "$twilio_num" ) ]]; then
     upsert_env "$env_file" "TWILIO_MOCK_MODE" "true"
   fi
-  if [[ -z "$expo_token" ]]; then
+  if [[ -z "$expo_mock" && -z "$expo_token" ]]; then
     upsert_env "$env_file" "EXPO_PUSH_MOCK_MODE" "true"
   fi
-  if [[ -z "$fcm_json" && ( -z "$fcm_proj" || -z "$fcm_email" || -z "$fcm_key" ) ]]; then
+  if [[ -z "$fcm_mock" && -z "$fcm_json" && ( -z "$fcm_proj" || -z "$fcm_email" || -z "$fcm_key" ) ]]; then
     upsert_env "$env_file" "FCM_MOCK_MODE" "true"
   fi
 }
@@ -391,6 +396,17 @@ PY
   )"
 }
 
+sync_env_key_from_example() {
+  local target_file="$1"
+  local example_file="$2"
+  local key="$3"
+  local example
+  example="$(get_env_value "$example_file" "$key")"
+  if [[ -n "$example" ]]; then
+    upsert_env "$target_file" "$key" "$example"
+  fi
+}
+
 bootstrap_server
 
 note "Validating tooling"
@@ -412,6 +428,19 @@ upsert_env "$ROOT_ENV_PROD" "PORT" "$BACKEND_PORT"
 upsert_env "$ROOT_ENV_PROD" "CORS_ORIGIN" "$ADMIN_URL"
 upsert_env "$ROOT_ENV_PROD" "FRONTEND_URL" "$ADMIN_URL"
 upsert_env "$ADMIN_ENV_PROD" "VITE_API_BASE_URL" "$API_URL"
+
+# Backfill Firebase push/auth envs from example when production file has empty values.
+sync_env_key_from_example "$ROOT_ENV_PROD" "$ROOT_ENV_PROD_EXAMPLE" "FCM_PROJECT_ID"
+sync_env_key_from_example "$ROOT_ENV_PROD" "$ROOT_ENV_PROD_EXAMPLE" "FCM_CLIENT_EMAIL"
+sync_env_key_from_example "$ROOT_ENV_PROD" "$ROOT_ENV_PROD_EXAMPLE" "FCM_PRIVATE_KEY"
+sync_env_key_from_example "$ROOT_ENV_PROD" "$ROOT_ENV_PROD_EXAMPLE" "RESEND_API_KEY"
+sync_env_key_from_example "$ROOT_ENV_PROD" "$ROOT_ENV_PROD_EXAMPLE" "RESEND_FROM_EMAIL"
+if [[ -n "$(get_env_value "$ROOT_ENV_PROD" "FCM_PROJECT_ID")" && -n "$(get_env_value "$ROOT_ENV_PROD" "FCM_CLIENT_EMAIL")" && -n "$(get_env_value "$ROOT_ENV_PROD" "FCM_PRIVATE_KEY")" ]]; then
+  upsert_env "$ROOT_ENV_PROD" "FCM_MOCK_MODE" "false"
+fi
+if [[ -n "$(get_env_value "$ROOT_ENV_PROD" "RESEND_API_KEY")" ]]; then
+  upsert_env "$ROOT_ENV_PROD" "EMAIL_MOCK_MODE" "false"
+fi
 
 provision_local_postgres_db "$ROOT_ENV_PROD"
 auto_mock_provider_flags "$ROOT_ENV_PROD"

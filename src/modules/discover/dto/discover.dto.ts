@@ -42,12 +42,6 @@ export class UpsertDiscoverPlaceDto {
   @IsUUID()
   imageFileId?: string;
 
-  @ApiPropertyOptional({ example: '8 mins away' })
-  @IsOptional()
-  @IsString()
-  @MaxLength(120)
-  distanceHint?: string;
-
   @ApiPropertyOptional({ example: true, default: true })
   @IsOptional()
   @IsBoolean()

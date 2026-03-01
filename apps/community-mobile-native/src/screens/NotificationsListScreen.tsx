@@ -113,18 +113,22 @@ function NotificationRowItem({
   isMarking,
   onOpen,
   palette,
+  language,
 }: {
   item: MobileNotificationRow;
   onMarkRead: (id: string) => void;
   isMarking: boolean;
   onOpen: () => void;
   palette: ReturnType<typeof getBrandPalette>;
+  language: 'en' | 'ar';
 }) {
   const { t } = useI18n();
   const visual = notificationVisual(item.type, palette);
   const safeTitle = item.title?.trim() || t('notifications.notification');
   const safeMessage =
-    item.messageEn?.trim() || item.messageAr?.trim() || t('notifications.noDetails');
+    (language === 'ar'
+      ? item.messageAr?.trim() || item.messageEn?.trim()
+      : item.messageEn?.trim() || item.messageAr?.trim()) || t('notifications.noDetails');
 
   return (
     <Pressable
@@ -214,7 +218,7 @@ function NotificationRowItem({
 }
 
 export function NotificationsListScreen({ onOpenInAppRoute }: NotificationsListScreenProps) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const { brand } = useBranding();
   const palette = getBrandPalette(brand);
   const insets = useSafeAreaInsets();
@@ -409,6 +413,7 @@ export function NotificationsListScreen({ onOpenInAppRoute }: NotificationsListS
             onMarkRead={(id) => void notifications.markRead(id)}
             isMarking={notifications.markingId === item.id}
             palette={palette}
+            language={language}
             onOpen={async () => {
               setSelectedNotification(item);
               if (!item.isRead) await notifications.markRead(item.id);
@@ -451,14 +456,13 @@ export function NotificationsListScreen({ onOpenInAppRoute }: NotificationsListS
             <ScrollView contentContainerStyle={styles.detailContent}>
               <View style={styles.detailBodyCard}>
                 <Text style={styles.detailBodyText}>
-                  {selectedNotification?.messageEn?.trim() || t('notifications.noDetails')}
+                  {(language === 'ar'
+                    ? selectedNotification?.messageAr?.trim() ||
+                      selectedNotification?.messageEn?.trim()
+                    : selectedNotification?.messageEn?.trim() ||
+                      selectedNotification?.messageAr?.trim()) ||
+                    t('notifications.noDetails')}
                 </Text>
-                {selectedNotification?.messageAr?.trim() ? (
-                  <>
-                    <View style={styles.detailDivider} />
-                    <Text style={styles.detailBodyText}>{selectedNotification.messageAr}</Text>
-                  </>
-                ) : null}
               </View>
 
               <View style={styles.detailBadgesRow}>

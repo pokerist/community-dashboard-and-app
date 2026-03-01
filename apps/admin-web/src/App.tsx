@@ -22,7 +22,7 @@ import { CommunityDirectory } from "./components/pages/CommunityDirectory";
 import { ApprovalsCenter } from "./components/pages/ApprovalsCenter";
 import { Toaster } from "./components/ui/sonner";
 import { toast } from "sonner";
-import { isAuthenticated, removeAuthToken } from "./lib/api-client";
+import apiClient, { isAuthenticated, removeAuthToken } from "./lib/api-client";
 import { AdminLoginPage } from "./components/auth/AdminLoginPage";
 import {
   Dialog,
@@ -131,6 +131,29 @@ export default function App() {
   }, [authenticated]);
 
   const currentAdminEmail = localStorage.getItem("auth_email") || "Admin";
+
+  useEffect(() => {
+    if (!authenticated || typeof document === "undefined") return;
+
+    const applyBrandPrimary = (hex: string) => {
+      const color = String(hex || "").trim();
+      if (!/^#[0-9a-fA-F]{6}$/.test(color)) return;
+      document.documentElement.style.setProperty("--primary", color);
+      document.documentElement.style.setProperty("--color-primary", color);
+      document.documentElement.style.setProperty("--primary-foreground", "#ffffff");
+    };
+
+    const loadBranding = async () => {
+      try {
+        const response = await apiClient.get("/system-settings/mobile-app-config");
+        applyBrandPrimary(response.data?.brand?.primaryColor ?? "");
+      } catch {
+        // Keep defaults if branding is unavailable.
+      }
+    };
+
+    void loadBranding();
+  }, [authenticated]);
 
   const handleLogout = () => {
     removeAuthToken();
@@ -333,7 +356,7 @@ export default function App() {
               <div className="space-y-3 text-sm text-[#334155]">
                 <p>This environment is intended for development and demonstrations on a local machine.</p>
                 <p>Seed/demo data may be generated and is not production customer data.</p>
-                <p>External providers (SMTP/Twilio/FCM) should use sandbox/test credentials during demos.</p>
+                <p>External providers (SMTP/Firebase/FCM) should use sandbox/test credentials during demos.</p>
                 <p>Do not reuse demo credentials in production environments.</p>
               </div>
             </>

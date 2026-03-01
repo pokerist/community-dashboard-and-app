@@ -34,6 +34,7 @@ import { ResidentVehiclesModule } from './modules/resident-vehicles/resident-veh
 import { HelpCenterModule } from './modules/help-center/help-center.module';
 import { DiscoverModule } from './modules/discover/discover.module';
 import { HouseholdModule } from './modules/household/household.module';
+import { RentRequestsModule } from './modules/rent-requests/rent-requests.module';
 
 @Module({
   imports: [
@@ -72,6 +73,7 @@ import { HouseholdModule } from './modules/household/household.module';
     HelpCenterModule,
     DiscoverModule,
     HouseholdModule,
+    RentRequestsModule,
   ],
   controllers: [],
   providers: [],

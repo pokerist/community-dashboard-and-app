@@ -363,13 +363,14 @@ export class NotificationsService {
         break;
       case Audience.SPECIFIC_UNITS:
         if (audienceMeta?.unitIds?.length) {
-          const residentUnits = await this.prisma.residentUnit.findMany({
-            where: { unitId: { in: audienceMeta.unitIds } },
-            select: { resident: { select: { userId: true } } },
+          const accesses = await this.prisma.unitAccess.findMany({
+            where: {
+              unitId: { in: audienceMeta.unitIds },
+              status: 'ACTIVE',
+            },
+            select: { userId: true },
           });
-          recipients.push(
-            ...residentUnits.map((r) => r.resident.userId).filter(Boolean),
-          );
+          recipients.push(...accesses.map((r) => r.userId).filter(Boolean));
         }
         break;
       case Audience.SPECIFIC_BLOCKS: {
@@ -388,14 +389,15 @@ export class NotificationsService {
         });
         if (!units.length) break;
 
-        const residentUnits = await this.prisma.residentUnit.findMany({
-          where: { unitId: { in: units.map((u) => u.id) } },
-          select: { resident: { select: { userId: true } } },
+        const accesses = await this.prisma.unitAccess.findMany({
+          where: {
+            unitId: { in: units.map((u) => u.id) },
+            status: 'ACTIVE',
+          },
+          select: { userId: true },
         });
 
-        recipients.push(
-          ...residentUnits.map((r) => r.resident.userId).filter(Boolean),
-        );
+        recipients.push(...accesses.map((r) => r.userId).filter(Boolean));
         break;
       }
     }
@@ -425,17 +427,13 @@ export class NotificationsService {
   }
 
   private async getUserAudienceContext(userId: string) {
-    const resident = await this.prisma.resident.findUnique({
-      where: { userId },
-      select: { id: true },
+    const userUnits = await this.prisma.unitAccess.findMany({
+      where: {
+        userId,
+        status: 'ACTIVE',
+      },
+      select: { unitId: true, unit: { select: { block: true } } },
     });
-
-    const userUnits = resident
-      ? await this.prisma.residentUnit.findMany({
-          where: { residentId: resident.id },
-          select: { unitId: true, unit: { select: { block: true } } },
-        })
-      : [];
 
     const unitIds = userUnits.map((u) => u.unitId);
     const blocks = [
@@ -446,7 +444,7 @@ export class NotificationsService {
       ),
     ] as string[];
 
-    return { residentId: resident?.id ?? null, unitIds, blocks };
+    return { unitIds, blocks };
   }
 
   private async buildUserNotificationWhereClause(
@@ -775,7 +773,7 @@ export class NotificationsService {
           data: {
             status: NotificationLogStatus.FAILED,
             providerResponse: ({
-              provider: 'twilio',
+              provider: 'sms_otp',
               mode,
               skipped: true,
               reason: 'SMS_DISABLED_OR_NOT_CONFIGURED',
@@ -793,17 +791,19 @@ export class NotificationsService {
     ];
     const users = await this.prisma.user.findMany({
       where: { id: { in: recipients }, phone: { not: null } },
-      select: { id: true, phone: true },
+      select: { id: true, phone: true, preferredLanguage: true },
     });
     const phoneByUserId = new Map(users.map((u) => [u.id, u.phone!] as const));
-    const smsBody = this.buildSmsContent(notification);
+    const languageByUserId = new Map(
+      users.map((u) => [u.id, String(u.preferredLanguage ?? '').toLowerCase()] as const),
+    );
 
     let sent = 0;
     let failed = 0;
 
     for (const log of targetLogs) {
       const metaBase = {
-        provider: 'twilio',
+        provider: 'sms_otp',
         mode,
         attemptedAt: new Date().toISOString(),
         actorUserId: actorUserId ?? null,
@@ -823,6 +823,10 @@ export class NotificationsService {
         });
         continue;
       }
+      const smsBody = this.buildSmsContent(
+        notification,
+        languageByUserId.get(log.recipient),
+      );
 
       try {
         const providerResponse = await this.smsProvider.sendSms({
@@ -926,7 +930,13 @@ export class NotificationsService {
 
     let sent = 0;
     let failed = 0;
-    const pushBody = this.buildSmsContent(notification);
+    const languageRows = await this.prisma.user.findMany({
+      where: { id: { in: recipients } },
+      select: { id: true, preferredLanguage: true },
+    });
+    const languageByUserId = new Map(
+      languageRows.map((u) => [u.id, String(u.preferredLanguage ?? '').toLowerCase()] as const),
+    );
     const pushData = this.buildPushData(notification);
 
     for (const log of targetLogs) {
@@ -935,6 +945,10 @@ export class NotificationsService {
         attemptedAt: new Date().toISOString(),
         actorUserId: actorUserId ?? null,
       };
+      const pushBody = this.buildSmsContent(
+        notification,
+        languageByUserId.get(log.recipient),
+      );
       const userTokens = tokensByUser.get(log.recipient) ?? [];
       if (userTokens.length === 0) {
         failed += 1;
@@ -1065,9 +1079,20 @@ export class NotificationsService {
     `;
   }
 
-  private buildSmsContent(notification: any): string {
+  private pickLocalizedMessage(notification: any, language?: string) {
+    const normalized = String(language ?? '').toLowerCase();
+    if (normalized.startsWith('ar')) {
+      const ar = String(notification.messageAr ?? '').trim();
+      if (ar) return ar;
+    }
+    const en = String(notification.messageEn ?? '').trim();
+    if (en) return en;
+    return String(notification.messageAr ?? '').trim();
+  }
+
+  private buildSmsContent(notification: any, language?: string): string {
     const title = String(notification.title ?? '').trim();
-    const message = String(notification.messageEn ?? '').trim();
+    const message = this.pickLocalizedMessage(notification, language);
     const body = title ? `${title}\n${message}` : message;
     return body.slice(0, 1400);
   }

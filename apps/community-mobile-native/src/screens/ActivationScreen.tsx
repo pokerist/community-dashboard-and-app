@@ -59,7 +59,7 @@ export function ActivationScreen({
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [status, setStatus] = useState<ActivationStatus | null>(null);
-  const [otp, setOtp] = useState('');
+  const [firebaseIdToken, setFirebaseIdToken] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [nationalIdFileId, setNationalIdFileId] = useState<string | null>(null);
@@ -130,24 +130,24 @@ export function ActivationScreen({
     }
     try {
       const result = await sendPhoneOtpRequest(session.accessToken, phone);
-      toast.success('OTP sent', result.message || 'Check your phone for OTP.');
+      toast.success('Verification started', result.message || 'Complete Firebase phone verification in-app.');
     } catch (error: any) {
       toast.error('OTP failed', error?.message ?? 'Failed to send OTP.');
     }
   };
 
   const verifyOtp = async () => {
-    if (!otp.trim()) {
-      toast.error('OTP required', 'Enter the OTP code first.');
+    if (!firebaseIdToken.trim()) {
+      toast.error('Token required', 'Enter Firebase ID token first.');
       return;
     }
     try {
-      const result = await verifyPhoneOtpRequest(session.accessToken, otp.trim());
+      const result = await verifyPhoneOtpRequest(session.accessToken, firebaseIdToken.trim());
       toast.success('Phone verified', result.message || 'Phone verified successfully.');
       await loadStatus();
-      setOtp('');
+      setFirebaseIdToken('');
     } catch (error: any) {
-      toast.error('Invalid OTP', error?.message ?? 'OTP verification failed.');
+      toast.error('Verification failed', error?.message ?? 'Phone verification failed.');
     }
   };
 
@@ -225,18 +225,17 @@ export function ActivationScreen({
               <>
                 <View style={styles.row}>
                   <Pressable style={[styles.smallButton, { backgroundColor: brandPrimary }]} onPress={sendOtp}>
-                    <Text style={styles.smallButtonText}>Send OTP</Text>
+                    <Text style={styles.smallButtonText}>Start Firebase Flow</Text>
                   </Pressable>
                 </View>
                 <View style={styles.otpRow}>
                   <TextInput
                     style={styles.input}
-                    value={otp}
-                    onChangeText={setOtp}
-                    keyboardType="number-pad"
-                    placeholder="Enter OTP"
+                    value={firebaseIdToken}
+                    onChangeText={setFirebaseIdToken}
+                    placeholder="Paste Firebase ID token"
                     placeholderTextColor={akColors.textSoft}
-                    maxLength={6}
+                    autoCapitalize="none"
                   />
                   <Pressable style={[styles.smallButton, { backgroundColor: brandPrimary }]} onPress={verifyOtp}>
                     <Text style={styles.smallButtonText}>Verify</Text>

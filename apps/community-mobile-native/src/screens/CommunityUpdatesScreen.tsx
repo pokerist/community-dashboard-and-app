@@ -107,12 +107,14 @@ function CommunityUpdateRow({
   onMarkRead,
   onOpen,
   palette,
+  language,
 }: {
   item: MobileNotificationRow;
   isMarking: boolean;
   onMarkRead: (id: string) => void;
   onOpen: () => void;
   palette: ReturnType<typeof getBrandPalette>;
+  language: 'en' | 'ar';
 }) {
   const { t } = useI18n();
   const visual = communityVisual(item.type, palette);
@@ -145,7 +147,12 @@ function CommunityUpdateRow({
         {!item.isRead ? <View style={[styles.unreadDot, { backgroundColor: palette.primary }]} /> : null}
       </View>
 
-      <Text style={styles.cardMessage}>{item.messageEn || t('communityUpdates.noDetails')}</Text>
+      <Text style={styles.cardMessage}>
+        {(language === 'ar'
+          ? item.messageAr?.trim() || item.messageEn?.trim()
+          : item.messageEn?.trim() || item.messageAr?.trim()) ||
+          t('communityUpdates.noDetails')}
+      </Text>
 
       <View style={styles.cardFooter}>
         <View
@@ -194,7 +201,7 @@ function CommunityUpdateRow({
 }
 
 export function CommunityUpdatesScreen({ onOpenInAppRoute }: CommunityUpdatesScreenProps) {
-  const { t } = useI18n();
+  const { t, language } = useI18n();
   const { brand } = useBranding();
   const palette = getBrandPalette(brand);
   const insets = useSafeAreaInsets();
@@ -379,6 +386,7 @@ export function CommunityUpdatesScreen({ onOpenInAppRoute }: CommunityUpdatesScr
               isMarking={realtime.markingId === item.id}
               onMarkRead={(id) => void realtime.markRead(id)}
               palette={palette}
+              language={language}
               onOpen={async () => {
                 setSelectedUpdate(item);
                 if (!item.isRead) {
@@ -429,14 +437,11 @@ export function CommunityUpdatesScreen({ onOpenInAppRoute }: CommunityUpdatesScr
             <ScrollView contentContainerStyle={styles.detailContent}>
               <View style={styles.detailBodyCard}>
                 <Text style={styles.detailBodyText}>
-                  {selectedUpdate?.messageEn?.trim() || t('communityUpdates.noDetails')}
+                  {(language === 'ar'
+                    ? selectedUpdate?.messageAr?.trim() || selectedUpdate?.messageEn?.trim()
+                    : selectedUpdate?.messageEn?.trim() || selectedUpdate?.messageAr?.trim()) ||
+                    t('communityUpdates.noDetails')}
                 </Text>
-                {selectedUpdate?.messageAr?.trim() ? (
-                  <>
-                    <View style={styles.detailDivider} />
-                    <Text style={styles.detailBodyText}>{selectedUpdate.messageAr}</Text>
-                  </>
-                ) : null}
               </View>
 
               <View style={styles.detailBadgesRow}>

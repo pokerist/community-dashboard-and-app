@@ -522,8 +522,40 @@ export type DiscoverPlace = {
   phone?: string | null;
   workingHours?: string | null;
   imageFileId?: string | null;
-  distanceHint?: string | null;
   isActive?: boolean;
+};
+
+export type CreateRentRequestInput = {
+  unitId: string;
+  tenantName: string;
+  tenantEmail: string;
+  tenantPhone: string;
+  tenantNationalId?: string;
+  tenantNationality?: 'EGYPTIAN' | 'FOREIGN';
+  tenantNationalIdFileId?: string;
+  contractFileId: string;
+};
+
+export type RentRequestRow = {
+  id: string;
+  ownerUserId: string;
+  unitId: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | string;
+  tenantName: string;
+  tenantEmail: string;
+  tenantPhone: string;
+  tenantNationalId?: string | null;
+  rejectionReason?: string | null;
+  approvedLeaseId?: string | null;
+  createdAt: string;
+  reviewedAt?: string | null;
+  unit?: {
+    id: string;
+    unitNumber?: string | null;
+    block?: string | null;
+    projectName?: string | null;
+    status?: string | null;
+  };
 };
 
 export type ViolationActionRow = {

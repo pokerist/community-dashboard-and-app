@@ -29,7 +29,6 @@ export class DiscoverService {
         phone: dto.phone?.trim() || null,
         workingHours: dto.workingHours?.trim() || null,
         imageFileId: dto.imageFileId ?? null,
-        distanceHint: dto.distanceHint?.trim() || null,
         isActive: dto.isActive ?? true,
       },
     });
@@ -52,7 +51,6 @@ export class DiscoverService {
         phone: dto.phone?.trim() || null,
         workingHours: dto.workingHours?.trim() || null,
         imageFileId: dto.imageFileId ?? null,
-        distanceHint: dto.distanceHint?.trim() || null,
         isActive: dto.isActive ?? true,
       },
     });

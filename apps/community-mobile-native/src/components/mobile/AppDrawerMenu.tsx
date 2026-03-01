@@ -19,6 +19,7 @@ import { akColors } from '../../theme/alkarma';
 
 export type AppDrawerRoute =
   | 'Profile'
+  | 'ManageUnits'
   | 'Access'
   | 'Requests'
   | 'Services'
@@ -102,6 +103,7 @@ export function AppDrawerMenu({
     selectedUnitRoles.has('OWNER') ||
     selectedUnitRoles.has('TENANT') ||
     canManageWorkers;
+  const canManageUnitsByUnit = selectedUnitRoles.has('OWNER');
   const featureAvailability = profile?.featureAvailability;
   const allowServices = featureAvailability?.canUseServices ?? true;
   const allowComplaints = featureAvailability?.canUseComplaints ?? true;
@@ -117,6 +119,16 @@ export function AppDrawerMenu({
 
   const menuItems: DrawerMenuItem[] = [
     { key: 'profile', label: t('drawer.profile'), icon: 'person-outline', route: 'Profile' },
+    ...(canManageUnitsByUnit
+      ? ([
+          {
+            key: 'manage-units',
+            label: 'Manage My Units',
+            icon: 'home-outline',
+            route: 'ManageUnits',
+          },
+        ] as DrawerMenuItem[])
+      : []),
     ...(allowHousehold
       ? ([
           {

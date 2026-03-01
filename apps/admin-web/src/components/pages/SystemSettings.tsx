@@ -142,10 +142,8 @@ type IntegrationsState = {
   smsOtp: {
     enabled: boolean;
     configured: boolean;
-    provider: "TWILIO";
-    accountSid: string;
-    authToken: string;
-    fromNumber: string;
+    provider: "FIREBASE_AUTH";
+    firebaseProjectId: string;
     lastTest: ProviderTestResult | null;
   };
   fcm: {
@@ -417,10 +415,8 @@ const defaultIntegrations: IntegrationsState = {
   smsOtp: {
     enabled: false,
     configured: false,
-    provider: "TWILIO",
-    accountSid: "",
-    authToken: "",
-    fromNumber: "",
+    provider: "FIREBASE_AUTH",
+    firebaseProjectId: "",
     lastTest: null,
   },
   fcm: {
@@ -879,7 +875,7 @@ export function SystemSettings() {
     () => [
       { label: "In-App Notifications", ready: true, note: "Supported in backend" },
       { label: "Email (SMTP)", ready: draft.notifications.enableEmail, note: "Requires SMTP envs (or mock mode) in backend" },
-      { label: "SMS (Twilio)", ready: draft.notifications.enableSms, note: "Backend supports Twilio/mock; requires credentials or mock mode" },
+      { label: "OTP (Firebase Auth)", ready: draft.notifications.enableSms, note: "Uses Firebase ID token verification (client-side phone auth)." },
       { label: "Push (FCM)", ready: draft.notifications.enablePush, note: "Backend supports FCM/mock; requires device tokens + provider config" },
     ],
     [draft.notifications.enableEmail, draft.notifications.enablePush, draft.notifications.enableSms],
@@ -1110,15 +1106,15 @@ export function SystemSettings() {
               <div className="rounded-xl border p-4 space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h4 className="text-sm font-semibold text-[#1E293B]">SMS OTP (Twilio)</h4>
-                    <p className="text-xs text-[#64748B]">Used for OTP and SMS notifications when enabled.</p>
+                    <h4 className="text-sm font-semibold text-[#1E293B]">OTP Verification (Firebase Auth)</h4>
+                    <p className="text-xs text-[#64748B]">Phone OTP is verified via Firebase ID token. SMS transport from dashboard is disabled.</p>
                   </div>
                   <div className={`text-xs px-2 py-1 rounded ${integrations.smsOtp.configured ? "bg-[#DCFCE7] text-[#166534]" : "bg-[#FEF2F2] text-[#991B1B]"}`}>
                     {integrations.smsOtp.configured ? "Configured" : "Not Configured"}
                   </div>
                 </div>
                 <div className="flex items-center justify-between rounded-lg border p-3">
-                  <span className="text-sm">Enable SMS OTP</span>
+                  <span className="text-sm">Enable Firebase OTP Verification</span>
                   <Switch
                     checked={integrations.smsOtp.enabled}
                     onCheckedChange={(v) =>
@@ -1129,17 +1125,24 @@ export function SystemSettings() {
                     }
                   />
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <Input placeholder="Account SID" value={integrations.smsOtp.accountSid} onChange={(e) => setIntegrations((s) => ({ ...s, smsOtp: { ...s.smsOtp, accountSid: e.target.value } }))} />
-                  <Input placeholder="Auth Token" type="password" value={integrations.smsOtp.authToken} onChange={(e) => setIntegrations((s) => ({ ...s, smsOtp: { ...s.smsOtp, authToken: e.target.value } }))} />
-                  <Input className="md:col-span-2" placeholder="From Number" value={integrations.smsOtp.fromNumber} onChange={(e) => setIntegrations((s) => ({ ...s, smsOtp: { ...s.smsOtp, fromNumber: e.target.value } }))} />
+                <div className="grid grid-cols-1 gap-3">
+                  <Input
+                    placeholder="Firebase Project ID (optional override)"
+                    value={integrations.smsOtp.firebaseProjectId}
+                    onChange={(e) =>
+                      setIntegrations((s) => ({
+                        ...s,
+                        smsOtp: { ...s.smsOtp, firebaseProjectId: e.target.value },
+                      }))
+                    }
+                  />
                 </div>
                 <div className="flex gap-2">
                   <Button variant="outline" disabled={testingIntegration === "smsOtp"} onClick={() => void testIntegration("smsOtp", integrations.smsOtp as unknown as Record<string, unknown>)}>
-                    {testingIntegration === "smsOtp" ? "Testing..." : "Test SMS"}
+                    {testingIntegration === "smsOtp" ? "Testing..." : "Test OTP"}
                   </Button>
                   <Button disabled={savingIntegration === "smsOtp"} onClick={() => void saveIntegration("smsOtp", integrations.smsOtp as unknown as Record<string, unknown>)}>
-                    {savingIntegration === "smsOtp" ? "Saving..." : "Save SMS"}
+                    {savingIntegration === "smsOtp" ? "Saving..." : "Save OTP"}
                   </Button>
                 </div>
               </div>

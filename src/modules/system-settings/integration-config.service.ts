@@ -33,10 +33,8 @@ type SystemIntegrationsState = {
   };
   smsOtp: {
     enabled: boolean;
-    provider: 'TWILIO';
-    accountSid: string;
-    authToken: string;
-    fromNumber: string;
+    provider: 'FIREBASE_AUTH';
+    firebaseProjectId: string;
     lastTest: TestResult | null;
   };
   fcm: {
@@ -109,10 +107,8 @@ export class IntegrationConfigService {
     },
     smsOtp: {
       enabled: false,
-      provider: 'TWILIO',
-      accountSid: '',
-      authToken: '',
-      fromNumber: '',
+      provider: 'FIREBASE_AUTH',
+      firebaseProjectId: '',
       lastTest: null,
     },
     fcm: {
@@ -169,7 +165,6 @@ export class IntegrationConfigService {
         },
         smsOtp: {
           ...resolved.smsOtp,
-          authToken: this.maskSecret(resolved.smsOtp.authToken),
         },
         fcm: {
           ...resolved.fcm,
@@ -406,17 +401,6 @@ export class IntegrationConfigService {
         smtp.fromEmail,
     );
 
-    const smsOtp = {
-      ...raw.smsOtp,
-      provider: 'TWILIO' as const,
-      accountSid: raw.smsOtp.accountSid || process.env.TWILIO_ACCOUNT_SID || '',
-      authToken: raw.smsOtp.authToken || process.env.TWILIO_AUTH_TOKEN || '',
-      fromNumber: raw.smsOtp.fromNumber || process.env.TWILIO_PHONE_NUMBER || '',
-    };
-    const smsConfigured = Boolean(
-      smsOtp.accountSid && smsOtp.authToken && smsOtp.fromNumber,
-    );
-
     const fcm = {
       ...raw.fcm,
       serviceAccountJson:
@@ -430,6 +414,14 @@ export class IntegrationConfigService {
         ),
     };
     const fcmConfigured = this.isFcmConfigValid(fcm);
+
+    const smsOtp = {
+      ...raw.smsOtp,
+      provider: 'FIREBASE_AUTH' as const,
+      firebaseProjectId:
+        raw.smsOtp.firebaseProjectId || fcm.projectId || process.env.FCM_PROJECT_ID || '',
+    };
+    const smsConfigured = fcmConfigured;
 
     const s3 = {
       ...raw.s3,
@@ -504,16 +496,11 @@ export class IntegrationConfigService {
           ...this.pickAllowed(safePatch, [
             'enabled',
             'provider',
-            'accountSid',
-            'authToken',
-            'fromNumber',
+            'firebaseProjectId',
             'lastTest',
           ]),
-          provider: 'TWILIO',
+          provider: 'FIREBASE_AUTH',
         } as SystemIntegrationsState['smsOtp'];
-        if (this.isMaskedValue(String(next.smsOtp.authToken ?? ''))) {
-          next.smsOtp.authToken = raw.smsOtp.authToken;
-        }
         break;
       case 'fcm':
         next.fcm = {
@@ -650,7 +637,6 @@ export class IntegrationConfigService {
       },
       smsOtp: {
         ...raw.smsOtp,
-        authToken: this.encryptValue(raw.smsOtp.authToken),
       },
       fcm: {
         ...raw.fcm,
@@ -674,7 +660,6 @@ export class IntegrationConfigService {
       },
       smsOtp: {
         ...raw.smsOtp,
-        authToken: this.decryptValue(raw.smsOtp.authToken),
       },
       fcm: {
         ...raw.fcm,
@@ -705,10 +690,7 @@ export class IntegrationConfigService {
       };
     }
     if (provider === 'smsOtp') {
-      return {
-        ...providerState,
-        authToken: this.maskSecret(String(providerState.authToken ?? '')),
-      };
+      return providerState;
     }
     if (provider === 'fcm') {
       return {
@@ -791,7 +773,7 @@ export class IntegrationConfigService {
     if (!smsOtp.configured) {
       return {
         status: 'FAIL',
-        message: 'SMS OTP config is incomplete',
+        message: 'Firebase OTP config is incomplete',
         checkedAt: new Date().toISOString(),
         latencyMs: null,
       };
@@ -799,7 +781,7 @@ export class IntegrationConfigService {
     return {
       status: 'PASS',
       message:
-        'SMS config looks valid (credential presence check). Dry-run send is disabled.',
+        'Firebase Auth OTP verification is ready (using FCM service account settings).',
       checkedAt: new Date().toISOString(),
       latencyMs: 1,
     };

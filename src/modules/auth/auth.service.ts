@@ -5,6 +5,7 @@ import {
   BadRequestException,
   NotFoundException,
   ServiceUnavailableException,
+  Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
@@ -34,9 +35,19 @@ import {
   ProfileChangeRequestStatus,
   UserStatusEnum,
 } from '@prisma/client';
+import {
+  cert,
+  getApp,
+  initializeApp,
+  type App as FirebaseApp,
+} from 'firebase-admin/app';
+import { getAuth, type Auth as FirebaseAuth } from 'firebase-admin/auth';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+  private firebaseAuthApp: FirebaseApp | null = null;
+
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
@@ -46,6 +57,61 @@ export class AuthService {
     private integrationConfigService: IntegrationConfigService,
     private eventEmitter: EventEmitter2,
   ) {}
+
+  private normalizePhoneForComparison(value: string | null | undefined): string {
+    return String(value ?? '').replace(/[^\d]/g, '');
+  }
+
+  private async getFirebaseAuthClient(): Promise<FirebaseAuth> {
+    const integrations = await this.integrationConfigService.getResolvedIntegrations();
+    if (!integrations.smsOtp.enabled) {
+      throw new ServiceUnavailableException(
+        'Firebase OTP verification is disabled by admin settings.',
+      );
+    }
+
+    let parsedJson: Record<string, any> | null = null;
+    if (integrations.fcm.serviceAccountJson) {
+      try {
+        parsedJson = JSON.parse(integrations.fcm.serviceAccountJson);
+      } catch {
+        parsedJson = null;
+      }
+    }
+
+    const projectId =
+      integrations.fcm.projectId || parsedJson?.project_id || integrations.smsOtp.firebaseProjectId;
+    const clientEmail = integrations.fcm.clientEmail || parsedJson?.client_email;
+    const privateKey = String(
+      integrations.fcm.privateKey || parsedJson?.private_key || '',
+    ).replace(/\\n/g, '\n');
+
+    if (!projectId || !clientEmail || !privateKey) {
+      throw new ServiceUnavailableException(
+        'Firebase service account is incomplete. Configure FCM credentials first.',
+      );
+    }
+
+    if (!this.firebaseAuthApp) {
+      const appName = 'community-firebase-auth';
+      try {
+        this.firebaseAuthApp = getApp(appName);
+      } catch {
+        this.firebaseAuthApp = initializeApp(
+          {
+            credential: cert({
+              projectId,
+              clientEmail,
+              privateKey,
+            }),
+          },
+          appName,
+        );
+      }
+    }
+
+    return getAuth(this.firebaseAuthApp);
+  }
 
   // ================= LOGIN =================
   async login(identifier: string, password: string) {
@@ -1655,64 +1721,57 @@ export class AuthService {
     const capabilities = await this.integrationConfigService.getMobileCapabilities();
     if (!capabilities.smsOtp) {
       throw new ServiceUnavailableException(
-        'SMS OTP is currently unavailable. Please try again later.',
+        'Firebase OTP verification is currently unavailable. Please try again later.',
       );
     }
-
-    // Invalidate existing OTPs
-    await this.prisma.phoneVerificationOtp.updateMany({
-      where: { userId, usedAt: null },
-      data: { usedAt: new Date() },
-    });
-
-    // Generate OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const otpHash = await bcrypt.hash(otp, 12);
-
-    await this.prisma.phoneVerificationOtp.create({
-      data: {
-        userId,
-        otpHash,
-        expiresAt: new Date(Date.now() + 5 * 60 * 1000), // 5 minutes
-      },
-    });
-
-    // Send SMS
-    await this.notificationsService.sendNotification(
-      {
-        type: 'OTP',
-        title: 'Phone Verification OTP',
-        messageEn: `Your OTP: ${otp}`,
-        channels: ['SMS'],
-        targetAudience: 'SPECIFIC_RESIDENCES',
-        audienceMeta: { userIds: [userId] },
-      },
-      undefined,
+    this.logger.log(
+      `Firebase OTP flow initiated for user ${userId}. OTP dispatch is handled client-side by Firebase SDK.`,
     );
-
-    return { message: 'OTP sent successfully' };
+    return {
+      message:
+        'Start phone verification from the mobile Firebase flow, then submit firebaseIdToken to verify-phone-otp.',
+      provider: 'FIREBASE_AUTH',
+    };
   }
 
   // ================= VERIFY PHONE OTP =================
   async verifyPhoneOtp(dto: VerifyPhoneOtpDto, userId: string) {
-    const { otp } = dto;
-
-    const storedOtp = await this.prisma.phoneVerificationOtp.findFirst({
-      where: { userId, usedAt: null, expiresAt: { gt: new Date() } },
-      orderBy: { createdAt: 'desc' },
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, phone: true },
     });
-
-    if (!storedOtp) {
-      throw new BadRequestException('Invalid or expired OTP');
+    if (!user?.phone) {
+      throw new BadRequestException('User has no phone number on file');
     }
 
-    const isValid = await bcrypt.compare(otp, storedOtp.otpHash);
-    if (!isValid) {
-      throw new BadRequestException('Invalid OTP');
+    const authClient = await this.getFirebaseAuthClient();
+    const token = String(dto.firebaseIdToken ?? '').trim();
+    if (!token) {
+      throw new BadRequestException('firebaseIdToken is required');
     }
 
-    await this.prisma.phoneVerificationOtp.update({
-      where: { id: storedOtp.id },
+    let decoded: any;
+    try {
+      decoded = await authClient.verifyIdToken(token, true);
+    } catch {
+      throw new BadRequestException('Invalid or expired Firebase ID token');
+    }
+
+    const firebasePhone = String(decoded?.phone_number ?? '').trim();
+    if (!firebasePhone) {
+      throw new BadRequestException('Firebase token does not include phone_number claim');
+    }
+
+    const expected = this.normalizePhoneForComparison(user.phone);
+    const actual = this.normalizePhoneForComparison(firebasePhone);
+    if (!expected || expected !== actual) {
+      throw new BadRequestException(
+        'Verified Firebase phone number does not match account phone number',
+      );
+    }
+
+    await this.prisma.phoneVerificationOtp.updateMany({
+      where: { userId, usedAt: null },
       data: { usedAt: new Date() },
     });
 

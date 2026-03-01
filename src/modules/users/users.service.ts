@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ConflictException,
   ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { Prisma, UserStatusEnum } from '@prisma/client';
@@ -126,6 +127,7 @@ export class UsersService {
           UserStatusEnum.ACTIVE,
           UserStatusEnum.SUSPENDED,
           UserStatusEnum.INVITED,
+          UserStatusEnum.DISABLED,
         ],
       },
     };
@@ -264,6 +266,114 @@ export class UsersService {
         leasesAsTenant: true,
         invoices: true,
       },
+    });
+  }
+
+  async hardDeleteUser(id: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+      select: { id: true, email: true, nameEN: true },
+    });
+    if (!user) throw new NotFoundException(`User with ID ${id} not found`);
+
+    return this.prisma.$transaction(async (tx) => {
+      const blockers = await Promise.all([
+        tx.lease.count({ where: { OR: [{ ownerId: id }, { tenantId: id }] } }),
+        tx.invoice.count({ where: { residentId: id } }),
+        tx.serviceRequest.count({ where: { createdById: id } }),
+        tx.booking.count({ where: { userId: id } }),
+        tx.complaint.count({ where: { OR: [{ reporterId: id }, { assignedToId: id }] } }),
+        tx.violation.count({ where: { OR: [{ issuedById: id }, { residentId: id }] } }),
+        tx.ownerUnitContract.count({ where: { ownerUserId: id } }),
+      ]);
+
+      if (blockers.some((count) => count > 0)) {
+        throw new BadRequestException(
+          'Cannot hard delete this user because they have business records (leases/invoices/requests/bookings/etc).',
+        );
+      }
+
+      await tx.notification.updateMany({
+        where: { senderId: id },
+        data: { senderId: null },
+      });
+
+      await tx.profileChangeRequest.updateMany({
+        where: { reviewedById: id },
+        data: { reviewedById: null },
+      });
+      await tx.familyAccessRequest.updateMany({
+        where: { reviewedById: id },
+        data: { reviewedById: null },
+      });
+      await tx.authorizedAccessRequest.updateMany({
+        where: { reviewedById: id },
+        data: { reviewedById: null },
+      });
+      await tx.homeStaffAccess.updateMany({
+        where: { reviewedById: id },
+        data: { reviewedById: null },
+      });
+      await tx.rentRequest.updateMany({
+        where: { reviewedById: id },
+        data: { reviewedById: null },
+      });
+      await tx.violationActionRequest.updateMany({
+        where: { reviewedById: id },
+        data: { reviewedById: null },
+      });
+
+      await tx.profileChangeRequest.deleteMany({ where: { userId: id } });
+      await tx.familyAccessRequest.deleteMany({
+        where: { OR: [{ ownerUserId: id }, { activatedUserId: id }] },
+      });
+      await tx.authorizedAccessRequest.deleteMany({
+        where: { OR: [{ ownerUserId: id }, { activatedUserId: id }] },
+      });
+      await tx.homeStaffAccess.deleteMany({ where: { ownerUserId: id } });
+      await tx.violationActionRequest.deleteMany({ where: { requestedById: id } });
+      await tx.referral.deleteMany({
+        where: { OR: [{ referrerId: id }, { convertedUserId: id }] },
+      });
+      await tx.clubhouseAccessRequest.deleteMany({ where: { userId: id } });
+      await tx.notificationDeviceToken.deleteMany({ where: { userId: id } });
+      await tx.refreshToken.deleteMany({ where: { userId: id } });
+      await tx.passwordResetToken.deleteMany({ where: { userId: id } });
+      await tx.emailVerificationToken.deleteMany({ where: { userId: id } });
+      await tx.phoneVerificationOtp.deleteMany({ where: { userId: id } });
+      await tx.userStatusLog.deleteMany({ where: { userId: id } });
+      await tx.userRole.deleteMany({ where: { userId: id } });
+      await tx.contractorMember.deleteMany({ where: { userId: id } });
+      await tx.unitAccess.deleteMany({ where: { userId: id } });
+      await tx.accessQRCode.deleteMany({ where: { generatedById: id } });
+      await tx.serviceRequestComment.deleteMany({ where: { createdById: id } });
+      await tx.complaintComment.deleteMany({ where: { createdById: id } });
+      await tx.residentUnit.deleteMany({
+        where: { resident: { userId: id } },
+      });
+      await tx.familyMember.deleteMany({
+        where: {
+          OR: [
+            { primaryResident: { userId: id } },
+            { familyResident: { userId: id } },
+          ],
+        },
+      });
+      await tx.residentDocument.deleteMany({ where: { resident: { userId: id } } });
+      await tx.residentVehicle.deleteMany({ where: { resident: { userId: id } } });
+      await tx.resident.deleteMany({ where: { userId: id } });
+      await tx.owner.deleteMany({ where: { userId: id } });
+      await tx.tenant.deleteMany({ where: { userId: id } });
+      await tx.admin.deleteMany({ where: { userId: id } });
+
+      await tx.user.delete({ where: { id } });
+
+      return {
+        success: true,
+        deletedUserId: id,
+        deletedEmail: user.email ?? null,
+        deletedName: user.nameEN ?? null,
+      };
     });
   }
 

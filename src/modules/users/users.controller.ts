@@ -92,6 +92,12 @@ export class AdminUsersController {
     return this.usersService.deactivateUser(id);
   }
 
+  @Delete(':id([0-9a-fA-F-]{36})/hard')
+  @Permissions('user.delete')
+  hardDeleteUser(@Param('id') id: string) {
+    return this.usersService.hardDeleteUser(id);
+  }
+
   // ============================================
   //                RESIDENTS
   // ============================================

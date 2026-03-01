@@ -11,6 +11,9 @@ export class EmailService {
   ) {}
 
   isConfigured(): boolean {
+    const resendKey = (process.env.RESEND_API_KEY ?? '').trim();
+    if (resendKey) return true;
+
     return Boolean(
       process.env.SMTP_HOST &&
         process.env.SMTP_USER &&
@@ -32,6 +35,12 @@ export class EmailService {
     content: string,
   ): Promise<void> {
     try {
+      const resendApiKey = (process.env.RESEND_API_KEY ?? '').trim();
+      if (resendApiKey) {
+        await this.sendWithResend(resendApiKey, subject, recipient, content);
+        return;
+      }
+
       const integrations =
         await this.integrationConfigService.getResolvedIntegrations();
       const smtp = integrations.smtp;
@@ -80,5 +89,51 @@ export class EmailService {
       this.logger.error(`Failed to send email to ${recipient}`, error as any);
       throw error;
     }
+  }
+
+  private async sendWithResend(
+    apiKey: string,
+    subject: string,
+    recipient: string,
+    content: string,
+  ) {
+    const fromEmail =
+      (process.env.RESEND_FROM_EMAIL ?? '').trim() ||
+      (process.env.FROM_EMAIL ?? '').trim() ||
+      'onboarding@resend.dev';
+
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: fromEmail,
+        to: [recipient],
+        subject,
+        html: content,
+      }),
+    });
+
+    const raw = await response.text();
+    let parsed: any = null;
+    try {
+      parsed = raw ? JSON.parse(raw) : null;
+    } catch {
+      parsed = { raw };
+    }
+
+    if (!response.ok) {
+      const msg =
+        parsed?.message ||
+        parsed?.error ||
+        `Resend request failed with status ${response.status}`;
+      throw new Error(msg);
+    }
+
+    this.logger.log(
+      `[RESEND] Email sent to ${recipient} | id=${String(parsed?.id ?? 'n/a')}`,
+    );
   }
 }

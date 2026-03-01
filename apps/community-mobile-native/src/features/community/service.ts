@@ -40,6 +40,8 @@ import type {
   HelpCenterEntry,
   HouseholdRequestsResponse,
   DiscoverPlace,
+  CreateRentRequestInput,
+  RentRequestRow,
   ViolationActionRow,
 } from './types';
 
@@ -491,6 +493,23 @@ export async function listHelpCenterEntries(accessToken: string) {
 
 export async function listDiscoverPlaces(accessToken: string) {
   const response = await http.get<DiscoverPlace[]>('/discover', {
+    headers: authHeaders(accessToken),
+  });
+  return Array.isArray(response.data) ? response.data : [];
+}
+
+export async function createRentRequest(
+  accessToken: string,
+  payload: CreateRentRequestInput,
+) {
+  const response = await http.post<RentRequestRow>('/rent-requests', payload, {
+    headers: authHeaders(accessToken),
+  });
+  return response.data;
+}
+
+export async function listMyRentRequests(accessToken: string) {
+  const response = await http.get<RentRequestRow[]>('/rent-requests/my', {
     headers: authHeaders(accessToken),
   });
   return Array.isArray(response.data) ? response.data : [];

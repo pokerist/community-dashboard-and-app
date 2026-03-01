@@ -84,7 +84,6 @@ export function DiscoverScreen({ session }: { session: AuthSession }) {
               {!!row.workingHours ? (
                 <Text style={styles.cardMeta}>Working Hours: {row.workingHours}</Text>
               ) : null}
-              {!!row.distanceHint ? <Text style={styles.cardMeta}>{row.distanceHint}</Text> : null}
               {link ? (
                 <Pressable
                   style={[styles.openBtn, { backgroundColor: palette.primary }]}

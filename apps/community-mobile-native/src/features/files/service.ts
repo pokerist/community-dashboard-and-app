@@ -74,6 +74,7 @@ export type FileUploadPurpose =
   | 'profile-photo'
   | 'national-id'
   | 'delegate-id'
+  | 'contract'
   | 'marriage-certificate'
   | 'birth-certificate'
   | 'public-signup-photo'
@@ -83,6 +84,7 @@ const uploadEndpointByPurpose: Record<FileUploadPurpose, string> = {
   'profile-photo': '/files/upload/profile-photo',
   'national-id': '/files/upload/national-id',
   'delegate-id': '/files/upload/delegate-id',
+  contract: '/files/upload/contract',
   'marriage-certificate': '/files/upload/marriage-certificate',
   'birth-certificate': '/files/upload/birth-certificate',
   'public-signup-photo': '/files/upload/public-signup-photo',

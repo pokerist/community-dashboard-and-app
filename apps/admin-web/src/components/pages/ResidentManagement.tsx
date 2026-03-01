@@ -437,6 +437,25 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
     }
   };
 
+  const handleHardDeleteResident = async (id: string, name: string) => {
+    const confirmed = window.confirm(
+      `Delete ${name} permanently?\nThis is intended for testing and cannot be undone.`,
+    );
+    if (!confirmed) return;
+
+    try {
+      await apiClient.delete(`/admin/users/${id}/hard`);
+      setRows((prev) => prev.filter((r) => r.id !== id));
+      toast.success("Resident deleted", {
+        description: `${name} was permanently deleted from backend.`,
+      });
+    } catch (error) {
+      toast.error("Failed to permanently delete resident", {
+        description: errorMessage(error),
+      });
+    }
+  };
+
   const handleToggleSuspend = async (id: string, name: string) => {
     const row = rows.find((r) => r.id === id);
     if (!row) return;
@@ -1055,6 +1074,13 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
                       >
                         <Trash2 className="w-4 h-4 mr-2" />
                         Deactivate User
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={() => void handleHardDeleteResident(resident.id, resident.name)}
+                        className="text-[#B91C1C]"
+                      >
+                        <Trash2 className="w-4 h-4 mr-2" />
+                        Delete User (Permanent)
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>

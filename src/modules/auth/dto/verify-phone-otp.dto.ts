@@ -1,7 +1,11 @@
-import { IsNotEmpty, Matches } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString, Matches } from 'class-validator';
 
 export class VerifyPhoneOtpDto {
-  @IsNotEmpty()
+  @IsOptional()
   @Matches(/^\d{4,6}$/)
   otp!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  firebaseIdToken!: string;
 }

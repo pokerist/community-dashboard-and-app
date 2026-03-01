@@ -32,6 +32,7 @@ enum UnitStatus {
   DELIVERED
   OCCUPIED
   LEASED
+  RENTED
   // UNDER_MAINTENANCE
   // UNDER_CONSTRUCTION
 }
@@ -106,6 +107,13 @@ enum LeaseStatus {
 enum LeaseSource {
   OWNER
   COMPOUND
+}
+
+enum RentRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
 }
 
 enum InvoiceStatus {
@@ -421,6 +429,7 @@ model User {
   passwordHash     String?
   nameEN           String?
   nameAR           String?
+  preferredLanguage String?
   userStatus       UserStatusEnum @default(ACTIVE)
   phone            String?
   signupSource     String         @default("dashboard") // "community" or "dashboard"
@@ -456,6 +465,8 @@ model User {
   // Leases (owner/tenant)
   leasesAsOwner  Lease[] @relation("owner_leases")
   leasesAsTenant Lease[] @relation("tenant_leases")
+  rentRequestsAsOwner RentRequest[] @relation("rent_request_owner")
+  rentRequestsReviewed RentRequest[] @relation("rent_request_reviewer")
 
   // Complaints (issued/targeted)
   complaintsReported Complaint[] @relation("reporter")
@@ -671,6 +682,7 @@ model Unit {
 
   workers Worker[]
   ownerUnitContracts OwnerUnitContract[]
+  rentRequests RentRequest[]
   familyAccessRequests FamilyAccessRequest[]
   authorizedAccessRequests AuthorizedAccessRequest[]
   homeStaffAccesses HomeStaffAccess[]
@@ -797,6 +809,8 @@ model File {
   documents            ResidentDocument[] @relation("file_documents")
   ownerUnitContracts   OwnerUnitContract[] @relation("owner_unit_contract_file")
   ownerInstallments    OwnerInstallment[] @relation("owner_installment_reference_file")
+  rentRequestContracts RentRequest[] @relation("rent_request_contract_file")
+  rentRequestNationalIds RentRequest[] @relation("rent_request_national_id_file")
 }
 
 model OwnerUnitContract {
@@ -1012,6 +1026,38 @@ model Lease {
   source           LeaseSource @default(OWNER)
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
+}
+
+model RentRequest {
+  id                     String            @id @default(uuid())
+  ownerUserId            String
+  unitId                 String
+  status                 RentRequestStatus @default(PENDING)
+  tenantName             String
+  tenantEmail            String
+  tenantPhone            String
+  tenantNationalId       String?
+  tenantNationality      NationalityType   @default(EGYPTIAN)
+  tenantNationalIdFileId String?
+  contractFileId         String?
+  requestedAt            DateTime          @default(now())
+  reviewedAt             DateTime?
+  reviewedById           String?
+  rejectionReason        String?
+  approvedLeaseId        String?
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+
+  owner        User   @relation("rent_request_owner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  unit         Unit   @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  reviewedBy   User?  @relation("rent_request_reviewer", fields: [reviewedById], references: [id])
+  contractFile File?  @relation("rent_request_contract_file", fields: [contractFileId], references: [id])
+  nationalIdFile File? @relation("rent_request_national_id_file", fields: [tenantNationalIdFileId], references: [id])
+
+  @@index([ownerUserId, status, createdAt])
+  @@index([unitId, status, createdAt])
+  @@index([tenantEmail, status])
+  @@index([reviewedById, reviewedAt])
 }
 
 model Invoice {
@@ -1536,7 +1582,6 @@ model DiscoverPlace {
   workingHours String?
   imageFileId  String?
   isActive     Boolean  @default(true)
-  distanceHint String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 }

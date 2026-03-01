@@ -31,6 +31,7 @@ import { HouseholdHubScreen } from './HouseholdHubScreen';
 import { UtilityTrackerScreen } from './UtilityTrackerScreen';
 import { DiscoverScreen } from './DiscoverScreen';
 import { HelpCenterScreen } from './HelpCenterScreen';
+import { ManageMyUnitsScreen } from './ManageMyUnitsScreen';
 import { UnitPickerSheet } from '../components/mobile/UnitPickerSheet';
 import { Pressable, StyleSheet, Text, View, Vibration, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -53,6 +54,7 @@ type MobileShellProps = {
 
 type RootTabsParamList = {
   Home: undefined;
+  ManageUnits: undefined;
   CommunityUpdates: undefined;
   Notifications: undefined;
   Bookings: undefined;
@@ -74,6 +76,8 @@ function tabIcon(routeName: keyof RootTabsParamList, color: string, size: number
   switch (routeName) {
     case 'Home':
       return <Ionicons name="home-outline" size={size} color={color} />;
+    case 'ManageUnits':
+      return <Ionicons name="business-outline" size={size} color={color} />;
     case 'Notifications':
       return <Ionicons name="notifications-outline" size={size} color={color} />;
     case 'CommunityUpdates':
@@ -529,6 +533,17 @@ function MobileShellInner(props: MobileShellProps) {
               onOpenFinance={() => navigation.navigate('Finance')}
               onOpenProfileTab={() => navigation.navigate('Profile')}
               bootstrapProfile={bootstrapProfile}
+            />
+          )}
+        </Tab.Screen>
+
+        <Tab.Screen name="ManageUnits" options={hiddenTabOptions}>
+          {() => (
+            <ManageMyUnitsScreen
+              session={props.session}
+              units={units.units}
+              selectedUnitId={units.selectedUnitId}
+              onSelectUnit={units.setSelectedUnitId}
             />
           )}
         </Tab.Screen>

@@ -20,7 +20,6 @@ type DiscoverPlace = {
   mapLink?: string | null;
   phone?: string | null;
   workingHours?: string | null;
-  distanceHint?: string | null;
   imageFileId?: string | null;
   isActive?: boolean;
 };
@@ -40,7 +39,6 @@ const defaultPlace: Omit<DiscoverPlace, 'id'> = {
   mapLink: '',
   phone: '',
   workingHours: '',
-  distanceHint: '',
   imageFileId: '',
   isActive: true,
 };
@@ -53,6 +51,7 @@ export function CommunityDirectory() {
   const [discoverRows, setDiscoverRows] = useState<DiscoverPlace[]>([]);
   const [helpForm, setHelpForm] = useState(defaultHelp);
   const [discoverForm, setDiscoverForm] = useState(defaultPlace);
+  const [discoverImageFile, setDiscoverImageFile] = useState<File | null>(null);
 
   const activeRowsCount = useMemo(
     () => (tab === 'help' ? helpRows.length : discoverRows.length),
@@ -113,19 +112,23 @@ export function CommunityDirectory() {
     }
     setSaving(true);
     try {
-      await apiClient.post('/discover/admin', {
-        ...discoverForm,
-        name: discoverForm.name.trim(),
-        category: discoverForm.category?.trim() || null,
-        address: discoverForm.address?.trim() || null,
-        mapLink: discoverForm.mapLink?.trim() || null,
-        phone: discoverForm.phone?.trim() || null,
-        workingHours: discoverForm.workingHours?.trim() || null,
-        distanceHint: discoverForm.distanceHint?.trim() || null,
-        imageFileId: discoverForm.imageFileId?.trim() || null,
+      const form = new FormData();
+      form.append('name', discoverForm.name.trim());
+      if (discoverForm.category?.trim()) form.append('category', discoverForm.category.trim());
+      if (discoverForm.address?.trim()) form.append('address', discoverForm.address.trim());
+      if (discoverForm.mapLink?.trim()) form.append('mapLink', discoverForm.mapLink.trim());
+      if (discoverForm.phone?.trim()) form.append('phone', discoverForm.phone.trim());
+      if (discoverForm.workingHours?.trim()) form.append('workingHours', discoverForm.workingHours.trim());
+      if (discoverForm.imageFileId?.trim()) form.append('imageFileId', discoverForm.imageFileId.trim());
+      if (discoverImageFile) {
+        form.append('image', discoverImageFile);
+      }
+      await apiClient.post('/discover/admin', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
       });
       toast.success('Discover place created');
       setDiscoverForm(defaultPlace);
+      setDiscoverImageFile(null);
       await load();
     } catch (error) {
       toast.error('Failed to create discover place', {
@@ -256,8 +259,8 @@ export function CommunityDirectory() {
               <input className="border border-[#CBD5E1] rounded-lg px-3 py-2" placeholder="Map URL" value={discoverForm.mapLink ?? ''} onChange={(e) => setDiscoverForm((p) => ({ ...p, mapLink: e.target.value }))} />
               <input className="border border-[#CBD5E1] rounded-lg px-3 py-2" placeholder="Phone" value={discoverForm.phone ?? ''} onChange={(e) => setDiscoverForm((p) => ({ ...p, phone: e.target.value }))} />
               <input className="border border-[#CBD5E1] rounded-lg px-3 py-2" placeholder="Working Hours" value={discoverForm.workingHours ?? ''} onChange={(e) => setDiscoverForm((p) => ({ ...p, workingHours: e.target.value }))} />
-              <input className="border border-[#CBD5E1] rounded-lg px-3 py-2" placeholder="Distance Hint" value={discoverForm.distanceHint ?? ''} onChange={(e) => setDiscoverForm((p) => ({ ...p, distanceHint: e.target.value }))} />
               <input className="border border-[#CBD5E1] rounded-lg px-3 py-2" placeholder="Image File ID (optional)" value={discoverForm.imageFileId ?? ''} onChange={(e) => setDiscoverForm((p) => ({ ...p, imageFileId: e.target.value }))} />
+              <input className="border border-[#CBD5E1] rounded-lg px-3 py-2" type="file" accept="image/*" onChange={(e) => setDiscoverImageFile(e.target.files?.[0] ?? null)} />
             </div>
             <button
               type="button"
