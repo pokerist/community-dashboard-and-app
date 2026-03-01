@@ -83,6 +83,15 @@ function normalizeCreatedAt(value?: string | null): number {
   return Number.isFinite(t) ? t : 0;
 }
 
+function sanitizeCursor(value?: string | null): string | null {
+  if (!value) return null;
+  const ts = new Date(value).getTime();
+  if (!Number.isFinite(ts)) return null;
+  const maxAllowed = Date.now() + 60_000;
+  const safeTs = Math.min(ts, maxAllowed);
+  return new Date(safeTs).toISOString();
+}
+
 function mergeRows(
   prev: MobileNotificationRow[],
   incoming: MobileNotificationRow[],
@@ -204,6 +213,7 @@ export function NotificationRealtimeProvider({
   const pollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isPollingRef = useRef(false);
   const backoffMsRef = useRef(5000);
+  const emptyPollStreakRef = useRef(0);
   const recentIdsRef = useRef<string[]>([]);
   const backendDeviceTokenIdRef = useRef<string | null>(null);
   const unmountedRef = useRef(false);
@@ -226,12 +236,13 @@ export function NotificationRealtimeProvider({
   );
 
   const setCursorFromRows = useCallback((incoming: MobileNotificationRow[]) => {
-    const newest = incoming
-      .map((r) => r.createdAt || r.sentAt || null)
-      .filter(Boolean)
-      .sort()
-      .pop();
-    if (newest) cursorRef.current = newest;
+    const newestTs = incoming.reduce((maxTs, row) => {
+      const ts = normalizeCreatedAt(row.createdAt || row.sentAt);
+      return ts > maxTs ? ts : maxTs;
+    }, 0);
+    if (!newestTs) return;
+    const clampedTs = Math.min(newestTs, Date.now() + 60_000);
+    cursorRef.current = new Date(clampedTs).toISOString();
   }, []);
 
   const fullRefresh = useCallback(async () => {
@@ -258,8 +269,18 @@ export function NotificationRealtimeProvider({
     });
     if (result.data.length) {
       applyRows(result.data);
+      emptyPollStreakRef.current = 0;
+    } else {
+      emptyPollStreakRef.current += 1;
+      // Guard against stale cursors or drift: force a periodic full sync.
+      if (emptyPollStreakRef.current >= 12) {
+        emptyPollStreakRef.current = 0;
+        await fullRefresh();
+        return;
+      }
     }
-    cursorRef.current = result.meta.nextCursor ?? cursorRef.current;
+    const nextCursor = sanitizeCursor(result.meta.nextCursor);
+    cursorRef.current = nextCursor ?? cursorRef.current;
     setLastSyncAt(result.meta.serverTime || new Date().toISOString());
     setErrorMessage(null);
   }, [applyRows, fullRefresh, session.accessToken]);
@@ -358,6 +379,7 @@ export function NotificationRealtimeProvider({
     supportsChangesRef.current = true;
     backoffMsRef.current = 5000;
     cursorRef.current = null;
+    emptyPollStreakRef.current = 0;
 
     (async () => {
       setIsInitialLoading(true);

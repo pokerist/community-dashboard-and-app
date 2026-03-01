@@ -509,12 +509,18 @@ export class NotificationsService {
   async getUserNotificationChanges(userId: string, after?: string, limit = 50) {
     const safeLimit =
       Number.isFinite(limit) && limit > 0 ? Math.min(Math.floor(limit), 100) : 50;
-    const cursorDate =
+    let cursorDate =
       typeof after === 'string' && after.trim()
         ? new Date(after)
         : null;
     if (cursorDate && Number.isNaN(cursorDate.getTime())) {
       throw new BadRequestException('Invalid "after" datetime cursor');
+    }
+    if (cursorDate && cursorDate.getTime() > Date.now() + 60_000) {
+      this.logger.warn(
+        `Ignoring future notification cursor for user ${userId}: ${cursorDate.toISOString()}`,
+      );
+      cursorDate = null;
     }
 
     const baseWhere = await this.buildUserNotificationWhereClause(userId);
