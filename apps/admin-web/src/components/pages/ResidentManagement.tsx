@@ -480,6 +480,11 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
     }
   };
 
+  const canDeactivate = (status: string) =>
+    status === "ACTIVE" || status === "SUSPENDED" || status === "INVITED";
+  const canSuspend = (status: string) => status === "ACTIVE";
+  const canActivate = (status: string) => status === "SUSPENDED" || status === "DISABLED";
+
   const filteredRows = useMemo(() => {
     return rows.filter((resident) => {
       const q = searchTerm.trim().toLowerCase();
@@ -1064,33 +1069,35 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
                 <TableCell className="text-[#64748B]">{resident.registrationDate}</TableCell>
                 <TableCell className="text-right">
                   <div className="inline-flex items-center gap-2">
+                    {canSuspend(resident.rawStatus) || canActivate(resident.rawStatus) ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="!text-[#0F172A] !border-[#CBD5E1] !bg-white hover:!bg-[#F8FAFC]"
+                        onClick={() => void handleToggleSuspend(resident.id, resident.name)}
+                      >
+                        <Ban className="w-4 h-4 mr-1" />
+                        {canActivate(resident.rawStatus) ? "Activate" : "Suspend"}
+                      </Button>
+                    ) : null}
+                    {canDeactivate(resident.rawStatus) ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="!text-[#B91C1C] !border-[#FECACA] !bg-[#FEF2F2] hover:!bg-[#FEE2E2]"
+                        onClick={() => void handleDeleteResident(resident.id, resident.name)}
+                      >
+                        <Trash2 className="w-4 h-4 mr-1" />
+                        Deactivate
+                      </Button>
+                    ) : null}
                     <Button
-                      variant="outline"
                       size="sm"
-                      className="text-[#0F172A] border-[#CBD5E1] bg-white hover:bg-[#F8FAFC]"
-                      onClick={() => void handleToggleSuspend(resident.id, resident.name)}
-                    >
-                      <Ban className="w-4 h-4 mr-1" />
-                      {resident.rawStatus === "SUSPENDED" || resident.rawStatus === "DISABLED"
-                        ? "Activate"
-                        : "Suspend"}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="text-[#B91C1C] border-[#FECACA] bg-[#FEF2F2] hover:bg-[#FEE2E2]"
-                      onClick={() => void handleDeleteResident(resident.id, resident.name)}
-                    >
-                      <Trash2 className="w-4 h-4 mr-1" />
-                      Deactivate
-                    </Button>
-                    <Button
-                      size="sm"
-                      className="bg-[#7F1D1D] hover:bg-[#7F1D1D]/90 text-white"
+                      className="!bg-[#7F1D1D] hover:!bg-[#7F1D1D]/90 !text-white"
                       onClick={() => void handleHardDeleteResident(resident.id, resident.name)}
                     >
                       <Trash2 className="w-4 h-4 mr-1" />
-                      Delete
+                      Delete Permanently
                     </Button>
                   </div>
                 </TableCell>
