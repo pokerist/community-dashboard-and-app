@@ -6,7 +6,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { Prisma, UserStatusEnum } from '@prisma/client';
+import { Prisma, UserStatusEnum, UnitStatus } from '@prisma/client';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { CreateResidentDto } from './dto/create-resident.dto';
@@ -261,7 +261,7 @@ export class UsersService {
     });
   }
 
-  async hardDeleteUser(id: string) {
+  async hardDeleteUser(id: string, purgeRelations: boolean = true) {
     const user = await this.prisma.user.findUnique({
       where: { id },
       select: { id: true, email: true, nameEN: true },
@@ -269,21 +269,91 @@ export class UsersService {
     if (!user) throw new NotFoundException(`User with ID ${id} not found`);
 
     return this.prisma.$transaction(async (tx) => {
-      const blockers = await Promise.all([
-        tx.lease.count({ where: { OR: [{ ownerId: id }, { tenantId: id }] } }),
-        tx.invoice.count({ where: { residentId: id } }),
-        tx.serviceRequest.count({ where: { createdById: id } }),
-        tx.booking.count({ where: { userId: id } }),
-        tx.complaint.count({ where: { OR: [{ reporterId: id }, { assignedToId: id }] } }),
-        tx.violation.count({ where: { OR: [{ issuedById: id }, { residentId: id }] } }),
-        tx.ownerUnitContract.count({ where: { ownerUserId: id } }),
-      ]);
+      if (!purgeRelations) {
+        const blockers = await Promise.all([
+          tx.lease.count({ where: { OR: [{ ownerId: id }, { tenantId: id }] } }),
+          tx.invoice.count({ where: { residentId: id } }),
+          tx.serviceRequest.count({ where: { createdById: id } }),
+          tx.booking.count({ where: { userId: id } }),
+          tx.complaint.count({ where: { OR: [{ reporterId: id }, { assignedToId: id }] } }),
+          tx.violation.count({ where: { OR: [{ issuedById: id }, { residentId: id }] } }),
+          tx.ownerUnitContract.count({ where: { ownerUserId: id } }),
+        ]);
 
-      if (blockers.some((count) => count > 0)) {
-        throw new BadRequestException(
-          'Cannot hard delete this user because they have business records (leases/invoices/requests/bookings/etc).',
-        );
+        if (blockers.some((count) => count > 0)) {
+          throw new BadRequestException(
+            'Cannot hard delete this user because they have business records. Use purge=true to clean related data.',
+          );
+        }
       }
+
+      const resident = await tx.resident.findUnique({
+        where: { userId: id },
+        select: { id: true },
+      });
+
+      const leaseRows = await tx.lease.findMany({
+        where: { OR: [{ ownerId: id }, { tenantId: id }] },
+        select: { id: true, unitId: true },
+      });
+      const ownerContractRows = await tx.ownerUnitContract.findMany({
+        where: { ownerUserId: id },
+        select: { id: true, unitId: true },
+      });
+      const userUnitAccessRows = await tx.unitAccess.findMany({
+        where: { userId: id },
+        select: { unitId: true },
+      });
+      const residentUnitRows = resident
+        ? await tx.residentUnit.findMany({
+            where: { residentId: resident.id },
+            select: { unitId: true },
+          })
+        : [];
+      const bookingRows = await tx.booking.findMany({
+        where: { userId: id },
+        select: { id: true, unitId: true },
+      });
+      const serviceRequestRows = await tx.serviceRequest.findMany({
+        where: { createdById: id },
+        select: { id: true, unitId: true },
+      });
+      const complaintRows = await tx.complaint.findMany({
+        where: { reporterId: id },
+        select: { id: true, unitId: true },
+      });
+      const violationRows = await tx.violation.findMany({
+        where: { OR: [{ residentId: id }, { issuedById: id }] },
+        select: { id: true, unitId: true },
+      });
+
+      const touchedUnitIds = Array.from(
+        new Set(
+          [
+            ...leaseRows.map((row) => row.unitId),
+            ...ownerContractRows.map((row) => row.unitId),
+            ...userUnitAccessRows.map((row) => row.unitId),
+            ...residentUnitRows.map((row) => row.unitId),
+            ...bookingRows
+              .map((row) => row.unitId)
+              .filter((value): value is string => typeof value === 'string'),
+            ...serviceRequestRows
+              .map((row) => row.unitId)
+              .filter((value): value is string => typeof value === 'string'),
+            ...complaintRows
+              .map((row) => row.unitId)
+              .filter((value): value is string => typeof value === 'string'),
+            ...violationRows.map((row) => row.unitId),
+          ].filter((value): value is string => typeof value === 'string'),
+        ),
+      );
+
+      const leaseIds = leaseRows.map((row) => row.id);
+      const ownerContractIds = ownerContractRows.map((row) => row.id);
+      const bookingIds = bookingRows.map((row) => row.id);
+      const serviceRequestIds = serviceRequestRows.map((row) => row.id);
+      const complaintIds = complaintRows.map((row) => row.id);
+      const violationIds = violationRows.map((row) => row.id);
 
       await tx.notification.updateMany({
         where: { senderId: id },
@@ -314,6 +384,95 @@ export class UsersService {
         where: { reviewedById: id },
         data: { reviewedById: null },
       });
+      await tx.complaint.updateMany({
+        where: { assignedToId: id },
+        data: { assignedToId: null },
+      });
+      await tx.violation.updateMany({
+        where: { issuedById: id },
+        data: { issuedById: null },
+      });
+      await tx.violation.updateMany({
+        where: { residentId: id },
+        data: { residentId: null },
+      });
+      await tx.invoice.updateMany({
+        where: { residentId: id },
+        data: { residentId: null },
+      });
+
+      if (serviceRequestIds.length > 0) {
+        await tx.invoice.updateMany({
+          where: { serviceRequestId: { in: serviceRequestIds } },
+          data: { serviceRequestId: null },
+        });
+        await tx.attachment.deleteMany({
+          where: { serviceRequestId: { in: serviceRequestIds } },
+        });
+        await tx.serviceRequestComment.deleteMany({
+          where: { requestId: { in: serviceRequestIds } },
+        });
+        await tx.serviceRequestFieldValue.deleteMany({
+          where: { requestId: { in: serviceRequestIds } },
+        });
+        await tx.serviceRequest.deleteMany({
+          where: { id: { in: serviceRequestIds } },
+        });
+      }
+
+      if (bookingIds.length > 0) {
+        await tx.invoice.updateMany({
+          where: { bookingId: { in: bookingIds } },
+          data: { bookingId: null },
+        });
+      }
+
+      if (complaintIds.length > 0) {
+        await tx.invoice.updateMany({
+          where: { complaintId: { in: complaintIds } },
+          data: { complaintId: null },
+        });
+        await tx.complaintComment.deleteMany({
+          where: { complaintId: { in: complaintIds } },
+        });
+        await tx.complaint.deleteMany({
+          where: { id: { in: complaintIds } },
+        });
+      }
+
+      if (violationIds.length > 0) {
+        await tx.invoice.updateMany({
+          where: { violationId: { in: violationIds } },
+          data: { violationId: null },
+        });
+        await tx.violationActionRequest.deleteMany({
+          where: { violationId: { in: violationIds } },
+        });
+        await tx.violation.deleteMany({
+          where: { id: { in: violationIds } },
+        });
+      }
+
+      if (bookingIds.length > 0) {
+        await tx.booking.deleteMany({
+          where: { id: { in: bookingIds } },
+        });
+      }
+
+      if (leaseIds.length > 0) {
+        await tx.lease.deleteMany({
+          where: { id: { in: leaseIds } },
+        });
+      }
+
+      if (ownerContractIds.length > 0) {
+        await tx.ownerInstallment.deleteMany({
+          where: { ownerUnitContractId: { in: ownerContractIds } },
+        });
+        await tx.ownerUnitContract.deleteMany({
+          where: { id: { in: ownerContractIds } },
+        });
+      }
 
       await tx.profileChangeRequest.deleteMany({ where: { userId: id } });
       await tx.familyAccessRequest.deleteMany({
@@ -360,11 +519,19 @@ export class UsersService {
 
       await tx.user.delete({ where: { id } });
 
+      if (touchedUnitIds.length > 0) {
+        await tx.unit.updateMany({
+          where: { id: { in: touchedUnitIds } },
+          data: { status: UnitStatus.AVAILABLE },
+        });
+      }
+
       return {
         success: true,
         deletedUserId: id,
         deletedEmail: user.email ?? null,
         deletedName: user.nameEN ?? null,
+        unitIdsResetToAvailable: touchedUnitIds,
       };
     });
   }

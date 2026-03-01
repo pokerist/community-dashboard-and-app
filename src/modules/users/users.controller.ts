@@ -94,8 +94,13 @@ export class AdminUsersController {
 
   @Delete(':id([0-9a-fA-F-]{36})/hard')
   @Permissions('user.delete')
-  hardDeleteUser(@Param('id') id: string) {
-    return this.usersService.hardDeleteUser(id);
+  hardDeleteUser(
+    @Param('id') id: string,
+    @Query('purge') purge?: string,
+  ) {
+    const shouldPurge =
+      purge === undefined ? true : ['1', 'true', 'yes'].includes(String(purge).toLowerCase());
+    return this.usersService.hardDeleteUser(id, shouldPurge);
   }
 
   // ============================================

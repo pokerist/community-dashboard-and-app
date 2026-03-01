@@ -135,12 +135,24 @@ export default function App() {
   useEffect(() => {
     if (!authenticated || typeof document === "undefined") return;
 
+    const computeReadableTextColor = (hex: string) => {
+      const safe = hex.replace("#", "");
+      const r = parseInt(safe.slice(0, 2), 16);
+      const g = parseInt(safe.slice(2, 4), 16);
+      const b = parseInt(safe.slice(4, 6), 16);
+      const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+      return luminance > 0.6 ? "#0F172A" : "#FFFFFF";
+    };
+
     const applyBrandPrimary = (hex: string) => {
       const color = String(hex || "").trim();
       if (!/^#[0-9a-fA-F]{6}$/.test(color)) return;
       document.documentElement.style.setProperty("--primary", color);
       document.documentElement.style.setProperty("--color-primary", color);
-      document.documentElement.style.setProperty("--primary-foreground", "#ffffff");
+      document.documentElement.style.setProperty(
+        "--primary-foreground",
+        computeReadableTextColor(color),
+      );
     };
 
     const loadBranding = async () => {

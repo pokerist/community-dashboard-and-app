@@ -424,7 +424,13 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
   const handleDeleteResident = async (id: string, name: string) => {
     try {
       await apiClient.delete(`/admin/users/${id}`);
-      setRows((prev) => prev.filter((r) => r.id !== id));
+      setRows((prev) =>
+        prev.map((r) =>
+          r.id === id
+            ? { ...r, rawStatus: "DISABLED", status: humanizeEnum("DISABLED") }
+            : r,
+        ),
+      );
       toast.success("Resident deactivated", {
         description: `${name} has been deactivated in the backend.`,
       });
@@ -435,12 +441,12 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
 
   const handleHardDeleteResident = async (id: string, name: string) => {
     const confirmed = window.confirm(
-      `Delete ${name} permanently?\nThis is intended for testing and cannot be undone.`,
+      `Delete ${name} permanently and purge unit links/leases?\nThis will reset affected units to AVAILABLE.`,
     );
     if (!confirmed) return;
 
     try {
-      await apiClient.delete(`/admin/users/${id}/hard`);
+      await apiClient.delete(`/admin/users/${id}/hard?purge=true`);
       setRows((prev) => prev.filter((r) => r.id !== id));
       toast.success("Resident deleted", {
         description: `${name} was permanently deleted from backend.`,
@@ -455,11 +461,16 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
   const handleToggleSuspend = async (id: string, name: string) => {
     const row = rows.find((r) => r.id === id);
     if (!row) return;
-    const nextStatus = row.status.toUpperCase() === "SUSPENDED" ? "ACTIVE" : "SUSPENDED";
+    const current = row.rawStatus.toUpperCase();
+    const nextStatus = current === "SUSPENDED" || current === "DISABLED" ? "ACTIVE" : "SUSPENDED";
     try {
       await apiClient.patch(`/admin/users/${id}`, { userStatus: nextStatus });
       setRows((prev) =>
-        prev.map((r) => (r.id === id ? { ...r, status: humanizeEnum(nextStatus) } : r)),
+        prev.map((r) =>
+          r.id === id
+            ? { ...r, rawStatus: nextStatus, status: humanizeEnum(nextStatus) }
+            : r,
+        ),
       );
       toast.success(`Resident ${nextStatus === "SUSPENDED" ? "suspended" : "activated"}`, {
         description: `${name} status updated in backend.`,
@@ -496,7 +507,7 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
             {isLoading ? "Refreshing..." : "Refresh"}
           </Button>
           <Button
-            className="rounded-lg gap-2 bg-[#0F172A] hover:bg-[#0F172A]/90 text-white border border-[#0F172A]"
+            className="rounded-lg gap-2 !bg-[#0F172A] hover:!bg-[#0F172A]/90 !text-white border border-[#0F172A]"
             onClick={() => {
               if (onNavigateToCreate) {
                 onNavigateToCreate();
@@ -512,7 +523,7 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
           <div className="hidden">
           <Dialog open={isCreateOwnerDialogOpen} onOpenChange={setIsCreateOwnerDialogOpen}>
             <DialogTrigger asChild>
-              <Button className="bg-[#16A34A] hover:bg-[#16A34A]/90 text-white rounded-lg gap-2">
+              <Button className="rounded-lg gap-2 !bg-[#0F172A] hover:!bg-[#0F172A]/90 !text-white">
                 <Plus className="w-4 h-4" />
                 Add Resident
               </Button>
@@ -830,7 +841,7 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
                   Cancel
                 </Button>
                 <Button
-                  className="bg-[#0F172A] hover:bg-[#0F172A]/90 text-white"
+                  className="!bg-[#0F172A] hover:!bg-[#0F172A]/90 !text-white"
                   onClick={() => void handleCreateOwner()}
                   disabled={isCreatingOwner}
                 >
@@ -962,7 +973,7 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
                   Cancel
                 </Button>
                 <Button
-                  className="bg-[#0F172A] hover:bg-[#0F172A]/90 text-white"
+                  className="!bg-[#0F172A] hover:!bg-[#0F172A]/90 !text-white"
                   onClick={() => void handleCreateResident()}
                   disabled={isCreatingResident}
                 >
@@ -1060,7 +1071,9 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
                       onClick={() => void handleToggleSuspend(resident.id, resident.name)}
                     >
                       <Ban className="w-4 h-4 mr-1" />
-                      {resident.rawStatus === "SUSPENDED" ? "Activate" : "Suspend"}
+                      {resident.rawStatus === "SUSPENDED" || resident.rawStatus === "DISABLED"
+                        ? "Activate"
+                        : "Suspend"}
                     </Button>
                     <Button
                       variant="outline"

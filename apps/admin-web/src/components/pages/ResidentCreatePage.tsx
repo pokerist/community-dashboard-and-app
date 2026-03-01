@@ -586,7 +586,7 @@ export function ResidentCreatePage({ onBack, onCreated }: ResidentCreatePageProp
 
         <div className="flex justify-end mt-6">
           <Button
-            className="gap-2 bg-[#0F172A] hover:bg-[#0F172A]/90 text-white"
+            className="gap-2 !bg-[#0F172A] hover:!bg-[#0F172A]/90 !text-white"
             onClick={() => void handleCreateResident()}
             disabled={isCreatingResident}
           >
