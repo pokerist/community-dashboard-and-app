@@ -480,14 +480,14 @@ export function ResidentManagement() {
             <DialogTrigger asChild>
               <Button className="bg-[#16A34A] hover:bg-[#16A34A]/90 text-white rounded-lg gap-2">
                 <Plus className="w-4 h-4" />
-                Add Owner
+                Add Resident
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto">
               <DialogHeader>
-                <DialogTitle>Create Owner (Multi-Unit + Payment Plan)</DialogTitle>
+                <DialogTitle>Create Resident (Owner + Multi-Unit Payment Plan)</DialogTitle>
                 <DialogDescription>
-                  Creates owner account, links one or more units, stores contract, and configures installment plans.
+                  Creates a resident owner account, links one or more units, stores contract documents, and configures unit payment plans.
                 </DialogDescription>
               </DialogHeader>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -807,16 +807,16 @@ export function ResidentManagement() {
           </Dialog>
           <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
             <DialogTrigger asChild>
-              <Button className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white rounded-lg gap-2">
+              <Button variant="outline" className="rounded-lg gap-2">
                 <Plus className="w-4 h-4" />
-                Add Resident
+                Quick Resident (Legacy)
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-2xl">
               <DialogHeader>
-                <DialogTitle>Create Resident</DialogTitle>
+                <DialogTitle>Quick Resident (Legacy)</DialogTitle>
                 <DialogDescription>
-                  Creates base user, resident profile, and optional unit assignment.
+                  Legacy lightweight flow: creates base user, resident profile, and optional unit assignment.
                 </DialogDescription>
               </DialogHeader>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
