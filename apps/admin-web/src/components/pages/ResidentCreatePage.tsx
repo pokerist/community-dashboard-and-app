@@ -84,16 +84,29 @@ export function ResidentCreatePage({ onBack, onCreated }: ResidentCreatePageProp
   const loadUnits = useCallback(async () => {
     setIsLoadingUnits(true);
     try {
-      const unitsResponse = await apiClient.get("/units", {
-        params: { page: 1, limit: 200 },
-      });
-      const rawUnits = Array.isArray(unitsResponse.data?.data)
-        ? unitsResponse.data.data
-        : Array.isArray(unitsResponse.data)
-          ? unitsResponse.data
-          : [];
+      const collected: any[] = [];
+      let page = 1;
+      let totalPages = 1;
+      do {
+        const unitsResponse = await apiClient.get("/units", {
+          params: {
+            page,
+            limit: 100,
+            status: "AVAILABLE",
+          },
+        });
+        const rawUnits = Array.isArray(unitsResponse.data?.data)
+          ? unitsResponse.data.data
+          : Array.isArray(unitsResponse.data)
+            ? unitsResponse.data
+            : [];
+        collected.push(...rawUnits);
+        totalPages = Number(unitsResponse.data?.meta?.totalPages || 1);
+        page += 1;
+      } while (page <= totalPages);
+
       setUnitOptions(
-        rawUnits
+        collected
           .map((unit: any) => ({
             id: String(unit.id),
             label:
