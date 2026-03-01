@@ -10,18 +10,28 @@ import {
   FileUploadResult,
 } from '../../../common/interfaces/file-storage.interface';
 
+type SupabaseAdapterOptions = {
+  supabaseUrl?: string;
+  serviceRoleKey?: string;
+  localStorageRoot?: string;
+  forceLocal?: boolean;
+};
+
 export class SupabaseStorageAdapter implements IFileStorageAdapter {
   private client: SupabaseClient | null = null;
-  private readonly localStorageRoot = path.resolve(
-    process.cwd(),
-    '.local',
-    'file-storage',
-  );
+  private readonly localStorageRoot: string;
+
+  constructor(private readonly options: SupabaseAdapterOptions = {}) {
+    this.localStorageRoot =
+      options.localStorageRoot ||
+      path.resolve(process.cwd(), '.local', 'file-storage');
+  }
 
   private isSupabaseConfigured(): boolean {
+    if (this.options.forceLocal) return false;
     return !!(
-      process.env.SUPABASE_URL &&
-      process.env.SUPABASE_SERVICE_ROLE_KEY
+      (this.options.supabaseUrl || process.env.SUPABASE_URL) &&
+      (this.options.serviceRoleKey || process.env.SUPABASE_SERVICE_ROLE_KEY)
     );
   }
 
@@ -41,8 +51,9 @@ export class SupabaseStorageAdapter implements IFileStorageAdapter {
       return this.client;
     }
 
-    const supabaseUrl = process.env.SUPABASE_URL;
-    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const supabaseUrl = this.options.supabaseUrl || process.env.SUPABASE_URL;
+    const serviceRoleKey =
+      this.options.serviceRoleKey || process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     if (!supabaseUrl || !serviceRoleKey) {
       throw new Error(

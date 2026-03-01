@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   NavigationContainer,
   DefaultTheme,
@@ -11,6 +11,7 @@ import type { AuthBootstrapProfile } from '../features/auth/types';
 import { getAuthBootstrapProfile } from '../features/auth/profile';
 import { AppDrawerMenu, type AppDrawerRoute } from '../components/mobile/AppDrawerMenu';
 import { useBranding } from '../features/branding/provider';
+import { useI18n } from '../features/i18n/provider';
 import { useResidentUnits } from '../features/units/useResidentUnits';
 import { akColors } from '../theme/alkarma';
 import { AccessQrScreen } from './AccessQrScreen';
@@ -27,8 +28,20 @@ import { NotificationsListScreen } from './NotificationsListScreen';
 import { SessionHomeScreen } from './SessionHomeScreen';
 import { ServicesRequestsScreen } from './ServicesRequestsScreen';
 import { HouseholdHubScreen } from './HouseholdHubScreen';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { UtilityTrackerScreen } from './UtilityTrackerScreen';
+import { DiscoverScreen } from './DiscoverScreen';
+import { HelpCenterScreen } from './HelpCenterScreen';
+import { UnitPickerSheet } from '../components/mobile/UnitPickerSheet';
+import { Pressable, StyleSheet, Text, View, Vibration, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as Notifications from 'expo-notifications';
+import { useAppToast } from '../components/mobile/AppToast';
+import { FireEvacuationAlertModal } from '../components/mobile/FireEvacuationAlertModal';
+import {
+  acknowledgeFireEvacuation,
+  getMyFireEvacuationStatus,
+} from '../features/community/service';
+import type { FireEvacuationStatus } from '../features/community/types';
 
 type MobileShellProps = {
   session: AuthSession;
@@ -49,6 +62,9 @@ type RootTabsParamList = {
   Access: undefined;
   Finance: undefined;
   Household: undefined;
+  Utilities: undefined;
+  Discover: undefined;
+  HelpCenter: undefined;
   Profile: undefined;
 };
 
@@ -78,6 +94,12 @@ function tabIcon(routeName: keyof RootTabsParamList, color: string, size: number
       return <Ionicons name="person-outline" size={size} color={color} />;
     case 'Household':
       return <Ionicons name="people-outline" size={size} color={color} />;
+    case 'Utilities':
+      return <Ionicons name="speedometer-outline" size={size} color={color} />;
+    case 'Discover':
+      return <Ionicons name="compass-outline" size={size} color={color} />;
+    case 'HelpCenter':
+      return <Ionicons name="help-circle-outline" size={size} color={color} />;
     default:
       return <Ionicons name="ellipse-outline" size={size} color={color} />;
   }
@@ -97,6 +119,7 @@ export function MobileShell(props: MobileShellProps) {
 }
 
 function MobileShellInner(props: MobileShellProps) {
+  const { t } = useI18n();
   const navigationRef = useNavigationContainerRef<RootTabsParamList>();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [currentRouteName, setCurrentRouteName] = useState<keyof RootTabsParamList>('Home');
@@ -112,11 +135,33 @@ function MobileShellInner(props: MobileShellProps) {
     entityType: 'INVOICE' | 'VIOLATION';
     entityId: string;
   } | null>(null);
-  const units = useResidentUnits(props.session.accessToken);
+  const [fireStatus, setFireStatus] = useState<FireEvacuationStatus | null>(null);
+  const [fireChecking, setFireChecking] = useState(false);
+  const [fireAckSubmitting, setFireAckSubmitting] = useState(false);
+  const [forceFireModal, setForceFireModal] = useState(false);
+  const units = useResidentUnits(props.session.accessToken, props.session.userId);
   const realtime = useNotificationRealtime();
+  const toast = useAppToast();
+  const lastFireAlertAtRef = useRef<string | null>(null);
+  const firePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const insets = useSafeAreaInsets();
+  const { width: viewportWidth } = useWindowDimensions();
   const { brand } = useBranding();
   const brandPrimary = brand.primaryColor || akColors.primary;
+  const selectedUnitAccesses = units.selectedUnit?.unitAccesses ?? [];
+  const canGenerateQrByUnit =
+    selectedUnitAccesses.length === 0 ||
+    selectedUnitAccesses.some((access) => access.canGenerateQR !== false);
+  const canUseQrFeature = bootstrapProfile?.featureAvailability?.canUseQr !== false;
+  const hideQrTabForSelectedUnit = !canUseQrFeature || !canGenerateQrByUnit;
+  const isTabletLayout = viewportWidth >= 768;
+  const effectiveBottomInset = Math.min(Math.max(insets.bottom, 0), 24);
+  const tabBarBaseHeight = isTabletLayout ? 66 : 64;
+  const tabBarHeight = tabBarBaseHeight + effectiveBottomInset;
+  const tabBarBottom = Math.max(effectiveBottomInset, isTabletLayout ? 10 : 8);
+  const tabBarHorizontalInset = 12;
+  const tabBarWidth = isTabletLayout ? Math.min(640, viewportWidth - 24) : undefined;
+  const tabBarVerticalPadding = isTabletLayout ? 8 : 7;
   const navTheme = useMemo(
     () => ({
       ...DefaultTheme,
@@ -130,6 +175,10 @@ function MobileShellInner(props: MobileShellProps) {
       },
     }),
     [brandPrimary],
+  );
+  const fireModalVisible = Boolean(
+    (fireStatus?.active && fireStatus?.targeted) ||
+      (forceFireModal && fireStatus?.targeted !== false),
   );
 
   useEffect(() => {
@@ -146,6 +195,76 @@ function MobileShellInner(props: MobileShellProps) {
       cancelled = true;
     };
   }, [props.session.accessToken]);
+
+  const loadFireStatus = useCallback(
+    async (forceAlarmHint = false) => {
+      if (!forceAlarmHint) setFireChecking(true);
+      try {
+        const next = await getMyFireEvacuationStatus(props.session.accessToken);
+        setFireStatus(next);
+        if (next?.active && next?.targeted && !next?.acknowledged) {
+          setForceFireModal(true);
+          const marker = String(next.triggeredAt ?? 'ACTIVE');
+          const shouldRing = forceAlarmHint || lastFireAlertAtRef.current !== marker;
+          if (shouldRing) {
+            lastFireAlertAtRef.current = marker;
+            Vibration.vibrate([0, 500, 260, 620], false);
+            try {
+              await Notifications.scheduleNotificationAsync({
+                content: {
+                  title: next.titleEn || t('fire.title'),
+                  body: next.messageEn || t('fire.message'),
+                  sound: true,
+                  data: {
+                    route: '/fire-evacuation',
+                    entityType: 'FIRE_EVACUATION',
+                    entityId: 'ACTIVE_DRILL',
+                  },
+                },
+                trigger: null,
+              });
+            } catch {
+              // best effort only
+            }
+          }
+        } else if (!next?.active) {
+          setForceFireModal(false);
+        }
+      } catch {
+        // fire drill endpoint is optional by design
+      } finally {
+        if (!forceAlarmHint) setFireChecking(false);
+      }
+    },
+    [props.session.accessToken, t],
+  );
+
+  const handleAcknowledgeFire = useCallback(async () => {
+    setFireAckSubmitting(true);
+    try {
+      const next = await acknowledgeFireEvacuation(props.session.accessToken);
+      setFireStatus(next);
+      toast.success(t('fire.confirmationSuccess'));
+    } catch {
+      toast.error(t('fire.confirmationFailed'));
+    } finally {
+      setFireAckSubmitting(false);
+    }
+  }, [props.session.accessToken, t, toast]);
+
+  useEffect(() => {
+    void loadFireStatus();
+    if (firePollRef.current) clearInterval(firePollRef.current);
+    firePollRef.current = setInterval(() => {
+      void loadFireStatus();
+    }, 15000);
+    return () => {
+      if (firePollRef.current) {
+        clearInterval(firePollRef.current);
+        firePollRef.current = null;
+      }
+    };
+  }, [loadFireStatus]);
 
   const navigateToRoute = (route: AppDrawerRoute | keyof RootTabsParamList) => {
     setDrawerOpen(false);
@@ -192,6 +311,13 @@ function MobileShellInner(props: MobileShellProps) {
         setPendingFinanceFocus({ entityType: entityType as 'INVOICE' | 'VIOLATION', entityId });
       }
     };
+
+    if (route.includes('fire') || entityType === 'FIRE_EVACUATION') {
+      setForceFireModal(true);
+      void loadFireStatus(true);
+      navigationRef.navigate('Notifications');
+      return;
+    }
 
     if (
       route.includes('payments') ||
@@ -249,6 +375,18 @@ function MobileShellInner(props: MobileShellProps) {
     }
     if (route.includes('household') || route.includes('family')) {
       navigationRef.navigate('Household');
+      return;
+    }
+    if (route.includes('utility') || route.includes('utilities')) {
+      navigationRef.navigate('Utilities');
+      return;
+    }
+    if (route.includes('discover')) {
+      navigationRef.navigate('Discover');
+      return;
+    }
+    if (route.includes('help')) {
+      navigationRef.navigate('HelpCenter');
       return;
     }
     if (route.includes('notification')) {
@@ -319,27 +457,32 @@ function MobileShellInner(props: MobileShellProps) {
             backgroundColor: akColors.bg,
             paddingTop:
               route.name === 'Home' ? 0 : Math.max(insets.top, 8) + 38,
-            paddingBottom: 78,
+            paddingBottom: 0,
           },
           tabBarStyle: {
             position: 'absolute',
-            left: 12,
-            right: 12,
-            bottom: 10,
-            height: 72,
+            left: tabBarHorizontalInset,
+            right: tabBarHorizontalInset,
+            bottom: tabBarBottom,
+            height: tabBarHeight,
+            width: tabBarWidth,
+            alignSelf: isTabletLayout ? 'center' : undefined,
             borderRadius: 22,
             backgroundColor: 'rgba(255,255,255,0.98)',
             borderTopColor: 'transparent',
-            borderWidth: 1,
+            borderTopWidth: 0,
+            borderLeftWidth: 1,
+            borderRightWidth: 1,
+            borderBottomWidth: 1,
             borderColor: 'rgba(226,232,240,0.85)',
-            paddingBottom: 8,
-            paddingTop: 8,
-            paddingHorizontal: 6,
+            paddingBottom: tabBarVerticalPadding + Math.max(effectiveBottomInset - 8, 0),
+            paddingTop: tabBarVerticalPadding,
+            paddingHorizontal: isTabletLayout ? 6 : 6,
             elevation: 10,
             shadowColor: '#000',
-            shadowOpacity: 0.08,
-            shadowRadius: 14,
-            shadowOffset: { width: 0, height: 8 },
+            shadowOpacity: isTabletLayout ? 0.08 : 0.08,
+            shadowRadius: isTabletLayout ? 14 : 14,
+            shadowOffset: { width: 0, height: isTabletLayout ? 8 : 8 },
           },
           tabBarActiveTintColor: brandPrimary,
           tabBarInactiveTintColor: akColors.textMuted,
@@ -358,7 +501,12 @@ function MobileShellInner(props: MobileShellProps) {
             tabIcon(route.name as keyof RootTabsParamList, color, size - 1),
         })}
       >
-        <Tab.Screen name="Home">
+        <Tab.Screen
+          name="Home"
+          options={{
+            tabBarLabel: t('tabs.home'),
+          }}
+        >
           {({ navigation }) => (
             <ResidentHomeScreen
               session={props.session}
@@ -415,6 +563,7 @@ function MobileShellInner(props: MobileShellProps) {
               unitsErrorMessage={units.errorMessage}
               onSelectUnit={units.setSelectedUnitId}
               onRefreshUnits={units.refresh}
+              onOpenFinance={() => navigationRef.navigate('Finance')}
               deepLinkBookingId={pendingBookingId}
               onConsumeDeepLinkBookingId={(bookingId) =>
                 setPendingBookingId((current) => (current === bookingId ? null : current))
@@ -510,9 +659,9 @@ function MobileShellInner(props: MobileShellProps) {
         <Tab.Screen
           name="Access"
           options={{
-            title: 'Access QR',
-            tabBarLabel: 'QR Codes',
-            ...(bootstrapProfile?.featureAvailability?.canUseQr === false
+            title: t('tabs.qrCodes'),
+            tabBarLabel: t('tabs.qrCodes'),
+            ...(hideQrTabForSelectedUnit
               ? hiddenTabOptions
               : null),
           }}
@@ -577,10 +726,34 @@ function MobileShellInner(props: MobileShellProps) {
           )}
         </Tab.Screen>
 
+        <Tab.Screen name="Utilities" options={hiddenTabOptions}>
+          {() => (
+            <UtilityTrackerScreen
+              session={props.session}
+              units={units.units}
+              selectedUnitId={units.selectedUnitId}
+              selectedUnit={units.selectedUnit}
+              unitsLoading={units.isLoading}
+              unitsRefreshing={units.isRefreshing}
+              unitsErrorMessage={units.errorMessage}
+              onSelectUnit={units.setSelectedUnitId}
+              onRefreshUnits={units.refresh}
+            />
+          )}
+        </Tab.Screen>
+
+        <Tab.Screen name="Discover" options={hiddenTabOptions}>
+          {() => <DiscoverScreen session={props.session} />}
+        </Tab.Screen>
+
+        <Tab.Screen name="HelpCenter" options={hiddenTabOptions}>
+          {() => <HelpCenterScreen session={props.session} />}
+        </Tab.Screen>
+
         <Tab.Screen
           name="Profile"
           options={{
-            tabBarLabel: 'Profile',
+            tabBarLabel: t('tabs.profile'),
           }}
         >
           {() => (
@@ -606,10 +779,31 @@ function MobileShellInner(props: MobileShellProps) {
           ]}
         >
           <Ionicons name="chevron-back" size={18} color={akColors.text} />
-          <Text style={shellStyles.globalBackText}>Back</Text>
+          <Text style={shellStyles.globalBackText}>{t('common.back')}</Text>
         </Pressable>
       ) : null}
       <ForegroundNotificationToast onPressToast={navigateFromPushPayload} />
+      <FireEvacuationAlertModal
+        visible={fireModalVisible}
+        status={fireStatus}
+        isSubmitting={fireAckSubmitting}
+        onConfirmSafe={() => void handleAcknowledgeFire()}
+        onCloseAcknowledged={() => setForceFireModal(false)}
+      />
+      <UnitPickerSheet
+        visible={units.requiresSelection}
+        units={units.units}
+        selectedUnitId={units.selectedUnitId}
+        anchorTop={Math.max(insets.top, 8) + 22}
+        anchorRight={10}
+        isLoading={units.isLoading}
+        isRefreshing={units.isRefreshing}
+        onRefresh={() => void units.refresh()}
+        onClose={() => {
+          // Gate is mandatory for multi-unit users.
+        }}
+        onSelect={units.setSelectedUnitId}
+      />
 
       <AppDrawerMenu
         visible={drawerOpen}

@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { createSign } from 'crypto';
+import { IntegrationConfigService } from '../../system-settings/integration-config.service';
 
 type SendPushInput = {
   token: string;
@@ -20,6 +21,10 @@ export class PushProviderService {
   private accessTokenCache:
     | { token: string; expiresAtEpochMs: number }
     | null = null;
+
+  constructor(
+    private readonly integrationConfigService: IntegrationConfigService,
+  ) {}
 
   private getServiceAccount(): FcmServiceAccount | null {
     const raw = process.env.FCM_SERVICE_ACCOUNT_JSON?.trim();
@@ -69,7 +74,15 @@ export class PushProviderService {
   }
 
   async sendPush(input: SendPushInput): Promise<Record<string, unknown>> {
-    if (this.isMockMode()) {
+    const runtime = await this.integrationConfigService.getResolvedIntegrations();
+    const runtimeSa = this.getServiceAccountFromRuntime(runtime.fcm);
+    const explicitMock = (process.env.FCM_MOCK_MODE ?? '').trim().toLowerCase();
+    const useMock =
+      explicitMock === 'true' ||
+      !runtime.fcm.enabled ||
+      !runtime.fcm.configured;
+
+    if (useMock) {
       this.logger.log(`[FCM:MOCK] Push to token=${input.token.slice(0, 12)}...`);
       return {
         provider: 'fcm',
@@ -78,7 +91,7 @@ export class PushProviderService {
       };
     }
 
-    const sa = this.getServiceAccount();
+    const sa = runtimeSa ?? this.getServiceAccount();
     if (!sa) {
       throw new Error('FCM provider is not configured');
     }
@@ -197,5 +210,34 @@ export class PushProviderService {
       .replace(/=/g, '')
       .replace(/\+/g, '-')
       .replace(/\//g, '_');
+  }
+
+  private getServiceAccountFromRuntime(fcm: {
+    serviceAccountJson?: string;
+    projectId?: string;
+    clientEmail?: string;
+    privateKey?: string;
+  }): FcmServiceAccount | null {
+    const raw = String(fcm.serviceAccountJson ?? '').trim();
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        return {
+          projectId: parsed.project_id,
+          clientEmail: parsed.client_email,
+          privateKey: String(parsed.private_key ?? '').replace(/\\n/g, '\n'),
+        };
+      } catch (error) {
+        this.logger.warn(
+          `Failed to parse runtime FCM service account JSON: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
+    const projectId = String(fcm.projectId ?? '').trim();
+    const clientEmail = String(fcm.clientEmail ?? '').trim();
+    const privateKey = String(fcm.privateKey ?? '').replace(/\\n/g, '\n');
+    if (!projectId || !clientEmail || !privateKey) return null;
+    return { projectId, clientEmail, privateKey };
   }
 }

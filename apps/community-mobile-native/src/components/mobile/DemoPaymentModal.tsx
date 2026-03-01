@@ -10,6 +10,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useBranding } from '../../features/branding/provider';
+import { getBrandPalette } from '../../features/branding/palette';
 import { akColors, akRadius, akShadow } from '../../theme/alkarma';
 import { formatCurrency, formatDateTime } from '../../utils/format';
 import type { PayableItem } from '../../features/community/types';
@@ -38,6 +40,8 @@ export function DemoPaymentModal({
     notes?: string;
   }) => Promise<void> | void;
 }) {
+  const { brand } = useBranding();
+  const palette = getBrandPalette(brand);
   const [paymentMethod, setPaymentMethod] = useState<string>(PAYMENT_METHODS[0]);
   const [cardLast4, setCardLast4] = useState('');
   const [notes, setNotes] = useState('');
@@ -93,7 +97,9 @@ export function DemoPaymentModal({
 
             <View style={styles.summaryCard}>
               <Text style={styles.summaryTitle}>{title}</Text>
-              <Text style={styles.summaryAmount}>{formatCurrency(item?.amount ?? 0)}</Text>
+              <Text style={[styles.summaryAmount, { color: palette.primary }]}>
+                {formatCurrency(item?.amount ?? 0)}
+              </Text>
               <Text style={styles.summaryMeta}>
                 {item?.dueDate ? `Due ${formatDateTime(item.dueDate).split(',')[0]}` : 'No due date'}
                 {item?.status ? ` • ${item.status}` : ''}
@@ -108,7 +114,13 @@ export function DemoPaymentModal({
                   <Pressable
                     key={method}
                     onPress={() => setPaymentMethod(method)}
-                    style={[styles.methodChip, active && styles.methodChipActive]}
+                    style={[
+                      styles.methodChip,
+                      active && {
+                        backgroundColor: palette.primary,
+                        borderColor: palette.primary,
+                      },
+                    ]}
                   >
                     <Text style={[styles.methodChipText, active && styles.methodChipTextActive]}>
                       {method}
@@ -150,7 +162,11 @@ export function DemoPaymentModal({
               </Pressable>
               <Pressable
                 onPress={() => void submit()}
-                style={[styles.confirmBtn, isSubmitting && styles.buttonDisabled]}
+                style={[
+                  styles.confirmBtn,
+                  { backgroundColor: palette.primary },
+                  isSubmitting && styles.buttonDisabled,
+                ]}
                 disabled={isSubmitting}
               >
                 {isSubmitting ? <ActivityIndicator size="small" color="#fff" /> : null}
@@ -236,7 +252,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   summaryAmount: {
-    color: akColors.primary,
     fontSize: 22,
     fontWeight: '700',
   },
@@ -262,10 +277,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     paddingHorizontal: 12,
     paddingVertical: 8,
-  },
-  methodChipActive: {
-    backgroundColor: akColors.primary,
-    borderColor: akColors.primary,
   },
   methodChipText: {
     color: akColors.text,
@@ -321,7 +332,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flexDirection: 'row',
     gap: 8,
-    backgroundColor: akColors.primary,
   },
   confirmBtnText: {
     color: '#fff',

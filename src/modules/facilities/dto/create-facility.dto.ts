@@ -87,6 +87,19 @@ export class CreateFacilityDto {
   @IsOptional()
   billingCycle?: BillingCycle;
 
+  @IsBoolean()
+  @IsOptional()
+  isBookable?: boolean;
+
+  @IsBoolean()
+  @IsOptional()
+  requiresPrepayment?: boolean;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  reminderMinutesBefore?: number;
+
   @IsOptional()
   @IsInt()
   maxReservationsPerDay?: number;

@@ -15,6 +15,8 @@ import {
   Home,
   Settings,
   BarChart3,
+  ClipboardCheck,
+  MapPin,
   ChevronRight,
 } from "lucide-react";
 import {
@@ -113,6 +115,16 @@ const bottomItems = [
     title: "Reports & Analytics",
     icon: BarChart3,
     url: "#reports",
+  },
+  {
+    title: "Help & Discover",
+    icon: MapPin,
+    url: "#directory",
+  },
+  {
+    title: "Approvals Center",
+    icon: ClipboardCheck,
+    url: "#approvals",
   },
   {
     title: "System Settings",

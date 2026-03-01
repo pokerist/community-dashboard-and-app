@@ -65,10 +65,27 @@ type InvoiceRow = {
   paidDate: string | null;
 };
 
+type OwnerInstallmentRow = {
+  id: string;
+  ownerName: string;
+  ownerEmail: string;
+  unitLabel: string;
+  amountValue: number;
+  amountLabel: string;
+  dueDateRaw: string;
+  dueDate: string;
+  status: string;
+  reminderSentAt: string | null;
+  overdueNotifiedAt: string | null;
+};
+
 export function BillingPayments() {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [invoicesData, setInvoicesData] = useState<InvoiceRow[]>([]);
+  const [ownerInstallments, setOwnerInstallments] = useState<OwnerInstallmentRow[]>([]);
+  const [installmentsLoading, setInstallmentsLoading] = useState(false);
+  const [installmentActionId, setInstallmentActionId] = useState<string | null>(null);
   const [residentOptions, setResidentOptions] = useState<ResidentOption[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -84,11 +101,15 @@ export function BillingPayments() {
 
   const loadBillingData = useCallback(async () => {
     setIsLoading(true);
+    setInstallmentsLoading(true);
     setLoadError(null);
     try {
-      const [invoicesRes, residentsRes] = await Promise.all([
+      const [invoicesRes, residentsRes, installmentsRes] = await Promise.all([
         apiClient.get("/invoices"),
         apiClient.get("/admin/users", { params: { userType: "resident", take: 200, skip: 0 } }),
+        apiClient.get("/owners/payment-plans/installments", {
+          params: { status: "ALL" },
+        }),
       ]);
 
       const invoiceRows = (Array.isArray(invoicesRes.data) ? invoicesRes.data : []).map((invoice: any) => ({
@@ -123,12 +144,34 @@ export function BillingPayments() {
 
       setInvoicesData(invoiceRows);
       setResidentOptions(options);
+      const installmentsRows = (Array.isArray(installmentsRes.data) ? installmentsRes.data : []).map((row: any) => {
+        const amount = Number(row.amount ?? 0);
+        const owner = row.ownerUnitContract?.ownerUser;
+        const unit = row.ownerUnitContract?.unit;
+        return {
+          id: String(row.id),
+          ownerName: owner?.nameEN ?? owner?.email ?? "Owner",
+          ownerEmail: owner?.email ?? "—",
+          unitLabel: [unit?.projectName, unit?.block ? `Block ${unit.block}` : null, unit?.unitNumber ? `Unit ${unit.unitNumber}` : null]
+            .filter(Boolean)
+            .join(" - ") || unit?.id || "—",
+          amountValue: amount,
+          amountLabel: formatCurrencyEGP(amount),
+          dueDateRaw: row.dueDate,
+          dueDate: formatDate(row.dueDate),
+          status: humanizeEnum(row.status),
+          reminderSentAt: row.reminderSentAt ? formatDate(row.reminderSentAt) : null,
+          overdueNotifiedAt: row.overdueNotifiedAt ? formatDate(row.overdueNotifiedAt) : null,
+        } satisfies OwnerInstallmentRow;
+      });
+      setOwnerInstallments(installmentsRows);
     } catch (error) {
       const msg = errorMessage(error);
       setLoadError(msg);
       toast.error("Failed to load billing data", { description: msg });
     } finally {
       setIsLoading(false);
+      setInstallmentsLoading(false);
     }
   }, []);
 
@@ -182,6 +225,34 @@ export function BillingPayments() {
     }
   };
 
+  const handleMarkInstallmentPaid = async (id: string) => {
+    setInstallmentActionId(id);
+    try {
+      await apiClient.patch(`/owners/payment-plans/installments/${id}/mark-paid`, {
+        paidAt: new Date().toISOString(),
+      });
+      toast.success("Installment marked as paid");
+      await loadBillingData();
+    } catch (error) {
+      toast.error("Failed to mark installment paid", { description: errorMessage(error) });
+    } finally {
+      setInstallmentActionId(null);
+    }
+  };
+
+  const handleSendInstallmentReminder = async (id: string) => {
+    setInstallmentActionId(id);
+    try {
+      await apiClient.post(`/owners/payment-plans/installments/${id}/send-reminder`);
+      toast.success("Reminder sent");
+      await loadBillingData();
+    } catch (error) {
+      toast.error("Failed to send reminder", { description: errorMessage(error) });
+    } finally {
+      setInstallmentActionId(null);
+    }
+  };
+
   const filteredInvoices = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
     return invoicesData.filter((invoice) => {
@@ -206,6 +277,10 @@ export function BillingPayments() {
   const overdueInvoices = useMemo(
     () => invoicesData.filter((i) => i.status.toUpperCase() === "OVERDUE"),
     [invoicesData],
+  );
+  const overdueOwnerInstallments = useMemo(
+    () => ownerInstallments.filter((i) => i.status.toUpperCase() === "OVERDUE"),
+    [ownerInstallments],
   );
 
   const totalRevenue = paidInvoices.reduce((sum, i) => sum + i.amountValue, 0);
@@ -445,6 +520,87 @@ export function BillingPayments() {
       </div>
 
       <Card className="shadow-card rounded-xl overflow-hidden">
+        <div className="p-4 border-b border-[#E5E7EB] flex items-center justify-between">
+          <div>
+            <h3 className="text-[#1E293B]">Owner Payment Plan Installments</h3>
+            <p className="text-xs text-[#64748B] mt-1">
+              Overdue follow-up and manual reminder actions
+            </p>
+          </div>
+          <Badge className={overdueOwnerInstallments.length ? "bg-[#FEF2F2] text-[#991B1B]" : "bg-[#ECFDF5] text-[#166534]"}>
+            {overdueOwnerInstallments.length} overdue
+          </Badge>
+        </div>
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-[#F9FAFB]">
+              <TableHead>Owner</TableHead>
+              <TableHead>Unit</TableHead>
+              <TableHead>Amount</TableHead>
+              <TableHead>Due Date</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Reminder</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {ownerInstallments.map((item) => (
+              <TableRow key={item.id} className="hover:bg-[#F9FAFB]">
+                <TableCell>
+                  <div className="text-sm font-medium text-[#1E293B]">{item.ownerName}</div>
+                  <div className="text-xs text-[#64748B]">{item.ownerEmail}</div>
+                </TableCell>
+                <TableCell className="text-[#334155]">{item.unitLabel}</TableCell>
+                <TableCell className="text-[#1E293B]">{item.amountLabel}</TableCell>
+                <TableCell className="text-[#64748B]">{item.dueDate}</TableCell>
+                <TableCell>
+                  <Badge className={getStatusColorClass(item.status)}>{item.status}</Badge>
+                </TableCell>
+                <TableCell className="text-xs text-[#64748B]">
+                  {item.reminderSentAt
+                    ? `Due reminder: ${item.reminderSentAt}`
+                    : item.overdueNotifiedAt
+                      ? `Overdue notified: ${item.overdueNotifiedAt}`
+                      : "Not sent"}
+                </TableCell>
+                <TableCell className="text-right">
+                  {item.status.toUpperCase() === "PAID" ? (
+                    <span className="text-xs text-[#64748B]">No actions</span>
+                  ) : (
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void handleSendInstallmentReminder(item.id)}
+                        disabled={installmentActionId === item.id}
+                      >
+                        {installmentActionId === item.id ? "Working..." : "Send Reminder"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="bg-[#16A34A] hover:bg-[#16A34A]/90 text-white"
+                        onClick={() => void handleMarkInstallmentPaid(item.id)}
+                        disabled={installmentActionId === item.id}
+                      >
+                        {installmentActionId === item.id ? "Working..." : "Mark Paid"}
+                      </Button>
+                    </div>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
+            {!installmentsLoading && ownerInstallments.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={7} className="text-center py-10 text-[#64748B]">
+                  No owner installments found.
+                </TableCell>
+              </TableRow>
+            ) : null}
+          </TableBody>
+        </Table>
+      </Card>
+
+      <Card className="shadow-card rounded-xl overflow-hidden">
         <Tabs defaultValue="all" className="w-full">
           <TabsList className="w-full justify-start border-b border-[#E5E7EB] rounded-none h-12 bg-transparent px-4">
             <TabsTrigger value="all" className="rounded-lg">All Invoices</TabsTrigger>
@@ -475,4 +631,3 @@ export function BillingPayments() {
     </div>
   );
 }
-

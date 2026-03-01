@@ -29,6 +29,11 @@ import { WorkersModule } from './modules/workers/workers.module';
 import { BannersModule } from './modules/banners/banners.module';
 import { SystemSettingsModule } from './modules/system-settings/system-settings.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { FireEvacuationModule } from './modules/fire-evacuation/fire-evacuation.module';
+import { ResidentVehiclesModule } from './modules/resident-vehicles/resident-vehicles.module';
+import { HelpCenterModule } from './modules/help-center/help-center.module';
+import { DiscoverModule } from './modules/discover/discover.module';
+import { HouseholdModule } from './modules/household/household.module';
 
 @Module({
   imports: [
@@ -62,6 +67,11 @@ import { ReportsModule } from './modules/reports/reports.module';
     BannersModule,
     SystemSettingsModule,
     ReportsModule,
+    FireEvacuationModule,
+    ResidentVehiclesModule,
+    HelpCenterModule,
+    DiscoverModule,
+    HouseholdModule,
   ],
   controllers: [],
   providers: [],

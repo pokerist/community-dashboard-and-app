@@ -7,8 +7,18 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateViolationDto, UpdateViolationDto } from './dto/violations.dto';
+import {
+  CreateViolationActionDto,
+  ReviewViolationActionDto,
+} from './dto/violation-action.dto';
 import { InvoicesService } from '../invoices/invoices.service';
-import { ViolationStatus, InvoiceStatus, InvoiceType } from '@prisma/client';
+import {
+  ViolationStatus,
+  InvoiceStatus,
+  InvoiceType,
+  ViolationActionStatus,
+  ViolationActionType,
+} from '@prisma/client';
 import { ViolationsQueryDto } from './dto/violations-query.dto';
 import { paginate } from '../../common/utils/pagination.util';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -240,6 +250,140 @@ export class ViolationsService {
         status: dto.status,
         appealStatus: dto.appealStatus,
       },
+    });
+  }
+
+  async createActionForActor(
+    violationId: string,
+    input: {
+      actorUserId: string;
+      permissions: string[];
+      dto: CreateViolationActionDto;
+    },
+  ) {
+    await this.findOneForActor(violationId, {
+      actorUserId: input.actorUserId,
+      permissions: input.permissions,
+    });
+
+    const note = input.dto.note?.trim() || null;
+    const attachmentIds = Array.from(
+      new Set((input.dto.attachmentIds ?? []).filter(Boolean)),
+    );
+
+    if (attachmentIds.length) {
+      const filesCount = await this.prisma.file.count({
+        where: { id: { in: attachmentIds } },
+      });
+      if (filesCount !== attachmentIds.length) {
+        throw new BadRequestException('One or more attachment files are invalid');
+      }
+    }
+
+    return this.prisma.violationActionRequest.create({
+      data: {
+        violationId,
+        requestedById: input.actorUserId,
+        type: input.dto.type,
+        note,
+        attachmentIds,
+      },
+      include: {
+        requestedBy: {
+          select: { id: true, nameEN: true, nameAR: true, email: true },
+        },
+        reviewedBy: {
+          select: { id: true, nameEN: true, nameAR: true, email: true },
+        },
+      },
+    });
+  }
+
+  async listActionsForActor(
+    violationId: string,
+    ctx: { actorUserId: string; permissions: string[] },
+  ) {
+    await this.findOneForActor(violationId, ctx);
+
+    return this.prisma.violationActionRequest.findMany({
+      where: { violationId },
+      include: {
+        requestedBy: {
+          select: { id: true, nameEN: true, nameAR: true, email: true },
+        },
+        reviewedBy: {
+          select: { id: true, nameEN: true, nameAR: true, email: true },
+        },
+      },
+      orderBy: [{ createdAt: 'desc' }],
+    });
+  }
+
+  async reviewActionRequest(
+    actionId: string,
+    reviewerUserId: string,
+    dto: ReviewViolationActionDto,
+  ) {
+    const action = await this.prisma.violationActionRequest.findUnique({
+      where: { id: actionId },
+      include: {
+        violation: {
+          select: { id: true, status: true, appealStatus: true },
+        },
+      },
+    });
+
+    if (!action) throw new NotFoundException('Violation action request not found');
+    if (action.status !== ViolationActionStatus.PENDING) {
+      throw new BadRequestException(
+        'Violation action request is no longer pending',
+      );
+    }
+
+    if (
+      dto.status !== ViolationActionStatus.APPROVED &&
+      dto.status !== ViolationActionStatus.REJECTED
+    ) {
+      throw new BadRequestException('Invalid review status');
+    }
+
+    const reviewNote = dto.note?.trim() || null;
+
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.violationActionRequest.update({
+        where: { id: action.id },
+        data: {
+          status: dto.status,
+          rejectionReason:
+            dto.status === ViolationActionStatus.REJECTED ? reviewNote : null,
+          reviewedById: reviewerUserId,
+          reviewedAt: new Date(),
+        },
+      });
+
+      if (action.type === ViolationActionType.APPEAL) {
+        await tx.violation.update({
+          where: { id: action.violationId },
+          data: {
+            appealStatus:
+              dto.status === ViolationActionStatus.APPROVED
+                ? 'APPROVED'
+                : 'REJECTED',
+          },
+        });
+      }
+
+      if (
+        action.type === ViolationActionType.FIX_SUBMISSION &&
+        dto.status === ViolationActionStatus.APPROVED
+      ) {
+        await tx.violation.update({
+          where: { id: action.violationId },
+          data: { appealStatus: 'FIX_VERIFIED' },
+        });
+      }
+
+      return updated;
     });
   }
 

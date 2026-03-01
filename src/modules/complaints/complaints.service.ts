@@ -100,12 +100,20 @@ export class ComplaintsService {
 
     const complaintNumber = await this.generateComplaintNumber();
     const { attachmentIds = [], ...complaintData } = dto;
+    const normalizedCategory =
+      dto.category?.trim() || dto.team?.trim() || 'GENERAL';
+    const normalizedTitle =
+      dto.title?.trim() || dto.description?.trim().slice(0, 120) || 'Complaint';
+    const normalizedTeam = dto.team?.trim() || null;
 
     return this.prisma.$transaction(async (tx) => {
       // Create the complaint
       const complaint = await tx.complaint.create({
         data: {
           ...complaintData,
+          title: normalizedTitle,
+          team: normalizedTeam,
+          category: normalizedCategory,
           complaintNumber,
           status: ComplaintStatus.NEW, // Default status from schema
           priority: dto.priority || Priority.MEDIUM, // Use provided priority or MEDIUM default

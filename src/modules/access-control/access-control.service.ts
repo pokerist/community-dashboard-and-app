@@ -8,6 +8,9 @@ import {
 import {
   AccessGrantPermission,
   AccessStatus,
+  Audience,
+  Channel,
+  NotificationType,
   QRType,
   UnitAccessRole,
 } from '@prisma/client';
@@ -16,6 +19,7 @@ import { randomUUID } from 'crypto';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateAccessQrCodeDto } from './dto/create-access-qr-code.dto';
 import { HikCentralQrService } from './hikcentral/hikcentral-qr.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class AccessControlService {
@@ -25,6 +29,7 @@ export class AccessControlService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly hikCentralQr: HikCentralQrService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   private async isAdminUser(userId: string): Promise<boolean> {
@@ -137,6 +142,173 @@ export class AccessControlService {
     return { validFrom: from, validTo: to };
   }
 
+  private assertWorkerWindow(validFrom: Date) {
+    const now = new Date();
+    const leadHours = (validFrom.getTime() - now.getTime()) / (1000 * 60 * 60);
+    if (leadHours < 24) {
+      throw new BadRequestException(
+        'Worker permits must be requested at least 24 hours in advance',
+      );
+    }
+
+    const day = validFrom.getDay(); // 0=Sun ... 5=Fri ... 6=Sat
+    if (day === 5 || day === 6) {
+      throw new BadRequestException(
+        'Worker permits cannot start on Friday or Saturday',
+      );
+    }
+  }
+
+  private async notifyAdminsWorkerPermitPending(params: {
+    qrId: string;
+    unitId: string;
+    requestedById: string;
+    visitorName: string | null;
+    validFrom: Date;
+    validTo: Date;
+  }) {
+    try {
+      const admins = await this.prisma.admin.findMany({
+        select: { userId: true },
+      });
+      const userIds = admins.map((x) => x.userId).filter(Boolean);
+      if (!userIds.length) return;
+
+      await this.notificationsService.sendNotification(
+        {
+          type: NotificationType.MAINTENANCE_ALERT,
+          title: 'Worker permit requires approval',
+          messageEn: `A new worker permit request is waiting for approval (Unit ${params.unitId}).`,
+          messageAr:
+            'يوجد طلب تصريح عمال جديد بانتظار الموافقة من الإدارة.',
+          channels: [Channel.IN_APP],
+          targetAudience: Audience.SPECIFIC_RESIDENCES,
+          audienceMeta: { userIds },
+          payload: {
+            route: '/access-control',
+            entityType: 'ACCESS_QR',
+            entityId: params.qrId,
+            eventKey: 'worker_qr.pending',
+            requesterId: params.requestedById,
+            unitId: params.unitId,
+            visitorName: params.visitorName,
+            validFrom: params.validFrom.toISOString(),
+            validTo: params.validTo.toISOString(),
+          },
+        },
+        params.requestedById,
+      );
+    } catch {
+      // Worker request should never fail due to notification delivery issues.
+    }
+  }
+
+  private async notifyOwnerWorkerPermitApproved(params: {
+    qrId: string;
+    ownerUserId: string;
+    unitId: string | null;
+    approvedById: string;
+    visitorName: string | null;
+  }) {
+    try {
+      await this.notificationsService.sendNotification(
+        {
+          type: NotificationType.ANNOUNCEMENT,
+          title: 'Worker permit approved',
+          messageEn:
+            'Your workers permit has been approved. You can now share the generated QR code.',
+          messageAr:
+            'تمت الموافقة على تصريح العمال. يمكنك الآن مشاركة رمز الدخول.',
+          channels: [Channel.IN_APP, Channel.PUSH],
+          targetAudience: Audience.SPECIFIC_RESIDENCES,
+          audienceMeta: { userIds: [params.ownerUserId] },
+          payload: {
+            route: '/qr-codes',
+            entityType: 'ACCESS_QR',
+            entityId: params.qrId,
+            eventKey: 'worker_qr.approved',
+            unitId: params.unitId,
+            visitorName: params.visitorName,
+          },
+        },
+        params.approvedById,
+      );
+    } catch {
+      // Approval should never fail due to notification issues.
+    }
+  }
+
+  private async notifyOwnerWorkerPermitRejected(params: {
+    qrId: string;
+    ownerUserId: string;
+    rejectedById: string;
+    reason?: string;
+  }) {
+    try {
+      await this.notificationsService.sendNotification(
+        {
+          type: NotificationType.ANNOUNCEMENT,
+          title: 'Worker permit rejected',
+          messageEn: params.reason
+            ? `Your workers permit was rejected: ${params.reason}`
+            : 'Your workers permit was rejected by management.',
+          messageAr:
+            'تم رفض تصريح العمال من الإدارة. يمكنك مراجعة التفاصيل والتقديم مرة أخرى.',
+          channels: [Channel.IN_APP, Channel.PUSH],
+          targetAudience: Audience.SPECIFIC_RESIDENCES,
+          audienceMeta: { userIds: [params.ownerUserId] },
+          payload: {
+            route: '/qr-codes',
+            entityType: 'ACCESS_QR',
+            entityId: params.qrId,
+            eventKey: 'worker_qr.rejected',
+            reason: params.reason ?? null,
+          },
+        },
+        params.rejectedById,
+      );
+    } catch {
+      // Rejection flow should not break on notification failure.
+    }
+  }
+
+  private async notifyOwnerQrUsedArrival(params: {
+    qrId: string;
+    ownerUserId: string;
+    visitorName: string | null;
+    gateName?: string | null;
+    scannedAt: Date;
+    actorUserId: string;
+  }) {
+    try {
+      const visitor = params.visitorName?.trim() || 'Visitor';
+      const gatePart = params.gateName ? ` via ${params.gateName}` : '';
+      await this.notificationsService.sendNotification(
+        {
+          type: NotificationType.ANNOUNCEMENT,
+          title: 'QR scanned: visitor arrived',
+          messageEn: `${visitor} has arrived${gatePart}.`,
+          messageAr: 'تم استخدام رمز الدخول ووصول الزائر.',
+          channels: [Channel.IN_APP, Channel.PUSH],
+          targetAudience: Audience.SPECIFIC_RESIDENCES,
+          audienceMeta: { userIds: [params.ownerUserId] },
+          payload: {
+            route: '/qr-codes',
+            entityType: 'ACCESS_QR',
+            entityId: params.qrId,
+            eventKey: 'access_qr.used',
+            visitorName: params.visitorName,
+            gateName: params.gateName ?? null,
+            scannedAt: params.scannedAt.toISOString(),
+          },
+        },
+        params.actorUserId,
+      );
+    } catch {
+      // QR status update should not fail due to notification delivery issues.
+    }
+  }
+
   async generateQrCode(dto: CreateAccessQrCodeDto, userId: string) {
     if (dto.type === QRType.VISITOR && !dto.visitorName) {
       throw new BadRequestException('visitorName is required for VISITOR QR');
@@ -152,6 +324,10 @@ export class AccessControlService {
       dto.validFrom,
       dto.validTo,
     );
+    const isWorkerPermit = dto.type === QRType.WORKER && !isAdmin;
+    if (isWorkerPermit) {
+      this.assertWorkerWindow(validFrom);
+    }
 
     if (validTo <= validFrom) {
       throw new BadRequestException('validTo must be after validFrom');
@@ -206,6 +382,39 @@ export class AccessControlService {
         accessGrantId = grant.id;
       }
 
+      if (isWorkerPermit) {
+        const qrCode = await this.prisma.accessQRCode.create({
+          data: {
+            qrId: `PENDING-${randomUUID()}`,
+            type: dto.type,
+            generatedById: userId,
+            unitId: dto.unitId,
+            accessGrantId,
+            visitorName: dto.visitorName,
+            validFrom,
+            validTo,
+            status: AccessStatus.PENDING,
+            gates,
+            notes: dto.notes,
+          },
+        });
+
+        await this.notifyAdminsWorkerPermitPending({
+          qrId: qrCode.id,
+          unitId: dto.unitId,
+          requestedById: userId,
+          visitorName: dto.visitorName ?? null,
+          validFrom,
+          validTo,
+        });
+
+        return {
+          qrCode,
+          qrImageBase64: null,
+          pendingApproval: true,
+        };
+      }
+
       const hik = await this.hikCentralQr.createQrCode({
         unitId: dto.unitId,
         type: dto.type,
@@ -247,6 +456,188 @@ export class AccessControlService {
       }
       throw err;
     }
+  }
+
+  async approveWorkerQrCode(actorUserId: string, qrCodeId: string) {
+    const isAdmin = await this.isAdminUser(actorUserId);
+    if (!isAdmin) {
+      throw new ForbiddenException('Only admin can approve worker permits');
+    }
+
+    const qr = await this.prisma.accessQRCode.findUnique({
+      where: { id: qrCodeId },
+      select: {
+        id: true,
+        type: true,
+        status: true,
+        generatedById: true,
+        unitId: true,
+        visitorName: true,
+        validFrom: true,
+        validTo: true,
+        notes: true,
+      },
+    });
+
+    if (!qr) throw new NotFoundException('QR code not found');
+    if (qr.type !== QRType.WORKER) {
+      throw new BadRequestException('Only worker permits can be approved here');
+    }
+    if (qr.status !== AccessStatus.PENDING) {
+      throw new BadRequestException('Only pending worker permits can be approved');
+    }
+    if (!qr.unitId) {
+      throw new BadRequestException('Worker permit is missing unit reference');
+    }
+
+    const permissions = this.defaultPermissionsForType(QRType.WORKER);
+    const hik = await this.hikCentralQr.createQrCode({
+      unitId: qr.unitId,
+      type: QRType.WORKER,
+      validFrom: qr.validFrom,
+      validTo: qr.validTo,
+      visitorName: qr.visitorName ?? undefined,
+      permissions,
+      gates: [],
+      notes: qr.notes ?? undefined,
+    });
+
+    const updated = await this.prisma.accessQRCode.update({
+      where: { id: qr.id },
+      data: {
+        qrId: hik.qrId,
+        status: AccessStatus.ACTIVE,
+      },
+    });
+
+    await this.notifyOwnerWorkerPermitApproved({
+      qrId: updated.id,
+      ownerUserId: qr.generatedById,
+      unitId: qr.unitId,
+      approvedById: actorUserId,
+      visitorName: qr.visitorName ?? null,
+    });
+
+    return { qrCode: updated, qrImageBase64: hik.qrImageBase64 };
+  }
+
+  async rejectWorkerQrCode(actorUserId: string, qrCodeId: string, reason?: string) {
+    const isAdmin = await this.isAdminUser(actorUserId);
+    if (!isAdmin) {
+      throw new ForbiddenException('Only admin can reject worker permits');
+    }
+
+    const qr = await this.prisma.accessQRCode.findUnique({
+      where: { id: qrCodeId },
+      select: {
+        id: true,
+        type: true,
+        status: true,
+        generatedById: true,
+        notes: true,
+      },
+    });
+
+    if (!qr) throw new NotFoundException('QR code not found');
+    if (qr.type !== QRType.WORKER) {
+      throw new BadRequestException('Only worker permits can be rejected here');
+    }
+    if (qr.status !== AccessStatus.PENDING) {
+      throw new BadRequestException('Only pending worker permits can be rejected');
+    }
+
+    const updated = await this.prisma.accessQRCode.update({
+      where: { id: qr.id },
+      data: {
+        status: AccessStatus.CANCELLED,
+        notes: reason
+          ? `${qr.notes ? `${qr.notes}\n` : ''}Rejected by admin: ${reason}`
+          : qr.notes ?? undefined,
+      },
+    });
+
+    await this.notifyOwnerWorkerPermitRejected({
+      qrId: updated.id,
+      ownerUserId: qr.generatedById,
+      rejectedById: actorUserId,
+      reason,
+    });
+
+    return updated;
+  }
+
+  async markQrCodeUsed(
+    actorUserId: string,
+    qrCodeId: string,
+    dto?: {
+      scannedAt?: string;
+      gateName?: string;
+      notes?: string;
+    },
+  ) {
+    const isAdmin = await this.isAdminUser(actorUserId);
+    if (!isAdmin) {
+      throw new ForbiddenException('Only admin can mark QR as used');
+    }
+
+    const qr = await this.prisma.accessQRCode.findUnique({
+      where: { id: qrCodeId },
+      select: {
+        id: true,
+        status: true,
+        generatedById: true,
+        visitorName: true,
+        notes: true,
+      },
+    });
+    if (!qr) throw new NotFoundException('QR code not found');
+
+    const scannedAt = dto?.scannedAt ? new Date(dto.scannedAt) : new Date();
+    if (Number.isNaN(scannedAt.getTime())) {
+      throw new BadRequestException('scannedAt must be a valid datetime');
+    }
+
+    if (qr.status === AccessStatus.USED) {
+      return {
+        qrCode: qr,
+        message: 'QR is already marked as used',
+      };
+    }
+    if (
+      qr.status === AccessStatus.CANCELLED ||
+      qr.status === AccessStatus.EXPIRED
+    ) {
+      throw new BadRequestException('Cannot mark a cancelled/expired QR as used');
+    }
+
+    const noteParts = [
+      qr.notes?.trim() || '',
+      dto?.notes?.trim() || '',
+      dto?.gateName?.trim() ? `Scanned at gate: ${dto.gateName.trim()}` : '',
+      `Marked as USED at ${scannedAt.toISOString()}`,
+    ].filter(Boolean);
+
+    const updated = await this.prisma.accessQRCode.update({
+      where: { id: qr.id },
+      data: {
+        status: AccessStatus.USED,
+        notes: noteParts.join('\n'),
+      },
+    });
+
+    await this.notifyOwnerQrUsedArrival({
+      qrId: updated.id,
+      ownerUserId: qr.generatedById,
+      visitorName: qr.visitorName ?? null,
+      gateName: dto?.gateName ?? null,
+      scannedAt,
+      actorUserId,
+    });
+
+    return {
+      qrCode: updated,
+      message: 'QR marked as used and owner notified',
+    };
   }
 
   async listQrCodes(userId: string, unitId?: string, includeInactive?: boolean) {

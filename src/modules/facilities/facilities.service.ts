@@ -40,6 +40,9 @@ export class FacilitiesService {
           capacity: dto.capacity,
           price: dto.price,
           billingCycle: dto.billingCycle,
+          isBookable: dto.isBookable ?? true,
+          requiresPrepayment: dto.requiresPrepayment ?? false,
+          reminderMinutesBefore: dto.reminderMinutesBefore ?? 60,
           maxReservationsPerDay: dto.maxReservationsPerDay,
           cooldownMinutes: dto.cooldownMinutes,
 
@@ -204,7 +207,13 @@ export class FacilitiesService {
     const activeBookings = await this.prisma.booking.count({
       where: {
         facilityId: id,
-        status: { in: [BookingStatus.PENDING, BookingStatus.APPROVED] },
+        status: {
+          in: [
+            BookingStatus.PENDING,
+            BookingStatus.PENDING_PAYMENT,
+            BookingStatus.APPROVED,
+          ],
+        },
       },
     });
 

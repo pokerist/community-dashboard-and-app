@@ -52,6 +52,7 @@ interface BackendService {
   name: string;
   category: string;
   unitEligibility: string;
+  isUrgent?: boolean;
   processingTime?: number | null;
   description?: string | null;
   status: boolean;
@@ -216,6 +217,7 @@ export function ServiceManagement() {
   const [startingPrice, setStartingPrice] = useState("");
   const [description, setDescription] = useState("");
   const [serviceIsActive, setServiceIsActive] = useState(true);
+  const [serviceIsUrgent, setServiceIsUrgent] = useState(false);
   const [formFields, setFormFields] = useState<FormField[]>([]);
 
   const [newFieldLabel, setNewFieldLabel] = useState("");
@@ -401,6 +403,7 @@ export function ServiceManagement() {
     setStartingPrice("");
     setDescription("");
     setServiceIsActive(true);
+    setServiceIsUrgent(false);
     setFormFields([]);
     setEditingServiceId(null);
     setNewFieldLabel("");
@@ -425,6 +428,7 @@ export function ServiceManagement() {
     setStartingPrice(service.startingPrice != null ? String(service.startingPrice) : "");
     setDescription(service.description ?? "");
     setServiceIsActive(Boolean(service.status));
+    setServiceIsUrgent(Boolean(service.isUrgent));
     setFormFields(
       (service.formFields ?? [])
         .slice()
@@ -493,6 +497,7 @@ export function ServiceManagement() {
       processingTime: processingTime ? Number(processingTime) : undefined,
       description: description || undefined,
       status: serviceIsActive,
+      isUrgent: serviceIsUrgent,
       startingPrice: startingPrice ? String(startingPrice) : undefined,
     };
 
@@ -654,7 +659,7 @@ export function ServiceManagement() {
                 <div className="space-y-4">
                   <h3 className="text-[#1E293B]">Basic Information</h3>
 
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-3 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="serviceName">Service Name *</Label>
                       <Input
@@ -730,6 +735,15 @@ export function ServiceManagement() {
                       <div className="flex items-center gap-3 h-9">
                         <Switch id="serviceActive" checked={serviceIsActive} onCheckedChange={setServiceIsActive} />
                         <span className="text-sm text-[#64748B]">{serviceIsActive ? "Active (visible)" : "Inactive (hidden)"}</span>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="serviceUrgent">Urgent Service</Label>
+                      <div className="flex items-center gap-3 h-9">
+                        <Switch id="serviceUrgent" checked={serviceIsUrgent} onCheckedChange={setServiceIsUrgent} />
+                        <span className="text-sm text-[#64748B]">
+                          {serviceIsUrgent ? "Yes (urgent lane)" : "No"}
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -916,6 +930,7 @@ export function ServiceManagement() {
               <TableHead>Unit Eligibility</TableHead>
               <TableHead>Form Fields</TableHead>
               <TableHead>Processing Time</TableHead>
+              <TableHead>Urgent</TableHead>
               <TableHead>Total Requests</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Actions</TableHead>
@@ -936,6 +951,11 @@ export function ServiceManagement() {
                   <TableCell className="text-[#64748B]">{service.formFields?.length ?? 0} fields</TableCell>
                   <TableCell className="text-[#64748B]">
                     {service.processingTime != null ? `${service.processingTime}h` : "—"}
+                  </TableCell>
+                  <TableCell>
+                    <Badge className={service.isUrgent ? "bg-[#FEE2E2] text-[#B91C1C]" : "bg-[#F1F5F9] text-[#475569]"}>
+                      {service.isUrgent ? "Yes" : "No"}
+                    </Badge>
                   </TableCell>
                   <TableCell className="text-[#1E293B]">{requestCount}</TableCell>
                   <TableCell>
@@ -971,7 +991,7 @@ export function ServiceManagement() {
             })}
             {!isLoading && filteredServices.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-10 text-[#64748B]">
+                <TableCell colSpan={9} className="text-center py-10 text-[#64748B]">
                   No services found. Create the first service template.
                 </TableCell>
               </TableRow>

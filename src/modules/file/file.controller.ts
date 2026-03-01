@@ -228,6 +228,23 @@ export class FileController {
     );
   }
 
+  @Post('upload/offer-banner')
+  @ApiOperation({ summary: 'Upload an offer banner image (admin mobile offers settings)' })
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadOfferBanner(
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<FileUploadResult> {
+    if (!file) {
+      throw new BadRequestException('File is missing.');
+    }
+    validateImage(file);
+    return this.fileService.handleUpload(
+      file,
+      ATTACHMENTS_BUCKET,
+      $Enums.FileCategory.SERVICE_ATTACHMENT,
+    );
+  }
+
   // DELETE /files/:fileId
   @Delete(':fileId')
   @ApiOperation({ summary: 'Delete a file (access-controlled)' })

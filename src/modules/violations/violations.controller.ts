@@ -16,6 +16,10 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ViolationsService } from './violations.service';
 import { CreateViolationDto, UpdateViolationDto } from './dto/violations.dto';
 import { ViolationsQueryDto } from './dto/violations-query.dto';
+import {
+  CreateViolationActionDto,
+  ReviewViolationActionDto,
+} from './dto/violation-action.dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -77,6 +81,46 @@ export class ViolationsController {
     @Body() updateViolationDto: UpdateViolationDto,
   ) {
     return this.violationsService.update(id, updateViolationDto);
+  }
+
+  @Post(':id/actions')
+  @ApiOperation({ summary: 'Submit violation action request (appeal or fix proof)' })
+  @Permissions('violation.view_own', 'violation.view_all')
+  createAction(
+    @Param('id') violationId: string,
+    @Body() dto: CreateViolationActionDto,
+    @Req() req: Request,
+  ) {
+    return this.violationsService.createActionForActor(violationId, {
+      actorUserId: (req as any).user?.id,
+      permissions: (req as any).user?.permissions ?? [],
+      dto,
+    });
+  }
+
+  @Get(':id/actions')
+  @ApiOperation({ summary: 'List violation action requests for this violation' })
+  @Permissions('violation.view_own', 'violation.view_all')
+  listActions(@Param('id') violationId: string, @Req() req: Request) {
+    return this.violationsService.listActionsForActor(violationId, {
+      actorUserId: (req as any).user?.id,
+      permissions: (req as any).user?.permissions ?? [],
+    });
+  }
+
+  @Patch('actions/:actionId/review')
+  @ApiOperation({ summary: 'Admin review violation action request' })
+  @Permissions('violation.update')
+  reviewAction(
+    @Param('actionId') actionId: string,
+    @Body() dto: ReviewViolationActionDto,
+    @Req() req: Request,
+  ) {
+    return this.violationsService.reviewActionRequest(
+      actionId,
+      (req as any).user?.id,
+      dto,
+    );
   }
 
   @Delete(':id')

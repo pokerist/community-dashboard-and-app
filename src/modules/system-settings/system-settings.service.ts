@@ -15,6 +15,9 @@ import {
   UpdateCrmSettingsDto,
   UpdateGeneralSettingsDto,
   UpdateNotificationSettingsDto,
+  UpdateMobileAccessSettingsDto,
+  UpdateOnboardingSettingsDto,
+  UpdateOffersSettingsDto,
   UpdateSecuritySettingsDto,
 } from './dto/system-settings.dto';
 
@@ -69,6 +72,41 @@ type SystemSettingsState = {
     supportEmail: string;
     supportPhone: string;
   };
+  onboarding: {
+    enabled: boolean;
+    slides: Array<{
+      title: string;
+      subtitle: string;
+      description: string;
+      imageUrl: string;
+    }>;
+  };
+  offers: {
+    enabled: boolean;
+    banners: Array<{
+      id: string;
+      title: string;
+      subtitle: string;
+      description: string;
+      imageUrl: string;
+      imageFileId: string;
+      linkUrl: string;
+      priority: number;
+      active: boolean;
+      startAt: string;
+      endAt: string;
+    }>;
+  };
+  mobileAccess: {
+    owner: Record<string, boolean>;
+    tenant: Record<string, boolean>;
+    family: Record<string, boolean>;
+    authorized: Record<string, boolean>;
+    contractor: Record<string, boolean>;
+    preDeliveryOwner: Record<string, boolean>;
+    resident: Record<string, boolean>;
+  };
+  integrations: Record<string, unknown>;
 };
 
 type SectionKey = keyof SystemSettingsState;
@@ -81,6 +119,10 @@ const SETTINGS_SECTIONS: SectionKey[] = [
   'backup',
   'crm',
   'brand',
+  'onboarding',
+  'offers',
+  'mobileAccess',
+  'integrations',
 ];
 
 @Injectable()
@@ -139,6 +181,121 @@ export class SystemSettingsService {
       supportEmail: '',
       supportPhone: '',
     },
+    onboarding: {
+      enabled: true,
+      slides: [
+        {
+          title: 'Welcome to SSS Community',
+          subtitle: 'SMART LIVING',
+          description:
+            'Experience premium community living with services, payments, bookings, and access control in one app.',
+          imageUrl:
+            'https://images.unsplash.com/photo-1560613654-ea1945efc370?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080',
+        },
+        {
+          title: 'Manage Your Property',
+          subtitle: 'ALL IN ONE',
+          description:
+            'Track requests, payments, visitors, and updates from your management team with a modern mobile experience.',
+          imageUrl:
+            'https://images.unsplash.com/photo-1643892605308-70a6559cfd0a?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080',
+        },
+        {
+          title: 'Secure & Connected',
+          subtitle: 'ALWAYS INFORMED',
+          description:
+            'Receive verified notifications, generate QR access, and stay connected to all important community updates.',
+          imageUrl:
+            'https://images.unsplash.com/photo-1633194883650-df448a10d554?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080',
+        },
+      ],
+    },
+    offers: {
+      enabled: false,
+      banners: [],
+    },
+    mobileAccess: {
+      owner: {
+        canUseServices: true,
+        canUseBookings: true,
+        canUseComplaints: true,
+        canUseQr: true,
+        canViewFinance: true,
+        canManageHousehold: true,
+        canUseDiscover: true,
+        canUseHelpCenter: true,
+        canUseUtilities: true,
+      },
+      tenant: {
+        canUseServices: true,
+        canUseBookings: true,
+        canUseComplaints: true,
+        canUseQr: true,
+        canViewFinance: true,
+        canManageHousehold: true,
+        canUseDiscover: true,
+        canUseHelpCenter: true,
+        canUseUtilities: true,
+      },
+      family: {
+        canUseServices: true,
+        canUseBookings: true,
+        canUseComplaints: true,
+        canUseQr: false,
+        canViewFinance: false,
+        canManageHousehold: false,
+        canUseDiscover: true,
+        canUseHelpCenter: true,
+        canUseUtilities: false,
+      },
+      authorized: {
+        canUseServices: true,
+        canUseBookings: true,
+        canUseComplaints: true,
+        canUseQr: true,
+        canViewFinance: false,
+        canManageHousehold: false,
+        canUseDiscover: true,
+        canUseHelpCenter: true,
+        canUseUtilities: false,
+      },
+      contractor: {
+        canUseServices: false,
+        canUseBookings: false,
+        canUseComplaints: false,
+        canUseQr: true,
+        canViewFinance: false,
+        canManageHousehold: false,
+        canUseDiscover: false,
+        canUseHelpCenter: true,
+        canUseUtilities: false,
+      },
+      preDeliveryOwner: {
+        canUseServices: false,
+        canUseBookings: false,
+        canUseComplaints: true,
+        canUseQr: false,
+        canViewFinance: true,
+        canManageHousehold: false,
+        canUseDiscover: true,
+        canUseHelpCenter: true,
+        canUseUtilities: true,
+      },
+      resident: {
+        canUseServices: true,
+        canUseBookings: true,
+        canUseComplaints: true,
+        canUseQr: true,
+        canViewFinance: true,
+        canManageHousehold: false,
+        canUseDiscover: true,
+        canUseHelpCenter: true,
+        canUseUtilities: true,
+      },
+    },
+    integrations: {
+      version: 1,
+    },
   };
 
   private isObject(value: unknown): value is Record<string, unknown> {
@@ -172,6 +329,21 @@ export class SystemSettingsService {
         ...this.defaults.brand,
         ...(this.isObject(incoming.brand) ? incoming.brand : {}),
       },
+      onboarding: {
+        ...this.defaults.onboarding,
+        ...(this.isObject(incoming.onboarding) ? incoming.onboarding : {}),
+      },
+      offers: {
+        ...this.defaults.offers,
+        ...(this.isObject(incoming.offers) ? incoming.offers : {}),
+      },
+      mobileAccess: {
+        ...this.defaults.mobileAccess,
+        ...(this.isObject(incoming.mobileAccess) ? incoming.mobileAccess : {}),
+      },
+      integrations: this.isObject(incoming.integrations)
+        ? incoming.integrations
+        : this.defaults.integrations,
     };
   }
 
@@ -241,6 +413,99 @@ export class SystemSettingsService {
       }
       if (brand.logoFileId && !/^[0-9a-fA-F-]{8,}$/.test(String(brand.logoFileId))) {
         throw new BadRequestException('brand.logoFileId looks invalid');
+      }
+    }
+
+    if (section === 'onboarding') {
+      const onboarding = value as SystemSettingsState['onboarding'];
+      if (!Array.isArray(onboarding.slides) || onboarding.slides.length === 0) {
+        throw new BadRequestException('onboarding.slides must include at least one slide');
+      }
+      if (onboarding.slides.length > 8) {
+        throw new BadRequestException('onboarding.slides cannot exceed 8 slides');
+      }
+      for (let i = 0; i < onboarding.slides.length; i += 1) {
+        const slide = onboarding.slides[i] as any;
+        if (!String(slide?.title ?? '').trim()) {
+          throw new BadRequestException(`onboarding.slides[${i}].title is required`);
+        }
+        if (slide?.imageUrl) {
+          try {
+            new URL(String(slide.imageUrl));
+          } catch {
+            throw new BadRequestException(
+              `onboarding.slides[${i}].imageUrl must be a valid URL`,
+            );
+          }
+        }
+      }
+    }
+
+    if (section === 'offers') {
+      const offers = value as SystemSettingsState['offers'];
+      if (!Array.isArray(offers.banners)) {
+        throw new BadRequestException('offers.banners must be an array');
+      }
+      if (offers.banners.length > 20) {
+        throw new BadRequestException('offers.banners cannot exceed 20 items');
+      }
+      for (let i = 0; i < offers.banners.length; i += 1) {
+        const banner = offers.banners[i] as any;
+        const title = String(banner?.title ?? '').trim();
+        if (!title) {
+          throw new BadRequestException(`offers.banners[${i}].title is required`);
+        }
+        const imageUrl = String(banner?.imageUrl ?? '').trim();
+        const imageFileId = String(banner?.imageFileId ?? '').trim();
+        if (!imageUrl && !imageFileId) {
+          throw new BadRequestException(
+            `offers.banners[${i}] must include imageUrl or imageFileId`,
+          );
+        }
+        if (imageUrl) {
+          try {
+            new URL(imageUrl);
+          } catch {
+            throw new BadRequestException(
+              `offers.banners[${i}].imageUrl must be a valid URL`,
+            );
+          }
+        }
+        const linkUrl = String(banner?.linkUrl ?? '').trim();
+        if (linkUrl) {
+          try {
+            new URL(linkUrl);
+          } catch {
+            throw new BadRequestException(
+              `offers.banners[${i}].linkUrl must be a valid URL`,
+            );
+          }
+        }
+        const startAt = String(banner?.startAt ?? '').trim();
+        const endAt = String(banner?.endAt ?? '').trim();
+        const parsedStart = startAt ? Date.parse(startAt) : NaN;
+        const parsedEnd = endAt ? Date.parse(endAt) : NaN;
+        if (startAt && Number.isNaN(parsedStart)) {
+          throw new BadRequestException(
+            `offers.banners[${i}].startAt must be a valid ISO datetime`,
+          );
+        }
+        if (endAt && Number.isNaN(parsedEnd)) {
+          throw new BadRequestException(
+            `offers.banners[${i}].endAt must be a valid ISO datetime`,
+          );
+        }
+        if (
+          startAt &&
+          endAt &&
+          Number.isFinite(parsedStart) &&
+          Number.isFinite(parsedEnd) &&
+          parsedEnd < parsedStart
+        ) {
+          throw new BadRequestException(
+            `offers.banners[${i}].endAt must be greater than or equal to startAt`,
+          );
+        }
       }
     }
   }
@@ -316,6 +581,93 @@ export class SystemSettingsService {
     return this.updateSection('brand', dto, actorUserId);
   }
 
+  async updateOnboarding(
+    dto: UpdateOnboardingSettingsDto,
+    actorUserId?: string | null,
+  ) {
+    const normalized: Partial<SystemSettingsState['onboarding']> = {
+      ...(typeof dto.enabled === 'boolean' ? { enabled: dto.enabled } : {}),
+      ...(Array.isArray(dto.slides)
+        ? {
+            slides: dto.slides.map((slide) => ({
+              title: String(slide.title ?? '').trim(),
+              subtitle: String(slide.subtitle ?? '').trim(),
+              description: String(slide.description ?? '').trim(),
+              imageUrl: String(slide.imageUrl ?? '').trim(),
+            })),
+          }
+        : {}),
+    };
+    return this.updateSection('onboarding', normalized, actorUserId);
+  }
+
+  async updateOffers(
+    dto: UpdateOffersSettingsDto,
+    actorUserId?: string | null,
+  ) {
+    const normalized: Partial<SystemSettingsState['offers']> = {
+      ...(typeof dto.enabled === 'boolean' ? { enabled: dto.enabled } : {}),
+      ...(Array.isArray(dto.banners)
+        ? {
+            banners: dto.banners.map((banner, idx) => ({
+              id:
+                String(banner.id ?? '').trim() ||
+                `offer-${Date.now()}-${idx + 1}`,
+              title: String(banner.title ?? '').trim(),
+              subtitle: String(banner.subtitle ?? '').trim(),
+              description: String(banner.description ?? '').trim(),
+              imageUrl: String(banner.imageUrl ?? '').trim(),
+              imageFileId: String(banner.imageFileId ?? '').trim(),
+              linkUrl: String(banner.linkUrl ?? '').trim(),
+              priority:
+                typeof banner.priority === 'number' && Number.isFinite(banner.priority)
+                  ? banner.priority
+                  : idx + 1,
+              active: banner.active !== false,
+              startAt: String(banner.startAt ?? '').trim(),
+              endAt: String(banner.endAt ?? '').trim(),
+            })),
+          }
+        : {}),
+    };
+    return this.updateSection('offers', normalized, actorUserId);
+  }
+
+  async updateMobileAccess(
+    dto: UpdateMobileAccessSettingsDto,
+    actorUserId?: string | null,
+  ) {
+    const toRecord = (
+      value: unknown,
+    ): Record<string, boolean> | undefined => {
+      if (!this.isObject(value)) return undefined;
+      const entries = Object.entries(value).filter(
+        ([, v]) => typeof v === 'boolean',
+      );
+      if (entries.length === 0) return undefined;
+      return Object.fromEntries(entries) as Record<string, boolean>;
+    };
+
+    const normalized: Partial<SystemSettingsState['mobileAccess']> = {};
+    const owner = toRecord(dto.owner);
+    const tenant = toRecord(dto.tenant);
+    const family = toRecord(dto.family);
+    const authorized = toRecord(dto.authorized);
+    const contractor = toRecord(dto.contractor);
+    const preDeliveryOwner = toRecord(dto.preDeliveryOwner);
+    const resident = toRecord(dto.resident);
+
+    if (owner) normalized.owner = owner;
+    if (tenant) normalized.tenant = tenant;
+    if (family) normalized.family = family;
+    if (authorized) normalized.authorized = authorized;
+    if (contractor) normalized.contractor = contractor;
+    if (preDeliveryOwner) normalized.preDeliveryOwner = preDeliveryOwner;
+    if (resident) normalized.resident = resident;
+
+    return this.updateSection('mobileAccess', normalized, actorUserId);
+  }
+
   async getMobileAppConfig(baseUrl?: string) {
     const settings = await this.getSettings();
     const brand = settings.data.brand;
@@ -338,9 +690,15 @@ export class SystemSettingsService {
         logoPath,
         logoUrl: logoPath && normalizedBase ? `${normalizedBase}${logoPath}` : null,
       },
+      onboarding: settings.data.onboarding,
+      offers: settings.data.offers,
+      mobileAccess: settings.data.mobileAccess,
       meta: {
         version: 1,
         updatedAt: settings.meta.updatedAtBySection?.brand ?? null,
+        onboardingUpdatedAt: settings.meta.updatedAtBySection?.onboarding ?? null,
+        offersUpdatedAt: settings.meta.updatedAtBySection?.offers ?? null,
+        mobileAccessUpdatedAt: settings.meta.updatedAtBySection?.mobileAccess ?? null,
       },
     };
   }

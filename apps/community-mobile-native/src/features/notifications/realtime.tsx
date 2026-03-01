@@ -14,6 +14,8 @@ import * as Application from 'expo-application';
 import Constants from 'expo-constants';
 import { extractApiErrorMessage } from '../../lib/http';
 import type { AuthSession } from '../auth/types';
+import { useBranding } from '../branding/provider';
+import { getBrandPalette } from '../branding/palette';
 import {
   listMyNotificationChanges,
   listMyNotifications,
@@ -129,6 +131,38 @@ async function getExpoPushTokenSafe(): Promise<string | null> {
   }
 }
 
+async function getNativeDevicePushTokenSafe(): Promise<{
+  token: string;
+  provider: 'fcm';
+} | null> {
+  try {
+    if (Platform.OS === 'web') return null;
+    if (Platform.OS !== 'android') return null;
+    if (!Device.isDevice) return null;
+
+    const permission = await Notifications.getPermissionsAsync();
+    let finalStatus = permission.status;
+    if (finalStatus !== 'granted') {
+      const req = await Notifications.requestPermissionsAsync();
+      finalStatus = req.status;
+    }
+    if (finalStatus !== 'granted') return null;
+
+    const nativeToken = await Notifications.getDevicePushTokenAsync();
+    const token =
+      typeof nativeToken?.data === 'string'
+        ? nativeToken.data
+        : nativeToken?.data
+          ? String(nativeToken.data)
+          : '';
+    if (!token.trim()) return null;
+
+    return { token, provider: 'fcm' };
+  } catch {
+    return null;
+  }
+}
+
 type ProviderProps = {
   session: AuthSession;
   onNavigateFromPush?: (payload: {
@@ -145,6 +179,8 @@ export function NotificationRealtimeProvider({
   onNavigateFromPush,
   children,
 }: ProviderProps) {
+  const { capabilities, brand } = useBranding();
+  const palette = getBrandPalette(brand);
   const [rows, setRows] = useState<MobileNotificationRow[]>([]);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -262,11 +298,13 @@ export function NotificationRealtimeProvider({
               ? {
                   ...row,
                   isRead: true,
-                  logs: row.logs.map((log) =>
-                    String(log.channel).toUpperCase() === 'IN_APP'
-                      ? { ...log, status: 'READ' }
-                      : log,
-                  ),
+                  logs: Array.isArray(row.logs)
+                    ? row.logs.map((log) =>
+                        String(log.channel).toUpperCase() === 'IN_APP'
+                          ? { ...log, status: 'READ' }
+                          : log,
+                      )
+                    : row.logs,
                 }
               : row,
           ),
@@ -355,6 +393,18 @@ export function NotificationRealtimeProvider({
   }, [refreshNow]);
 
   useEffect(() => {
+    if (!capabilities.push) {
+      return () => {
+        const tokenId = backendDeviceTokenIdRef.current;
+        backendDeviceTokenIdRef.current = null;
+        if (tokenId) {
+          void revokePushDeviceToken(session.accessToken, tokenId).catch(
+            () => undefined,
+          );
+        }
+      };
+    }
+
     let cancelled = false;
     let receivedSub: Notifications.EventSubscription | null = null;
     let responseSub: Notifications.EventSubscription | null = null;
@@ -366,7 +416,7 @@ export function NotificationRealtimeProvider({
             name: 'Default',
             importance: Notifications.AndroidImportance.HIGH,
             vibrationPattern: [0, 250, 250, 250],
-            lightColor: '#2A3E35',
+            lightColor: palette.primary,
           });
         } catch {
           // Ignore channel setup failures in Expo Go / unsupported environments.
@@ -374,16 +424,20 @@ export function NotificationRealtimeProvider({
       }
 
       try {
-        const expoToken = await getExpoPushTokenSafe();
+        const nativePush = await getNativeDevicePushTokenSafe();
+        const expoToken = nativePush ? null : await getExpoPushTokenSafe();
+        const tokenToRegister = nativePush?.token ?? expoToken;
+        const provider =
+          nativePush?.provider ?? (expoToken ? 'expo' : null);
 
-        if (!cancelled && expoToken) {
+        if (!cancelled && tokenToRegister && provider) {
           try {
             const androidId =
               Platform.OS === 'android'
                 ? Application.getAndroidId()
                 : null;
             const registered = await registerPushDeviceToken(session.accessToken, {
-              token: expoToken,
+              token: tokenToRegister,
               platform: inferPlatform(),
               deviceId: androidId ?? ((Constants as any).sessionId ?? undefined),
               appVersion:
@@ -391,7 +445,7 @@ export function NotificationRealtimeProvider({
                 Constants.expoConfig?.version ??
                 undefined,
               metadata: {
-                pushProvider: 'expo',
+                pushProvider: provider,
                 expoProjectId:
                   Constants?.expoConfig?.extra?.eas?.projectId ??
                   (Constants as any)?.easConfig?.projectId ??
@@ -399,6 +453,7 @@ export function NotificationRealtimeProvider({
                 platformOs: Platform.OS,
                 deviceName: Device.deviceName ?? null,
                 osVersion: Device.osVersion ?? null,
+                tokenSource: nativePush ? 'native-device-token' : 'expo-token',
               },
             });
             backendDeviceTokenIdRef.current = registered.id || null;
@@ -492,7 +547,14 @@ export function NotificationRealtimeProvider({
         void revokePushDeviceToken(session.accessToken, tokenId).catch(() => undefined);
       }
     };
-  }, [onNavigateFromPush, refreshNow, session.accessToken, trackRecentId]);
+  }, [
+    capabilities.push,
+    onNavigateFromPush,
+    palette.primary,
+    refreshNow,
+    session.accessToken,
+    trackRecentId,
+  ]);
 
   const unreadCount = useMemo(
     () => rows.filter((row) => !row.isRead).length,

@@ -12,6 +12,8 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import type { AccessQrRow } from '../../features/community/types';
+import { useBranding } from '../../features/branding/provider';
+import { getBrandPalette } from '../../features/branding/palette';
 import { akColors, akShadow } from '../../theme/alkarma';
 import { formatDateTime } from '../../utils/format';
 
@@ -51,6 +53,8 @@ export function GeneratedQrModal({
   onViewHistory,
   onToast,
 }: GeneratedQrModalProps) {
+  const { brand } = useBranding();
+  const palette = getBrandPalette(brand);
   const [sharingBusy, setSharingBusy] = useState(false);
   const imageUri = useMemo(() => normalizeBase64(qrImageBase64), [qrImageBase64]);
 
@@ -95,7 +99,7 @@ export function GeneratedQrModal({
         <View style={styles.modalCard}>
           <View style={styles.headerRow}>
             <View style={styles.headerIcon}>
-              <MaterialCommunityIcons name="qrcode" size={20} color={akColors.primary} />
+              <MaterialCommunityIcons name="qrcode" size={20} color={palette.primary} />
             </View>
             <View style={styles.flex}>
               <Text style={styles.title}>QR Code Ready</Text>
@@ -141,7 +145,11 @@ export function GeneratedQrModal({
               </Pressable>
             ) : null}
             <Pressable
-              style={[styles.primaryBtn, sharingBusy && styles.disabled]}
+              style={[
+                styles.primaryBtn,
+                { backgroundColor: palette.primary },
+                sharingBusy && styles.disabled,
+              ]}
               onPress={() => void handleShare()}
               disabled={sharingBusy}
             >
@@ -189,7 +197,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(42,62,53,0.08)',
+    backgroundColor: 'rgba(15,23,42,0.08)',
   },
   flex: { flex: 1 },
   iconBtn: {
@@ -270,7 +278,6 @@ const styles = StyleSheet.create({
     flex: 1.3,
     minHeight: 42,
     borderRadius: 12,
-    backgroundColor: akColors.primary,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',

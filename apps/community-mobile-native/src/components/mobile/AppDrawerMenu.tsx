@@ -13,6 +13,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import type { ResidentUnit } from '../../features/community/types';
 import type { AuthBootstrapProfile } from '../../features/auth/types';
 import { useBranding } from '../../features/branding/provider';
+import { useI18n } from '../../features/i18n/provider';
 import { akColors } from '../../theme/alkarma';
 
 export type AppDrawerRoute =
@@ -24,7 +25,10 @@ export type AppDrawerRoute =
   | 'Finance'
   | 'Notifications'
   | 'Bookings'
-  | 'Household';
+  | 'Household'
+  | 'Utilities'
+  | 'Discover'
+  | 'HelpCenter';
 
 type DrawerMenuItem = {
   key: string;
@@ -65,6 +69,7 @@ export function AppDrawerMenu({
   notificationUnreadCount: _notificationUnreadCount,
 }: AppDrawerMenuProps) {
   const { brand } = useBranding();
+  const { t } = useI18n();
   const brandPrimary = brand.primaryColor || akColors.primary;
   const brandAccent = brand.accentColor || akColors.gold;
   const selectedUnit = useMemo(
@@ -88,42 +93,59 @@ export function AppDrawerMenu({
   const canManageWorkers =
     unitAccesses.some((a) => a.canManageWorkers) ||
     Boolean(profile?.personaHints?.canManageWorkers);
+  const selectedUnitRoles = new Set(
+    unitAccesses.map((a) => String(a.role ?? '').toUpperCase()).filter(Boolean),
+  );
+  const canManageHouseholdByUnit =
+    selectedUnitRoles.has('OWNER') ||
+    selectedUnitRoles.has('TENANT') ||
+    canManageWorkers;
   const featureAvailability = profile?.featureAvailability;
   const allowServices = featureAvailability?.canUseServices ?? true;
   const allowComplaints = featureAvailability?.canUseComplaints ?? true;
   const allowFinance = (featureAvailability?.canViewFinance ?? true) && canViewFinancials;
   const allowQr = (featureAvailability?.canUseQr ?? true) && canGenerateQr;
   const allowBookings = (featureAvailability?.canUseBookings ?? true) && canBookFacilities;
+  const allowDiscover = featureAvailability?.canUseDiscover ?? true;
+  const allowHelpCenter = featureAvailability?.canUseHelpCenter ?? true;
+  const allowUtilities = featureAvailability?.canUseUtilities ?? true;
   const allowHousehold =
-    featureAvailability?.canManageHousehold ?? false;
+    (featureAvailability?.canManageHousehold ?? false) && canManageHouseholdByUnit;
   const hideUnsupported = true;
 
   const menuItems: DrawerMenuItem[] = [
-    { key: 'profile', label: 'Profile', icon: 'person-outline', route: 'Profile' },
-    { key: 'qr', label: 'QR Codes', icon: 'qrcode', iconSet: 'mc', route: 'Access', disabled: preConstruction || !allowQr },
-    { key: 'bookings', label: 'Bookings', icon: 'calendar-outline', route: 'Bookings', disabled: preConstruction || !allowBookings },
-    { key: 'requests', label: 'Requests', icon: 'file-tray-outline', route: 'Requests', disabled: preConstruction || !allowServices },
-    { key: 'services', label: 'Services', icon: 'construct-outline', route: 'Services', disabled: preConstruction || !allowServices },
-    { key: 'complaints', label: 'Complaints', icon: 'chatbubble-ellipses-outline', route: 'Complaints', disabled: !allowComplaints },
-    { key: 'violations', label: 'Violations', icon: 'flag-outline', route: 'Finance', disabled: preConstruction || !allowFinance },
-    { key: 'payments', label: 'Payments', icon: 'card-outline', route: 'Finance', disabled: !allowFinance },
+    { key: 'profile', label: t('drawer.profile'), icon: 'person-outline', route: 'Profile' },
     ...(allowHousehold
       ? ([
           {
             key: 'household',
-            label: 'Manage Household',
+            label: t('drawer.manageHousehold'),
             icon: 'people-outline',
             route: 'Household',
             disabled: preConstruction,
           },
         ] as DrawerMenuItem[])
       : []),
+    { key: 'qr', label: t('drawer.qrCodes'), icon: 'qrcode', iconSet: 'mc', route: 'Access', disabled: preConstruction || !allowQr },
+    { key: 'bookings', label: t('drawer.bookings'), icon: 'calendar-outline', route: 'Bookings', disabled: preConstruction || !allowBookings },
+    { key: 'requests', label: t('drawer.requests'), icon: 'file-tray-outline', route: 'Requests', disabled: preConstruction || !allowServices },
+    { key: 'services', label: t('drawer.services'), icon: 'construct-outline', route: 'Services', disabled: preConstruction || !allowServices },
+    { key: 'complaints', label: t('drawer.complaints'), icon: 'chatbubble-ellipses-outline', route: 'Complaints', disabled: !allowComplaints },
+    ...(allowUtilities
+      ? ([{ key: 'utilities', label: t('drawer.trackUtility'), icon: 'speedometer-outline', route: 'Utilities', disabled: false }] as DrawerMenuItem[])
+      : []),
+    { key: 'violations', label: t('drawer.violations'), icon: 'flag-outline', route: 'Finance', disabled: preConstruction || !allowFinance },
+    { key: 'payments', label: t('drawer.payments'), icon: 'card-outline', route: 'Finance', disabled: !allowFinance },
+    ...(allowDiscover
+      ? ([{ key: 'discover', label: 'Discover', icon: 'compass-outline', route: 'Discover', disabled: false }] as DrawerMenuItem[])
+      : []),
+    ...(allowHelpCenter
+      ? ([{ key: 'help', label: 'Help Center', icon: 'help-circle-outline', route: 'HelpCenter', disabled: false }] as DrawerMenuItem[])
+      : []),
     ...(hideUnsupported
       ? []
       : ([
           { key: 'smart-home', label: 'Smart Home', icon: 'hardware-chip-outline', disabled: true },
-          { key: 'discover', label: 'Discover', icon: 'compass-outline', disabled: true },
-          { key: 'help', label: 'Help', icon: 'help-circle-outline', disabled: true },
         ] as DrawerMenuItem[])),
   ];
 
@@ -182,7 +204,7 @@ export function AppDrawerMenu({
                     {displayName}
                   </Text>
                   <Text numberOfLines={1} style={[styles.userUnit, { color: brandAccent }]}>
-                    {selectedUnit?.unitNumber ?? 'No Unit Selected'}
+                    {selectedUnit?.unitNumber ?? t('drawer.noUnitSelected')}
                   </Text>
                   <Text numberOfLines={1} style={styles.userCompound}>
                     {selectedUnit?.projectName ?? brand.companyName ?? 'Community'}
@@ -194,7 +216,7 @@ export function AppDrawerMenu({
             <ScrollView contentContainerStyle={styles.scrollContent}>
               {units.length > 0 ? (
                 <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>MY PROPERTIES</Text>
+                  <Text style={styles.sectionLabel}>{t('drawer.myProperties')}</Text>
                   <View style={styles.unitList}>
                     {units.map((unit) => {
                       const active = unit.id === (selectedUnitId ?? units[0]?.id);
@@ -262,7 +284,7 @@ export function AppDrawerMenu({
                 style={styles.logoutButton}
               >
                 <Ionicons name="log-out-outline" size={18} color="#EF4444" />
-                <Text style={styles.logoutButtonText}>Logout</Text>
+                <Text style={styles.logoutButtonText}>{t('drawer.logout')}</Text>
               </Pressable>
             </View>
           </View>

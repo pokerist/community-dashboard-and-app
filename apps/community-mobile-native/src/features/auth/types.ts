@@ -3,6 +3,8 @@ export type AuthSession = {
   refreshToken: string | null;
   userId: string | null;
   email: string;
+  userStatus?: string | null;
+  mustCompleteActivation?: boolean;
 };
 
 export type SavedLoginCredentials = {
@@ -28,13 +30,53 @@ export type SignupPayload = {
 };
 
 export type LoginResponse = {
-  accessToken: string;
+  accessToken?: string;
   refreshToken?: string;
+  userStatus?: string;
+  mustCompleteActivation?: boolean;
+  challengeRequired?: boolean;
+  challengeToken?: string;
+  method?: 'SMS' | 'EMAIL' | string;
+  expiresInSeconds?: number;
+};
+
+export type VerifyLoginTwoFactorPayload = {
+  challengeToken: string;
+  otp: string;
 };
 
 export type RefreshResponse = {
   accessToken: string;
   refreshToken?: string;
+};
+
+export type ActivationStatusResponse = {
+  user: {
+    id: string;
+    email?: string | null;
+    phone?: string | null;
+    nameEN?: string | null;
+    nameAR?: string | null;
+    userStatus?: string | null;
+    nationalIdFileId?: string | null;
+    profilePhotoId?: string | null;
+  };
+  mustCompleteActivation: boolean;
+  checklist: {
+    requiresPhoneOtp: boolean;
+    phoneVerified: boolean;
+    hasNationalId: boolean;
+    hasProfilePhoto: boolean;
+    canCompleteActivation: boolean;
+  };
+};
+
+export type CompleteActivationPayload = {
+  nationalIdFileId: string;
+  profilePhotoId: string;
+  newPassword: string;
+  nameEN?: string;
+  nameAR?: string;
 };
 
 export type SignupResponse = {
@@ -52,6 +94,7 @@ export type AuthBootstrapProfile = {
     nameAR?: string | null;
     userStatus?: string;
     signupSource?: string;
+    twoFactorEnabled?: boolean;
     emailVerifiedAt?: string | null;
     phoneVerifiedAt?: string | null;
     lastLoginAt?: string | null;
@@ -76,6 +119,17 @@ export type AuthBootstrapProfile = {
     dateOfBirth?: string | null;
     relationship?: string | null;
   } | null;
+  vehicles?: Array<{
+    id: string;
+    vehicleType: string;
+    model: string;
+    plateNumber: string;
+    color?: string | null;
+    notes?: string | null;
+    isPrimary?: boolean;
+    createdAt?: string;
+    updatedAt?: string;
+  }>;
   units: Array<{
     id: string;
     unitNumber?: string | null;
@@ -135,10 +189,28 @@ export type AuthBootstrapProfile = {
     canUseQr?: boolean;
     canViewFinance?: boolean;
     canManageHousehold?: boolean;
+    canUseDiscover?: boolean;
+    canUseHelpCenter?: boolean;
+    canUseUtilities?: boolean;
   };
 };
 
 export type UpdateMeProfileInput = {
   nameEN?: string;
   nameAR?: string;
+  email?: string;
+  phone?: string;
+};
+
+export type ProfileChangeRequestRow = {
+  id: string;
+  userId: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED' | string;
+  requestedFields?: Record<string, unknown> | null;
+  previousSnapshot?: Record<string, unknown> | null;
+  reviewedById?: string | null;
+  reviewedAt?: string | null;
+  rejectionReason?: string | null;
+  createdAt: string;
+  updatedAt: string;
 };

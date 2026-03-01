@@ -4,9 +4,10 @@ import { AuthModule } from '../auth/auth.module';
 import { AccessControlController } from './access-control.controller';
 import { AccessControlService } from './access-control.service';
 import { HikCentralQrService } from './hikcentral/hikcentral-qr.service';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule],
+  imports: [PrismaModule, AuthModule, NotificationsModule],
   controllers: [AccessControlController],
   providers: [AccessControlService, HikCentralQrService],
   exports: [AccessControlService, HikCentralQrService],

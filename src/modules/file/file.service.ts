@@ -1,4 +1,5 @@
 import {
+  Logger,
   Injectable,
   NotFoundException,
   BadRequestException,
@@ -9,8 +10,10 @@ import {
   IFileStorageAdapter,
 } from '../../common/interfaces/file-storage.interface';
 import { SupabaseStorageAdapter } from './adapters/supabase-storage.adapter';
+import { S3StorageAdapter } from './adapters/s3-storage.adapter';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { $Enums, Audience, BannerStatus, Prisma } from '@prisma/client';
+import { IntegrationConfigService } from '../system-settings/integration-config.service';
 
 const ATTACHMENTS_BUCKET = 'service-attachments';
 const PROFILE_BUCKET = 'profile-photos';
@@ -18,11 +21,45 @@ const IDENTITY_DOCS_BUCKET = 'identity-docs';
 
 @Injectable()
 export class FileService {
-  private readonly storageAdapter: IFileStorageAdapter;
+  private readonly logger = new Logger(FileService.name);
 
-  constructor(private readonly prisma: PrismaService) {
-    // Initialize the concrete adapter (Supabase in your case)
-    this.storageAdapter = new SupabaseStorageAdapter();
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly integrationConfigService: IntegrationConfigService,
+  ) {}
+
+  private async getStorageAdapter(): Promise<IFileStorageAdapter> {
+    const runtime = await this.integrationConfigService.getStorageRuntimeConfig();
+
+    if (runtime.enabled && runtime.provider === 'S3' && runtime.configured) {
+      return new S3StorageAdapter({
+        bucket: runtime.bucket,
+        region: runtime.region,
+        endpoint: runtime.endpoint || undefined,
+        accessKeyId: runtime.accessKeyId,
+        secretAccessKey: runtime.secretAccessKey,
+        forcePathStyle: runtime.forcePathStyle,
+      });
+    }
+
+    if (
+      runtime.enabled &&
+      runtime.provider === 'SUPABASE' &&
+      runtime.configured
+    ) {
+      return new SupabaseStorageAdapter({
+        supabaseUrl: runtime.supabaseUrl,
+        serviceRoleKey: runtime.supabaseServiceRoleKey,
+      });
+    }
+
+    if (runtime.enabled && !runtime.configured) {
+      this.logger.warn(
+        `Storage provider "${runtime.provider}" is enabled but not configured. Falling back to local storage.`,
+      );
+    }
+
+    return new SupabaseStorageAdapter({ forceLocal: true });
   }
 
   private resolveBucket(category: $Enums.FileCategory): string {
@@ -147,7 +184,8 @@ export class FileService {
     bucket: string,
     category: $Enums.FileCategory,
   ): Promise<FileUploadResult> {
-    const uploadResult = await this.storageAdapter.uploadFile(file, bucket);
+    const storageAdapter = await this.getStorageAdapter();
+    const uploadResult = await storageAdapter.uploadFile(file, bucket);
 
     // Save the metadata to your File table
     const fileRecord = await this.prisma.file.create({
@@ -353,7 +391,8 @@ export class FileService {
     }
 
     const bucket = this.resolveBucket(file.category);
-    await this.storageAdapter.deleteFile(file.key, bucket);
+    const storageAdapter = await this.getStorageAdapter();
+    await storageAdapter.deleteFile(file.key, bucket);
 
     await this.prisma.$transaction([
       this.prisma.attachment.deleteMany({ where: { fileId } }),
@@ -377,7 +416,8 @@ export class FileService {
 
     const file = await this.getFileOrThrow(fileId);
     const bucket = this.resolveBucket(file.category);
-    return this.storageAdapter.getFileStream(file.key, bucket);
+    const storageAdapter = await this.getStorageAdapter();
+    return storageAdapter.getFileStream(file.key, bucket);
   }
 
   async getFileStreamWithMetaForActor(
@@ -398,7 +438,8 @@ export class FileService {
 
     const file = await this.getFileOrThrow(fileId);
     const bucket = this.resolveBucket(file.category);
-    const stream = await this.storageAdapter.getFileStream(file.key, bucket);
+    const storageAdapter = await this.getStorageAdapter();
+    const stream = await storageAdapter.getFileStream(file.key, bucket);
     return { file, stream };
   }
 
@@ -429,7 +470,8 @@ export class FileService {
 
     const file = await this.getFileOrThrow(fileId);
     const bucket = this.resolveBucket(file.category);
-    const stream = await this.storageAdapter.getFileStream(file.key, bucket);
+    const storageAdapter = await this.getStorageAdapter();
+    const stream = await storageAdapter.getFileStream(file.key, bucket);
     return { file, stream };
   }
 
@@ -460,7 +502,63 @@ export class FileService {
 
     const file = await this.getFileOrThrow(fileId);
     const bucket = this.resolveBucket(file.category);
-    const stream = await this.storageAdapter.getFileStream(file.key, bucket);
+    const storageAdapter = await this.getStorageAdapter();
+    const stream = await storageAdapter.getFileStream(file.key, bucket);
+    return { file, stream };
+  }
+
+  async getPublicOfferBannerStream(fileId: string): Promise<{
+    file: {
+      id: string;
+      key: string;
+      name: string;
+      mimeType: string | null;
+      size: number | null;
+      category: $Enums.FileCategory;
+    };
+    stream: NodeJS.ReadableStream;
+  }> {
+    const offersRow = await this.prisma.systemSetting.findUnique({
+      where: { section: 'offers' },
+      select: { value: true },
+    });
+    const value =
+      offersRow?.value &&
+      typeof offersRow.value === 'object' &&
+      !Array.isArray(offersRow.value)
+        ? (offersRow.value as Record<string, unknown>)
+        : null;
+
+    const offersEnabled = value?.enabled === true;
+    const banners = Array.isArray(value?.banners) ? value.banners : [];
+    const now = Date.now();
+    const linkedBanner = banners.find((raw) => {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+      const row = raw as Record<string, unknown>;
+      const linkedFileId =
+        typeof row.imageFileId === 'string' ? row.imageFileId.trim() : '';
+      const isActive = row.active !== false;
+      const startAt =
+        typeof row.startAt === 'string' && row.startAt.trim()
+          ? Date.parse(row.startAt)
+          : NaN;
+      const endAt =
+        typeof row.endAt === 'string' && row.endAt.trim()
+          ? Date.parse(row.endAt)
+          : NaN;
+      if (Number.isFinite(startAt) && startAt > now) return false;
+      if (Number.isFinite(endAt) && endAt < now) return false;
+      return linkedFileId === fileId && isActive;
+    });
+
+    if (!offersEnabled || !linkedBanner) {
+      throw new NotFoundException('Offer banner image not found');
+    }
+
+    const file = await this.getFileOrThrow(fileId);
+    const bucket = this.resolveBucket(file.category);
+    const storageAdapter = await this.getStorageAdapter();
+    const stream = await storageAdapter.getFileStream(file.key, bucket);
     return { file, stream };
   }
 }

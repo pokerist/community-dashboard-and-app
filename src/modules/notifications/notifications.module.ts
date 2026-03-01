@@ -10,8 +10,9 @@ import { ExpoPushProviderService } from './providers/expo-push-provider.service'
 import { PushDispatchRouterService } from './providers/push-dispatch-router.service';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
+import { SystemSettingsModule } from '../system-settings/system-settings.module';
 @Module({
-  imports: [PrismaModule, forwardRef(() => AuthModule)],
+  imports: [PrismaModule, SystemSettingsModule, forwardRef(() => AuthModule)],
   controllers: [NotificationsController],
   providers: [
     NotificationsService,

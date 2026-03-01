@@ -4,6 +4,7 @@ import { Feather, Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -18,6 +19,8 @@ import {
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
 import { useAppToast } from '../components/mobile/AppToast';
+import { useBranding } from '../features/branding/provider';
+import { getBrandPalette } from '../features/branding/palette';
 import { extractApiErrorMessage } from '../lib/http';
 import { signupRequest } from '../features/auth/service';
 import { pickAndUploadPublicSignupPhoto } from '../features/files/service';
@@ -33,9 +36,12 @@ const roleOptions: Array<{ value: SignupRoleIntent; label: string }> = [
   { value: 'TENANT', label: 'Tenant' },
   { value: 'FAMILY', label: 'Family' },
 ];
+const authLogo = require('../../assets/branding/alkarma-logo-dark.png');
 
 export function RegisterScreen({ onBackToLogin }: RegisterScreenProps) {
   const insets = useSafeAreaInsets();
+  const { brand } = useBranding();
+  const palette = getBrandPalette(brand);
   const toast = useAppToast();
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -120,13 +126,17 @@ export function RegisterScreen({ onBackToLogin }: RegisterScreenProps) {
           >
             <View style={styles.headerRow}>
               <Pressable onPress={onBackToLogin} style={styles.backButton}>
-                <Ionicons name="chevron-back" size={16} color={akColors.primary} />
-                <Text style={styles.backButtonText}>Back</Text>
+                <Ionicons name="chevron-back" size={16} color={palette.primary} />
+                <Text style={[styles.backButtonText, { color: palette.primary }]}>Back</Text>
               </Pressable>
             </View>
 
+            <View style={styles.logoHeader}>
+              <Image source={authLogo} style={styles.logo} resizeMode="contain" />
+            </View>
+
             <LinearGradient
-              colors={[akColors.primary, akColors.primaryDark, akColors.primary]}
+              colors={[palette.primary, palette.primaryDark, palette.primary]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={styles.heroCard}
@@ -187,7 +197,11 @@ export function RegisterScreen({ onBackToLogin }: RegisterScreenProps) {
                     <Pressable
                       key={option.value}
                       onPress={() => setRoleIntent(option.value)}
-                      style={[styles.roleChip, active && styles.roleChipActive]}
+                      style={[
+                        styles.roleChip,
+                        active && styles.roleChipActive,
+                        active && { backgroundColor: palette.primary, borderColor: palette.primary },
+                      ]}
                     >
                       <Text style={[styles.roleChipText, active && styles.roleChipTextActive]}>
                         {option.label}
@@ -214,7 +228,7 @@ export function RegisterScreen({ onBackToLogin }: RegisterScreenProps) {
               >
                 {isUploadingPhoto ? (
                   <View style={styles.inlineRow}>
-                    <ActivityIndicator size="small" color={akColors.primary} />
+                    <ActivityIndicator size="small" color={palette.primary} />
                     <Text style={styles.uploadPhotoButtonText}>Uploading Photo...</Text>
                   </View>
                 ) : (
@@ -224,8 +238,8 @@ export function RegisterScreen({ onBackToLogin }: RegisterScreenProps) {
                 )}
               </Pressable>
               <View style={styles.noteCard}>
-                <Ionicons name="information-circle-outline" size={16} color={akColors.primary} />
-                <Text style={styles.noteText}>
+                <Ionicons name="information-circle-outline" size={16} color={palette.primary} />
+                <Text style={[styles.noteText, { color: palette.primary }]}>
                   Signup requires a `personalPhotoId`. You can upload a photo directly here or paste
                   a `fileId` manually for testing.
                 </Text>
@@ -251,7 +265,11 @@ export function RegisterScreen({ onBackToLogin }: RegisterScreenProps) {
               <Pressable
                 onPress={handleSubmit}
                 disabled={isSubmitting}
-                style={[styles.submitButton, isSubmitting && styles.buttonDisabled]}
+                style={[
+                  styles.submitButton,
+                  { backgroundColor: palette.primary },
+                  isSubmitting && styles.buttonDisabled,
+                ]}
               >
                 {isSubmitting ? (
                   <View style={styles.inlineRow}>
@@ -264,7 +282,9 @@ export function RegisterScreen({ onBackToLogin }: RegisterScreenProps) {
               </Pressable>
 
               <Pressable onPress={onBackToLogin} style={styles.backToLoginLink}>
-                <Text style={styles.backToLoginText}>Already have an account? Sign In</Text>
+                <Text style={[styles.backToLoginText, { color: palette.primary }]}>
+                  Already have an account? Sign In
+                </Text>
               </Pressable>
             </View>
           </ScrollView>
@@ -345,6 +365,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-start',
+  },
+  logoHeader: {
+    alignItems: 'center',
+    paddingTop: 4,
+    paddingBottom: 2,
+  },
+  logo: {
+    width: 170,
+    height: 60,
   },
   backButton: {
     flexDirection: 'row',

@@ -46,14 +46,22 @@ export class ServiceController {
       'Lists service types. Use `status=active` (default) for active only, `status=inactive` for inactive only, or `status=all` for both active and inactive services.',
   })
   @Permissions('service.read', 'service_request.create')
-  findAll(@Query('status') status?: string) {
+  findAll(
+    @Query('status') status?: string,
+    @Query('urgent') urgent?: string,
+  ) {
     let filter: boolean | undefined;
+    let urgentFilter: boolean | undefined;
 
     if (status === 'active') filter = true;
     else if (status === 'inactive') filter = false;
     else filter = undefined; // "all"
 
-    return this.serviceService.findAll(filter);
+    if (urgent === 'true') urgentFilter = true;
+    else if (urgent === 'false') urgentFilter = false;
+    else urgentFilter = undefined;
+
+    return this.serviceService.findAll(filter, urgentFilter);
   }
 
   // GET /services/:id (Admin: View details)

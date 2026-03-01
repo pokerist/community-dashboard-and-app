@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useBranding } from '../../features/branding/provider';
+import { getBrandPalette } from '../../features/branding/palette';
 import { akColors, akRadius, akShadow } from '../../theme/alkarma';
 
 export function ScreenCard(props: {
@@ -8,6 +10,9 @@ export function ScreenCard(props: {
   onActionPress?: () => void;
   children: ReactNode;
 }) {
+  const { brand } = useBranding();
+  const palette = getBrandPalette(brand);
+
   return (
     <View style={styles.card}>
       {props.title ? (
@@ -15,7 +20,7 @@ export function ScreenCard(props: {
           <Text style={styles.title}>{props.title}</Text>
           {props.actionLabel && props.onActionPress ? (
             <Pressable onPress={props.onActionPress}>
-              <Text style={styles.action}>{props.actionLabel}</Text>
+              <Text style={[styles.action, { color: palette.primary }]}>{props.actionLabel}</Text>
             </Pressable>
           ) : null}
         </View>

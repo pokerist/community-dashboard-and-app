@@ -16,6 +16,7 @@ import {
 import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import { Switch } from "../ui/switch";
 import {
   Table,
   TableBody,
@@ -48,6 +49,8 @@ interface ComplaintListRow {
   complaintNumber?: string | null;
   reporterId?: string | null;
   unitId?: string | null;
+  title?: string | null;
+  team?: string | null;
   category?: string | null;
   description?: string | null;
   priority?: string | null;
@@ -96,10 +99,12 @@ export function ComplaintsViolations() {
   const [complaintStatusDraft, setComplaintStatusDraft] = useState<string>("");
   const [complaintStatusUpdating, setComplaintStatusUpdating] = useState(false);
   const [complaintResolutionNotesDraft, setComplaintResolutionNotesDraft] = useState("");
+  const [complaintTeamDraft, setComplaintTeamDraft] = useState("");
   const [complaintFormData, setComplaintFormData] = useState({
     reporterId: "",
     unitId: "",
-    category: "",
+    title: "",
+    team: "",
     priority: "",
     description: "",
   });
@@ -153,8 +158,13 @@ export function ComplaintsViolations() {
   }, [loadData]);
 
   const handleCreateComplaint = async () => {
-    if (!complaintFormData.reporterId || !complaintFormData.category || !complaintFormData.description) {
-      toast.error("Reporter, category, and description are required");
+    if (
+      !complaintFormData.reporterId ||
+      !complaintFormData.title ||
+      !complaintFormData.team ||
+      !complaintFormData.description
+    ) {
+      toast.error("Reporter, title, team, and description are required");
       return;
     }
 
@@ -163,7 +173,9 @@ export function ComplaintsViolations() {
       await apiClient.post("/complaints/admin/create", {
         reporterId: complaintFormData.reporterId,
         unitId: complaintFormData.unitId || undefined,
-        category: complaintFormData.category,
+        title: complaintFormData.title,
+        team: complaintFormData.team,
+        category: complaintFormData.team,
         priority: complaintFormData.priority || undefined,
         description: complaintFormData.description,
       });
@@ -173,7 +185,8 @@ export function ComplaintsViolations() {
       setComplaintFormData({
         reporterId: "",
         unitId: "",
-        category: "",
+        title: "",
+        team: "",
         priority: "",
         description: "",
       });
@@ -239,6 +252,7 @@ export function ComplaintsViolations() {
       setComplaintComments(comments);
       setComplaintStatusDraft(String(detail.status ?? "NEW").toUpperCase());
       setComplaintResolutionNotesDraft(detail.resolutionNotes ?? "");
+      setComplaintTeamDraft(String(detail.team ?? "").trim());
     } catch (error) {
       toast.error("Failed to load complaint details", { description: errorMessage(error) });
       setActiveComplaint(null);
@@ -265,6 +279,7 @@ export function ComplaintsViolations() {
     setComplaintReplyInternal(false);
     setComplaintStatusDraft("");
     setComplaintResolutionNotesDraft("");
+    setComplaintTeamDraft("");
   }, []);
 
   const refreshActiveComplaint = useCallback(async () => {
@@ -305,9 +320,10 @@ export function ComplaintsViolations() {
 
     setComplaintStatusUpdating(true);
     try {
-      await apiClient.patch(`/complaints/${activeComplaintId}/status`, {
+      await apiClient.patch(`/complaints/${activeComplaintId}`, {
         status: target,
         resolutionNotes: complaintResolutionNotesDraft.trim() || undefined,
+        team: complaintTeamDraft.trim() || undefined,
       });
       toast.success("Complaint status updated");
       await Promise.all([loadData(), refreshActiveComplaint()]);
@@ -319,6 +335,7 @@ export function ComplaintsViolations() {
   }, [
     activeComplaintId,
     complaintStatusDraft,
+    complaintTeamDraft,
     complaintResolutionNotesDraft,
     loadData,
     refreshActiveComplaint,
@@ -333,6 +350,8 @@ export function ComplaintsViolations() {
       return [
         c.complaintNumber,
         c.id,
+        c.title,
+        c.team,
         c.category,
         c.description,
         c.status,
@@ -540,12 +559,21 @@ export function ComplaintsViolations() {
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="category">Complaint Category</Label>
+                      <Label htmlFor="title">Complaint Title</Label>
                       <Input
-                        id="category"
-                        placeholder="Noise / Parking / Maintenance..."
-                        value={complaintFormData.category}
-                        onChange={(e) => setComplaintFormData((p) => ({ ...p, category: e.target.value }))}
+                        id="title"
+                        placeholder="Short complaint title"
+                        value={complaintFormData.title}
+                        onChange={(e) => setComplaintFormData((p) => ({ ...p, title: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="team">Team</Label>
+                      <Input
+                        id="team"
+                        placeholder="Security / Maintenance / Community"
+                        value={complaintFormData.team}
+                        onChange={(e) => setComplaintFormData((p) => ({ ...p, team: e.target.value }))}
                       />
                     </div>
                     <div className="space-y-2">
@@ -597,7 +625,8 @@ export function ComplaintsViolations() {
                   <TableHead>Complaint ID</TableHead>
                   <TableHead>Reporter</TableHead>
                   <TableHead>Unit</TableHead>
-                  <TableHead>Category</TableHead>
+                  <TableHead>Title</TableHead>
+                  <TableHead>Team</TableHead>
                   <TableHead>Description</TableHead>
                   <TableHead>Priority</TableHead>
                   <TableHead>Status</TableHead>
@@ -620,7 +649,8 @@ export function ComplaintsViolations() {
                         {complaint.unit?.unitNumber ?? "—"}
                       </Badge>
                     </TableCell>
-                    <TableCell className="text-[#1E293B]">{complaint.category ?? "—"}</TableCell>
+                    <TableCell className="text-[#1E293B]">{complaint.title ?? "—"}</TableCell>
+                    <TableCell className="text-[#1E293B]">{complaint.team ?? "—"}</TableCell>
                     <TableCell className="text-[#64748B] max-w-xs truncate">
                       {complaint.description ?? "—"}
                     </TableCell>
@@ -648,7 +678,7 @@ export function ComplaintsViolations() {
                 ))}
                 {!isLoading && filteredComplaints.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-10 text-[#64748B]">
+                    <TableCell colSpan={11} className="text-center py-10 text-[#64748B]">
                       No complaints found.
                     </TableCell>
                   </TableRow>
@@ -863,7 +893,9 @@ export function ComplaintsViolations() {
                 <Card className="p-4 lg:col-span-2">
                   <div className="flex items-start justify-between gap-4">
                     <div>
-                      <h4 className="text-[#1E293B]">{activeComplaint.category || "Complaint"}</h4>
+                      <h4 className="text-[#1E293B]">
+                        {activeComplaint.title || activeComplaint.category || "Complaint"}
+                      </h4>
                       <p className="text-xs text-[#64748B] mt-1">
                         Complaint ID: {activeComplaint.complaintNumber ?? activeComplaint.id}
                       </p>
@@ -898,6 +930,18 @@ export function ComplaintsViolations() {
                     <div>
                       <p className="text-[#64748B]">Last Updated</p>
                       <p className="text-[#1E293B]">{formatDateTime(activeComplaint.updatedAt)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[#64748B]">Team</p>
+                      <p className="text-[#1E293B]">{activeComplaint.team || "Unassigned Team"}</p>
+                    </div>
+                    <div>
+                      <p className="text-[#64748B]">Assigned To</p>
+                      <p className="text-[#1E293B]">
+                        {activeComplaint.assignedTo?.nameEN ||
+                          activeComplaint.assignedTo?.email ||
+                          "Unassigned"}
+                      </p>
                     </div>
                   </div>
 
@@ -936,6 +980,16 @@ export function ComplaintsViolations() {
                   </div>
 
                   <div className="space-y-2">
+                    <Label htmlFor="complaintTeamDraft">Team Assignment</Label>
+                    <Input
+                      id="complaintTeamDraft"
+                      placeholder="Security / Maintenance / Community"
+                      value={complaintTeamDraft}
+                      onChange={(e) => setComplaintTeamDraft(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
                     <Label htmlFor="complaintResolutionNotes">Resolution Notes</Label>
                     <Textarea
                       id="complaintResolutionNotes"
@@ -951,8 +1005,7 @@ export function ComplaintsViolations() {
                     onClick={() => void applyComplaintStatus()}
                     disabled={
                       complaintStatusUpdating ||
-                      !complaintStatusDraft ||
-                      complaintStatusDraft === String(activeComplaint.status || "").toUpperCase()
+                      !complaintStatusDraft
                     }
                   >
                     {complaintStatusUpdating ? "Updating..." : "Apply Status"}

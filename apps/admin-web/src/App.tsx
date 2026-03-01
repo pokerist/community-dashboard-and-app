@@ -17,6 +17,8 @@ import { AmenitiesManagement } from "./components/pages/AmenitiesManagement";
 import { SmartHomeIntegration } from "./components/pages/SmartHomeIntegration";
 import { ReportsAnalytics } from "./components/pages/ReportsAnalytics";
 import { SystemSettings } from "./components/pages/SystemSettings";
+import { CommunityDirectory } from "./components/pages/CommunityDirectory";
+import { ApprovalsCenter } from "./components/pages/ApprovalsCenter";
 import { Toaster } from "./components/ui/sonner";
 import { toast } from "sonner";
 import { isAuthenticated, removeAuthToken } from "./lib/api-client";
@@ -48,6 +50,8 @@ const VALID_SECTIONS = new Set([
   "smarthome",
   "reports",
   "settings",
+  "directory",
+  "approvals",
 ]);
 
 function normalizeSection(value?: string | null): string {
@@ -170,6 +174,10 @@ export default function App() {
         return <ReportsAnalytics />;
       case "settings":
         return <SystemSettings />;
+      case "directory":
+        return <CommunityDirectory />;
+      case "approvals":
+        return <ApprovalsCenter />;
       default:
         return <DashboardOverview onNavigate={navigateToSection} />;
     }

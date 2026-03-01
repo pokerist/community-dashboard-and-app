@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import {
   ActivityIndicator,
-  Linking,
   Modal,
   Pressable,
   RefreshControl,
@@ -17,16 +16,18 @@ import {
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
 import type { AuthSession } from '../features/auth/types';
-import { useAppToast } from '../components/mobile/AppToast';
+import { InAppWebViewerModal } from '../components/mobile/InAppWebViewerModal';
 import {
   formatNotificationDateTime,
   formatNotificationRelativeTime,
   isPersonalNotification,
   notificationTypeLabel,
 } from '../features/notifications/presentation';
+import { useI18n } from '../features/i18n/provider';
 import type { MobileNotificationRow } from '../features/notifications/types';
 import { useNotificationRealtime } from '../features/notifications/realtime';
-import { extractApiErrorMessage } from '../lib/http';
+import { useBranding } from '../features/branding/provider';
+import { getBrandPalette } from '../features/branding/palette';
 import { akColors, akRadius, akShadow } from '../theme/alkarma';
 
 type FilterMode = 'all' | 'unread';
@@ -41,7 +42,10 @@ type NotificationsListScreenProps = {
   }) => void;
 };
 
-function notificationVisual(type?: string) {
+function notificationVisual(
+  type: string | undefined,
+  palette: ReturnType<typeof getBrandPalette>,
+) {
   const key = String(type ?? '').toUpperCase();
   if (key.includes('PAYMENT') || key.includes('INVOICE')) {
     return {
@@ -53,8 +57,8 @@ function notificationVisual(type?: string) {
   if (key.includes('SERVICE')) {
     return {
       icon: 'construct-outline' as const,
-      iconColor: akColors.primary,
-      bg: 'rgba(42,62,53,0.10)',
+      iconColor: palette.primary,
+      bg: palette.primarySoft10,
     };
   }
   if (key.includes('SECURITY') || key.includes('INCIDENT')) {
@@ -86,19 +90,21 @@ function normalizeExternalUrl(raw?: string | null): string | null {
   return `https://${trimmed}`;
 }
 
-function dayBucketLabel(dateValue?: string | null): string {
-  if (!dateValue) return 'Earlier';
+function dayBucketLabel(
+  dateValue?: string | null,
+): 'common.today' | 'common.yesterday' | 'common.earlier' {
+  if (!dateValue) return 'common.earlier';
   const ts = new Date(dateValue);
-  if (Number.isNaN(ts.getTime())) return 'Earlier';
+  if (Number.isNaN(ts.getTime())) return 'common.earlier';
 
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const startOfYesterday = new Date(startOfToday);
   startOfYesterday.setDate(startOfYesterday.getDate() - 1);
 
-  if (ts >= startOfToday) return 'Today';
-  if (ts >= startOfYesterday) return 'Yesterday';
-  return 'Earlier';
+  if (ts >= startOfToday) return 'common.today';
+  if (ts >= startOfYesterday) return 'common.yesterday';
+  return 'common.earlier';
 }
 
 function NotificationRowItem({
@@ -106,20 +112,34 @@ function NotificationRowItem({
   onMarkRead,
   isMarking,
   onOpen,
+  palette,
 }: {
   item: MobileNotificationRow;
   onMarkRead: (id: string) => void;
   isMarking: boolean;
   onOpen: () => void;
+  palette: ReturnType<typeof getBrandPalette>;
 }) {
-  const visual = notificationVisual(item.type);
+  const { t } = useI18n();
+  const visual = notificationVisual(item.type, palette);
+  const safeTitle = item.title?.trim() || t('notifications.notification');
+  const safeMessage =
+    item.messageEn?.trim() || item.messageAr?.trim() || t('notifications.noDetails');
 
   return (
     <Pressable
       onPress={onOpen}
       style={({ pressed }) => [
         styles.rowCard,
-        !item.isRead && styles.rowCardUnread,
+        item.isRead && styles.rowCardRead,
+        !item.isRead && [
+          styles.rowCardUnread,
+          {
+            backgroundColor: palette.primarySoft8,
+            borderColor: palette.primarySoft22,
+            borderLeftColor: palette.primary,
+          },
+        ],
         pressed && styles.rowCardPressed,
       ]}
     >
@@ -129,30 +149,35 @@ function NotificationRowItem({
         </View>
         <View style={{ flex: 1 }}>
           <Text style={[styles.rowTitle, !item.isRead && styles.rowTitleUnread]}>
-            {item.title}
+            {safeTitle}
           </Text>
           <Text style={styles.rowSubtitle}>
-            {notificationTypeLabel(item)} • {item.isRead ? 'Seen' : 'New'}
+            {notificationTypeLabel(item)} • {item.isRead ? t('common.seen') : t('common.new')}
           </Text>
         </View>
         <View
           style={[
             styles.readBadge,
             item.isRead ? styles.readBadgeRead : styles.readBadgeUnread,
+            !item.isRead && {
+              backgroundColor: palette.accentSoft12,
+              borderColor: palette.secondary,
+            },
           ]}
         >
           <Text
             style={[
               styles.readBadgeText,
               item.isRead ? styles.readBadgeTextRead : styles.readBadgeTextUnread,
+              !item.isRead && { color: palette.primary },
             ]}
           >
-            {item.isRead ? 'Read' : 'Unread'}
+            {item.isRead ? t('common.read') : t('common.unread')}
           </Text>
         </View>
       </View>
 
-      <Text style={styles.rowMessage}>{item.messageEn || 'No message'}</Text>
+      <Text style={styles.rowMessage}>{safeMessage}</Text>
 
       <Text style={styles.rowTime}>
         {formatNotificationRelativeTime(item.sentAt || item.createdAt)} • {formatNotificationDateTime(item.sentAt || item.createdAt)}
@@ -160,17 +185,27 @@ function NotificationRowItem({
 
       {!item.isRead ? (
         <Pressable
-          style={[styles.markReadButton, isMarking && styles.buttonDisabled]}
-          onPress={() => onMarkRead(item.id)}
+          style={[
+            styles.markReadButton,
+            { borderColor: palette.secondary, backgroundColor: palette.accentSoft12 },
+            isMarking && styles.buttonDisabled,
+          ]}
+          onPress={(event) => {
+            // Prevent row press from firing while marking as read.
+            (event as any)?.stopPropagation?.();
+            onMarkRead(item.id);
+          }}
           disabled={isMarking}
         >
           {isMarking ? (
             <View style={styles.inlineLoading}>
-              <ActivityIndicator size="small" color={akColors.primary} />
-              <Text style={styles.markReadText}>Updating...</Text>
+              <ActivityIndicator size="small" color={palette.primary} />
+              <Text style={[styles.markReadText, { color: palette.primary }]}>{t('common.updating')}</Text>
             </View>
           ) : (
-            <Text style={styles.markReadText}>Mark as Read</Text>
+            <Text style={[styles.markReadText, { color: palette.primary }]}>
+              {t('notifications.markAsRead')}
+            </Text>
           )}
         </Pressable>
       ) : null}
@@ -179,11 +214,22 @@ function NotificationRowItem({
 }
 
 export function NotificationsListScreen({ onOpenInAppRoute }: NotificationsListScreenProps) {
+  const { t } = useI18n();
+  const { brand } = useBranding();
+  const palette = getBrandPalette(brand);
   const insets = useSafeAreaInsets();
   const notifications = useNotificationRealtime();
-  const toast = useAppToast();
   const [filter, setFilter] = useState<FilterMode>('all');
   const [selectedNotification, setSelectedNotification] = useState<MobileNotificationRow | null>(null);
+  const [webViewerState, setWebViewerState] = useState<{
+    visible: boolean;
+    url: string | null;
+    title: string;
+  }>({
+    visible: false,
+    url: null,
+    title: t('notifications.notification'),
+  });
 
   const personalRows = useMemo(
     () => notifications.rows.filter((row) => isPersonalNotification(row)),
@@ -199,8 +245,8 @@ export function NotificationsListScreen({ onOpenInAppRoute }: NotificationsListS
     return personalRows.filter((row) => !row.isRead);
   }, [filter, personalRows]);
   const groupedSections = useMemo(() => {
-    const orderedBuckets = ['Today', 'Yesterday', 'Earlier'] as const;
-    const bucketMap = new Map<string, MobileNotificationRow[]>();
+    const orderedBuckets = ['common.today', 'common.yesterday', 'common.earlier'] as const;
+    const bucketMap = new Map<(typeof orderedBuckets)[number], MobileNotificationRow[]>();
     for (const row of filteredRows) {
       const bucket = dayBucketLabel(row.sentAt || row.createdAt);
       const current = bucketMap.get(bucket) ?? [];
@@ -232,25 +278,20 @@ export function NotificationsListScreen({ onOpenInAppRoute }: NotificationsListS
     const raw = String(
       selectedNotification?.payload?.ctaLabel ?? selectedNotification?.payload?.ctaText ?? '',
     ).trim();
-    return raw || 'Open Link';
-  }, [selectedNotification]);
+    return raw || t('common.openLink');
+  }, [selectedNotification, t]);
   const selectedInAppLabel = useMemo(() => {
     const raw = String(selectedNotification?.payload?.openInAppLabel ?? '').trim();
-    return raw || 'Open in App';
-  }, [selectedNotification]);
+    return raw || t('common.openInApp');
+  }, [selectedNotification, t]);
 
   const openSelectedLink = async () => {
     if (!selectedExternalUrl) return;
-    try {
-      const canOpen = await Linking.canOpenURL(selectedExternalUrl);
-      if (!canOpen) {
-        toast.error('Unable to open link', 'This link is not supported on your device.');
-        return;
-      }
-      await Linking.openURL(selectedExternalUrl);
-    } catch (error) {
-      toast.error('Failed to open link', extractApiErrorMessage(error));
-    }
+    setWebViewerState({
+      visible: true,
+      url: selectedExternalUrl,
+      title: selectedNotification?.title || t('notifications.notification'),
+    });
   };
 
   const openSelectedInApp = () => {
@@ -274,14 +315,20 @@ export function NotificationsListScreen({ onOpenInAppRoute }: NotificationsListS
     <SafeAreaView style={styles.screen} edges={['bottom']}>
       <View style={[styles.topCardWrap, { paddingTop: Math.max(insets.top, 8) + 8 }]}>
         <View style={styles.headerBlock}>
-          <Text style={styles.screenTitle}>Notifications</Text>
+          <Text style={styles.screenTitle}>{t('notifications.title')}</Text>
           <Text style={styles.screenSubtitle}>
-            Personal updates for your requests, bookings, payments, and account activity.
+            {t('notifications.subtitle')}
           </Text>
         </View>
         <View style={styles.filtersRow}>
           <Pressable
-            style={[styles.filterChip, filter === 'all' && styles.filterChipActive]}
+            style={[
+              styles.filterChip,
+              filter === 'all' && [
+                styles.filterChipActive,
+                { backgroundColor: palette.primary, borderColor: palette.primary },
+              ],
+            ]}
             onPress={() => setFilter('all')}
           >
             <Text
@@ -290,11 +337,17 @@ export function NotificationsListScreen({ onOpenInAppRoute }: NotificationsListS
                 filter === 'all' && styles.filterChipTextActive,
               ]}
               >
-              All ({personalRows.length})
+              {t('common.all')} ({personalRows.length})
             </Text>
           </Pressable>
           <Pressable
-            style={[styles.filterChip, filter === 'unread' && styles.filterChipActive]}
+            style={[
+              styles.filterChip,
+              filter === 'unread' && [
+                styles.filterChipActive,
+                { backgroundColor: palette.primary, borderColor: palette.primary },
+              ],
+            ]}
             onPress={() => setFilter('unread')}
           >
             <Text
@@ -303,14 +356,14 @@ export function NotificationsListScreen({ onOpenInAppRoute }: NotificationsListS
                 filter === 'unread' && styles.filterChipTextActive,
               ]}
               >
-              Unread ({unreadPersonalCount})
+              {t('common.unread')} ({unreadPersonalCount})
             </Text>
           </Pressable>
           <Pressable style={styles.refreshChip} onPress={() => void notifications.refreshNow()}>
             <Text style={styles.refreshChipText}>
               {notifications.isRefreshing || notifications.isInitialLoading
-                ? 'Refreshing...'
-                : 'Refresh'}
+                ? t('common.refreshing')
+                : t('common.refresh')}
             </Text>
           </Pressable>
         </View>
@@ -324,6 +377,7 @@ export function NotificationsListScreen({ onOpenInAppRoute }: NotificationsListS
       <SectionList
         sections={groupedSections}
         keyExtractor={(item) => item.id}
+        extraData={`${filter}:${notifications.markingId ?? ''}:${notifications.unreadCount}:${notifications.rows.length}`}
         contentContainerStyle={styles.listContent}
         refreshControl={
           <RefreshControl
@@ -333,19 +387,19 @@ export function NotificationsListScreen({ onOpenInAppRoute }: NotificationsListS
         }
         renderSectionHeader={({ section }) => (
           <View style={styles.sectionHeaderWrap}>
-            <Text style={styles.sectionHeaderText}>{section.title}</Text>
+            <Text style={styles.sectionHeaderText}>{t(section.title)}</Text>
             <View style={styles.sectionHeaderLine} />
           </View>
         )}
         ListEmptyComponent={
           notifications.isInitialLoading ? (
             <View style={styles.emptyState}>
-              <ActivityIndicator size="small" color={akColors.primary} />
-              <Text style={styles.emptyText}>Loading notifications...</Text>
+              <ActivityIndicator size="small" color={palette.primary} />
+              <Text style={styles.emptyText}>{t('common.refreshing')}</Text>
             </View>
           ) : (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>No notifications found.</Text>
+              <Text style={styles.emptyText}>{t('notifications.noNotifications')}</Text>
             </View>
           )
         }
@@ -354,6 +408,7 @@ export function NotificationsListScreen({ onOpenInAppRoute }: NotificationsListS
             item={item}
             onMarkRead={(id) => void notifications.markRead(id)}
             isMarking={notifications.markingId === item.id}
+            palette={palette}
             onOpen={async () => {
               setSelectedNotification(item);
               if (!item.isRead) await notifications.markRead(item.id);
@@ -363,7 +418,7 @@ export function NotificationsListScreen({ onOpenInAppRoute }: NotificationsListS
         ListFooterComponent={
           <View style={styles.listFooterHint}>
             <Text style={styles.listFooterHintText}>
-              Showing latest {personalRows.length} personal updates • {notifications.connectionState}
+              {t('notifications.title')} • {personalRows.length} • {notifications.connectionState}
             </Text>
           </View>
         }
@@ -380,7 +435,9 @@ export function NotificationsListScreen({ onOpenInAppRoute }: NotificationsListS
             <View style={styles.detailHandle} />
             <View style={styles.detailHeaderRow}>
               <View style={styles.detailHeaderTextWrap}>
-                <Text style={styles.detailTitle}>{selectedNotification?.title ?? 'Notification'}</Text>
+                <Text style={styles.detailTitle}>
+                  {selectedNotification?.title ?? t('notifications.notification')}
+                </Text>
                 <Text style={styles.detailMeta}>
                   {selectedNotification
                     ? `${formatNotificationRelativeTime(selectedNotification.sentAt || selectedNotification.createdAt)} • ${formatNotificationDateTime(selectedNotification.sentAt || selectedNotification.createdAt)}`
@@ -394,7 +451,7 @@ export function NotificationsListScreen({ onOpenInAppRoute }: NotificationsListS
             <ScrollView contentContainerStyle={styles.detailContent}>
               <View style={styles.detailBodyCard}>
                 <Text style={styles.detailBodyText}>
-                  {selectedNotification?.messageEn?.trim() || 'No details available.'}
+                  {selectedNotification?.messageEn?.trim() || t('notifications.noDetails')}
                 </Text>
                 {selectedNotification?.messageAr?.trim() ? (
                   <>
@@ -409,6 +466,10 @@ export function NotificationsListScreen({ onOpenInAppRoute }: NotificationsListS
                   style={[
                     styles.detailBadge,
                     selectedNotification?.isRead ? styles.detailBadgeRead : styles.detailBadgeUnread,
+                    !selectedNotification?.isRead && {
+                      borderColor: palette.primarySoft22,
+                      backgroundColor: palette.primarySoft8,
+                    },
                   ]}
                 >
                   <Text
@@ -417,9 +478,10 @@ export function NotificationsListScreen({ onOpenInAppRoute }: NotificationsListS
                       selectedNotification?.isRead
                         ? styles.detailBadgeTextRead
                         : styles.detailBadgeTextUnread,
+                      !selectedNotification?.isRead && { color: palette.primary },
                     ]}
                   >
-                    {selectedNotification?.isRead ? 'Read' : 'Unread'}
+                    {selectedNotification?.isRead ? t('common.read') : t('common.unread')}
                   </Text>
                 </View>
                 {selectedNotification ? (
@@ -431,7 +493,10 @@ export function NotificationsListScreen({ onOpenInAppRoute }: NotificationsListS
 
               <View style={styles.detailActionsRow}>
                 {selectedInternalRoute ? (
-                  <Pressable style={styles.detailPrimaryAction} onPress={openSelectedInApp}>
+                  <Pressable
+                    style={[styles.detailPrimaryAction, { backgroundColor: palette.primary }]}
+                    onPress={openSelectedInApp}
+                  >
                     <Text style={styles.detailPrimaryActionText}>{selectedInAppLabel}</Text>
                   </Pressable>
                 ) : null}
@@ -445,6 +510,18 @@ export function NotificationsListScreen({ onOpenInAppRoute }: NotificationsListS
           </View>
         </View>
       </Modal>
+      <InAppWebViewerModal
+        visible={webViewerState.visible}
+        url={webViewerState.url}
+        title={webViewerState.title}
+        onClose={() =>
+          setWebViewerState({
+            visible: false,
+            url: null,
+            title: t('notifications.notification'),
+          })
+        }
+      />
     </SafeAreaView>
   );
 }
@@ -569,6 +646,10 @@ const styles = StyleSheet.create({
     ...akShadow.soft,
     overflow: 'hidden',
   },
+  rowCardRead: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5EAF2',
+  },
   rowCardUnread: {
     backgroundColor: '#FCFEFD',
     borderColor: '#CFE4DA',
@@ -591,7 +672,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   rowTitle: {
-    color: akColors.text,
+    color: '#0F172A',
     fontSize: 14,
     fontWeight: '600',
   },
@@ -601,7 +682,7 @@ const styles = StyleSheet.create({
   },
   rowSubtitle: {
     marginTop: 3,
-    color: akColors.textMuted,
+    color: '#64748B',
     fontSize: 11,
   },
   readBadge: {
@@ -629,7 +710,7 @@ const styles = StyleSheet.create({
     color: '#166534',
   },
   rowMessage: {
-    color: akColors.textMuted,
+    color: '#334155',
     fontSize: 12,
     lineHeight: 18,
   },

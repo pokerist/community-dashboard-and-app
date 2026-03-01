@@ -21,6 +21,9 @@ import { UnitPicker } from '../components/mobile/UnitPicker';
 import type { AuthSession } from '../features/auth/types';
 import { createAccessQr, listAccessQrs, revokeAccessQr } from '../features/community/service';
 import type { AccessQrRow, ResidentUnit } from '../features/community/types';
+import { pickAndUploadServiceAttachment } from '../features/files/service';
+import { useBranding } from '../features/branding/provider';
+import { getBrandPalette } from '../features/branding/palette';
 import { extractApiErrorMessage } from '../lib/http';
 import { akColors, akShadow } from '../theme/alkarma';
 import { formatDateTime, plusHoursIso } from '../utils/format';
@@ -39,19 +42,50 @@ type AccessQrScreenProps = {
   onConsumeDeepLinkAccessQrId?: (qrId: string) => void;
 };
 
-const QR_TYPES = ['VISITOR', 'DELIVERY', 'WORKER', 'SERVICE_PROVIDER', 'RIDESHARE', 'SELF'] as const;
+const QR_TYPES = ['VISITOR', 'DELIVERY', 'RIDESHARE', 'WORKER'] as const;
 type QrTypeOption = (typeof QR_TYPES)[number];
-const VALIDITY_PRESETS = [2, 4, 8, 24] as const;
 const PRIMARY_TABS: QrTypeOption[] = ['VISITOR', 'DELIVERY', 'RIDESHARE', 'WORKER'];
+const DELIVERY_COMPANIES = ['Talabat', 'Noon Minutes', 'Rabbit', 'Breadfast', 'Mrsool', 'Elmenus', 'InstaShop', 'Jumia Food', 'Chefaa'];
+const RIDE_COMPANIES = ['Uber', 'Careem', 'DIDI', 'InDrive', 'Bolt'] as const;
+const WORK_TYPES = ['Renovation', 'Electrical', 'Plumbing', 'Painting', 'Other'] as const;
+const WORK_DURATIONS = [
+  { value: '1 day', hours: 24 },
+  { value: '2-3 days', hours: 72 },
+  { value: 'Week', hours: 24 * 7 },
+  { value: 'Month', hours: 24 * 30 },
+  { value: 'Ongoing', hours: 24 * 60 },
+] as const;
+const WORK_REGULATIONS_TEXT = `Al Karma Compound Work Regulations
+Please review and accept the following regulations before proceeding
 
-function buildValidityWindow(hours: number) {
-  const from = new Date();
-  const to = new Date(from.getTime() + hours * 60 * 60 * 1000);
-  return {
-    validFrom: from.toISOString(),
-    validTo: to.toISOString(),
-  };
-}
+Permitted Working Hours
+• السبت - الخميس: 8:00 صباحاً - 6:00 مساءً
+• الجمعة: ممنوع العمل
+• يُمنع إصدار أي ضوضاء بعد الساعة 6:00 مساءً
+Official Holidays - No Work Allowed
+• عيد الفطر المبارك (3 أيام)
+• عيد الأضحى المبارك (4 أيام)
+• رأس السنة الميلادية (1 يناير)
+• ثورة 25 يناير (25 يناير)
+• عيد تحرير سيناء (25 أبريل)
+• عيد العمال (1 مايو)
+• ثورة 30 يونيو (30 يونيو)
+• ثورة 23 يوليو (23 يوليو)
+Safety & Conduct Rules
+• يجب على جميع العمال ارتداء بطاقات التعريف المرئية
+• استخدام معدات السلامة إلزامي (خوذة، أحذية أمان)
+• التدخين محظور في الأماكن المغلقة
+• يجب الحفاظ على نظافة موقع العمل
+• احترام خصوصية السكان وممتلكاتهم
+• عدم استخدام المصاعد العامة لنقل مواد البناء
+Violations & Penalties
+• العمل في أوقات غير مصرح بها: 500 جنيه
+• العمل في أيام العطلات الرسمية: 1000 جنيه
+• عدم ارتداء بطاقات التعريف: 200 جنيه
+• إحداث ضوضاء زائدة: 300 جنيه
+• عدم الالتزام بقواعد السلامة: 500 جنيه
+• المخالفة المتكررة قد تؤدي إلى إلغاء التصريح نهائياً
+إقرار المسؤولية: بالموافقة على هذه اللوائح، أتحمل كامل المسؤولية عن جميع العمال المسجلين تحت اسمي. أتعهد بالالتزام بجميع القواعد المذكورة أعلاه وسداد أي غرامات قد تنتج عن مخالفات العمال.`;
 
 function isValidIsoDateTime(value: string): boolean {
   const parsed = new Date(value);
@@ -79,27 +113,30 @@ function formatTypeLabel(value?: string | null) {
   return String(value ?? 'QR').replaceAll('_', ' ');
 }
 
-function typeMeta(value: string) {
+function formatStatusLabel(value?: string | null) {
+  return String(value ?? 'UNKNOWN').replaceAll('_', ' ');
+}
+
+function typeMeta(value: string, palette: ReturnType<typeof getBrandPalette>) {
   const normalized = String(value).toUpperCase();
   switch (normalized) {
     case 'VISITOR':
-      return { label: 'Visitors', icon: 'people-outline' as const, tint: '#2a3e35', tintBg: 'rgba(42,62,53,0.10)' };
+      return { label: 'Visitors', icon: 'people-outline' as const, tint: palette.primary, tintBg: palette.primarySoft10 };
     case 'DELIVERY':
       return { label: 'Deliveries', icon: 'cube-outline' as const, tint: '#2563EB', tintBg: 'rgba(37,99,235,0.10)' };
     case 'RIDESHARE':
       return { label: 'Ride', icon: 'car-outline' as const, tint: '#9333EA', tintBg: 'rgba(147,51,234,0.10)' };
     case 'WORKER':
       return { label: 'Workers', icon: 'hammer-outline' as const, tint: '#EA580C', tintBg: 'rgba(234,88,12,0.10)' };
-    case 'SERVICE_PROVIDER':
-      return { label: 'Service', icon: 'construct-outline' as const, tint: '#0F766E', tintBg: 'rgba(15,118,110,0.10)' };
-    case 'SELF':
-      return { label: 'Self', icon: 'person-outline' as const, tint: '#475569', tintBg: 'rgba(71,85,105,0.10)' };
     default:
-      return { label: formatTypeLabel(value), icon: 'qr-code-outline' as const, tint: akColors.primary, tintBg: 'rgba(201,169,97,0.12)' };
+      return { label: formatTypeLabel(value), icon: 'qr-code-outline' as const, tint: palette.primary, tintBg: palette.accentSoft12 };
   }
 }
 
-function statusBadgeColors(status?: string | null) {
+function statusBadgeColors(
+  status: string | null | undefined,
+  palette: ReturnType<typeof getBrandPalette>,
+) {
   const normalized = String(status ?? '').toUpperCase();
   if (normalized === 'ACTIVE') {
     return { bg: 'rgba(16,185,129,0.10)', border: 'rgba(16,185,129,0.18)', text: '#059669' };
@@ -107,25 +144,21 @@ function statusBadgeColors(status?: string | null) {
   if (normalized === 'REVOKED' || normalized === 'EXPIRED' || normalized === 'INACTIVE') {
     return { bg: 'rgba(100,116,139,0.10)', border: 'rgba(148,163,184,0.24)', text: '#64748B' };
   }
-  return { bg: 'rgba(201,169,97,0.12)', border: 'rgba(201,169,97,0.22)', text: akColors.gold };
+  return { bg: palette.accentSoft12, border: palette.primarySoft22, text: palette.secondary };
 }
 
 function typeHint(type: QrTypeOption) {
   switch (type) {
     case 'VISITOR':
-      return 'Guest visit with named visitor and limited-time access.';
+      return 'Enter visitor details.';
     case 'DELIVERY':
-      return 'Fast entry for food or courier deliveries. Visitor name optional.';
+      return 'Select delivery company.';
     case 'RIDESHARE':
-      return 'Single-purpose access for Uber/Careem drivers.';
+      return 'Add ride details.';
     case 'WORKER':
-      return 'Temporary access for workers/technicians within allowed time window.';
-    case 'SERVICE_PROVIDER':
-      return 'Use for service vendors or maintenance teams.';
-    case 'SELF':
-      return 'Personal access QR linked to your selected unit.';
+      return 'Management approval required.';
     default:
-      return 'Temporary access linked to your selected unit.';
+      return 'Complete required fields.';
   }
 }
 
@@ -143,11 +176,25 @@ export function AccessQrScreen({
   onConsumeDeepLinkAccessQrId,
 }: AccessQrScreenProps) {
   const insets = useSafeAreaInsets();
+  const { brand } = useBranding();
+  const palette = getBrandPalette(brand);
   const toast = useAppToast();
   const [rows, setRows] = useState<AccessQrRow[]>([]);
   const [type, setType] = useState<QrTypeOption>('VISITOR');
   const [visitorName, setVisitorName] = useState('');
-  const [notes, setNotes] = useState('');
+  const [visitorPhone, setVisitorPhone] = useState('');
+  const [visitorPurpose, setVisitorPurpose] = useState('');
+  const [deliveryCompany, setDeliveryCompany] = useState(DELIVERY_COMPANIES[0]);
+  const [rideCompany, setRideCompany] = useState<(typeof RIDE_COMPANIES)[number]>(RIDE_COMPANIES[0]);
+  const [driverName, setDriverName] = useState('');
+  const [carNumber, setCarNumber] = useState('');
+  const [workersCount, setWorkersCount] = useState('1');
+  const [workType, setWorkType] = useState<(typeof WORK_TYPES)[number]>(WORK_TYPES[0]);
+  const [workDuration, setWorkDuration] = useState<(typeof WORK_DURATIONS)[number]['value']>(WORK_DURATIONS[0].value);
+  const [workerIdFiles, setWorkerIdFiles] = useState<Array<{ id: string; name: string }>>([]);
+  const [isUploadingWorkerId, setIsUploadingWorkerId] = useState(false);
+  const [showRegulationsModal, setShowRegulationsModal] = useState(false);
+  const [acceptedRegulations, setAcceptedRegulations] = useState(false);
   const [validFrom, setValidFrom] = useState(new Date().toISOString());
   const [validTo, setValidTo] = useState(plusHoursIso(4));
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -216,39 +263,23 @@ export function AccessQrScreen({
     }
   }, [deepLinkAccessQrId, onConsumeDeepLinkAccessQrId, rows]);
 
-  const requiresVisitorName = type === 'VISITOR';
-  const selectedTypeMeta = typeMeta(type);
-  const extraTypes = QR_TYPES.filter((v) => !PRIMARY_TABS.includes(v));
-
-  useEffect(() => {
-    if (requiresVisitorName) return;
-    setVisitorName('');
-  }, [requiresVisitorName]);
+  const selectedTypeMeta = typeMeta(type, palette);
+  const workerDurationHours = useMemo(
+    () => WORK_DURATIONS.find((item) => item.value === workDuration)?.hours ?? 24,
+    [workDuration],
+  );
+  const previewValidTo = useMemo(() => {
+    if (type === 'WORKER') {
+      const start = parseIsoOrNow(validFrom);
+      return new Date(start.getTime() + workerDurationHours * 60 * 60 * 1000).toISOString();
+    }
+    return validTo;
+  }, [type, validFrom, validTo, workerDurationHours]);
 
   const submitQr = useCallback(async () => {
     if (!selectedUnitId) {
       setSubmitError('Select a unit first.');
-      toast.error('Missing unit', 'Select a unit before generating a QR code.');
-      return;
-    }
-    if (requiresVisitorName && !visitorName.trim()) {
-      setSubmitError('Visitor name is required for VISITOR QR.');
-      toast.error('Missing visitor name', 'Visitor name is required for visitor access.');
-      return;
-    }
-    if (!isValidIsoDateTime(validFrom.trim())) {
-      setSubmitError('Valid From must be a valid ISO datetime.');
-      toast.error('Invalid date', 'Valid From must be a valid date/time.');
-      return;
-    }
-    if (!isValidIsoDateTime(validTo.trim())) {
-      setSubmitError('Valid To must be a valid ISO datetime.');
-      toast.error('Invalid date', 'Valid To must be a valid date/time.');
-      return;
-    }
-    if (new Date(validTo).getTime() <= new Date(validFrom).getTime()) {
-      setSubmitError('Valid To must be later than Valid From.');
-      toast.error('Invalid validity window', 'Valid To must be later than Valid From.');
+      toast.error('Missing unit', 'Select a unit before generating an access permit.');
       return;
     }
 
@@ -256,31 +287,152 @@ export function AccessQrScreen({
     setSubmitError(null);
     setSuccessMessage(null);
     try {
+      const now = new Date();
+      let payloadVisitorName = visitorName.trim() || undefined;
+      let payloadValidFrom = validFrom.trim() || now.toISOString();
+      let payloadValidTo = validTo.trim() || plusHoursIso(4);
+      const noteLines: string[] = [];
+
+      if (type === 'VISITOR') {
+        if (!visitorName.trim()) {
+          setSubmitError('Visitor name is required for visitor permits.');
+          toast.error('Missing visitor name', 'Visitor name is required.');
+          return;
+        }
+        if (!visitorPhone.trim()) {
+          setSubmitError('Phone number is required for visitor permits.');
+          toast.error('Missing phone number', 'Phone number is required.');
+          return;
+        }
+        payloadVisitorName = visitorName.trim();
+        noteLines.push(`Phone: ${visitorPhone.trim()}`);
+        if (visitorPurpose.trim()) noteLines.push(`Purpose: ${visitorPurpose.trim()}`);
+      }
+
+      if (type === 'DELIVERY') {
+        if (!deliveryCompany.trim()) {
+          setSubmitError('Select a delivery company.');
+          toast.error('Missing company', 'Select a delivery company first.');
+          return;
+        }
+        payloadVisitorName = `${deliveryCompany} Courier`;
+        payloadValidFrom = now.toISOString();
+        payloadValidTo = new Date(now.getTime() + 3 * 60 * 60 * 1000).toISOString();
+        noteLines.push(`Delivery Company: ${deliveryCompany}`);
+      }
+
+      if (type === 'RIDESHARE') {
+        payloadVisitorName = driverName.trim() || `${rideCompany} Driver`;
+        payloadValidFrom = now.toISOString();
+        payloadValidTo = new Date(now.getTime() + 2 * 60 * 60 * 1000).toISOString();
+        noteLines.push(`Ride Company: ${rideCompany}`);
+        if (driverName.trim()) noteLines.push(`Driver Name: ${driverName.trim()}`);
+        if (carNumber.trim()) noteLines.push(`Car Number: ${carNumber.trim()}`);
+      }
+
+      if (type === 'WORKER') {
+        const workers = Number(workersCount);
+        if (!Number.isFinite(workers) || workers < 1) {
+          setSubmitError('Workers count must be at least 1.');
+          toast.error('Invalid workers count', 'Please enter a valid workers count.');
+          return;
+        }
+        if (workerIdFiles.length < workers) {
+          setSubmitError(`Upload ${workers} worker ID image(s) before submitting.`);
+          toast.error('Missing worker IDs', `You selected ${workers} workers. Upload ${workers} ID image(s).`);
+          return;
+        }
+        const startDate = new Date(payloadValidFrom);
+        const day = startDate.getDay();
+        const leadHours = (startDate.getTime() - now.getTime()) / (1000 * 60 * 60);
+        if (leadHours < 24) {
+          setSubmitError('Workers permit must be requested at least 24 hours in advance.');
+          toast.error('Invalid date', 'Workers permit must be requested at least 24 hours in advance.');
+          return;
+        }
+        if (day === 5 || day === 6) {
+          setSubmitError('Workers permit cannot start on Friday or Saturday.');
+          toast.error('Invalid date', 'Workers permit cannot start on Friday or Saturday.');
+          return;
+        }
+        const duration = WORK_DURATIONS.find((item) => item.value === workDuration)?.hours ?? 24;
+        payloadVisitorName = `${workersCount} Worker(s)`;
+        payloadValidFrom = validFrom.trim() || now.toISOString();
+        payloadValidTo =
+          new Date(new Date(payloadValidFrom).getTime() + duration * 60 * 60 * 1000).toISOString();
+        noteLines.push(`Workers Count: ${workersCount}`);
+        noteLines.push(`Work Type: ${workType}`);
+        noteLines.push(`Expected Duration: ${workDuration}`);
+        noteLines.push(`Worker IDs Attached: ${workerIdFiles.length}`);
+      }
+
+      if (!isValidIsoDateTime(payloadValidFrom)) {
+        setSubmitError('Valid From must be a valid date/time.');
+        toast.error('Invalid date', 'Start date and time are invalid.');
+        return;
+      }
+      if (!isValidIsoDateTime(payloadValidTo)) {
+        setSubmitError('Valid To must be a valid date/time.');
+        toast.error('Invalid date', 'End date and time are invalid.');
+        return;
+      }
+      if (new Date(payloadValidTo).getTime() <= new Date(payloadValidFrom).getTime()) {
+        setSubmitError('Valid To must be later than Valid From.');
+        toast.error('Invalid validity window', 'End date must be later than start date.');
+        return;
+      }
+
       const created = await createAccessQr(session.accessToken, {
         unitId: selectedUnitId,
         type,
-        visitorName: visitorName.trim() || undefined,
-        validFrom: validFrom.trim() || undefined,
-        validTo: validTo.trim() || undefined,
-        notes: notes.trim() || undefined,
+        visitorName: payloadVisitorName,
+        validFrom: payloadValidFrom,
+        validTo: payloadValidTo,
+        notes: noteLines.length ? noteLines.join('\n') : undefined,
       });
       setLastCreatedQrId(created.qrCode.qrId ?? created.qrCode.id);
-      setSuccessMessage('Access permit generated successfully.');
-      setGeneratedQrRow(created.qrCode);
-      setGeneratedQrImageBase64(created.qrImageBase64 ?? null);
-      setQrModalVisible(true);
+      if (type === 'WORKER' && created.pendingApproval) {
+        setSuccessMessage('Worker permit request submitted for management approval.');
+        setGeneratedQrRow(null);
+        setGeneratedQrImageBase64(null);
+        setQrModalVisible(false);
+      } else {
+        setSuccessMessage('Access permit generated successfully.');
+        setGeneratedQrRow(created.qrCode);
+        setGeneratedQrImageBase64(created.qrImageBase64 ?? null);
+        setQrModalVisible(true);
+      }
       if (type === 'VISITOR') setVisitorName('');
-      setNotes('');
-      toast.success('QR code generated', 'Access permit is ready to share.');
+      if (type === 'VISITOR') {
+        setVisitorPhone('');
+        setVisitorPurpose('');
+      }
+      if (type === 'RIDESHARE') {
+        setDriverName('');
+        setCarNumber('');
+      }
+      if (type === 'WORKER') {
+        setWorkersCount('1');
+        setWorkerIdFiles([]);
+        setAcceptedRegulations(false);
+      }
+      if (type === 'WORKER' && created.pendingApproval) {
+        toast.info(
+          'Worker permit submitted',
+          'Request sent to management. QR will be generated after approval.',
+        );
+      } else {
+        toast.success('Access permit generated', 'The QR code is ready to share.');
+      }
       await loadData('refresh');
     } catch (error) {
       const msg = extractApiErrorMessage(error);
       setSubmitError(msg);
-      toast.error('Failed to generate QR', msg);
+      toast.error('Failed to generate access permit', msg);
     } finally {
       setIsSubmitting(false);
     }
-  }, [loadData, notes, requiresVisitorName, selectedUnitId, session.accessToken, toast, type, validFrom, validTo, visitorName]);
+  }, [carNumber, deliveryCompany, driverName, loadData, selectedUnitId, session.accessToken, toast, type, validFrom, validTo, visitorName, visitorPhone, visitorPurpose, workerIdFiles, workersCount, workDuration, workType, rideCompany]);
 
   const handleRevoke = useCallback(
     async (id: string) => {
@@ -288,25 +440,18 @@ export function AccessQrScreen({
       setSubmitError(null);
       try {
         await revokeAccessQr(session.accessToken, id);
-        toast.success('QR revoked', 'The access code was revoked successfully.');
+        toast.success('Access permit revoked', 'The access permit was revoked successfully.');
         await loadData('refresh');
       } catch (error) {
         const msg = extractApiErrorMessage(error);
         setSubmitError(msg);
-        toast.error('Failed to revoke QR', msg);
+        toast.error('Failed to revoke access permit', msg);
       } finally {
         setRevokingId(null);
       }
     },
     [loadData, session.accessToken, toast],
   );
-
-  const applyPreset = useCallback((hours: number) => {
-    const next = buildValidityWindow(hours);
-    setValidFrom(next.validFrom);
-    setValidTo(next.validTo);
-    setSubmitError(null);
-  }, []);
 
   const resetStartNow = useCallback(() => {
     setValidFrom(new Date().toISOString());
@@ -341,20 +486,62 @@ export function AccessQrScreen({
     setSubmitError(null);
   }, []);
 
+  const handleUploadWorkerId = useCallback(async () => {
+    setIsUploadingWorkerId(true);
+    try {
+      const uploaded = await pickAndUploadServiceAttachment(session.accessToken);
+      if (!uploaded) return;
+      setWorkerIdFiles((prev) => {
+        if (prev.some((file) => file.id === uploaded.id)) return prev;
+        return [...prev, { id: uploaded.id, name: uploaded.name }];
+      });
+      toast.success('Worker ID uploaded', 'Worker ID image attached successfully.');
+    } catch (error) {
+      const msg = extractApiErrorMessage(error);
+      setSubmitError(msg);
+      toast.error('Failed to upload worker ID', msg);
+    } finally {
+      setIsUploadingWorkerId(false);
+    }
+  }, [session.accessToken, toast]);
+
+  const removeWorkerIdFile = useCallback((fileId: string) => {
+    setWorkerIdFiles((prev) => prev.filter((file) => file.id !== fileId));
+  }, []);
+
+  const handlePrimarySubmit = useCallback(() => {
+    if (type === 'WORKER') {
+      const workers = Number(workersCount);
+      if (!Number.isFinite(workers) || workers < 1) {
+        setSubmitError('Workers count must be at least 1.');
+        toast.error('Invalid worker count', 'Please enter a valid number of workers.');
+        return;
+      }
+      if (workerIdFiles.length < workers) {
+        setSubmitError(`Upload ${workers} worker ID image(s) before submitting.`);
+        toast.error('Missing worker IDs', `You selected ${workers} workers. Upload ${workers} worker ID image(s).`);
+        return;
+      }
+      setShowRegulationsModal(true);
+      return;
+    }
+    void submitQr();
+  }, [submitQr, toast, type, workerIdFiles.length, workersCount]);
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom']}>
       <ScrollView
         contentContainerStyle={[
           styles.container,
-          { paddingTop: Math.max(insets.top, 8) + 8, paddingBottom: 110 },
+          { paddingTop: Math.max(insets.top, 8) + 8, paddingBottom: 32 },
         ]}
       >
       <View style={styles.headerCard}>
         <Text style={styles.headerTitle}>QR Codes</Text>
-        <Text style={styles.headerSubtitle}>Generate and manage access codes</Text>
+        <Text style={styles.headerSubtitle}>Generate and manage access permits</Text>
       </View>
 
-      <ScreenCard title="Unit Context">
+      <ScreenCard title="Selected Unit">
         <UnitPicker
           units={units}
           selectedUnitId={selectedUnitId}
@@ -364,11 +551,13 @@ export function AccessQrScreen({
           title="Choose Unit"
         />
         <InlineError message={unitsErrorMessage} />
-        {unitsLoading ? <ActivityIndicator color={akColors.primary} /> : null}
+        {unitsLoading ? <ActivityIndicator color={palette.primary} /> : null}
         {selectedUnit ? (
           <View style={styles.unitHintRow}>
-            <Ionicons name="home-outline" size={14} color={akColors.primary} />
-            <Text style={styles.helperText}>Generating codes for unit {selectedUnit.unitNumber ?? selectedUnit.id}</Text>
+            <Ionicons name="home-outline" size={14} color={palette.primary} />
+            <Text style={styles.helperText}>
+              Access permits will be issued for unit {selectedUnit.unitNumber ?? selectedUnit.id}
+            </Text>
           </View>
         ) : null}
       </ScreenCard>
@@ -376,29 +565,27 @@ export function AccessQrScreen({
       <View style={styles.tabsCard}>
         <View style={styles.tabsGrid}>
           {PRIMARY_TABS.map((value) => {
-            const meta = typeMeta(value);
+            const meta = typeMeta(value, palette);
             const active = type === value;
             return (
-              <Pressable key={value} onPress={() => setType(value)} style={[styles.tabButton, active && styles.tabButtonActive]}>
+              <Pressable
+                key={value}
+                onPress={() => setType(value)}
+                style={[
+                  styles.tabButton,
+                  active && styles.tabButtonActive,
+                  active && { backgroundColor: palette.primary, borderColor: palette.primary },
+                ]}
+              >
                 <Ionicons name={meta.icon} size={16} color={active ? akColors.white : akColors.textMuted} />
                 <Text style={[styles.tabButtonText, active && styles.tabButtonTextActive]}>{meta.label}</Text>
               </Pressable>
             );
           })}
         </View>
-        <View style={styles.extraTypeRow}>
-          {extraTypes.map((value) => {
-            const active = type === value;
-            return (
-              <Pressable key={value} onPress={() => setType(value)} style={[styles.extraTypeChip, active && styles.extraTypeChipActive]}>
-                <Text style={[styles.extraTypeChipText, active && styles.extraTypeChipTextActive]}>{typeMeta(value).label}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
       </View>
 
-      <ScreenCard title="Generate Access Permit" actionLabel={isRefreshing ? 'Refreshing...' : 'Reload'} onActionPress={() => void loadData('refresh')}>
+      <ScreenCard title="Generate Access Permit" actionLabel={isRefreshing ? 'Refreshing...' : 'Refresh'} onActionPress={() => void loadData('refresh')}>
         <InlineError message={loadError} />
         {/* submit/revoke errors are shown as toasts to reduce visual clutter */}
 
@@ -413,37 +600,265 @@ export function AccessQrScreen({
         </View>
 
         {successMessage ? (
-          <LinearGradient colors={['rgba(42,62,53,0.10)', 'rgba(201,169,97,0.08)']} style={styles.successCard}>
+          <LinearGradient colors={[palette.primarySoft10, palette.accentSoft12]} style={styles.successCard}>
             <View style={styles.successTopRow}>
               <View style={styles.successIconWrap}>
                 <Ionicons name="checkmark-circle" size={20} color={akColors.success} />
               </View>
               <View style={styles.flex}>
-                <Text style={styles.successTitle}>{successMessage}</Text>
+                <Text style={[styles.successTitle, { color: palette.primary }]}>{successMessage}</Text>
                 {lastCreatedQrId ? <Text style={styles.successCode}>ID: {lastCreatedQrId}</Text> : null}
               </View>
             </View>
             <View style={styles.qrPreviewBox}>
-              <MaterialCommunityIcons name="qrcode" size={46} color={akColors.primary} />
-              <Text style={styles.qrPreviewText}>Access permit is ready and listed below.</Text>
+              <MaterialCommunityIcons name="qrcode" size={46} color={palette.primary} />
+              <Text style={styles.qrPreviewText}>
+                {type === 'WORKER' && !generatedQrRow
+                  ? 'Request sent. QR code will appear after management approval.'
+                  : 'Access permit is ready and listed below.'}
+              </Text>
             </View>
           </LinearGradient>
         ) : null}
 
-        <Text style={styles.label}>Visitor Name</Text>
-        <View style={[styles.inputShell, !requiresVisitorName && styles.inputShellDisabled]}>
-          <Ionicons name="person-outline" size={18} color={akColors.textMuted} />
-          <TextInput
-            value={visitorName}
-            onChangeText={setVisitorName}
-            style={[styles.input, !requiresVisitorName && styles.inputDisabled]}
-            placeholder={requiresVisitorName ? 'Mohamed Ibrahim' : 'Not required for this permit type'}
-            placeholderTextColor={akColors.textSoft}
-            editable={requiresVisitorName}
-          />
-        </View>
-        {!requiresVisitorName ? (
-          <Text style={styles.helperText}>Visitor name is optional for {selectedTypeMeta.label.toLowerCase()} access.</Text>
+        {type === 'VISITOR' ? (
+          <>
+            <Text style={styles.label}>Visitor Name</Text>
+            <View style={styles.inputShell}>
+              <Ionicons name="person-outline" size={18} color={akColors.textMuted} />
+              <TextInput
+                value={visitorName}
+                onChangeText={setVisitorName}
+                style={styles.input}
+                placeholder="Mohamed Ibrahim"
+                placeholderTextColor={akColors.textSoft}
+              />
+            </View>
+
+            <Text style={styles.label}>Phone Number</Text>
+            <View style={styles.inputShell}>
+              <Ionicons name="call-outline" size={18} color={akColors.textMuted} />
+              <TextInput
+                value={visitorPhone}
+                onChangeText={setVisitorPhone}
+                style={styles.input}
+                keyboardType="phone-pad"
+                placeholder="+20 111 222 3333"
+                placeholderTextColor={akColors.textSoft}
+              />
+            </View>
+
+            <Text style={styles.label}>Purpose of Visit</Text>
+            <View style={[styles.inputShell, styles.multilineShell]}>
+              <Ionicons name="document-text-outline" size={18} color={akColors.textMuted} style={styles.multilineIcon} />
+              <TextInput
+                value={visitorPurpose}
+                onChangeText={setVisitorPurpose}
+                style={[styles.input, styles.multilineInput]}
+                multiline
+                numberOfLines={2}
+                placeholder="Family visit, business, etc."
+                placeholderTextColor={akColors.textSoft}
+              />
+            </View>
+          </>
+        ) : null}
+
+        {type === 'DELIVERY' ? (
+          <>
+            <Text style={styles.label}>Delivery Company</Text>
+            <View style={styles.selectInlineRow}>
+              {DELIVERY_COMPANIES.map((company) => {
+                const active = company === deliveryCompany;
+                return (
+                  <Pressable
+                    key={company}
+                    onPress={() => setDeliveryCompany(company)}
+                    style={[
+                      styles.selectChip,
+                      active && styles.selectChipActive,
+                      active && { borderColor: palette.primary, backgroundColor: palette.primarySoft10 },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.selectChipText,
+                        active && styles.selectChipTextActive,
+                        active && { color: palette.primary },
+                      ]}
+                    >
+                      {company}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </>
+        ) : null}
+
+        {type === 'RIDESHARE' ? (
+          <>
+            <Text style={styles.label}>Ride Hailing Company</Text>
+            <View style={styles.selectInlineRow}>
+              {RIDE_COMPANIES.map((company) => {
+                const active = company === rideCompany;
+                return (
+                  <Pressable
+                    key={company}
+                    onPress={() => setRideCompany(company)}
+                    style={[
+                      styles.selectChip,
+                      active && styles.selectChipActive,
+                      active && { borderColor: palette.primary, backgroundColor: palette.primarySoft10 },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.selectChipText,
+                        active && styles.selectChipTextActive,
+                        active && { color: palette.primary },
+                      ]}
+                    >
+                      {company}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <Text style={styles.label}>Driver Name (Optional)</Text>
+            <View style={styles.inputShell}>
+              <Ionicons name="person-outline" size={18} color={akColors.textMuted} />
+              <TextInput
+                value={driverName}
+                onChangeText={setDriverName}
+                style={styles.input}
+                placeholder="Driver Name"
+                placeholderTextColor={akColors.textSoft}
+              />
+            </View>
+
+            <Text style={styles.label}>Car Number (Optional)</Text>
+            <View style={styles.inputShell}>
+              <Ionicons name="car-outline" size={18} color={akColors.textMuted} />
+              <TextInput
+                value={carNumber}
+                onChangeText={setCarNumber}
+                style={styles.input}
+                placeholder="ABC-1234"
+                placeholderTextColor={akColors.textSoft}
+                autoCapitalize="characters"
+              />
+            </View>
+          </>
+        ) : null}
+
+        {type === 'WORKER' ? (
+          <>
+            <Text style={styles.label}>Number of Workers</Text>
+            <View style={styles.inputShell}>
+              <Ionicons name="people-outline" size={18} color={akColors.textMuted} />
+              <TextInput
+                value={workersCount}
+                onChangeText={setWorkersCount}
+                style={styles.input}
+                keyboardType="number-pad"
+                placeholder="1"
+                placeholderTextColor={akColors.textSoft}
+              />
+            </View>
+
+            <Text style={styles.label}>Type of Work</Text>
+            <View style={styles.selectInlineRow}>
+              {WORK_TYPES.map((option) => {
+                const active = option === workType;
+                return (
+                  <Pressable
+                    key={option}
+                    onPress={() => setWorkType(option)}
+                    style={[
+                      styles.selectChip,
+                      active && styles.selectChipActive,
+                      active && { borderColor: palette.primary, backgroundColor: palette.primarySoft10 },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.selectChipText,
+                        active && styles.selectChipTextActive,
+                        active && { color: palette.primary },
+                      ]}
+                    >
+                      {option}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <Text style={styles.label}>Expected Duration</Text>
+            <View style={styles.selectInlineRow}>
+              {WORK_DURATIONS.map((option) => {
+                const active = option.value === workDuration;
+                return (
+                  <Pressable
+                    key={option.value}
+                    onPress={() => setWorkDuration(option.value)}
+                    style={[
+                      styles.selectChip,
+                      active && styles.selectChipActive,
+                      active && { borderColor: palette.primary, backgroundColor: palette.primarySoft10 },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.selectChipText,
+                        active && styles.selectChipTextActive,
+                        active && { color: palette.primary },
+                      ]}
+                    >
+                      {option.value}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+
+            <Text style={styles.label}>Worker ID Images</Text>
+            <Pressable
+              onPress={() => void handleUploadWorkerId()}
+              disabled={isUploadingWorkerId}
+              style={[styles.uploadDocButton, isUploadingWorkerId && styles.buttonDisabled]}
+            >
+              {isUploadingWorkerId ? (
+                <ActivityIndicator size="small" color={palette.primary} />
+              ) : (
+                <Ionicons name="cloud-upload-outline" size={16} color={palette.primary} />
+              )}
+              <Text style={styles.uploadDocButtonText}>
+                {workerIdFiles.length
+                  ? `Uploaded ${workerIdFiles.length} ID image(s)`
+                  : 'Upload Worker ID Image'}
+              </Text>
+            </Pressable>
+            <Text style={styles.helperText}>
+              Required: {Math.max(Number(workersCount) || 1, 1)} image(s), one ID image per worker.
+            </Text>
+            {workerIdFiles.length ? (
+              <View style={styles.workerFilesWrap}>
+                {workerIdFiles.map((file, index) => (
+                  <View key={file.id} style={styles.workerFileChip}>
+                    <Text style={styles.workerFileChipText} numberOfLines={1}>
+                      #{index + 1} {file.name}
+                    </Text>
+                    <Pressable onPress={() => removeWorkerIdFile(file.id)} style={styles.workerFileRemoveBtn}>
+                      <Ionicons name="close" size={13} color={akColors.textMuted} />
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+          </>
         ) : null}
 
         <Text style={styles.label}>Valid From</Text>
@@ -460,80 +875,80 @@ export function AccessQrScreen({
         </View>
         {showFromDatePicker && Platform.OS !== 'web' ? <DateTimePicker mode="date" value={parseIsoOrNow(validFrom)} onChange={onFromDatePicked} /> : null}
         {showFromTimePicker && Platform.OS !== 'web' ? <DateTimePicker mode="time" value={parseIsoOrNow(validFrom)} onChange={onFromTimePicked} /> : null}
-        <TextInput value={validFrom} onChangeText={setValidFrom} style={styles.textField} placeholder="2026-02-24T10:00:00.000Z" placeholderTextColor={akColors.textSoft} />
-
-        <Text style={styles.label}>Validity Presets</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.presetRow}>
-          {VALIDITY_PRESETS.map((hours) => (
-            <Pressable key={hours} onPress={() => applyPreset(hours)} style={styles.presetChip}>
-              <Text style={styles.presetChipText}>{hours}h</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-
-        <Text style={styles.label}>Valid To</Text>
-        <View style={styles.inlineButtonsWrap}>
-          <Pressable onPress={() => setShowToDatePicker((v) => !v)} style={styles.inlineGhostButton}>
-            <Ionicons name="calendar-outline" size={14} color={akColors.textMuted} />
-            <Text style={styles.inlineGhostButtonText}>Date</Text>
-          </Pressable>
-          <Pressable onPress={() => setShowToTimePicker((v) => !v)} style={styles.inlineGhostButton}>
-            <Ionicons name="time-outline" size={14} color={akColors.textMuted} />
-            <Text style={styles.inlineGhostButtonText}>Time</Text>
-          </Pressable>
+        <View style={styles.datePreviewField}>
+          <Ionicons name="time-outline" size={14} color={akColors.textMuted} />
+          <Text style={styles.datePreviewText}>{formatDateTime(validFrom)}</Text>
         </View>
-        {showToDatePicker && Platform.OS !== 'web' ? <DateTimePicker mode="date" value={parseIsoOrNow(validTo)} onChange={onToDatePicked} /> : null}
-        {showToTimePicker && Platform.OS !== 'web' ? <DateTimePicker mode="time" value={parseIsoOrNow(validTo)} onChange={onToTimePicked} /> : null}
-        <TextInput value={validTo} onChangeText={setValidTo} style={styles.textField} placeholder="2026-02-24T14:00:00.000Z" placeholderTextColor={akColors.textSoft} />
+
+        {type !== 'WORKER' ? (
+          <>
+            <Text style={styles.label}>Valid To</Text>
+            <View style={styles.inlineButtonsWrap}>
+              <Pressable onPress={() => setShowToDatePicker((v) => !v)} style={styles.inlineGhostButton}>
+                <Ionicons name="calendar-outline" size={14} color={akColors.textMuted} />
+                <Text style={styles.inlineGhostButtonText}>Date</Text>
+              </Pressable>
+              <Pressable onPress={() => setShowToTimePicker((v) => !v)} style={styles.inlineGhostButton}>
+                <Ionicons name="time-outline" size={14} color={akColors.textMuted} />
+                <Text style={styles.inlineGhostButtonText}>Time</Text>
+              </Pressable>
+            </View>
+            {showToDatePicker && Platform.OS !== 'web' ? <DateTimePicker mode="date" value={parseIsoOrNow(validTo)} onChange={onToDatePicked} /> : null}
+            {showToTimePicker && Platform.OS !== 'web' ? <DateTimePicker mode="time" value={parseIsoOrNow(validTo)} onChange={onToTimePicked} /> : null}
+            <View style={styles.datePreviewField}>
+              <Ionicons name="time-outline" size={14} color={akColors.textMuted} />
+              <Text style={styles.datePreviewText}>{formatDateTime(validTo)}</Text>
+            </View>
+          </>
+        ) : (
+          <View style={styles.helperInline}>
+            <Ionicons name="information-circle-outline" size={14} color={akColors.textMuted} />
+            <Text style={styles.helperText}>End date is auto-calculated from expected duration.</Text>
+          </View>
+        )}
 
         <View style={styles.previewRow}>
-          <Ionicons name="time-outline" size={14} color={akColors.primary} />
-          <Text style={styles.previewText}>{formatDateTime(validFrom)} → {formatDateTime(validTo)}</Text>
+          <Ionicons name="time-outline" size={14} color={palette.primary} />
+          <Text style={styles.previewText}>{formatDateTime(validFrom)} → {formatDateTime(previewValidTo)}</Text>
         </View>
 
-        <Text style={styles.label}>Notes (optional)</Text>
-        <View style={[styles.inputShell, styles.multilineShell]}>
-          <Ionicons name="document-text-outline" size={18} color={akColors.textMuted} style={styles.multilineIcon} />
-          <TextInput
-            value={notes}
-            onChangeText={setNotes}
-            style={[styles.input, styles.multilineInput]}
-            multiline
-            numberOfLines={3}
-            placeholder="Order number, technician name, gate note..."
-            placeholderTextColor={akColors.textSoft}
-          />
-        </View>
-
-        <Pressable onPress={() => void submitQr()} disabled={isSubmitting} style={[styles.submitButton, isSubmitting && styles.buttonDisabled]}>
-          <LinearGradient colors={[akColors.primary, akColors.primaryDark]} style={styles.submitButtonGradient}>
+        <Pressable onPress={handlePrimarySubmit} disabled={isSubmitting} style={[styles.submitButton, isSubmitting && styles.buttonDisabled]}>
+          <LinearGradient colors={[palette.primary, palette.primaryDark]} style={styles.submitButtonGradient}>
             {isSubmitting ? <ActivityIndicator size="small" color="#fff" /> : null}
-            <Text style={styles.submitButtonText}>{isSubmitting ? 'Generating...' : 'Send Access Permit to Security'}</Text>
+            <Text style={styles.submitButtonText}>
+              {isSubmitting
+                ? 'Generating...'
+                : type === 'VISITOR'
+                  ? 'Generate QR Code'
+                  : type === 'WORKER'
+                    ? 'Review Work Regulations & Submit'
+                    : 'Send Access Permit to Security'}
+            </Text>
           </LinearGradient>
         </Pressable>
       </ScreenCard>
 
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Recent QR Codes</Text>
-        <Text style={styles.sectionLink}>Active: {activeRows.length}</Text>
+        <Text style={styles.sectionTitle}>Recent Access Permits</Text>
+        <Text style={[styles.sectionLink, { color: palette.primary }]}>Active permits: {activeRows.length}</Text>
       </View>
 
       {isLoading ? (
-        <View style={styles.loadingCard}><ActivityIndicator color={akColors.primary} /></View>
+        <View style={styles.loadingCard}><ActivityIndicator color={palette.primary} /></View>
       ) : null}
 
       {!isLoading && recentRows.length === 0 ? (
         <View style={styles.emptyCard}>
           <MaterialCommunityIcons name="qrcode-scan" size={28} color={akColors.textSoft} />
-          <Text style={styles.emptyTitle}>No QR codes yet</Text>
+          <Text style={styles.emptyTitle}>No permits yet</Text>
           <Text style={styles.emptyText}>Generate your first access permit using the form above.</Text>
         </View>
       ) : null}
 
       {recentRows.map((row) => {
         const isActive = String(row.status).toUpperCase() === 'ACTIVE';
-        const badge = statusBadgeColors(row.status);
-        const meta = typeMeta(row.type ?? 'QR');
+        const badge = statusBadgeColors(row.status, palette);
+        const meta = typeMeta(row.type ?? 'QR', palette);
         return (
           <View key={row.id} style={styles.historyCard}>
             <Pressable style={styles.historyBodyPress} onPress={() => setSelectedQr(row)}>
@@ -543,9 +958,11 @@ export function AccessQrScreen({
                 </View>
                 <View style={styles.flex}>
                   <View style={styles.historyTitleRow}>
-                    <Text style={styles.historyId}>{row.qrId ?? row.id}</Text>
+                    <Text style={[styles.historyId, { color: palette.primary }]}>{row.qrId ?? row.id}</Text>
                     <View style={[styles.statusBadge, { backgroundColor: badge.bg, borderColor: badge.border }]}>
-                      <Text style={[styles.statusBadgeText, { color: badge.text }]}>{String(row.status ?? 'UNKNOWN')}</Text>
+                      <Text style={[styles.statusBadgeText, { color: badge.text }]}>
+                        {formatStatusLabel(row.status)}
+                      </Text>
                     </View>
                   </View>
                   <Text style={styles.historySub}>{formatTypeLabel(row.type)}{row.visitorName ? ` • ${row.visitorName}` : ''}</Text>
@@ -555,7 +972,7 @@ export function AccessQrScreen({
               {row.notes ? <Text style={styles.historyNote}>{row.notes}</Text> : null}
             </Pressable>
             <View style={styles.historyFooter}>
-              <Text style={styles.historyCreated}>Created {formatDateTime(row.createdAt)}</Text>
+              <Text style={styles.historyCreated}>Created on {formatDateTime(row.createdAt)}</Text>
               {isActive ? (
                 <Pressable onPress={() => void handleRevoke(row.id)} disabled={revokingId === row.id} style={[styles.revokeButton, revokingId === row.id && styles.buttonDisabled]}>
                   <Text style={styles.revokeButtonText}>{revokingId === row.id ? 'Revoking...' : 'Revoke'}</Text>
@@ -566,6 +983,48 @@ export function AccessQrScreen({
         );
       })}
       </ScrollView>
+      <Modal
+        visible={showRegulationsModal}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowRegulationsModal(false)}
+      >
+        <View style={styles.detailRoot}>
+          <Pressable style={styles.detailBackdrop} onPress={() => setShowRegulationsModal(false)} />
+          <View style={styles.regulationsSheet}>
+            <View style={styles.detailHandle} />
+            <Text style={styles.regulationsTitle}>Work Regulations</Text>
+            <ScrollView style={styles.regulationsBody} showsVerticalScrollIndicator={false}>
+              <Text style={styles.regulationsText}>{WORK_REGULATIONS_TEXT}</Text>
+            </ScrollView>
+            <Pressable onPress={() => setAcceptedRegulations((prev) => !prev)} style={styles.regulationsCheckRow}>
+              <View
+                style={[
+                  styles.regulationsCheckbox,
+                  acceptedRegulations && styles.regulationsCheckboxChecked,
+                  acceptedRegulations && { backgroundColor: palette.primary, borderColor: palette.primary },
+                ]}
+              >
+                {acceptedRegulations ? <Ionicons name="checkmark" size={13} color="#fff" /> : null}
+              </View>
+              <Text style={styles.regulationsCheckText}>I have read and accepted all regulations.</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                if (!acceptedRegulations) {
+                  toast.error('Confirmation required', 'Please accept the regulations before submitting.');
+                  return;
+                }
+                setShowRegulationsModal(false);
+                void submitQr();
+              }}
+              style={[styles.regulationsSubmit, { backgroundColor: palette.primary }]}
+            >
+              <Text style={styles.regulationsSubmitText}>Submit Worker Permit</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
       <GeneratedQrModal
         visible={qrModalVisible}
         qrRow={generatedQrRow}
@@ -606,7 +1065,7 @@ export function AccessQrScreen({
               </View>
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Status</Text>
-                <Text style={styles.detailValue}>{String(selectedQr?.status ?? 'UNKNOWN').replaceAll('_', ' ')}</Text>
+                <Text style={styles.detailValue}>{formatStatusLabel(selectedQr?.status)}</Text>
               </View>
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Visitor</Text>
@@ -619,8 +1078,8 @@ export function AccessQrScreen({
                 </Text>
               </View>
               {selectedQr?.notes ? (
-                <View style={styles.detailNotesBox}>
-                  <Text style={styles.detailNotesLabel}>Notes</Text>
+                <View style={[styles.detailNotesBox, { backgroundColor: palette.accentSoft12 }]}>
+                  <Text style={[styles.detailNotesLabel, { color: palette.primary }]}>Notes</Text>
                   <Text style={styles.detailNotesText}>{selectedQr.notes}</Text>
                 </View>
               ) : null}
@@ -678,9 +1137,8 @@ const styles = StyleSheet.create({
     gap: 8,
     ...akShadow.soft,
   },
-  tabsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  tabsGrid: { flexDirection: 'row', gap: 8 },
   tabButton: {
-    minWidth: '47%',
     flex: 1,
     borderRadius: 14,
     borderWidth: 1,
@@ -765,6 +1223,21 @@ const styles = StyleSheet.create({
   inputShellDisabled: { opacity: 0.82 },
   input: { flex: 1, padding: 0, color: akColors.text, fontSize: 14, minHeight: 20 },
   inputDisabled: { color: akColors.textSoft },
+  selectInlineRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  selectChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    backgroundColor: akColors.surface,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+  },
+  selectChipActive: {
+    borderColor: akColors.primary,
+    backgroundColor: 'rgba(42,62,53,0.10)',
+  },
+  selectChipText: { color: akColors.textMuted, fontSize: 11, fontWeight: '700' },
+  selectChipTextActive: { color: akColors.primary },
   inlineButtonsWrap: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
   inlineGhostButton: {
     flexDirection: 'row',
@@ -778,6 +1251,35 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   inlineGhostButtonText: { color: akColors.textMuted, fontSize: 11, fontWeight: '700' },
+  datePreviewField: {
+    borderWidth: 1,
+    borderColor: akColors.border,
+    borderRadius: 12,
+    backgroundColor: akColors.surface,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  datePreviewText: {
+    flex: 1,
+    color: akColors.text,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  helperInline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    backgroundColor: akColors.surfaceMuted,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
   textField: {
     borderWidth: 1,
     borderColor: akColors.border,
@@ -811,6 +1313,40 @@ const styles = StyleSheet.create({
   multilineShell: { alignItems: 'flex-start' },
   multilineIcon: { marginTop: 2 },
   multilineInput: { minHeight: 70, textAlignVertical: 'top' },
+  uploadDocButton: {
+    minHeight: 46,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    backgroundColor: akColors.surface,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  uploadDocButtonText: { color: akColors.text, fontSize: 12, fontWeight: '700' },
+  workerFilesWrap: { gap: 8, marginTop: 6 },
+  workerFileChip: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    backgroundColor: akColors.surface,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  workerFileChipText: { flex: 1, color: akColors.textMuted, fontSize: 11, fontWeight: '600' },
+  workerFileRemoveBtn: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: akColors.surfaceMuted,
+  },
   submitButton: { borderRadius: 14, overflow: 'hidden', ...akShadow.soft },
   submitButtonGradient: {
     paddingVertical: 13,
@@ -1006,4 +1542,72 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
+  regulationsSheet: {
+    backgroundColor: akColors.surface,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 18,
+    gap: 12,
+    ...akShadow.soft,
+  },
+  regulationsTitle: {
+    color: akColors.text,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  regulationsBody: {
+    maxHeight: 320,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    backgroundColor: akColors.surfaceMuted,
+    padding: 10,
+  },
+  regulationsText: {
+    color: akColors.text,
+    fontSize: 12,
+    lineHeight: 19,
+  },
+  regulationsCheckRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  regulationsCheckbox: {
+    width: 20,
+    height: 20,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    backgroundColor: akColors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  regulationsCheckboxChecked: {
+    backgroundColor: akColors.primary,
+    borderColor: akColors.primary,
+  },
+  regulationsCheckText: {
+    flex: 1,
+    color: akColors.text,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  regulationsSubmit: {
+    minHeight: 46,
+    borderRadius: 12,
+    backgroundColor: akColors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  regulationsSubmitText: {
+    color: akColors.white,
+    fontSize: 13,
+    fontWeight: '700',
+  },
 });
+

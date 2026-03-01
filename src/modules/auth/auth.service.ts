@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   BadRequestException,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { JwtService } from '@nestjs/jwt';
@@ -18,9 +19,21 @@ import { VerifyEmailDto } from './dto/verify-email.dto';
 import { SendPhoneOtpDto } from './dto/send-phone-otp.dto';
 import { VerifyPhoneOtpDto } from './dto/verify-phone-otp.dto';
 import { UpdateMeProfileDto } from './dto/update-me-profile.dto';
+import { CompleteActivationDto } from './dto/complete-activation.dto';
+import { VerifyLoginTwoFactorDto } from './dto/verify-login-two-factor.dto';
+import { UpdateMeSecurityDto } from './dto/update-me-security.dto';
+import { CreateProfileChangeRequestDto } from './dto/profile-change-request.dto';
 import { NotificationsService } from '../notifications/notifications.service';
+import { IntegrationConfigService } from '../system-settings/integration-config.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { ReferralConvertedEvent } from '../../events/contracts/referral-converted.event';
+import {
+  $Enums,
+  AuthorizedFeeMode,
+  InvoiceStatus,
+  ProfileChangeRequestStatus,
+  UserStatusEnum,
+} from '@prisma/client';
 
 @Injectable()
 export class AuthService {
@@ -30,6 +43,7 @@ export class AuthService {
     private permissionCache: PermissionCacheService,
     private referralsService: ReferralsService,
     private notificationsService: NotificationsService,
+    private integrationConfigService: IntegrationConfigService,
     private eventEmitter: EventEmitter2,
   ) {}
 
@@ -89,18 +103,13 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { loginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() },
-    });
-
     // Skip unit access check for admin roles (SUPER_ADMIN, MANAGER)
     const isAdmin = user.roles.some((ur) =>
       ['SUPER_ADMIN', 'MANAGER'].includes(ur.role.name),
     );
 
     if (!isAdmin) {
-      const hasActiveAccess = await this.prisma.unitAccess.findFirst({
+      let hasActiveAccess = await this.prisma.unitAccess.findFirst({
         where: {
           userId: user.id,
           status: 'ACTIVE',
@@ -108,15 +117,374 @@ export class AuthService {
       });
 
       if (!hasActiveAccess) {
-        throw new ForbiddenException('Your access has been revoked.');
+        const activation = await this.ensureAuthorizedAccessActivated(user.id);
+        hasActiveAccess = await this.prisma.unitAccess.findFirst({
+          where: {
+            userId: user.id,
+            status: 'ACTIVE',
+          },
+        });
+
+        if (!hasActiveAccess) {
+          if (activation.hasEligibleRequest && activation.blockedByUnpaidFee) {
+            throw new ForbiddenException(
+              'Your authorization is pending activation fee payment.',
+            );
+          }
+          throw new ForbiddenException('Your access has been revoked.');
+        }
       }
     }
 
-    const permissions = this.permissionCache.resolveUserPermissions(
-      user.roles.map((ur) => ur.role.name),
+    const shouldUseTwoFactor =
+      user.twoFactorEnabled === true && user.userStatus === UserStatusEnum.ACTIVE;
+    if (shouldUseTwoFactor) {
+      return this.beginLoginTwoFactorChallenge(user);
+    }
+
+    const tokens = await this.generateTokens(user);
+    await this.markSuccessfulLogin(user.id);
+    return {
+      ...tokens,
+      userStatus: user.userStatus,
+      mustCompleteActivation: user.userStatus !== 'ACTIVE',
+    };
+  }
+
+  private async assertAdminUser(userId: string) {
+    const admin = await this.prisma.admin.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+    if (!admin) throw new ForbiddenException('Admin access required');
+  }
+
+  private async markSuccessfulLogin(userId: string) {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { loginAttempts: 0, lockedUntil: null, lastLoginAt: new Date() },
+    });
+  }
+
+  // Delegate accounts created through household approvals can remain in
+  // PENDING unit-access state until activation fee is paid by the owner.
+  private async ensureAuthorizedAccessActivated(userId: string) {
+    const requests = await this.prisma.authorizedAccessRequest.findMany({
+      where: {
+        activatedUserId: userId,
+        status: 'APPROVED',
+      },
+      select: {
+        id: true,
+        unitId: true,
+        feeMode: true,
+        activationInvoiceId: true,
+        activationInvoice: {
+          select: { id: true, status: true },
+        },
+      },
+    });
+
+    if (!requests.length) {
+      return {
+        hasEligibleRequest: false,
+        blockedByUnpaidFee: false,
+      };
+    }
+
+    let blockedByUnpaidFee = false;
+    let activatedAny = false;
+
+    for (const req of requests) {
+      const requiresPayment =
+        req.feeMode === AuthorizedFeeMode.FEE_REQUIRED &&
+        Boolean(req.activationInvoiceId);
+      const paymentDone = req.activationInvoice?.status === InvoiceStatus.PAID;
+
+      if (requiresPayment && !paymentDone) {
+        blockedByUnpaidFee = true;
+        continue;
+      }
+
+      const pendingRows = await this.prisma.unitAccess.findMany({
+        where: {
+          userId,
+          unitId: req.unitId,
+          role: 'DELEGATE',
+          status: 'PENDING',
+        },
+        select: { id: true },
+      });
+      if (!pendingRows.length) continue;
+
+      await this.prisma.unitAccess.updateMany({
+        where: {
+          id: {
+            in: pendingRows.map((row) => row.id),
+          },
+        },
+        data: {
+          status: 'ACTIVE',
+          startsAt: new Date(),
+        },
+      });
+      activatedAny = true;
+    }
+
+    if (activatedAny) {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { userStatus: UserStatusEnum.ACTIVE },
+      });
+    }
+
+    return {
+      hasEligibleRequest: true,
+      blockedByUnpaidFee,
+    };
+  }
+
+  private async beginLoginTwoFactorChallenge(user: any) {
+    const capabilities = await this.integrationConfigService.getMobileCapabilities();
+    const smsReady = capabilities.smsOtp && Boolean(user.phone);
+    const emailReady = capabilities.smtpMail && Boolean(user.email);
+
+    if (!smsReady && !emailReady) {
+      throw new ServiceUnavailableException(
+        'Two-factor authentication is enabled but no OTP channel is currently available.',
+      );
+    }
+
+    const channel: $Enums.Channel = smsReady ? 'SMS' : 'EMAIL';
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpHash = await bcrypt.hash(otp, 12);
+
+    await this.prisma.phoneVerificationOtp.updateMany({
+      where: { userId: user.id, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+    await this.prisma.phoneVerificationOtp.create({
+      data: {
+        userId: user.id,
+        otpHash,
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+      },
+    });
+
+    await this.notificationsService.sendNotification(
+      {
+        type: 'OTP',
+        title: 'Login security code',
+        messageEn:
+          channel === 'SMS'
+            ? `Your SSS Community login OTP: ${otp}`
+            : `Your SSS Community login OTP is ${otp}. It expires in 5 minutes.`,
+        channels: [channel],
+        targetAudience: 'SPECIFIC_RESIDENCES',
+        audienceMeta: { userIds: [user.id] },
+        payload: {
+          eventKey: 'auth.login_2fa',
+          channel,
+        },
+      },
+      undefined,
     );
 
-    return this.generateTokens(user);
+    const challengeToken = this.jwtService.sign(
+      {
+        sub: user.id,
+        purpose: 'LOGIN_2FA',
+      },
+      {
+        expiresIn: '5m',
+      },
+    );
+
+    return {
+      challengeRequired: true,
+      challengeToken,
+      method: channel,
+      expiresInSeconds: 300,
+      userStatus: user.userStatus,
+      mustCompleteActivation: false,
+    };
+  }
+
+  async verifyLoginTwoFactor(dto: VerifyLoginTwoFactorDto) {
+    let payload: any;
+    try {
+      payload = this.jwtService.verify(dto.challengeToken);
+    } catch {
+      throw new UnauthorizedException('Two-factor challenge is invalid or expired.');
+    }
+
+    if (!payload?.sub || payload?.purpose !== 'LOGIN_2FA') {
+      throw new UnauthorizedException('Invalid two-factor challenge.');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub as string },
+      include: { roles: { include: { role: true } } },
+    });
+    if (!user) throw new UnauthorizedException('User not found.');
+    if (user.lockedUntil && user.lockedUntil > new Date()) {
+      throw new ForbiddenException(
+        'Account temporarily locked. Try again later.',
+      );
+    }
+
+    const storedOtp = await this.prisma.phoneVerificationOtp.findFirst({
+      where: {
+        userId: user.id,
+        usedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!storedOtp) {
+      throw new BadRequestException('Invalid or expired OTP.');
+    }
+
+    const isValid = await bcrypt.compare(String(dto.otp ?? '').trim(), storedOtp.otpHash);
+    if (!isValid) {
+      throw new BadRequestException('Invalid OTP.');
+    }
+
+    await this.prisma.phoneVerificationOtp.update({
+      where: { id: storedOtp.id },
+      data: { usedAt: new Date() },
+    });
+
+    const isAdmin = user.roles.some((ur) =>
+      ['SUPER_ADMIN', 'MANAGER'].includes(ur.role.name),
+    );
+    if (!isAdmin) {
+      let hasActiveAccess = await this.prisma.unitAccess.findFirst({
+        where: {
+          userId: user.id,
+          status: 'ACTIVE',
+        },
+      });
+      if (!hasActiveAccess) {
+        const activation = await this.ensureAuthorizedAccessActivated(user.id);
+        hasActiveAccess = await this.prisma.unitAccess.findFirst({
+          where: {
+            userId: user.id,
+            status: 'ACTIVE',
+          },
+        });
+
+        if (!hasActiveAccess) {
+          if (activation.hasEligibleRequest && activation.blockedByUnpaidFee) {
+            throw new ForbiddenException(
+              'Your authorization is pending activation fee payment.',
+            );
+          }
+          throw new ForbiddenException('Your access has been revoked.');
+        }
+      }
+    }
+
+    const tokens = await this.generateTokens(user);
+    await this.markSuccessfulLogin(user.id);
+    return {
+      ...tokens,
+      userStatus: user.userStatus,
+      mustCompleteActivation: user.userStatus !== 'ACTIVE',
+    };
+  }
+
+  private readonly defaultMobileFeaturePolicy = {
+    canUseServices: true,
+    canUseBookings: true,
+    canUseComplaints: true,
+    canUseQr: true,
+    canViewFinance: true,
+    canManageHousehold: false,
+    canUseDiscover: true,
+    canUseHelpCenter: true,
+    canUseUtilities: true,
+  };
+
+  private normalizeFeaturePolicy(value: unknown) {
+    const raw =
+      value && typeof value === 'object' && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {};
+    return {
+      canUseServices:
+        typeof raw.canUseServices === 'boolean'
+          ? raw.canUseServices
+          : this.defaultMobileFeaturePolicy.canUseServices,
+      canUseBookings:
+        typeof raw.canUseBookings === 'boolean'
+          ? raw.canUseBookings
+          : this.defaultMobileFeaturePolicy.canUseBookings,
+      canUseComplaints:
+        typeof raw.canUseComplaints === 'boolean'
+          ? raw.canUseComplaints
+          : this.defaultMobileFeaturePolicy.canUseComplaints,
+      canUseQr:
+        typeof raw.canUseQr === 'boolean'
+          ? raw.canUseQr
+          : this.defaultMobileFeaturePolicy.canUseQr,
+      canViewFinance:
+        typeof raw.canViewFinance === 'boolean'
+          ? raw.canViewFinance
+          : this.defaultMobileFeaturePolicy.canViewFinance,
+      canManageHousehold:
+        typeof raw.canManageHousehold === 'boolean'
+          ? raw.canManageHousehold
+          : this.defaultMobileFeaturePolicy.canManageHousehold,
+      canUseDiscover:
+        typeof raw.canUseDiscover === 'boolean'
+          ? raw.canUseDiscover
+          : this.defaultMobileFeaturePolicy.canUseDiscover,
+      canUseHelpCenter:
+        typeof raw.canUseHelpCenter === 'boolean'
+          ? raw.canUseHelpCenter
+          : this.defaultMobileFeaturePolicy.canUseHelpCenter,
+      canUseUtilities:
+        typeof raw.canUseUtilities === 'boolean'
+          ? raw.canUseUtilities
+          : this.defaultMobileFeaturePolicy.canUseUtilities,
+    };
+  }
+
+  private async resolveMobileAccessPolicy(
+    persona:
+      | 'PRE_DELIVERY_OWNER'
+      | 'CONTRACTOR'
+      | 'AUTHORIZED'
+      | 'OWNER'
+      | 'TENANT'
+      | 'FAMILY'
+      | 'RESIDENT',
+  ) {
+    const row = await this.prisma.systemSetting.findUnique({
+      where: { section: 'mobileAccess' },
+      select: { value: true },
+    });
+    const root =
+      row?.value && typeof row.value === 'object' && !Array.isArray(row.value)
+        ? (row.value as Record<string, unknown>)
+        : {};
+    const key =
+      persona === 'OWNER'
+        ? 'owner'
+        : persona === 'TENANT'
+          ? 'tenant'
+          : persona === 'FAMILY'
+            ? 'family'
+            : persona === 'AUTHORIZED'
+              ? 'authorized'
+              : persona === 'CONTRACTOR'
+                ? 'contractor'
+                : persona === 'PRE_DELIVERY_OWNER'
+                  ? 'preDeliveryOwner'
+                  : 'resident';
+
+    return this.normalizeFeaturePolicy(root[key]);
   }
 
   async getCurrentUserBootstrap(userId: string) {
@@ -139,6 +507,9 @@ export class AuthService {
                   },
                 },
               },
+            },
+            vehicles: {
+              orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
             },
           },
         },
@@ -331,6 +702,20 @@ export class AuthService {
     else if (hasFamilyAccess) resolvedPersona = 'FAMILY';
 
     const permissionSet = new Set(permissions);
+    const personaPolicy = await this.resolveMobileAccessPolicy(resolvedPersona);
+    const baseCanUseServices =
+      permissionSet.has('service.read') ||
+      permissionSet.has('service_request.create');
+    const baseCanUseBookings =
+      permissionSet.has('booking.create') || canBookFacilities;
+    const baseCanUseComplaints = permissionSet.has('complaint.report');
+    const baseCanUseQr = permissionSet.has('qr.generate') && canGenerateQr;
+    const baseCanViewFinance =
+      permissionSet.has('invoice.view_own') &&
+      permissionSet.has('violation.view_own') &&
+      canViewFinancials;
+    const baseCanManageHousehold =
+      hasOwnerAccess || hasTenantAccess || hasDelegateAccess || canManageWorkers;
 
     return {
       user: {
@@ -341,6 +726,7 @@ export class AuthService {
         nameAR: user.nameAR,
         userStatus: user.userStatus,
         signupSource: user.signupSource,
+        twoFactorEnabled: user.twoFactorEnabled === true,
         emailVerifiedAt: user.emailVerifiedAt,
         phoneVerifiedAt: user.phoneVerifiedAt,
         lastLoginAt: user.lastLoginAt,
@@ -369,6 +755,18 @@ export class AuthService {
             relationship: user.resident.relationship,
           }
         : null,
+      vehicles:
+        user.resident?.vehicles?.map((vehicle: any) => ({
+          id: vehicle.id,
+          vehicleType: vehicle.vehicleType,
+          model: vehicle.model,
+          plateNumber: vehicle.plateNumber,
+          color: vehicle.color,
+          notes: vehicle.notes,
+          isPrimary: vehicle.isPrimary,
+          createdAt: vehicle.createdAt,
+          updatedAt: vehicle.updatedAt,
+        })) ?? [],
       units,
       legacyResidentLinks,
       personaHints: {
@@ -382,40 +780,439 @@ export class AuthService {
       },
       featureAvailability: {
         canViewBanners: permissionSet.has('banner.view'),
-        canUseServices:
-          permissionSet.has('service.read') ||
-          permissionSet.has('service_request.create'),
-        canUseBookings:
-          permissionSet.has('booking.create') || canBookFacilities,
-        canUseComplaints: permissionSet.has('complaint.report'),
-        canUseQr: permissionSet.has('qr.generate') && canGenerateQr,
-        canViewFinance:
-          permissionSet.has('invoice.view_own') &&
-          permissionSet.has('violation.view_own') &&
-          canViewFinancials,
+        canUseServices: baseCanUseServices && personaPolicy.canUseServices,
+        canUseBookings: baseCanUseBookings && personaPolicy.canUseBookings,
+        canUseComplaints: baseCanUseComplaints && personaPolicy.canUseComplaints,
+        canUseQr: baseCanUseQr && personaPolicy.canUseQr,
+        canViewFinance: baseCanViewFinance && personaPolicy.canViewFinance,
         canManageHousehold:
-          hasOwnerAccess || hasTenantAccess || hasDelegateAccess || canManageWorkers,
+          baseCanManageHousehold && personaPolicy.canManageHousehold,
+        canUseDiscover: personaPolicy.canUseDiscover,
+        canUseHelpCenter: personaPolicy.canUseHelpCenter,
+        canUseUtilities: personaPolicy.canUseUtilities,
       },
     };
   }
 
   async updateCurrentUserBasicProfile(userId: string, dto: UpdateMeProfileDto) {
+    // Product policy: contact profile edits are request-based and require admin approval.
+    return this.createCurrentUserProfileChangeRequest(userId, dto);
+  }
+
+  async createCurrentUserProfileChangeRequest(
+    userId: string,
+    dto: CreateProfileChangeRequestDto,
+  ) {
     const nameEN = dto.nameEN?.trim();
     const nameAR = dto.nameAR?.trim();
+    const email = dto.email?.trim().toLowerCase();
+    const phone = dto.phone?.trim();
 
-    if (!nameEN && !nameAR) {
+    if (!nameEN && !nameAR && !email && !phone) {
       throw new BadRequestException('At least one profile field must be provided');
+    }
+
+    if (email) {
+      const existingByEmail = await this.prisma.user.findFirst({
+        where: { email, id: { not: userId } },
+        select: { id: true },
+      });
+      if (existingByEmail) {
+        throw new BadRequestException('Email is already in use by another account');
+      }
+    }
+
+    if (phone) {
+      const existingByPhone = await this.prisma.user.findFirst({
+        where: { phone, id: { not: userId } },
+        select: { id: true },
+      });
+      if (existingByPhone) {
+        throw new BadRequestException('Phone is already in use by another account');
+      }
+    }
+
+    const current = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, nameEN: true, nameAR: true, email: true, phone: true },
+    });
+    if (!current) throw new NotFoundException('User not found');
+
+    const requestedFields = {
+      ...(nameEN ? { nameEN } : {}),
+      ...(nameAR ? { nameAR } : {}),
+      ...(email ? { email } : {}),
+      ...(phone ? { phone } : {}),
+    } as Record<string, unknown>;
+
+    if (Object.keys(requestedFields).length === 0) {
+      throw new BadRequestException('No valid fields were provided');
+    }
+
+    const pending = await this.prisma.profileChangeRequest.findFirst({
+      where: {
+        userId,
+        status: ProfileChangeRequestStatus.PENDING,
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+
+    if (pending) {
+      throw new BadRequestException(
+        'A pending profile update request already exists. Wait for admin review.',
+      );
+    }
+
+    return this.prisma.profileChangeRequest.create({
+      data: {
+        userId,
+        requestedFields: requestedFields as any,
+        previousSnapshot: {
+          nameEN: current.nameEN,
+          nameAR: current.nameAR,
+          email: current.email,
+          phone: current.phone,
+        } as any,
+      },
+    });
+  }
+
+  async listCurrentUserProfileChangeRequests(userId: string) {
+    return this.prisma.profileChangeRequest.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async listProfileChangeRequestsForAdmin(
+    actorUserId: string,
+    status?: ProfileChangeRequestStatus | 'ALL',
+  ) {
+    await this.assertAdminUser(actorUserId);
+    return this.prisma.profileChangeRequest.findMany({
+      where:
+        status && status !== 'ALL'
+          ? {
+              status: status as ProfileChangeRequestStatus,
+            }
+          : undefined,
+      include: {
+        user: {
+          select: {
+            id: true,
+            nameEN: true,
+            nameAR: true,
+            email: true,
+            phone: true,
+          },
+        },
+        reviewedBy: {
+          select: { id: true, nameEN: true, email: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  async approveProfileChangeRequest(requestId: string, actorUserId: string) {
+    await this.assertAdminUser(actorUserId);
+
+    const request = await this.prisma.profileChangeRequest.findUnique({
+      where: { id: requestId },
+      select: {
+        id: true,
+        userId: true,
+        status: true,
+        requestedFields: true,
+      },
+    });
+
+    if (!request) throw new NotFoundException('Profile change request not found');
+    if (request.status !== ProfileChangeRequestStatus.PENDING) {
+      throw new BadRequestException('Profile change request is no longer pending');
+    }
+
+    const fields = (request.requestedFields ?? {}) as Record<string, unknown>;
+    const nameEN = typeof fields.nameEN === 'string' ? fields.nameEN.trim() : undefined;
+    const nameAR = typeof fields.nameAR === 'string' ? fields.nameAR.trim() : undefined;
+    const email =
+      typeof fields.email === 'string' ? fields.email.trim().toLowerCase() : undefined;
+    const phone = typeof fields.phone === 'string' ? fields.phone.trim() : undefined;
+
+    if (email) {
+      const existingByEmail = await this.prisma.user.findFirst({
+        where: { email, id: { not: request.userId } },
+        select: { id: true },
+      });
+      if (existingByEmail) {
+        throw new BadRequestException('Email is already in use by another account');
+      }
+    }
+
+    if (phone) {
+      const existingByPhone = await this.prisma.user.findFirst({
+        where: { phone, id: { not: request.userId } },
+        select: { id: true },
+      });
+      if (existingByPhone) {
+        throw new BadRequestException('Phone is already in use by another account');
+      }
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: request.userId },
+        data: {
+          ...(nameEN ? { nameEN } : {}),
+          ...(nameAR ? { nameAR } : {}),
+          ...(email ? { email } : {}),
+          ...(phone ? { phone } : {}),
+        },
+      });
+
+      await tx.profileChangeRequest.update({
+        where: { id: request.id },
+        data: {
+          status: ProfileChangeRequestStatus.APPROVED,
+          reviewedById: actorUserId,
+          reviewedAt: new Date(),
+          rejectionReason: null,
+        },
+      });
+    });
+
+    return this.prisma.profileChangeRequest.findUnique({
+      where: { id: request.id },
+      include: {
+        user: {
+          select: { id: true, nameEN: true, nameAR: true, email: true, phone: true },
+        },
+        reviewedBy: {
+          select: { id: true, nameEN: true, email: true },
+        },
+      },
+    });
+  }
+
+  async rejectProfileChangeRequest(
+    requestId: string,
+    actorUserId: string,
+    rejectionReason?: string,
+  ) {
+    await this.assertAdminUser(actorUserId);
+
+    const request = await this.prisma.profileChangeRequest.findUnique({
+      where: { id: requestId },
+      select: { id: true, status: true },
+    });
+
+    if (!request) throw new NotFoundException('Profile change request not found');
+    if (request.status !== ProfileChangeRequestStatus.PENDING) {
+      throw new BadRequestException('Profile change request is no longer pending');
+    }
+
+    return this.prisma.profileChangeRequest.update({
+      where: { id: request.id },
+      data: {
+        status: ProfileChangeRequestStatus.REJECTED,
+        reviewedById: actorUserId,
+        reviewedAt: new Date(),
+        rejectionReason: rejectionReason?.trim() || null,
+      },
+      include: {
+        user: {
+          select: { id: true, nameEN: true, nameAR: true, email: true, phone: true },
+        },
+        reviewedBy: {
+          select: { id: true, nameEN: true, email: true },
+        },
+      },
+    });
+  }
+
+  async updateCurrentUserSecurity(userId: string, dto: UpdateMeSecurityDto) {
+    const targetState = dto.twoFactorEnabled === true;
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        twoFactorEnabled: true,
+      },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    if (targetState) {
+      const capabilities = await this.integrationConfigService.getMobileCapabilities();
+      const smsReady = capabilities.smsOtp && Boolean(user.phone);
+      const emailReady = capabilities.smtpMail && Boolean(user.email);
+      if (!smsReady && !emailReady) {
+        throw new BadRequestException(
+          '2FA cannot be enabled now. Add phone/email and ensure OTP channels are configured.',
+        );
+      }
     }
 
     await this.prisma.user.update({
       where: { id: userId },
       data: {
-        ...(nameEN ? { nameEN } : {}),
-        ...(nameAR ? { nameAR } : {}),
+        twoFactorEnabled: targetState,
       },
     });
 
     return this.getCurrentUserBootstrap(userId);
+  }
+
+  async getActivationStatus(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        nameEN: true,
+        nameAR: true,
+        userStatus: true,
+        phoneVerifiedAt: true,
+        emailVerifiedAt: true,
+        nationalIdFileId: true,
+        profilePhotoId: true,
+      },
+    });
+
+    if (!user) throw new NotFoundException('User not found');
+
+    const requiresPhoneOtp = Boolean(user.phone);
+    const phoneVerified = Boolean(user.phoneVerifiedAt);
+    const hasNationalId = Boolean(user.nationalIdFileId);
+    const hasProfilePhoto = Boolean(user.profilePhotoId);
+    const mustCompleteActivation = user.userStatus !== UserStatusEnum.ACTIVE;
+
+    const canCompleteActivation =
+      mustCompleteActivation &&
+      (!requiresPhoneOtp || phoneVerified) &&
+      hasNationalId &&
+      hasProfilePhoto;
+
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        phone: user.phone,
+        nameEN: user.nameEN,
+        nameAR: user.nameAR,
+        userStatus: user.userStatus,
+        nationalIdFileId: user.nationalIdFileId,
+        profilePhotoId: user.profilePhotoId,
+      },
+      mustCompleteActivation,
+      checklist: {
+        requiresPhoneOtp,
+        phoneVerified,
+        hasNationalId,
+        hasProfilePhoto,
+        canCompleteActivation,
+      },
+    };
+  }
+
+  async completeActivation(userId: string, dto: CompleteActivationDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        userStatus: true,
+        phone: true,
+        phoneVerifiedAt: true,
+      },
+    });
+
+    if (!user) throw new NotFoundException('User not found');
+
+    if (user.userStatus === UserStatusEnum.SUSPENDED) {
+      throw new ForbiddenException('Account is suspended');
+    }
+    if (user.userStatus === UserStatusEnum.DISABLED) {
+      throw new ForbiddenException('Account is disabled');
+    }
+
+    const [nationalIdFile, profilePhotoFile] = await Promise.all([
+      this.prisma.file.findUnique({
+        where: { id: dto.nationalIdFileId },
+        select: { id: true, category: true },
+      }),
+      this.prisma.file.findUnique({
+        where: { id: dto.profilePhotoId },
+        select: { id: true, category: true },
+      }),
+    ]);
+
+    if (!nationalIdFile || nationalIdFile.category !== $Enums.FileCategory.NATIONAL_ID) {
+      throw new BadRequestException('Invalid national ID file');
+    }
+    if (
+      !profilePhotoFile ||
+      profilePhotoFile.category !== $Enums.FileCategory.PROFILE_PHOTO
+    ) {
+      throw new BadRequestException('Invalid profile photo file');
+    }
+
+    const fileConflict = await this.prisma.user.findFirst({
+      where: {
+        id: { not: userId },
+        OR: [
+          { nationalIdFileId: dto.nationalIdFileId },
+          { profilePhotoId: dto.profilePhotoId },
+        ],
+      },
+      select: { id: true },
+    });
+    if (fileConflict) {
+      throw new BadRequestException(
+        'Provided files are already linked to another account',
+      );
+    }
+
+    if (user.phone && !user.phoneVerifiedAt) {
+      throw new BadRequestException(
+        'Phone verification is required before activation',
+      );
+    }
+
+    const passwordHash = await bcrypt.hash(dto.newPassword, 12);
+    const nameEN = dto.nameEN?.trim();
+    const nameAR = dto.nameAR?.trim();
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          passwordHash,
+          nationalIdFileId: dto.nationalIdFileId,
+          profilePhotoId: dto.profilePhotoId,
+          userStatus: UserStatusEnum.ACTIVE,
+          ...(nameEN ? { nameEN } : {}),
+          ...(nameAR ? { nameAR } : {}),
+        },
+      });
+
+      await tx.userStatusLog.create({
+        data: {
+          userId,
+          newStatus: UserStatusEnum.ACTIVE,
+          source: 'MANUAL',
+          note: 'First-login activation completed by user',
+        },
+      });
+    });
+
+    return {
+      message: 'Activation completed successfully',
+      userStatus: UserStatusEnum.ACTIVE,
+      mustCompleteActivation: false,
+    };
   }
 
   // ================= REGISTER =================
@@ -613,6 +1410,14 @@ export class AuthService {
       return { message: 'If the account exists, a reset link has been sent.' };
     }
 
+    if (user.userStatus !== 'ACTIVE') {
+      return {
+        message:
+          'Account is not activated yet. Please sign in with your initial credentials first to complete activation.',
+        code: 'ACCOUNT_NOT_ACTIVATED',
+      };
+    }
+
     // Invalidate any existing tokens
     await this.prisma.passwordResetToken.updateMany({
       where: { userId: user.id, usedAt: null },
@@ -637,8 +1442,16 @@ export class AuthService {
       },
     });
 
+    const capabilities = await this.integrationConfigService.getMobileCapabilities();
+
     // Send reset link
     if (email) {
+      if (!capabilities.smtpMail) {
+        return {
+          message:
+            'If the account exists, a reset link has been sent. Email reset is currently unavailable.',
+        };
+      }
       const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${rawToken}`;
       await this.notificationsService.sendNotification(
         {
@@ -652,6 +1465,12 @@ export class AuthService {
         undefined, // no sender
       );
     } else if (phone) {
+      if (!capabilities.smsOtp) {
+        return {
+          message:
+            'If the account exists, a reset link has been sent. SMS reset is currently unavailable.',
+        };
+      }
       // For phone, send OTP instead of link
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
       const otpHash = await bcrypt.hash(otp, 12);
@@ -831,6 +1650,13 @@ export class AuthService {
 
     if (user.phone !== phone) {
       throw new BadRequestException('Phone does not match the current profile');
+    }
+
+    const capabilities = await this.integrationConfigService.getMobileCapabilities();
+    if (!capabilities.smsOtp) {
+      throw new ServiceUnavailableException(
+        'SMS OTP is currently unavailable. Please try again later.',
+      );
     }
 
     // Invalidate existing OTPs

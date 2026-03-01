@@ -10,6 +10,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { SendNotificationDto } from './dto/send-notification.dto';
 import { NotificationCreatedEvent } from '../../events/contracts/notification-created.event';
 import { EmailService } from './email.service';
+import { IntegrationConfigService } from '../system-settings/integration-config.service';
 import { RegisterDeviceTokenDto } from './dto/register-device-token.dto';
 import { ListDeviceTokensDto } from './dto/list-device-tokens.dto';
 import { SmsProviderService } from './providers/sms-provider.service';
@@ -33,26 +34,34 @@ export class NotificationsService {
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
     private readonly emailService: EmailService,
+    private readonly integrationConfigService: IntegrationConfigService,
     private readonly smsProvider: SmsProviderService,
     private readonly pushProvider: PushProviderService,
     private readonly pushDispatchRouter: PushDispatchRouterService,
   ) {}
 
-  getProviderStatus() {
-    const emailConfigured = this.emailService.isConfigured();
+  async getProviderStatus() {
+    const integrations = await this.integrationConfigService.getResolvedIntegrations();
     const pushDispatch = this.pushDispatchRouter.getStatus();
     return {
       providers: {
         email: {
           provider: 'smtp',
-          configured: emailConfigured,
-          mockMode: this.emailService.isMockMode(),
-          host: process.env.SMTP_HOST || null,
-          port: process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : null,
-          from: process.env.FROM_EMAIL || null,
+          enabled: integrations.smtp.enabled,
+          configured: integrations.smtp.configured,
+          host: integrations.smtp.host || null,
+          port: integrations.smtp.port || null,
+          from: integrations.smtp.fromEmail || null,
         },
-        sms: this.smsProvider.getStatus(),
+        sms: {
+          ...this.smsProvider.getStatus(),
+          enabled: integrations.smsOtp.enabled,
+          configured: integrations.smsOtp.configured,
+        },
         push: pushDispatch,
+        runtime: {
+          capabilities: await this.integrationConfigService.getMobileCapabilities(),
+        },
       },
     };
   }
@@ -642,6 +651,30 @@ export class NotificationsService {
     );
     if (!targetLogs.length) return { attempted: 0, sent: 0, failed: 0 };
 
+    const integrations = await this.integrationConfigService.getResolvedIntegrations();
+    if (!integrations.smtp.enabled || !integrations.smtp.configured) {
+      this.logger.warn(
+        `SMTP disabled or not configured. Skipping ${targetLogs.length} email logs for notification ${notification.id}`,
+      );
+      for (const log of targetLogs) {
+        await this.prisma.notificationLog.update({
+          where: { id: log.id },
+          data: {
+            status: NotificationLogStatus.FAILED,
+            providerResponse: ({
+              provider: 'smtp',
+              mode,
+              skipped: true,
+              reason: 'SMTP_DISABLED_OR_NOT_CONFIGURED',
+              attemptedAt: new Date().toISOString(),
+              actorUserId: actorUserId ?? null,
+            } as Prisma.InputJsonValue),
+          },
+        });
+      }
+      return { attempted: targetLogs.length, sent: 0, failed: targetLogs.length };
+    }
+
     const recipients: string[] = [
       ...new Set<string>(targetLogs.map((l: any) => String(l.recipient))),
     ];
@@ -724,6 +757,30 @@ export class NotificationsService {
       (l: any) => l.channel === Channel.SMS && statuses.includes(l.status),
     );
     if (!targetLogs.length) return { attempted: 0, sent: 0, failed: 0 };
+
+    const integrations = await this.integrationConfigService.getResolvedIntegrations();
+    if (!integrations.smsOtp.enabled || !integrations.smsOtp.configured) {
+      this.logger.warn(
+        `SMS OTP provider disabled or not configured. Skipping ${targetLogs.length} sms logs for notification ${notification.id}`,
+      );
+      for (const log of targetLogs) {
+        await this.prisma.notificationLog.update({
+          where: { id: log.id },
+          data: {
+            status: NotificationLogStatus.FAILED,
+            providerResponse: ({
+              provider: 'twilio',
+              mode,
+              skipped: true,
+              reason: 'SMS_DISABLED_OR_NOT_CONFIGURED',
+              attemptedAt: new Date().toISOString(),
+              actorUserId: actorUserId ?? null,
+            } as Prisma.InputJsonValue),
+          },
+        });
+      }
+      return { attempted: targetLogs.length, sent: 0, failed: targetLogs.length };
+    }
 
     const recipients: string[] = [
       ...new Set<string>(targetLogs.map((l: any) => String(l.recipient))),
@@ -811,6 +868,30 @@ export class NotificationsService {
       (l: any) => l.channel === Channel.PUSH && statuses.includes(l.status),
     );
     if (!targetLogs.length) return { attempted: 0, sent: 0, failed: 0 };
+
+    const integrations = await this.integrationConfigService.getResolvedIntegrations();
+    if (!integrations.fcm.enabled || !integrations.fcm.configured) {
+      this.logger.warn(
+        `Push provider disabled or not configured. Skipping ${targetLogs.length} push logs for notification ${notification.id}`,
+      );
+      for (const log of targetLogs) {
+        await this.prisma.notificationLog.update({
+          where: { id: log.id },
+          data: {
+            status: NotificationLogStatus.FAILED,
+            providerResponse: ({
+              provider: 'push',
+              mode,
+              skipped: true,
+              reason: 'PUSH_DISABLED_OR_NOT_CONFIGURED',
+              attemptedAt: new Date().toISOString(),
+              actorUserId: actorUserId ?? null,
+            } as Prisma.InputJsonValue),
+          },
+        });
+      }
+      return { attempted: targetLogs.length, sent: 0, failed: targetLogs.length };
+    }
 
     const recipients: string[] = [
       ...new Set<string>(targetLogs.map((l: any) => String(l.recipient))),

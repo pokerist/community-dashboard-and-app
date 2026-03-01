@@ -12,6 +12,9 @@ import type {
   CreateBookingInput,
   CreateComplaintInput,
   CreateContractorInput,
+  CreateFamilyRequestInput,
+  CreateAuthorizedRequestInput,
+  CreateHomeStaffInput,
   CreateDelegateByContactInput,
   CreateServiceRequestInput,
   CreateWorkerInput,
@@ -33,6 +36,11 @@ import type {
   ContractorRow,
   WorkerRow,
   ViolationRow,
+  FireEvacuationStatus,
+  HelpCenterEntry,
+  HouseholdRequestsResponse,
+  DiscoverPlace,
+  ViolationActionRow,
 } from './types';
 
 function authHeaders(accessToken: string) {
@@ -91,10 +99,16 @@ export async function cancelBooking(accessToken: string, bookingId: string) {
   return response.data;
 }
 
-export async function listServices(accessToken: string) {
+export async function listServices(
+  accessToken: string,
+  options?: { urgent?: boolean },
+) {
   const response = await http.get<CommunityService[]>('/services', {
     headers: authHeaders(accessToken),
-    params: { status: 'active' },
+    params: {
+      status: 'active',
+      ...(options?.urgent === undefined ? {} : { urgent: String(options.urgent) }),
+    },
   });
   return response.data;
 }
@@ -167,9 +181,19 @@ export async function createComplaint(
   accessToken: string,
   payload: CreateComplaintInput,
 ) {
-  const response = await http.post<ComplaintRow>('/complaints', payload, {
-    headers: authHeaders(accessToken),
-  });
+  const response = await http.post<ComplaintRow>(
+    '/complaints',
+    {
+      unitId: payload.unitId,
+      title: payload.title?.trim(),
+      team: payload.team?.trim(),
+      category: payload.team?.trim() || 'GENERAL',
+      description: payload.body?.trim(),
+    },
+    {
+      headers: authHeaders(accessToken),
+    },
+  );
   return response.data;
 }
 
@@ -257,6 +281,38 @@ export async function listMyViolations(accessToken: string) {
   const response = await http.get<ViolationRow[]>('/violations/me', {
     headers: authHeaders(accessToken),
   });
+  return response.data;
+}
+
+export async function listViolationActions(
+  accessToken: string,
+  violationId: string,
+) {
+  const response = await http.get<ViolationActionRow[]>(
+    `/violations/${violationId}/actions`,
+    {
+      headers: authHeaders(accessToken),
+    },
+  );
+  return response.data;
+}
+
+export async function submitViolationAction(
+  accessToken: string,
+  violationId: string,
+  payload: {
+    type: 'APPEAL' | 'FIX_SUBMISSION';
+    note?: string;
+    attachmentIds?: string[];
+  },
+) {
+  const response = await http.post<ViolationActionRow>(
+    `/violations/${violationId}/actions`,
+    payload,
+    {
+      headers: authHeaders(accessToken),
+    },
+  );
   return response.data;
 }
 
@@ -405,5 +461,78 @@ export async function generateWorkerQr(
     payload ?? {},
     { headers: authHeaders(accessToken) },
   );
+  return response.data;
+}
+
+export async function getMyFireEvacuationStatus(accessToken: string) {
+  const response = await http.get<FireEvacuationStatus>('/fire-evacuation/me', {
+    headers: authHeaders(accessToken),
+  });
+  return response.data;
+}
+
+export async function acknowledgeFireEvacuation(accessToken: string) {
+  const response = await http.post<FireEvacuationStatus>(
+    '/fire-evacuation/me/ack',
+    {},
+    {
+      headers: authHeaders(accessToken),
+    },
+  );
+  return response.data;
+}
+
+export async function listHelpCenterEntries(accessToken: string) {
+  const response = await http.get<HelpCenterEntry[]>('/help-center', {
+    headers: authHeaders(accessToken),
+  });
+  return Array.isArray(response.data) ? response.data : [];
+}
+
+export async function listDiscoverPlaces(accessToken: string) {
+  const response = await http.get<DiscoverPlace[]>('/discover', {
+    headers: authHeaders(accessToken),
+  });
+  return Array.isArray(response.data) ? response.data : [];
+}
+
+export async function listHouseholdRequests(
+  accessToken: string,
+  options?: { unitId?: string | null },
+) {
+  const response = await http.get<HouseholdRequestsResponse>('/household/my-requests', {
+    headers: authHeaders(accessToken),
+    params: options?.unitId ? { unitId: options.unitId } : undefined,
+  });
+  return response.data;
+}
+
+export async function createFamilyRequest(
+  accessToken: string,
+  payload: CreateFamilyRequestInput,
+) {
+  const response = await http.post('/household/family-requests', payload, {
+    headers: authHeaders(accessToken),
+  });
+  return response.data;
+}
+
+export async function createAuthorizedRequest(
+  accessToken: string,
+  payload: CreateAuthorizedRequestInput,
+) {
+  const response = await http.post('/household/authorized-requests', payload, {
+    headers: authHeaders(accessToken),
+  });
+  return response.data;
+}
+
+export async function createHomeStaffAccess(
+  accessToken: string,
+  payload: CreateHomeStaffInput,
+) {
+  const response = await http.post('/household/home-staff', payload, {
+    headers: authHeaders(accessToken),
+  });
   return response.data;
 }

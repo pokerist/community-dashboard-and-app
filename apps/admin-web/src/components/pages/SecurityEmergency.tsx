@@ -24,7 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from "../ui/table";
-import { AlertTriangle, CheckCircle, Clock, Video } from "lucide-react";
+import { AlertTriangle, CheckCircle, Clock, Flame, Video } from "lucide-react";
 import apiClient from "../../lib/api-client";
 import {
   errorMessage,
@@ -42,6 +42,16 @@ export function SecurityEmergency() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [fireStatus, setFireStatus] = useState<any | null>(null);
+  const [fireMessageEn, setFireMessageEn] = useState(
+    "Emergency alarm triggered. Please evacuate immediately and confirm once you are safe.",
+  );
+  const [fireMessageAr, setFireMessageAr] = useState(
+    "تم إطلاق إنذار حريق. يرجى الإخلاء فورًا وتأكيد الوصول إلى مكان آمن.",
+  );
+  const [isFireDialogOpen, setIsFireDialogOpen] = useState(false);
+  const [isFireTriggering, setIsFireTriggering] = useState(false);
+  const [isFireResolving, setIsFireResolving] = useState(false);
   const [reportFormData, setReportFormData] = useState({
     type: "",
     location: "",
@@ -54,18 +64,52 @@ export function SecurityEmergency() {
     setIsLoading(true);
     setLoadError(null);
     try {
-      const [cardsRes, listRes] = await Promise.all([
+      const [cardsRes, listRes, fireRes] = await Promise.all([
         apiClient.get("/incidents/cards"),
         apiClient.get("/incidents/list", { params: { page: 1, limit: 100 } }),
+        apiClient.get("/fire-evacuation/admin/status").catch(() => ({ data: null })),
       ]);
       setCards(cardsRes.data ?? {});
       setIncidentsData(extractRows(listRes.data));
+      setFireStatus(fireRes?.data ?? null);
     } catch (error) {
       const msg = errorMessage(error);
       setLoadError(msg);
       toast.error("Failed to load incidents", { description: msg });
     } finally {
       setIsLoading(false);
+    }
+  }, []);
+
+  const handleTriggerFireEvacuation = useCallback(async () => {
+    setIsFireTriggering(true);
+    try {
+      const response = await apiClient.post("/fire-evacuation/admin/trigger", {
+        messageEn: fireMessageEn,
+        messageAr: fireMessageAr,
+      });
+      setFireStatus(response.data ?? null);
+      setIsFireDialogOpen(false);
+      toast.success("Fire evacuation alert triggered");
+    } catch (error) {
+      toast.error("Failed to trigger fire evacuation", { description: errorMessage(error) });
+    } finally {
+      setIsFireTriggering(false);
+    }
+  }, [fireMessageAr, fireMessageEn]);
+
+  const handleResolveFireEvacuation = useCallback(async () => {
+    setIsFireResolving(true);
+    try {
+      const response = await apiClient.post("/fire-evacuation/admin/resolve", {
+        note: "Evacuation alert closed by admin",
+      });
+      setFireStatus(response.data ?? null);
+      toast.success("Fire evacuation alert resolved");
+    } catch (error) {
+      toast.error("Failed to resolve fire evacuation", { description: errorMessage(error) });
+    } finally {
+      setIsFireResolving(false);
     }
   }, []);
 
@@ -250,6 +294,132 @@ export function SecurityEmergency() {
           </div>
         </Card>
       </div>
+
+      <Card className="p-5 shadow-card rounded-xl border border-[#FCA5A5] bg-gradient-to-r from-[#FEF2F2] to-[#FFF7ED]">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <Flame className="w-5 h-5 text-[#DC2626]" />
+              <h3 className="text-[#7F1D1D]">Fire Evacuation</h3>
+              {fireStatus?.active ? (
+                <Badge className="bg-[#DC2626] text-white">Active Alarm</Badge>
+              ) : (
+                <Badge variant="secondary" className="bg-[#E2E8F0] text-[#334155]">Standby</Badge>
+              )}
+            </div>
+            <p className="text-sm text-[#7F1D1D]/90">
+              Trigger emergency alarm for residents and track confirmations in real time.
+            </p>
+            {fireStatus?.triggeredAt ? (
+              <p className="text-xs text-[#991B1B]">
+                Last trigger: {formatDateTime(fireStatus.triggeredAt)}
+              </p>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Dialog open={isFireDialogOpen} onOpenChange={setIsFireDialogOpen}>
+              <DialogTrigger asChild>
+                <Button className="bg-[#DC2626] hover:bg-[#B91C1C] text-white rounded-lg gap-2">
+                  <Flame className="w-4 h-4" />
+                  Trigger Fire Alarm
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-xl">
+                <DialogHeader>
+                  <DialogTitle>Trigger Fire Evacuation Alarm</DialogTitle>
+                  <DialogDescription>
+                    Sends emergency alert to all active residents (in-app + push if configured).
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="fireMessageEn">English Message</Label>
+                    <Textarea
+                      id="fireMessageEn"
+                      rows={3}
+                      value={fireMessageEn}
+                      onChange={(e) => setFireMessageEn(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="fireMessageAr">Arabic Message</Label>
+                    <Textarea
+                      id="fireMessageAr"
+                      rows={3}
+                      value={fireMessageAr}
+                      onChange={(e) => setFireMessageAr(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setIsFireDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    className="bg-[#DC2626] hover:bg-[#B91C1C] text-white"
+                    onClick={() => void handleTriggerFireEvacuation()}
+                    disabled={isFireTriggering}
+                  >
+                    {isFireTriggering ? "Sending..." : "Send Alarm"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            <Button
+              variant="outline"
+              className="border-[#DC2626]/30 text-[#B91C1C] hover:bg-[#FEE2E2]"
+              onClick={() => void handleResolveFireEvacuation()}
+              disabled={!fireStatus?.active || isFireResolving}
+            >
+              {isFireResolving ? "Resolving..." : "Mark All Clear"}
+            </Button>
+
+            <Button variant="outline" onClick={() => void loadIncidents()} disabled={isLoading}>
+              Refresh Status
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="rounded-lg border border-[#FECACA] bg-white p-3">
+            <p className="text-xs text-[#7F1D1D]">Targeted Residents</p>
+            <p className="text-xl font-semibold text-[#7F1D1D]">
+              {Number(fireStatus?.counters?.totalRecipients ?? 0)}
+            </p>
+          </div>
+          <div className="rounded-lg border border-[#BBF7D0] bg-white p-3">
+            <p className="text-xs text-[#166534]">Confirmed Evacuated</p>
+            <p className="text-xl font-semibold text-[#166534]">
+              {Number(fireStatus?.counters?.acknowledged ?? 0)}
+            </p>
+          </div>
+          <div className="rounded-lg border border-[#FCD34D] bg-white p-3">
+            <p className="text-xs text-[#92400E]">Still Pending</p>
+            <p className="text-xl font-semibold text-[#92400E]">
+              {Number(fireStatus?.counters?.pending ?? 0)}
+            </p>
+          </div>
+        </div>
+
+        {Array.isArray(fireStatus?.pendingRecipients) && fireStatus.pendingRecipients.length > 0 ? (
+          <div className="mt-4">
+            <p className="text-xs font-medium text-[#7F1D1D] mb-2">Pending confirmations</p>
+            <div className="flex flex-wrap gap-2">
+              {fireStatus.pendingRecipients.slice(0, 12).map((resident: any) => (
+                <Badge key={resident.userId} variant="secondary" className="bg-[#FEE2E2] text-[#991B1B]">
+                  {resident.name || resident.userId}
+                </Badge>
+              ))}
+              {fireStatus.pendingRecipients.length > 12 ? (
+                <Badge variant="secondary" className="bg-[#F1F5F9] text-[#475569]">
+                  +{fireStatus.pendingRecipients.length - 12} more
+                </Badge>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+      </Card>
 
       <Card className="shadow-card rounded-xl overflow-hidden">
         <div className="p-4 border-b border-[#E5E7EB]">

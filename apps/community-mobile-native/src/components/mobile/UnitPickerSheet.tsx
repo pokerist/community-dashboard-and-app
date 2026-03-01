@@ -9,6 +9,8 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { ResidentUnit } from '../../features/community/types';
+import { useBranding } from '../../features/branding/provider';
+import { getBrandPalette } from '../../features/branding/palette';
 import { akColors, akRadius, akShadow } from '../../theme/alkarma';
 
 type UnitPickerSheetProps = {
@@ -29,10 +31,19 @@ function unitLine(unit: ResidentUnit) {
 }
 
 function unitSubline(unit: ResidentUnit) {
+  const unitTypeRaw = String(unit.type ?? '').toUpperCase();
+  const unitTypeLabel =
+    unitTypeRaw === 'OWNER' || unitTypeRaw === 'OWN_USE'
+      ? 'Own Use'
+      : unitTypeRaw === 'TENANT' || unitTypeRaw === 'RENTED'
+        ? 'Rented'
+        : unit.type
+          ? String(unit.type)
+          : null;
   const parts: string[] = [];
   if (unit.projectName) parts.push(unit.projectName);
   if (unit.block) parts.push(`Block ${unit.block}`);
-  if (unit.type) parts.push(String(unit.type));
+  if (unitTypeLabel) parts.push(unitTypeLabel);
   return parts.join(' • ');
 }
 
@@ -48,6 +59,9 @@ export function UnitPickerSheet({
   onClose,
   onSelect,
 }: UnitPickerSheetProps) {
+  const { brand } = useBranding();
+  const palette = getBrandPalette(brand);
+
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.root}>
@@ -79,7 +93,7 @@ export function UnitPickerSheet({
                     <Ionicons
                       name="refresh"
                       size={17}
-                      color={akColors.textMuted}
+                      color={palette.primary}
                     />
                   </Pressable>
                 ) : null}
@@ -91,7 +105,7 @@ export function UnitPickerSheet({
 
             {isLoading ? (
               <View style={styles.centerBox}>
-                <ActivityIndicator color={akColors.primary} />
+                <ActivityIndicator color={palette.primary} />
               </View>
             ) : (
               <ScrollView
@@ -117,7 +131,13 @@ export function UnitPickerSheet({
                     return (
                       <Pressable
                         key={unit.id}
-                        style={[styles.rowCard, active && styles.rowCardActive]}
+                        style={[
+                          styles.rowCard,
+                          active && {
+                            backgroundColor: palette.primary,
+                            borderColor: palette.primary,
+                          },
+                        ]}
                         onPress={() => {
                           onSelect(unit.id);
                           onClose();
@@ -133,7 +153,7 @@ export function UnitPickerSheet({
                             <Ionicons
                               name="home-outline"
                               size={16}
-                              color={active ? '#fff' : akColors.primary}
+                              color={active ? '#fff' : palette.primary}
                             />
                           </View>
                           <View style={styles.flex}>
@@ -269,10 +289,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 10,
   },
-  rowCardActive: {
-    backgroundColor: akColors.primary,
-    borderColor: akColors.primary,
-  },
   rowLeft: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -285,7 +301,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(42,62,53,0.08)',
+    backgroundColor: 'rgba(15,23,42,0.06)',
   },
   homeIconWrapActive: {
     backgroundColor: 'rgba(255,255,255,0.12)',

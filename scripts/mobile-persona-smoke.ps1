@@ -25,7 +25,7 @@ $accounts = @(
   @{ Label = "Owner"; Email = "owner.demo@test.com" },
   @{ Label = "Tenant"; Email = "tenant.demo@test.com" },
   @{ Label = "PreOwner"; Email = "preowner.demo@test.com" },
-  @{ Label = "Family"; Email = "family.demo@test.com" },
+  @{ Label = "Family Member"; Email = "family.demo@test.com" },
   @{ Label = "Authorized"; Email = "authorized.demo@test.com" },
   @{ Label = "Contractor"; Email = "contractor.demo@test.com" }
 )
@@ -83,4 +83,3 @@ if ($failed.Count -gt 0) {
 }
 
 Write-Host "`nSMOKE_RESULT=OK count=$($results.Count)" -ForegroundColor Green
-

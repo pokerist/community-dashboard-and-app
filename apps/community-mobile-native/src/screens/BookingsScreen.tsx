@@ -17,6 +17,8 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAppToast } from '../components/mobile/AppToast';
 import { InlineError, ScreenCard } from '../components/mobile/Primitives';
 import { UnitPicker } from '../components/mobile/UnitPicker';
+import { useBranding } from '../features/branding/provider';
+import { getBrandPalette } from '../features/branding/palette';
 import type { AuthSession } from '../features/auth/types';
 import {
   cancelBooking,
@@ -40,6 +42,7 @@ type BookingsScreenProps = {
   unitsErrorMessage: string | null;
   onSelectUnit: (unitId: string) => void;
   onRefreshUnits: () => Promise<void>;
+  onOpenFinance?: () => void;
   deepLinkBookingId?: string | null;
   onConsumeDeepLinkBookingId?: (bookingId: string) => void;
 };
@@ -184,9 +187,12 @@ export function BookingsScreen({
   unitsErrorMessage,
   onSelectUnit,
   onRefreshUnits,
+  onOpenFinance,
   deepLinkBookingId = null,
   onConsumeDeepLinkBookingId,
 }: BookingsScreenProps) {
+  const { brand } = useBranding();
+  const palette = getBrandPalette(brand);
   const insets = useSafeAreaInsets();
   const toast = useAppToast();
   const [facilities, setFacilities] = useState<Facility[]>([]);
@@ -383,7 +389,7 @@ export function BookingsScreen({
       </View>
 
       <LinearGradient
-        colors={[akColors.primary, akColors.primaryDark]}
+        colors={[palette.primary, palette.primaryDark]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.hero}
@@ -412,10 +418,10 @@ export function BookingsScreen({
           isRefreshing={unitsRefreshing}
         />
         <InlineError message={unitsErrorMessage} />
-        {unitsLoading ? <ActivityIndicator color={akColors.primary} /> : null}
+        {unitsLoading ? <ActivityIndicator color={palette.primary} /> : null}
         {selectedUnit ? (
           <View style={styles.unitHintRow}>
-            <Ionicons name="home-outline" size={14} color={akColors.primary} />
+            <Ionicons name="home-outline" size={14} color={palette.primary} />
             <Text style={styles.helperText}>
               Selected unit: {selectedUnit.unitNumber ?? selectedUnit.id} ({selectedUnit.status ?? '—'})
             </Text>
@@ -429,7 +435,7 @@ export function BookingsScreen({
         {successMessage ? <Text style={styles.successText}>{successMessage}</Text> : null}
 
         {isLoading ? (
-          <ActivityIndicator color={akColors.primary} />
+          <ActivityIndicator color={palette.primary} />
         ) : (
           <>
             <Text style={styles.label}>Facility</Text>
@@ -567,7 +573,7 @@ export function BookingsScreen({
               onPress={() => void submitBooking()}
               disabled={isSubmitting}
             >
-              <LinearGradient colors={[akColors.primary, akColors.primaryDark]} style={styles.primaryButtonInner}>
+              <LinearGradient colors={[palette.primary, palette.primaryDark]} style={styles.primaryButtonInner}>
                 {isSubmitting ? <ActivityIndicator size="small" color="#fff" /> : null}
                 <Text style={styles.primaryButtonText}>
                   {isSubmitting ? 'Submitting...' : 'Create Booking'}
@@ -580,13 +586,15 @@ export function BookingsScreen({
 
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>My Bookings</Text>
-        <Text style={styles.sectionCount}>{filteredBookings.length}</Text>
+        <Text style={[styles.sectionCount, { color: palette.primary }]}>{filteredBookings.length}</Text>
       </View>
       <ScreenCard>
         {filteredBookings.length === 0 ? (
           <Text style={styles.emptyText}>No bookings found for the selected unit.</Text>
         ) : (
           filteredBookings.map((booking) => {
+            const isPendingPayment =
+              String(booking.status ?? '').toUpperCase() === 'PENDING_PAYMENT';
             const cancellable =
               booking.status === 'PENDING' || booking.status === 'APPROVED';
             return (
@@ -611,13 +619,23 @@ export function BookingsScreen({
                 <Text style={styles.itemSub}>
                   Unit: {booking.unit?.unitNumber ?? '—'} • Updated {formatDateTime(booking.cancelledAt || booking.createdAt)}
                 </Text>
+                {isPendingPayment ? (
+                  <Pressable
+                    onPress={() => onOpenFinance?.()}
+                    style={styles.secondaryButton}
+                  >
+                    <Text style={[styles.secondaryButtonText, { color: palette.primary }]}>
+                      Pay Booking Fee
+                    </Text>
+                  </Pressable>
+                ) : null}
                 {cancellable ? (
                   <Pressable
                     onPress={() => void handleCancel(booking.id)}
                     style={[styles.secondaryButton, cancellingId === booking.id && styles.buttonDisabled]}
                     disabled={cancellingId === booking.id}
                   >
-                    <Text style={styles.secondaryButtonText}>
+                    <Text style={[styles.secondaryButtonText, { color: palette.primary }]}>
                       {cancellingId === booking.id ? 'Cancelling...' : 'Cancel Booking'}
                     </Text>
                   </Pressable>
@@ -707,6 +725,16 @@ export function BookingsScreen({
                       You can cancel a booking while it is pending or approved. Cancelled bookings remain visible in history.
                     </Text>
                   </View>
+                  {String(selectedBooking.status ?? '').toUpperCase() === 'PENDING_PAYMENT' ? (
+                    <Pressable
+                      onPress={() => onOpenFinance?.()}
+                      style={[styles.detailActionPrimary, { borderColor: palette.primarySoft18, backgroundColor: palette.primarySoft8 }]}
+                    >
+                      <Text style={[styles.detailActionPrimaryText, { color: palette.primary }]}>
+                        Open Payments to Complete Booking
+                      </Text>
+                    </Pressable>
+                  ) : null}
                   {['PENDING', 'APPROVED'].includes(String(selectedBooking.status).toUpperCase()) ? (
                     <Pressable
                       onPress={() => void handleCancel(selectedBooking.id)}
@@ -741,6 +769,8 @@ function statusBadgeStyle(status?: string) {
   switch (String(status).toUpperCase()) {
     case 'APPROVED':
       return { backgroundColor: 'rgba(16,185,129,0.10)', borderColor: 'rgba(16,185,129,0.18)' };
+    case 'PENDING_PAYMENT':
+      return { backgroundColor: 'rgba(245,158,11,0.12)', borderColor: 'rgba(245,158,11,0.22)' };
     case 'PENDING':
       return { backgroundColor: 'rgba(201,169,97,0.12)', borderColor: 'rgba(201,169,97,0.22)' };
     case 'CANCELLED':
@@ -755,6 +785,8 @@ function statusBadgeTextStyle(status?: string) {
   switch (String(status).toUpperCase()) {
     case 'APPROVED':
       return { color: '#059669' };
+    case 'PENDING_PAYMENT':
+      return { color: '#B45309' };
     case 'PENDING':
       return { color: akColors.gold };
     case 'CANCELLED':
@@ -772,6 +804,10 @@ function bookingStatusLabel(status?: string) {
 function bookingTimelineRows(booking: Booking): string[] {
   const rows = [`Request submitted • ${formatDateTime(booking.createdAt)}`];
   const status = String(booking.status ?? '').toUpperCase();
+  if (status === 'PENDING_PAYMENT') {
+    rows.push('Awaiting payment confirmation');
+    rows.push('Open Payments tab to pay and activate this booking');
+  }
   if (status === 'APPROVED') rows.push('Booking approved by management');
   if (status === 'PENDING') rows.push('Waiting for approval');
   if (status === 'REJECTED') rows.push('Booking request was rejected');
@@ -1280,6 +1316,21 @@ const styles = StyleSheet.create({
     color: akColors.text,
     fontSize: 12,
     fontWeight: '600',
+  },
+  detailActionPrimary: {
+    marginTop: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(11,95,255,0.20)',
+    backgroundColor: 'rgba(11,95,255,0.08)',
+    paddingVertical: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailActionPrimaryText: {
+    color: '#0B5FFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
   detailActionDanger: {
     marginTop: 6,

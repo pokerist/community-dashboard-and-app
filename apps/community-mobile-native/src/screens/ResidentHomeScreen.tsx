@@ -1,24 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   ActivityIndicator,
   Image,
-  Linking,
   Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DemoPaymentModal } from '../components/mobile/DemoPaymentModal';
 import { useAppToast } from '../components/mobile/AppToast';
+import { InAppWebViewerModal } from '../components/mobile/InAppWebViewerModal';
 import { UnitPickerSheet } from '../components/mobile/UnitPickerSheet';
 import { API_BASE_URL } from '../config/env';
 import type { AuthBootstrapProfile, AuthSession } from '../features/auth/types';
 import { useBranding } from '../features/branding/provider';
+import { useI18n } from '../features/i18n/provider';
 import {
   listAccessQrs,
   listMobileBanners,
@@ -82,6 +84,30 @@ function normalizeExternalUrl(raw?: string | null): string | null {
   return `https://${trimmed}`;
 }
 
+function dayGreetingKey(now = new Date()): string {
+  const hour = now.getHours();
+  if (hour >= 5 && hour < 12) return 'home.greeting.morning';
+  if (hour >= 12 && hour < 17) return 'home.greeting.afternoon';
+  if (hour >= 17 && hour < 22) return 'home.greeting.evening';
+  return 'home.greeting.night';
+}
+
+function hexToRgba(hex: string, alpha: number) {
+  const normalized = hex.replace('#', '').trim();
+  const expanded =
+    normalized.length === 3
+      ? normalized
+          .split('')
+          .map((c) => `${c}${c}`)
+          .join('')
+      : normalized;
+  const r = Number.parseInt(expanded.slice(0, 2), 16);
+  const g = Number.parseInt(expanded.slice(2, 4), 16);
+  const b = Number.parseInt(expanded.slice(4, 6), 16);
+  if ([r, g, b].some((v) => Number.isNaN(v))) return `rgba(42,62,53,${alpha})`;
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
 export function ResidentHomeScreen({
   session,
   units,
@@ -105,6 +131,10 @@ export function ResidentHomeScreen({
   bootstrapProfile,
 }: ResidentHomeScreenProps) {
   const insets = useSafeAreaInsets();
+  const { width: viewportWidth } = useWindowDimensions();
+  const isTabletLayout = viewportWidth >= 768;
+  const horizontalPadding = isTabletLayout ? 20 : 16;
+  const contentMaxWidth = isTabletLayout ? Math.min(980, viewportWidth - 24) : undefined;
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
   const [snapshotLoading, setSnapshotLoading] = useState(true);
   const [snapshotRefreshing, setSnapshotRefreshing] = useState(false);
@@ -132,14 +162,56 @@ export function ResidentHomeScreen({
   const [isPaying, setIsPaying] = useState(false);
   const [unitSheetOpen, setUnitSheetOpen] = useState(false);
   const [smartHomeModalVisible, setSmartHomeModalVisible] = useState(false);
+  const [offersModalVisible, setOffersModalVisible] = useState(false);
+  const [activeOfferId, setActiveOfferId] = useState<string | null>(null);
+  const [webViewerState, setWebViewerState] = useState<{
+    visible: boolean;
+    url: string | null;
+    title: string;
+  }>({
+    visible: false,
+    url: null,
+    title: '',
+  });
   const bannerScrollRef = useRef<ScrollView | null>(null);
+  const offerShownRef = useRef(false);
   const toast = useAppToast();
-  const { brand } = useBranding();
+  const { t } = useI18n();
+  const { brand, offers } = useBranding();
   const brandPrimary = brand.primaryColor || akColors.primary;
-  const brandSecondary = brand.secondaryColor || akColors.bg;
-  const brandAccent = brand.accentColor || akColors.gold;
+  const brandSecondary = brand.secondaryColor || akColors.gold;
+  const brandAccent = brand.accentColor || '#0B5FFF';
 
   const notifications = useNotificationRealtime();
+
+  const activeOffers = useMemo(
+    () => {
+      const now = Date.now();
+      return (offers?.enabled ? offers.banners : [])
+        .filter((banner) => banner.active !== false)
+        .filter((banner) => {
+          const startTs = banner.startAt ? Date.parse(banner.startAt) : NaN;
+          const endTs = banner.endAt ? Date.parse(banner.endAt) : NaN;
+          if (Number.isFinite(startTs) && startTs > now) return false;
+          if (Number.isFinite(endTs) && endTs < now) return false;
+          return true;
+        })
+        .sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0));
+    },
+    [offers],
+  );
+  const activeOffer = useMemo(
+    () => activeOffers.find((offer) => offer.id === activeOfferId) ?? activeOffers[0] ?? null,
+    [activeOfferId, activeOffers],
+  );
+
+  useEffect(() => {
+    if (offerShownRef.current) return;
+    if (!activeOffers.length) return;
+    offerShownRef.current = true;
+    setActiveOfferId(activeOffers[0].id);
+    setOffersModalVisible(true);
+  }, [activeOffers]);
 
   const loadSnapshot = useCallback(
     async (mode: 'initial' | 'refresh' = 'initial') => {
@@ -271,12 +343,22 @@ export function ResidentHomeScreen({
   const isPreDeliveryUnit = String(selectedUnit?.status ?? '')
     .toUpperCase()
     .includes('NOT_DELIVERED');
+  const selectedUnitAccesses = selectedUnit?.unitAccesses ?? [];
+  const canBookFacilitiesByUnit =
+    selectedUnitAccesses.length === 0 ||
+    selectedUnitAccesses.some((access) => access.canBookFacilities !== false);
+  const canViewFinanceByUnit =
+    selectedUnitAccesses.length === 0 ||
+    selectedUnitAccesses.some(
+      (access) =>
+        Boolean(access.canViewFinancials) || Boolean(access.canReceiveBilling),
+    );
 
   const baseQuickActions = [
     {
       key: 'bookings',
-      title: 'Bookings',
-      subtitle: 'Facilities',
+      title: t('drawer.bookings'),
+      subtitle: t('tabs.home'),
       bg: 'rgba(59,130,246,0.10)',
       iconColor: '#2563EB',
       icon: <Ionicons name="calendar-outline" size={20} color="#2563EB" />,
@@ -284,47 +366,47 @@ export function ResidentHomeScreen({
     },
     {
       key: 'services',
-      title: 'Services',
-      subtitle: 'Maintenance',
-      bg: 'rgba(249,115,22,0.10)',
+      title: t('drawer.services'),
+      subtitle: t('home.communityUpdatesTitle'),
+      bg: hexToRgba(brandPrimary, 0.10),
       iconColor: '#EA580C',
       icon: <Ionicons name="construct-outline" size={20} color="#EA580C" />,
       onPress: onOpenServices,
     },
     {
       key: 'requests',
-      title: 'Requests',
-      subtitle: 'Permits & admin',
-      bg: 'rgba(168,85,247,0.10)',
+      title: t('drawer.requests'),
+      subtitle: t('drawer.manageHousehold'),
+      bg: hexToRgba(brandSecondary, 0.14),
       iconColor: '#9333EA',
       icon: <Ionicons name="file-tray-outline" size={20} color="#9333EA" />,
       onPress: onOpenRequests,
     },
     {
-      key: 'access',
-      title: 'QR Codes',
-      subtitle: 'Visitors',
-      bg: 'rgba(16,185,129,0.10)',
-      iconColor: '#059669',
-      icon: <MaterialCommunityIcons name="qrcode" size={20} color="#059669" />,
-      onPress: onOpenQr,
+      key: 'smart-home',
+      title: t('home.smartHomeTitle'),
+      subtitle: t('home.quickAccess'),
+      bg: hexToRgba(brandAccent, 0.10),
+      iconColor: brandPrimary,
+      icon: <Ionicons name="home-outline" size={20} color={brandPrimary} />,
+      onPress: () => setSmartHomeModalVisible(true),
     },
     {
       key: 'finance',
-      title: 'Payments',
-      subtitle: 'Invoices',
-      bg: 'rgba(245,158,11,0.10)',
-      iconColor: '#D97706',
-      icon: <Ionicons name="card-outline" size={20} color="#D97706" />,
+      title: t('drawer.payments'),
+      subtitle: t('home.upcomingPayments'),
+      bg: hexToRgba(brandSecondary, 0.14),
+      iconColor: brandSecondary,
+      icon: <Ionicons name="card-outline" size={20} color={brandSecondary} />,
       onPress: onOpenFinance,
     },
     {
       key: 'profile',
-      title: 'Profile',
-      subtitle: 'Account',
-      bg: 'rgba(42,62,53,0.10)',
-      iconColor: akColors.primary,
-      icon: <Ionicons name="person-outline" size={20} color={akColors.primary} />,
+      title: t('tabs.profile'),
+      subtitle: t('profile.title'),
+      bg: hexToRgba(brandPrimary, 0.10),
+      iconColor: brandPrimary,
+      icon: <Ionicons name="person-outline" size={20} color={brandPrimary} />,
       onPress: onOpenProfileTab,
     },
   ];
@@ -333,17 +415,25 @@ export function ResidentHomeScreen({
     .filter((action) => {
       switch (action.key) {
         case 'bookings':
-          return !isPreDeliveryUnit && (featureFlags?.canUseBookings ?? true);
+          return (
+            !isPreDeliveryUnit &&
+            (featureFlags?.canUseBookings ?? true) &&
+            canBookFacilitiesByUnit
+          );
         case 'services':
           return !isPreDeliveryUnit && (featureFlags?.canUseServices ?? true);
         case 'complaints':
           return featureFlags?.canUseComplaints ?? true;
         case 'requests':
           return !isPreDeliveryUnit && (featureFlags?.canUseServices ?? true);
-        case 'access':
-          return !isPreDeliveryUnit && (featureFlags?.canUseQr ?? true);
+        case 'smart-home':
+          return true;
         case 'finance':
-          return !isPreDeliveryUnit && (featureFlags?.canViewFinance ?? true);
+          return (
+            !isPreDeliveryUnit &&
+            (featureFlags?.canViewFinance ?? true) &&
+            canViewFinanceByUnit
+          );
         default:
           return true;
       }
@@ -353,9 +443,13 @@ export function ResidentHomeScreen({
     bootstrapProfile?.user?.nameEN?.trim() ||
     bootstrapProfile?.user?.nameAR?.trim() ||
     session.email.split('@')[0];
+  const greetingPrefix = t(dayGreetingKey());
 
   const quickAccessTiles = useMemo(
-    () => quickActions.filter((a) => ['access', 'services', 'requests'].includes(a.key)).slice(0, 3),
+    () =>
+      quickActions
+        .filter((a) => ['smart-home', 'services', 'requests'].includes(a.key))
+        .slice(0, 3),
     [quickActions],
   );
 
@@ -371,16 +465,35 @@ export function ResidentHomeScreen({
     [notifications.rows],
   );
   const upcomingPayments = useMemo(() => {
+    if (
+      isPreDeliveryUnit ||
+      !(featureFlags?.canViewFinance ?? true) ||
+      !canViewFinanceByUnit
+    ) {
+      return [];
+    }
     const allPayables = buildPayables(snapshotRows.invoices, snapshotRows.violations);
     return filterPayablesByUnit(allPayables, selectedUnitId).slice(0, 2);
-  }, [selectedUnitId, snapshotRows.invoices, snapshotRows.violations]);
+  }, [
+    canViewFinanceByUnit,
+    featureFlags?.canViewFinance,
+    isPreDeliveryUnit,
+    selectedUnitId,
+    snapshotRows.invoices,
+    snapshotRows.violations,
+  ]);
+
+  const showPaymentsSection =
+    !isPreDeliveryUnit &&
+    (featureFlags?.canViewFinance ?? true) &&
+    canViewFinanceByUnit;
 
   const handleConfirmDemoPayment = useCallback(
     async (payload: { paymentMethod: string; cardLast4?: string; notes?: string }) => {
       if (!activePaymentItem?.invoiceId) {
         toast.info(
-          'Payment unavailable',
-          'This item is not linked to an invoice yet. Open Finance to review details.',
+          t('home.paymentUnavailable'),
+          t('home.paymentUnavailableHint'),
         );
         return;
       }
@@ -392,10 +505,10 @@ export function ResidentHomeScreen({
           payload,
         );
         setActivePaymentItem(null);
-        toast.success('Payment completed', 'Your payment was recorded successfully.');
+        toast.success(t('home.paymentCompleted'), t('home.paymentCompletedHint'));
         await loadSnapshot('refresh');
       } catch (error) {
-        toast.error('Payment failed', extractApiErrorMessage(error));
+        toast.error(t('home.paymentFailed'), extractApiErrorMessage(error));
       } finally {
         setIsPaying(false);
       }
@@ -404,36 +517,57 @@ export function ResidentHomeScreen({
   );
 
   const handleOpenBannerCta = useCallback(
-    async (rawUrl?: string | null) => {
+    (rawUrl?: string | null, title?: string | null) => {
       const normalized = normalizeExternalUrl(rawUrl);
       if (!normalized) return;
-      try {
-        const canOpen = await Linking.canOpenURL(normalized);
-        if (!canOpen) {
-          toast.error('Unable to open link', 'This link format is not supported on your device.');
-          return;
-        }
-        await Linking.openURL(normalized);
-      } catch (error) {
-        toast.error('Failed to open link', extractApiErrorMessage(error));
-      }
+      setWebViewerState({
+        visible: true,
+        url: normalized,
+        title: title?.trim() || t('communityUpdates.communityUpdate'),
+      });
     },
-    [toast],
+    [t],
   );
 
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: brandSecondary }]} edges={['bottom']}>
+    <SafeAreaView
+      style={[styles.safeArea, { backgroundColor: akColors.bg }]}
+      edges={['left', 'right', 'bottom']}
+    >
       <ScrollView
         contentContainerStyle={[
           styles.container,
-          { paddingTop: Math.max(insets.top, 8) + 8, paddingBottom: 110 },
+          {
+            paddingTop: 0,
+            paddingBottom: isTabletLayout ? 122 : 102,
+            paddingHorizontal: horizontalPadding,
+            alignItems: 'center',
+          },
+        ]}
+      >
+      <View
+        style={[
+          styles.contentFrame,
+          {
+            maxWidth: contentMaxWidth,
+            gap: isTabletLayout ? 16 : 14,
+          },
         ]}
       >
       <LinearGradient
         colors={[brandPrimary, akColors.primaryDark]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
-        style={styles.hero}
+        style={[
+          styles.hero,
+          {
+            marginHorizontal: isTabletLayout ? 0 : -horizontalPadding,
+            paddingHorizontal: horizontalPadding,
+            paddingTop: Math.max(insets.top, 8) + 10,
+            borderTopLeftRadius: isTabletLayout ? 24 : 0,
+            borderTopRightRadius: isTabletLayout ? 24 : 0,
+          },
+        ]}
       >
         <View style={styles.heroTopRow}>
           <Pressable onPress={onOpenMenu} style={styles.heroIconButton}>
@@ -456,17 +590,19 @@ export function ResidentHomeScreen({
             >
               <Ionicons name="home-outline" size={14} color="#fff" />
               <Text style={styles.heroUnitPillText}>
-                {selectedUnit?.unitNumber ?? 'My Unit'}
+                {selectedUnit?.unitNumber ?? t('home.myUnit')}
               </Text>
               <Ionicons name="chevron-down" size={14} color="rgba(255,255,255,0.9)" />
             </Pressable>
           </View>
         </View>
 
-        <Text style={styles.heroTitle}>Good Morning, {greetingName} 👋</Text>
+        <Text style={styles.heroTitle}>{greetingPrefix}, {greetingName} 👋</Text>
         <View style={styles.heroWelcomeRow}>
-          <Text style={styles.heroSubtitle}>Welcome to </Text>
-          <Text style={styles.heroBrand}>{selectedUnit?.projectName ?? 'AlKarma Gates'}</Text>
+          <Text style={styles.heroSubtitle}>{t('home.welcomeTo')} </Text>
+          <Text style={styles.heroBrand}>
+            {(selectedUnit?.projectName ?? brand.companyName?.trim()) || 'SSS Community'}
+          </Text>
         </View>
         <Text style={styles.heroEmail}>
           {selectedUnit?.block ? `Block ${selectedUnit.block} • ` : ''}
@@ -515,6 +651,10 @@ export function ResidentHomeScreen({
                     const isCurrent = banner.id === activeBanner.id;
                     const visualIndex = homeBanners.findIndex((b) => b.id === banner.id);
                     const imageFailed = bannerImageErrors[banner.id] === true;
+                    const bannerTitle =
+                      banner.titleEn || banner.titleAr || t('communityUpdates.communityUpdate');
+                    const bannerLink = normalizeExternalUrl(banner.ctaUrl);
+                    const hasBannerLink = Boolean(bannerLink);
                     return (
                       <View
                         key={banner.id}
@@ -525,7 +665,7 @@ export function ResidentHomeScreen({
                       >
                         <View style={styles.heroBannerTopRow}>
                           <Text style={[styles.heroBannerTag, { color: brandAccent }]}>
-                            COMMUNITY UPDATES
+                            {t('home.communityUpdatesTag')}
                           </Text>
                           {homeBanners.length > 1 ? (
                             <Text style={styles.heroBannerCounter}>
@@ -560,9 +700,50 @@ export function ResidentHomeScreen({
                                   color="rgba(255,255,255,0.72)"
                                 />
                                 <Text style={styles.heroBannerImageFallbackText}>
-                                  Image unavailable
+                                  {t('home.imageUnavailable')}
                                 </Text>
                               </View>
+                            )}
+                            {hasBannerLink ? (
+                              <Pressable
+                                style={styles.heroBannerTapLayer}
+                                onPress={() =>
+                                  handleOpenBannerCta(bannerLink, bannerTitle)
+                                }
+                              >
+                                <LinearGradient
+                                  colors={[
+                                    'rgba(0,0,0,0.08)',
+                                    'rgba(0,0,0,0.36)',
+                                    'rgba(0,0,0,0.62)',
+                                  ]}
+                                  style={styles.heroBannerImageOverlay}
+                                >
+                                  <Text style={styles.heroBannerTitle}>{bannerTitle}</Text>
+                                  {banner.description ? (
+                                    <Text style={styles.heroBannerOverlayText} numberOfLines={2}>
+                                      {banner.description}
+                                    </Text>
+                                  ) : null}
+                                </LinearGradient>
+                              </Pressable>
+                            ) : (
+                              <LinearGradient
+                                pointerEvents="none"
+                                colors={[
+                                  'rgba(0,0,0,0.08)',
+                                  'rgba(0,0,0,0.36)',
+                                  'rgba(0,0,0,0.62)',
+                                ]}
+                                style={styles.heroBannerImageOverlay}
+                              >
+                                <Text style={styles.heroBannerTitle}>{bannerTitle}</Text>
+                                {banner.description ? (
+                                  <Text style={styles.heroBannerOverlayText} numberOfLines={2}>
+                                    {banner.description}
+                                  </Text>
+                                ) : null}
+                              </LinearGradient>
                             )}
                             {homeBanners.length > 1 ? (
                               <>
@@ -593,15 +774,18 @@ export function ResidentHomeScreen({
                               </>
                             ) : null}
                           </View>
-                        ) : null}
-                        <Text style={styles.heroBannerTitle}>
-                          {banner.titleEn || banner.titleAr || 'Community update'}
-                        </Text>
-                        {banner.description ? (
-                          <Text style={styles.heroBannerText}>{banner.description}</Text>
-                        ) : null}
+                        ) : (
+                          <>
+                            <Text style={styles.heroBannerTitle}>{bannerTitle}</Text>
+                            {banner.description ? (
+                              <Text style={styles.heroBannerText}>{banner.description}</Text>
+                            ) : null}
+                          </>
+                        )}
                         {bannerError && isCurrent ? (
-                          <Text style={styles.heroBannerText}>Banner feed issue: {bannerError}</Text>
+                          <Text style={styles.heroBannerText}>
+                            {t('home.bannerFeedIssue', { message: bannerError })}
+                          </Text>
                         ) : null}
                         <View style={styles.heroBannerActionsRow}>
                           {homeBanners.length > 1 ? (
@@ -621,15 +805,10 @@ export function ResidentHomeScreen({
                           ) : (
                             <View />
                           )}
-                          {banner.ctaUrl ? (
-                            <Pressable
-                              style={styles.heroBannerCta}
-                              onPress={() => void handleOpenBannerCta(banner.ctaUrl)}
-                            >
-                              <Text style={[styles.heroBannerCtaText, { color: brandAccent }]}>
-                                {banner.ctaText?.trim() || 'Open'}
-                              </Text>
-                            </Pressable>
+                          {hasBannerLink ? (
+                            <Text style={[styles.heroBannerTapHint, { color: brandAccent }]}>
+                              {t('home.bannerTapHint')}
+                            </Text>
                           ) : null}
                         </View>
                       </View>
@@ -640,14 +819,16 @@ export function ResidentHomeScreen({
             ) : (
               <>
                 <Text style={[styles.heroBannerTag, { color: brandAccent }]}>
-                  COMMUNITY UPDATES
+                  {t('home.communityUpdatesTag')}
                 </Text>
-                <Text style={styles.heroBannerTitle}>No active banners right now</Text>
+                <Text style={styles.heroBannerTitle}>{t('home.noActiveBanners')}</Text>
                 <Text style={styles.heroBannerText}>
-                  Admin-created banners will appear here automatically when active.
+                  {t('home.adminBannersHint')}
                 </Text>
                 {bannerError ? (
-                  <Text style={styles.heroBannerText}>Banner feed issue: {bannerError}</Text>
+                  <Text style={styles.heroBannerText}>
+                    {t('home.bannerFeedIssue', { message: bannerError })}
+                  </Text>
                 ) : null}
               </>
             )}
@@ -668,7 +849,7 @@ export function ResidentHomeScreen({
       ) : null}
 
       <View style={styles.homeSection}>
-        <Text style={styles.homeSectionTitle}>Quick Access</Text>
+        <Text style={styles.homeSectionTitle}>{t('home.quickAccess')}</Text>
         <View style={styles.homeQuickGrid}>
           {quickAccessTiles.map((tile) => (
             <Pressable
@@ -690,9 +871,9 @@ export function ResidentHomeScreen({
 
       <View style={styles.homeSection}>
         <View style={styles.sectionHeader}>
-          <Text style={styles.homeSectionTitle}>Community Updates</Text>
+          <Text style={styles.homeSectionTitle}>{t('home.communityUpdatesTitle')}</Text>
           <Pressable onPress={onOpenCommunityUpdates}>
-            <Text style={styles.linkText}>View All</Text>
+            <Text style={styles.linkText}>{t('common.viewAll')}</Text>
           </Pressable>
         </View>
         {notifications.errorMessage ? (
@@ -703,8 +884,8 @@ export function ResidentHomeScreen({
           <ActivityIndicator color={akColors.primary} />
         ) : communityUpdates.length === 0 ? (
           <View style={styles.feedCard}>
-            <Text style={styles.feedTitle}>No updates yet</Text>
-            <Text style={styles.feedMeta}>New community announcements will appear here.</Text>
+            <Text style={styles.feedTitle}>{t('home.noUpdatesYet')}</Text>
+            <Text style={styles.feedMeta}>{t('home.newAnnouncementsHint')}</Text>
           </View>
         ) : (
           communityUpdates.map((item) => (
@@ -718,7 +899,7 @@ export function ResidentHomeScreen({
                 <Ionicons
                   name={!item.isRead ? 'notifications' : 'checkmark'}
                   size={14}
-                  color={!item.isRead ? '#0284C7' : '#16A34A'}
+                  color={!item.isRead ? brandAccent : brandPrimary}
                 />
               </View>
               <View style={styles.flex}>
@@ -734,23 +915,24 @@ export function ResidentHomeScreen({
         )}
       </View>
 
+      {showPaymentsSection ? (
       <View style={styles.homeSection}>
         <View style={styles.sectionHeader}>
-          <Text style={styles.homeSectionTitle}>Upcoming Payments</Text>
+          <Text style={styles.homeSectionTitle}>{t('home.upcomingPayments')}</Text>
           <Pressable onPress={onOpenFinance}>
-            <Text style={styles.linkText}>View All</Text>
+            <Text style={styles.linkText}>{t('common.viewAll')}</Text>
           </Pressable>
         </View>
         {snapshotLoading ? (
           <ActivityIndicator color={akColors.primary} />
         ) : upcomingPayments.length === 0 ? (
           <View style={styles.paymentCard}>
-            <View style={[styles.paymentIconWrap, { backgroundColor: 'rgba(34,197,94,0.10)' }]}>
-              <Ionicons name="checkmark-circle-outline" size={18} color="#16A34A" />
+            <View style={[styles.paymentIconWrap, { backgroundColor: hexToRgba(brandPrimary, 0.10) }]}>
+              <Ionicons name="checkmark-circle-outline" size={18} color={brandPrimary} />
             </View>
             <View style={styles.flex}>
-              <Text style={styles.paymentTitle}>No pending payments</Text>
-              <Text style={styles.paymentMeta}>All dues are clear for the selected unit.</Text>
+              <Text style={styles.paymentTitle}>{t('home.noPendingPayments')}</Text>
+              <Text style={styles.paymentMeta}>{t('home.duesClear')}</Text>
             </View>
           </View>
         ) : (
@@ -764,7 +946,7 @@ export function ResidentHomeScreen({
                   {item.title}
                 </Text>
                 <Text style={styles.paymentMeta}>
-                  Due {item.dueDate ? formatDateTime(item.dueDate).split(',')[0] : '—'}
+                  {t('home.duePrefix')} {item.dueDate ? formatDateTime(item.dueDate).split(',')[0] : '—'}
                 </Text>
               </View>
               <View style={styles.paymentRight}>
@@ -783,31 +965,16 @@ export function ResidentHomeScreen({
                     }
                   }}
                 >
-                  <Text style={styles.payNowPillText}>Pay Now</Text>
+                  <Text style={styles.payNowPillText}>{t('home.payNow')}</Text>
                 </Pressable>
               </View>
             </View>
           ))
         )}
       </View>
+      ) : null}
 
-      <Pressable style={styles.smartHomeCard} onPress={() => setSmartHomeModalVisible(true)}>
-        <LinearGradient
-          colors={[brandPrimary, akColors.primaryDark]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.smartHomeCardInner}
-        >
-          <View style={styles.smartHomeIconWrap}>
-            <Ionicons name="home-outline" size={18} color={brandAccent} />
-          </View>
-          <View style={styles.flex}>
-            <Text style={styles.smartHomeTitle}>Smart Home Control</Text>
-            <Text style={styles.smartHomeSub}>Feature availability depends on your unit</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.8)" />
-        </LinearGradient>
-      </Pressable>
+      </View>
       </ScrollView>
       <DemoPaymentModal
         visible={Boolean(activePaymentItem)}
@@ -832,6 +999,116 @@ export function ResidentHomeScreen({
         onSelect={onSelectUnit}
       />
       <Modal
+        visible={offersModalVisible && Boolean(activeOffer)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setOffersModalVisible(false)}
+      >
+        <View style={styles.offerRoot}>
+          <Pressable
+            style={styles.offerBackdrop}
+            onPress={() => setOffersModalVisible(false)}
+          />
+          <View style={styles.offerCard}>
+            <Pressable
+              style={styles.offerCloseBtn}
+              onPress={() => setOffersModalVisible(false)}
+            >
+              <Ionicons name="close" size={18} color={akColors.text} />
+            </Pressable>
+
+            <Pressable
+              onPress={() => {
+                const normalized = normalizeExternalUrl(activeOffer?.linkUrl);
+                if (!normalized) return;
+                setOffersModalVisible(false);
+                setWebViewerState({
+                  visible: true,
+                  url: normalized,
+                  title: activeOffer?.title?.trim() || t('home.offerTitle'),
+                });
+              }}
+              style={styles.offerImageWrap}
+            >
+              {activeOffer?.imageUrl ? (
+                <Image
+                  source={{ uri: activeOffer.imageUrl }}
+                  style={styles.offerImage}
+                  resizeMode="cover"
+                />
+              ) : activeOffer?.imageFileId ? (
+                <Image
+                  source={{
+                    uri: `${API_BASE_URL}/files/public/offer-banner/${activeOffer.imageFileId}`,
+                  }}
+                  style={styles.offerImage}
+                  resizeMode="cover"
+                />
+              ) : (
+                <LinearGradient
+                  colors={[brandPrimary, akColors.primaryDark]}
+                  style={styles.offerImage}
+                />
+              )}
+              <LinearGradient
+                colors={[
+                  'rgba(0,0,0,0.15)',
+                  'rgba(0,0,0,0.45)',
+                  'rgba(0,0,0,0.72)',
+                ]}
+                style={styles.offerOverlay}
+              >
+                <Text style={styles.offerTitle}>
+                  {activeOffer?.title || t('home.offerTitle')}
+                </Text>
+                {activeOffer?.description ? (
+                  <Text style={styles.offerDesc} numberOfLines={3}>
+                    {activeOffer.description}
+                  </Text>
+                ) : null}
+              </LinearGradient>
+            </Pressable>
+            <View style={styles.offerActions}>
+              <Pressable
+                style={styles.offerDismissBtn}
+                onPress={() => setOffersModalVisible(false)}
+              >
+                <Text style={styles.offerDismissText}>{t('home.offerDismiss')}</Text>
+              </Pressable>
+              {activeOffer?.linkUrl ? (
+                <Pressable
+                  style={[styles.offerOpenBtn, { backgroundColor: brandPrimary }]}
+                  onPress={() => {
+                    const normalized = normalizeExternalUrl(activeOffer.linkUrl);
+                    if (!normalized) return;
+                    setOffersModalVisible(false);
+                    setWebViewerState({
+                      visible: true,
+                      url: normalized,
+                      title: activeOffer.title || t('home.offerTitle'),
+                    });
+                  }}
+                >
+                  <Text style={styles.offerOpenText}>{t('home.offerOpen')}</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          </View>
+        </View>
+      </Modal>
+      <InAppWebViewerModal
+        visible={webViewerState.visible}
+        url={webViewerState.url}
+        title={webViewerState.title}
+        onClose={() =>
+          setWebViewerState({
+            visible: false,
+            url: null,
+            title: '',
+          })
+        }
+      />
+      <Modal
         visible={smartHomeModalVisible}
         transparent
         animationType="fade"
@@ -852,24 +1129,24 @@ export function ResidentHomeScreen({
               <View style={styles.comingSoonIconWrap}>
                 <Ionicons name="bulb-outline" size={24} color={brandAccent} />
               </View>
-              <Text style={styles.comingSoonTitle}>Smart Home Coming Soon</Text>
+              <Text style={styles.comingSoonTitle}>{t('home.smartHomeTitle')}</Text>
               <Text style={styles.comingSoonSubtitle}>
-                You will be able to control supported devices inside your home directly from the app.
+                {t('home.smartHomeSubtitle')}
               </Text>
             </LinearGradient>
 
             <View style={styles.comingSoonBody}>
               <Text style={styles.comingSoonBullet}>
-                • Lighting and scenes
+                {t('home.smartHomeBullet1')}
               </Text>
               <Text style={styles.comingSoonBullet}>
-                • AC and climate controls
+                {t('home.smartHomeBullet2')}
               </Text>
               <Text style={styles.comingSoonBullet}>
-                • Device status and quick actions
+                {t('home.smartHomeBullet3')}
               </Text>
               <Text style={styles.comingSoonHint}>
-                Availability depends on your unit setup and supported integrations.
+                {t('home.smartHomeHint')}
               </Text>
             </View>
 
@@ -877,7 +1154,7 @@ export function ResidentHomeScreen({
               style={[styles.comingSoonCloseBtn, { backgroundColor: brandPrimary }]}
               onPress={() => setSmartHomeModalVisible(false)}
             >
-              <Text style={styles.comingSoonCloseBtnText}>Got it</Text>
+              <Text style={styles.comingSoonCloseBtnText}>{t('home.smartHomeClose')}</Text>
             </Pressable>
           </View>
         </View>
@@ -892,9 +1169,10 @@ const styles = StyleSheet.create({
     backgroundColor: akColors.bg,
   },
   container: {
-    padding: 16,
-    gap: 14,
     backgroundColor: akColors.bg,
+  },
+  contentFrame: {
+    width: '100%',
   },
   flex: {
     flex: 1,
@@ -1043,6 +1321,25 @@ const styles = StyleSheet.create({
   },
   heroBannerImageWrap: {
     position: 'relative',
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  heroBannerTapLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
+  },
+  heroBannerImageOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'flex-end',
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    gap: 4,
+  },
+  heroBannerOverlayText: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '500',
   },
   heroBannerImageFallback: {
     alignItems: 'center',
@@ -1066,6 +1363,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 2,
   },
   heroBannerArrowLeft: {
     left: 8,
@@ -1105,19 +1403,10 @@ const styles = StyleSheet.create({
     width: 14,
     backgroundColor: akColors.gold,
   },
-  heroBannerCta: {
-    borderRadius: 999,
-    backgroundColor: 'rgba(201,169,97,0.18)',
-    borderWidth: 1,
-    borderColor: 'rgba(201,169,97,0.35)',
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  heroBannerCtaText: {
-    color: akColors.gold,
+  heroBannerTapHint: {
     fontSize: 11,
     fontWeight: '700',
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
   },
   homeSection: {
     gap: 10,
@@ -1554,5 +1843,96 @@ const styles = StyleSheet.create({
   notificationMeta: {
     color: akColors.textSoft,
     fontSize: 11,
+  },
+  offerRoot: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+  },
+  offerBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(2,6,23,0.58)',
+  },
+  offerCard: {
+    width: '100%',
+    maxWidth: 460,
+    borderRadius: 20,
+    overflow: 'hidden',
+    backgroundColor: '#fff',
+    ...akShadow.card,
+  },
+  offerCloseBtn: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    zIndex: 3,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.88)',
+  },
+  offerImageWrap: {
+    position: 'relative',
+    height: 300,
+    backgroundColor: '#0f172a',
+  },
+  offerImage: {
+    width: '100%',
+    height: '100%',
+  },
+  offerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'flex-end',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    gap: 6,
+  },
+  offerTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  offerDesc: {
+    color: 'rgba(255,255,255,0.92)',
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '500',
+  },
+  offerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: akColors.border,
+  },
+  offerDismissBtn: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: '#fff',
+  },
+  offerDismissText: {
+    color: akColors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  offerOpenBtn: {
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: akColors.primary,
+  },
+  offerOpenText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '800',
   },
 });

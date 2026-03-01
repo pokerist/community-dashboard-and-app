@@ -13,12 +13,17 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useAppToast } from '../components/mobile/AppToast';
 import { UnitPicker } from '../components/mobile/UnitPicker';
 import type { AuthSession } from '../features/auth/types';
+import { useBranding } from '../features/branding/provider';
+import { getBrandPalette } from '../features/branding/palette';
 import {
-  addFamilyMember,
+  createAuthorizedRequest,
+  createFamilyRequest,
+  createHomeStaffAccess,
   createContractor,
   createDelegateRequestByContact,
   createWorker,
   generateWorkerQr,
+  listHouseholdRequests,
   listContractors,
   listDelegatesForUnit,
   listFamilyMembers,
@@ -30,10 +35,15 @@ import {
 } from '../features/community/service';
 import type {
   AddFamilyMemberInput,
+  AuthorizedRequestRow,
+  CreateAuthorizedRequestInput,
+  CreateHomeStaffInput,
   ContractorRow,
   CreateDelegateByContactInput,
   DelegateAccessRow,
   FamilyAccessRow,
+  HomeStaffAccessRow,
+  HouseholdRequestsResponse,
   ResidentUnit,
   UpdateDelegateAccessInput,
   UpdateFamilyMemberInput,
@@ -78,6 +88,8 @@ export function HouseholdHubScreen({
   onRefreshUnits,
 }: HouseholdHubScreenProps) {
   const insets = useSafeAreaInsets();
+  const { brand } = useBranding();
+  const palette = getBrandPalette(brand);
   const toast = useAppToast();
   const [section, setSection] = useState<SectionKey>('family');
   const [isLoading, setIsLoading] = useState(true);
@@ -87,11 +99,14 @@ export function HouseholdHubScreen({
   const [delegateRows, setDelegateRows] = useState<DelegateAccessRow[]>([]);
   const [contractorRows, setContractorRows] = useState<ContractorRow[]>([]);
   const [workerRows, setWorkerRows] = useState<WorkerRow[]>([]);
+  const [householdRequests, setHouseholdRequests] = useState<HouseholdRequestsResponse>({
+    family: [],
+    authorized: [],
+    homeStaff: [],
+  });
   const [busyKey, setBusyKey] = useState<string | null>(null);
 
-  const [contractorName, setContractorName] = useState('');
   const [workerForm, setWorkerForm] = useState({
-    contractorId: '',
     fullName: '',
     nationalId: '',
     phone: '',
@@ -102,23 +117,29 @@ export function HouseholdHubScreen({
   const [editingDelegateAccessId, setEditingDelegateAccessId] = useState<string | null>(null);
   const [familyForm, setFamilyForm] = useState<{
     relationship: AddFamilyMemberInput['relationship'];
+    nationality: 'EGYPTIAN' | 'FOREIGN';
     name: string;
     email: string;
     phone: string;
     personalPhotoId: string;
     nationalId: string;
     nationalIdFileId: string;
+    passportFileId: string;
+    childAgeBracket: '<18' | '>=18';
     birthDate: string;
     birthCertificateFileId: string;
     marriageCertificateFileId: string;
   }>({
     relationship: 'CHILD',
+    nationality: 'EGYPTIAN',
     name: '',
     email: '',
     phone: '',
     personalPhotoId: '',
     nationalId: '',
     nationalIdFileId: '',
+    passportFileId: '',
+    childAgeBracket: '<18',
     birthDate: '',
     birthCertificateFileId: '',
     marriageCertificateFileId: '',
@@ -146,6 +167,71 @@ export function HouseholdHubScreen({
     canGenerateQR: true,
     canManageWorkers: true,
   });
+  const [authorizedRequestForm, setAuthorizedRequestForm] = useState<{
+    fullName: string;
+    email: string;
+    phone: string;
+    nationality: 'EGYPTIAN' | 'FOREIGN';
+    nationalIdOrPassport: string;
+    idOrPassportFileId: string;
+    powerOfAttorneyFileId: string;
+    personalPhotoFileId: string;
+    validFrom: string;
+    validTo: string;
+    feeMode: 'NO_FEE' | 'FEE_REQUIRED';
+    feeAmount: string;
+    permissions: Record<string, boolean>;
+  }>({
+    fullName: '',
+    email: '',
+    phone: '',
+    nationality: 'EGYPTIAN',
+    nationalIdOrPassport: '',
+    idOrPassportFileId: '',
+    powerOfAttorneyFileId: '',
+    personalPhotoFileId: '',
+    validFrom: '',
+    validTo: '',
+    feeMode: 'NO_FEE',
+    feeAmount: '',
+    permissions: {
+      qrDelivery: true,
+      qrWorkers: true,
+      qrDriver: true,
+      qrVisitor: true,
+      requests: true,
+      services: true,
+      utilityPayment: false,
+      complaints: true,
+      bookings: false,
+      violations: false,
+    },
+  });
+  const [homeStaffRequestForm, setHomeStaffRequestForm] = useState<{
+    fullName: string;
+    phone: string;
+    nationality: 'EGYPTIAN' | 'FOREIGN';
+    nationalIdOrPassport: string;
+    idOrPassportFileId: string;
+    personalPhotoFileId: string;
+    staffType: CreateHomeStaffInput['staffType'];
+    employmentDuration: string;
+    liveIn: boolean;
+    accessFrom: string;
+    accessTo: string;
+  }>({
+    fullName: '',
+    phone: '',
+    nationality: 'EGYPTIAN',
+    nationalIdOrPassport: '',
+    idOrPassportFileId: '',
+    personalPhotoFileId: '',
+    staffType: 'OTHER',
+    employmentDuration: '',
+    liveIn: false,
+    accessFrom: '',
+    accessTo: '',
+  });
 
   const selectedUnitAccesses = selectedUnit?.unitAccesses ?? [];
   const canManageWorkers = useMemo(
@@ -168,6 +254,8 @@ export function HouseholdHubScreen({
     );
     return roles.has('OWNER');
   }, [selectedUnitAccesses]);
+  const showLegacyDelegateManagement = false;
+  const showLegacyWorkerTools = false;
 
   const load = useCallback(
     async (mode: 'initial' | 'refresh' = 'initial') => {
@@ -176,6 +264,7 @@ export function HouseholdHubScreen({
         setDelegateRows([]);
         setContractorRows([]);
         setWorkerRows([]);
+        setHouseholdRequests({ family: [], authorized: [], homeStaff: [] });
         setIsLoading(false);
         setIsRefreshing(false);
         return;
@@ -190,6 +279,7 @@ export function HouseholdHubScreen({
         listDelegatesForUnit(session.accessToken, selectedUnitId),
         listContractors(session.accessToken, selectedUnitId),
         listWorkers(session.accessToken, selectedUnitId),
+        listHouseholdRequests(session.accessToken, { unitId: selectedUnitId }),
       ]);
 
       const firstError = results.find((r) => r.status === 'rejected') as
@@ -203,6 +293,11 @@ export function HouseholdHubScreen({
       setDelegateRows(results[1].status === 'fulfilled' ? results[1].value : []);
       setContractorRows(results[2].status === 'fulfilled' ? results[2].value : []);
       setWorkerRows(results[3].status === 'fulfilled' ? results[3].value : []);
+      setHouseholdRequests(
+        results[4].status === 'fulfilled'
+          ? results[4].value
+          : { family: [], authorized: [], homeStaff: [] },
+      );
 
       setIsLoading(false);
       setIsRefreshing(false);
@@ -214,25 +309,19 @@ export function HouseholdHubScreen({
     void load('initial');
   }, [load]);
 
-  useEffect(() => {
-    setWorkerForm((prev) => ({
-      ...prev,
-      contractorId: prev.contractorId && contractorRows.some((c) => c.id === prev.contractorId)
-        ? prev.contractorId
-        : (contractorRows[0]?.id ?? ''),
-    }));
-  }, [contractorRows]);
-
   const resetFamilyForm = () => {
     setEditingFamilyUserId(null);
     setFamilyForm({
       relationship: 'CHILD',
+      nationality: 'EGYPTIAN',
       name: '',
       email: '',
       phone: '',
       personalPhotoId: '',
       nationalId: '',
       nationalIdFileId: '',
+      passportFileId: '',
+      childAgeBracket: '<18',
       birthDate: '',
       birthCertificateFileId: '',
       marriageCertificateFileId: '',
@@ -262,12 +351,15 @@ export function HouseholdHubScreen({
       relationship:
         (String(row.user?.resident?.relationship ?? '').toUpperCase() as AddFamilyMemberInput['relationship']) ||
         prev.relationship,
+      nationality: 'EGYPTIAN',
       name: row.user?.nameEN || row.user?.nameAR || '',
       email: row.user?.email ?? '',
       phone: row.user?.phone ?? '',
       personalPhotoId: '',
       nationalId: row.user?.resident?.nationalId ?? '',
       nationalIdFileId: '',
+      passportFileId: '',
+      childAgeBracket: prev.childAgeBracket,
       birthDate: '',
       birthCertificateFileId: '',
       marriageCertificateFileId: '',
@@ -325,42 +417,26 @@ export function HouseholdHubScreen({
     }
   };
 
-  const handleCreateContractor = async () => {
-    if (!selectedUnitId) return;
-    const name = contractorName.trim();
-    if (!name) {
-      setErrorMessage('Contractor name is required');
-      toast.error('Missing contractor name', 'Contractor company name is required.');
-      return;
-    }
-    setBusyKey('contractor-create');
-    try {
-      await createContractor(session.accessToken, { unitId: selectedUnitId, name });
-      setContractorName('');
-      await load('refresh');
-      setSection('delegates');
-      toast.success('Contractor created', 'Contractor was added successfully.');
-    } catch (error) {
-      const msg = extractApiErrorMessage(error);
-      setErrorMessage(msg);
-      toast.error('Failed to create contractor', msg);
-    } finally {
-      setBusyKey(null);
-    }
-  };
-
   const handleCreateWorker = async () => {
     if (!selectedUnitId) return;
-    if (!workerForm.contractorId || !workerForm.fullName.trim() || !workerForm.nationalId.trim()) {
-      setErrorMessage('Contractor, worker name and national ID are required');
-      toast.error('Missing worker fields', 'Contractor, worker name and national ID are required.');
+    if (!workerForm.fullName.trim() || !workerForm.nationalId.trim()) {
+      setErrorMessage('Worker name and national ID are required');
+      toast.error('Missing worker fields', 'Worker name and national ID are required.');
       return;
     }
     setBusyKey('worker-create');
     try {
+      let contractorId = contractorRows[0]?.id ?? '';
+      if (!contractorId) {
+        const internal = await createContractor(session.accessToken, {
+          unitId: selectedUnitId,
+          name: 'Home Staff',
+        });
+        contractorId = internal.id;
+      }
       await createWorker(session.accessToken, {
         unitId: selectedUnitId,
-        contractorId: workerForm.contractorId,
+        contractorId,
         fullName: workerForm.fullName.trim(),
         nationalId: workerForm.nationalId.trim(),
         phone: workerForm.phone.trim() || undefined,
@@ -406,21 +482,32 @@ export function HouseholdHubScreen({
 
   const hasUnit = Boolean(selectedUnitId);
   const familyRelationship = familyForm.relationship;
-  const familyNeedsBirthDate = familyRelationship === 'CHILD';
+  const familyNationality = familyForm.nationality;
+  const familyNeedsBirthDate =
+    familyRelationship === 'CHILD' && familyForm.childAgeBracket === '<18';
   const familyNeedsMarriageCert = familyRelationship === 'SPOUSE';
-  const familyNeedsNationalIdFile = familyRelationship === 'PARENT' || familyRelationship === 'CHILD';
+  const familyNeedsNationalIdFile =
+    familyNationality === 'EGYPTIAN' &&
+    (familyRelationship !== 'CHILD' || familyForm.childAgeBracket === '>=18');
+  const familyNeedsBirthCert =
+    familyNationality === 'EGYPTIAN' &&
+    familyRelationship === 'CHILD' &&
+    familyForm.childAgeBracket === '<18';
+  const familyNeedsPassportFile = familyNationality === 'FOREIGN';
 
   const handleUploadFamilyFile = async (
     purpose:
       | 'profile-photo'
       | 'national-id'
       | 'birth-certificate'
-      | 'marriage-certificate',
+      | 'marriage-certificate'
+      | 'delegate-id',
     field:
       | 'personalPhotoId'
       | 'nationalIdFileId'
       | 'birthCertificateFileId'
-      | 'marriageCertificateFileId',
+      | 'marriageCertificateFileId'
+      | 'passportFileId',
   ) => {
     setBusyKey(`upload-${field}`);
     try {
@@ -453,6 +540,181 @@ export function HouseholdHubScreen({
     }
   };
 
+  const handleUploadAuthorizedFile = async (
+    field: 'idOrPassportFileId' | 'powerOfAttorneyFileId' | 'personalPhotoFileId',
+    purpose: 'delegate-id' | 'service-attachment' | 'profile-photo',
+  ) => {
+    setBusyKey(`upload-auth-${field}`);
+    try {
+      const uploaded = await pickAndUploadFileByPurpose(session.accessToken, purpose);
+      if (!uploaded) return;
+      setAuthorizedRequestForm((prev) => ({ ...prev, [field]: uploaded.id }));
+      toast.success('Document uploaded');
+    } catch (error) {
+      const msg = extractApiErrorMessage(error);
+      setErrorMessage(msg);
+      toast.error('Upload failed', msg);
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const handleUploadHomeStaffFile = async (
+    field: 'idOrPassportFileId' | 'personalPhotoFileId',
+    purpose: 'delegate-id' | 'profile-photo',
+  ) => {
+    setBusyKey(`upload-staff-${field}`);
+    try {
+      const uploaded = await pickAndUploadFileByPurpose(session.accessToken, purpose);
+      if (!uploaded) return;
+      setHomeStaffRequestForm((prev) => ({ ...prev, [field]: uploaded.id }));
+      toast.success('Document uploaded');
+    } catch (error) {
+      const msg = extractApiErrorMessage(error);
+      setErrorMessage(msg);
+      toast.error('Upload failed', msg);
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const handleCreateAuthorizedRequest = async () => {
+    if (!selectedUnitId) return;
+    if (
+      !authorizedRequestForm.fullName.trim() ||
+      !authorizedRequestForm.phone.trim() ||
+      !authorizedRequestForm.idOrPassportFileId.trim() ||
+      !authorizedRequestForm.powerOfAttorneyFileId.trim() ||
+      !authorizedRequestForm.personalPhotoFileId.trim() ||
+      !authorizedRequestForm.validFrom.trim() ||
+      !authorizedRequestForm.validTo.trim()
+    ) {
+      toast.error('Missing required fields', 'Please complete all required authorized request fields.');
+      return;
+    }
+    if (
+      authorizedRequestForm.feeMode === 'FEE_REQUIRED' &&
+      (!authorizedRequestForm.feeAmount.trim() ||
+        Number.isNaN(Number(authorizedRequestForm.feeAmount)) ||
+        Number(authorizedRequestForm.feeAmount) <= 0)
+    ) {
+      toast.error('Invalid fee amount', 'Provide a valid fee amount for fee-required mode.');
+      return;
+    }
+
+    setBusyKey('authorized-request-create');
+    try {
+      const payload: CreateAuthorizedRequestInput = {
+        unitId: selectedUnitId,
+        fullName: authorizedRequestForm.fullName.trim(),
+        phone: authorizedRequestForm.phone.trim(),
+        email: authorizedRequestForm.email.trim() || undefined,
+        nationality: authorizedRequestForm.nationality,
+        nationalIdOrPassport: authorizedRequestForm.nationalIdOrPassport.trim() || undefined,
+        idOrPassportFileId: authorizedRequestForm.idOrPassportFileId.trim(),
+        powerOfAttorneyFileId: authorizedRequestForm.powerOfAttorneyFileId.trim(),
+        personalPhotoFileId: authorizedRequestForm.personalPhotoFileId.trim(),
+        validFrom: authorizedRequestForm.validFrom.trim(),
+        validTo: authorizedRequestForm.validTo.trim(),
+        feeMode: authorizedRequestForm.feeMode,
+        feeAmount:
+          authorizedRequestForm.feeMode === 'FEE_REQUIRED'
+            ? Number(authorizedRequestForm.feeAmount)
+            : undefined,
+        delegatePermissions: authorizedRequestForm.permissions,
+      };
+      await createAuthorizedRequest(session.accessToken, payload);
+      setAuthorizedRequestForm({
+        fullName: '',
+        email: '',
+        phone: '',
+        nationality: 'EGYPTIAN',
+        nationalIdOrPassport: '',
+        idOrPassportFileId: '',
+        powerOfAttorneyFileId: '',
+        personalPhotoFileId: '',
+        validFrom: '',
+        validTo: '',
+        feeMode: 'NO_FEE',
+        feeAmount: '',
+        permissions: {
+          qrDelivery: true,
+          qrWorkers: true,
+          qrDriver: true,
+          qrVisitor: true,
+          requests: true,
+          services: true,
+          utilityPayment: false,
+          complaints: true,
+          bookings: false,
+          violations: false,
+        },
+      });
+      toast.success('Authorized request submitted', 'Request is pending admin approval.');
+      await load('refresh');
+    } catch (error) {
+      const msg = extractApiErrorMessage(error);
+      setErrorMessage(msg);
+      toast.error('Authorized request failed', msg);
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const handleCreateHomeStaffRequest = async () => {
+    if (!selectedUnitId) return;
+    if (
+      !homeStaffRequestForm.fullName.trim() ||
+      !homeStaffRequestForm.phone.trim() ||
+      !homeStaffRequestForm.idOrPassportFileId.trim() ||
+      !homeStaffRequestForm.accessFrom.trim() ||
+      !homeStaffRequestForm.accessTo.trim()
+    ) {
+      toast.error('Missing required fields', 'Please complete all required home staff fields.');
+      return;
+    }
+
+    setBusyKey('home-staff-request-create');
+    try {
+      const payload: CreateHomeStaffInput = {
+        unitId: selectedUnitId,
+        fullName: homeStaffRequestForm.fullName.trim(),
+        phone: homeStaffRequestForm.phone.trim(),
+        nationality: homeStaffRequestForm.nationality,
+        nationalIdOrPassport: homeStaffRequestForm.nationalIdOrPassport.trim() || undefined,
+        idOrPassportFileId: homeStaffRequestForm.idOrPassportFileId.trim(),
+        personalPhotoFileId: homeStaffRequestForm.personalPhotoFileId.trim() || undefined,
+        staffType: homeStaffRequestForm.staffType,
+        employmentDuration: homeStaffRequestForm.employmentDuration.trim() || undefined,
+        liveIn: homeStaffRequestForm.liveIn,
+        accessFrom: homeStaffRequestForm.accessFrom.trim(),
+        accessTo: homeStaffRequestForm.accessTo.trim(),
+      };
+      await createHomeStaffAccess(session.accessToken, payload);
+      setHomeStaffRequestForm({
+        fullName: '',
+        phone: '',
+        nationality: 'EGYPTIAN',
+        nationalIdOrPassport: '',
+        idOrPassportFileId: '',
+        personalPhotoFileId: '',
+        staffType: 'OTHER',
+        employmentDuration: '',
+        liveIn: false,
+        accessFrom: '',
+        accessTo: '',
+      });
+      toast.success('Home staff request submitted', 'Request is pending admin approval.');
+      await load('refresh');
+    } catch (error) {
+      const msg = extractApiErrorMessage(error);
+      setErrorMessage(msg);
+      toast.error('Home staff request failed', msg);
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
   const handleAddFamily = async () => {
     if (!selectedUnitId) return;
     if (!familyForm.name.trim()) {
@@ -474,9 +736,19 @@ export function HouseholdHubScreen({
       toast.error('Missing document', 'National ID file is required for this relationship.');
       return;
     }
+    if (!isEditing && familyNeedsPassportFile && !familyForm.passportFileId.trim()) {
+      setErrorMessage('Passport file is required for foreign family members');
+      toast.error('Missing document', 'Passport file is required for foreign family members.');
+      return;
+    }
     if (!isEditing && familyNeedsBirthDate && !familyForm.birthDate.trim()) {
       setErrorMessage('Birth date is required for child family member');
       toast.error('Missing birth date', 'Birth date is required for child family member.');
+      return;
+    }
+    if (!isEditing && familyNeedsBirthCert && !familyForm.birthCertificateFileId.trim()) {
+      setErrorMessage('Birth certificate file is required for child below 18');
+      toast.error('Missing document', 'Birth certificate is required for child below 18.');
       return;
     }
     if (!isEditing && familyNeedsMarriageCert && !familyForm.marriageCertificateFileId.trim()) {
@@ -501,26 +773,42 @@ export function HouseholdHubScreen({
           updatePayload,
         );
       } else {
-        const payload: AddFamilyMemberInput = {
-          relationship: familyForm.relationship,
-          name: familyForm.name.trim(),
+        await createFamilyRequest(session.accessToken, {
+          unitId: selectedUnitId,
+          relationship:
+            familyForm.relationship === 'CHILD'
+              ? 'SON_DAUGHTER'
+              : familyForm.relationship === 'PARENT'
+                ? 'MOTHER_FATHER'
+                : 'SPOUSE',
+          fullName: familyForm.name.trim(),
           email: familyForm.email.trim() || undefined,
           phone: familyForm.phone.trim(),
-          personalPhotoId: familyForm.personalPhotoId.trim(),
-          nationalId: familyForm.nationalId.trim() || undefined,
-          nationalIdFileId: familyForm.nationalIdFileId.trim() || undefined,
-          birthDate: familyForm.birthDate.trim() || undefined,
+          nationality: familyForm.nationality,
+          nationalIdOrPassport: familyForm.nationalId.trim() || undefined,
+          personalPhotoFileId: familyForm.personalPhotoId.trim(),
+          nationalIdFileId:
+            familyForm.nationality === 'EGYPTIAN'
+              ? familyForm.nationalIdFileId.trim() || undefined
+              : undefined,
+          passportFileId:
+            familyForm.nationality === 'FOREIGN'
+              ? familyForm.passportFileId.trim() || undefined
+              : undefined,
           birthCertificateFileId: familyForm.birthCertificateFileId.trim() || undefined,
           marriageCertificateFileId: familyForm.marriageCertificateFileId.trim() || undefined,
-        };
-        await addFamilyMember(session.accessToken, selectedUnitId, payload);
+          childAgeBracket:
+            familyForm.relationship === 'CHILD'
+              ? familyForm.childAgeBracket
+              : undefined,
+        });
       }
       resetFamilyForm();
       toast.success(
-        isEditing ? 'Family member updated' : 'Family member added',
+        isEditing ? 'Family member updated' : 'Family request submitted',
         isEditing
           ? 'Family member details were updated successfully.'
-          : 'Family member was added to this unit successfully.',
+          : 'Family request was sent for admin approval.',
       );
       await load('refresh');
     } catch (error) {
@@ -607,17 +895,19 @@ export function HouseholdHubScreen({
       >
         <View style={styles.headerCard}>
           <View style={styles.headerTopRow}>
-            <View style={styles.headerIconWrap}>
-              <Ionicons name="people-outline" size={20} color={akColors.primary} />
+            <View style={[styles.headerIconWrap, { backgroundColor: palette.primarySoft8 }]}>
+              <Ionicons name="people-outline" size={20} color={palette.primary} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.headerTitle}>Manage Household</Text>
               <Text style={styles.headerSubtitle}>
-                Family members, delegates, contractors and workers per unit
+                Manage family members, authorized users, and home staff per unit.
               </Text>
             </View>
             <Pressable onPress={() => void load('refresh')}>
-              <Text style={styles.linkText}>{isRefreshing ? 'Refreshing...' : 'Refresh'}</Text>
+              <Text style={[styles.linkText, { color: palette.primary }]}>
+                {isRefreshing ? 'Refreshing...' : 'Refresh'}
+              </Text>
             </Pressable>
           </View>
 
@@ -634,10 +924,18 @@ export function HouseholdHubScreen({
             <Text style={styles.helperText}>
               {selectedUnit.unitNumber ?? selectedUnit.id}
               {selectedUnit.block ? ` • Block ${selectedUnit.block}` : ''}
-              {selectedUnit.status ? ` • ${String(selectedUnit.status).replace(/_/g, ' ')}` : ''}
+              {selectedUnit.status
+                ? ` • ${
+                    ['LEASED', 'RENTED', 'TENANT_OCCUPIED'].includes(
+                      String(selectedUnit.status).toUpperCase(),
+                    )
+                      ? 'Rented'
+                      : 'Own Use'
+                  }`
+                : ''}
             </Text>
           ) : null}
-          {unitsLoading ? <ActivityIndicator color={akColors.primary} /> : null}
+          {unitsLoading ? <ActivityIndicator color={palette.primary} /> : null}
           {unitsErrorMessage ? <Text style={styles.errorText}>{unitsErrorMessage}</Text> : null}
           {errorMessage ? <Text style={styles.errorText}>{errorMessage}</Text> : null}
           {workerQrResult ? <Text style={styles.successText}>{workerQrResult}</Text> : null}
@@ -647,16 +945,26 @@ export function HouseholdHubScreen({
           {([
             ['family', 'Family'],
             ['delegates', 'Authorized'],
-            ['staff', 'Staff'],
+            ['staff', 'Home Staff'],
           ] as const).map(([key, label]) => {
             const active = section === key;
             return (
               <Pressable
                 key={key}
                 onPress={() => setSection(key)}
-                style={[styles.segmentChip, active && styles.segmentChipActive]}
+                style={[
+                  styles.segmentChip,
+                  active && styles.segmentChipActive,
+                  active && { backgroundColor: palette.primary, borderColor: palette.primary },
+                ]}
               >
-                <Text style={[styles.segmentChipText, active && styles.segmentChipTextActive]}>
+                <Text
+                  style={[
+                    styles.segmentChipText,
+                    active && styles.segmentChipTextActive,
+                    active && { color: '#fff' },
+                  ]}
+                >
                   {label}
                 </Text>
               </Pressable>
@@ -670,7 +978,7 @@ export function HouseholdHubScreen({
           </View>
         ) : null}
 
-        {isLoading ? <ActivityIndicator color={akColors.primary} /> : null}
+        {isLoading ? <ActivityIndicator color={palette.primary} /> : null}
 
         {hasUnit && !isLoading && section === 'family' ? (
           <>
@@ -678,7 +986,7 @@ export function HouseholdHubScreen({
               <Text style={styles.cardTitle}>Family Members</Text>
               <Text style={styles.cardSub}>
                 {canManageFamily
-                  ? 'List and remove family members linked to this unit.'
+                  ? 'Submit first-degree family requests and review linked family members for this unit.'
                   : 'Family management is available for owner/tenant authority on the selected unit.'}
               </Text>
               {!canManageFamily ? (
@@ -698,7 +1006,7 @@ export function HouseholdHubScreen({
                   </Text>
                   {editingFamilyUserId ? (
                     <Pressable onPress={resetFamilyForm}>
-                      <Text style={styles.linkText}>Cancel Edit</Text>
+                      <Text style={[styles.linkText, { color: palette.primary }]}>Cancel Edit</Text>
                     </Pressable>
                   ) : null}
                 </View>
@@ -707,19 +1015,79 @@ export function HouseholdHubScreen({
                 <View style={styles.optionRow}>
                   {(['CHILD', 'PARENT', 'SPOUSE'] as const).map((rel) => {
                     const active = familyForm.relationship === rel;
+                    const label =
+                      rel === 'CHILD'
+                        ? 'Son / Daughter'
+                        : rel === 'PARENT'
+                          ? 'Mother / Father'
+                          : 'Spouse';
                     return (
                       <Pressable
                         key={rel}
                         onPress={() => setFamilyForm((p) => ({ ...p, relationship: rel }))}
-                        style={[styles.choiceChip, active && styles.choiceChipActive]}
+                        style={[styles.choiceChip, active && styles.choiceChipActive, active && { borderColor: palette.primary, backgroundColor: palette.primarySoft8 }]}
                       >
-                        <Text style={[styles.choiceChipText, active && styles.choiceChipTextActive]}>
-                          {rel}
+                        <Text style={[styles.choiceChipText, active && styles.choiceChipTextActive, active && { color: palette.primary }]}>
+                          {label}
                         </Text>
                       </Pressable>
                     );
                   })}
                 </View>
+                <Text style={styles.fieldLabel}>Nationality</Text>
+                <View style={styles.optionRow}>
+                  {(['EGYPTIAN', 'FOREIGN'] as const).map((nationality) => {
+                    const active = familyForm.nationality === nationality;
+                    return (
+                      <Pressable
+                        key={nationality}
+                        onPress={() =>
+                          setFamilyForm((p) => ({
+                            ...p,
+                            nationality,
+                            nationalIdFileId:
+                              nationality === 'FOREIGN' ? '' : p.nationalIdFileId,
+                            passportFileId:
+                              nationality === 'EGYPTIAN' ? '' : p.passportFileId,
+                          }))
+                        }
+                        style={[styles.choiceChip, active && styles.choiceChipActive, active && { borderColor: palette.primary, backgroundColor: palette.primarySoft8 }]}
+                      >
+                        <Text
+                          style={[styles.choiceChipText, active && styles.choiceChipTextActive, active && { color: palette.primary }]}
+                        >
+                          {nationality === 'EGYPTIAN' ? 'Egyptian' : 'Foreign'}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
+                {familyForm.relationship === 'CHILD' ? (
+                  <>
+                    <Text style={styles.fieldLabel}>Child Age Group</Text>
+                    <View style={styles.optionRow}>
+                      {(['<18', '>=18'] as const).map((age) => {
+                        const active = familyForm.childAgeBracket === age;
+                        return (
+                          <Pressable
+                            key={age}
+                            onPress={() =>
+                              setFamilyForm((p) => ({ ...p, childAgeBracket: age }))
+                            }
+                            style={[styles.choiceChip, active && styles.choiceChipActive, active && { borderColor: palette.primary, backgroundColor: palette.primarySoft8 }]}
+                          >
+                            <Text
+                              style={[styles.choiceChipText, active && styles.choiceChipTextActive, active && { color: palette.primary }]}
+                            >
+                              {age === '<18' ? 'Under 18' : '18 and above'}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </>
+                ) : null}
 
                 <TextInput
                   style={styles.input}
@@ -758,11 +1126,18 @@ export function HouseholdHubScreen({
                   </Text>
                 </View>
 
-                {(familyNeedsNationalIdFile || familyForm.nationalId || familyForm.nationalIdFileId) ? (
+                {(familyNeedsNationalIdFile ||
+                  familyNeedsPassportFile ||
+                  familyForm.nationalId ||
+                  familyForm.nationalIdFileId) ? (
                   <>
                     <TextInput
                       style={styles.input}
-                      placeholder="National ID (if applicable)"
+                      placeholder={
+                        familyForm.nationality === 'FOREIGN'
+                          ? 'Passport Number'
+                          : 'National ID'
+                      }
                       value={familyForm.nationalId}
                       onChangeText={(v) => setFamilyForm((p) => ({ ...p, nationalId: v }))}
                     />
@@ -781,6 +1156,25 @@ export function HouseholdHubScreen({
                       </Text>
                     </View>
                   </>
+                ) : null}
+
+                {familyNeedsPassportFile ? (
+                  <View style={styles.uploadRow}>
+                    <Pressable
+                      style={[styles.secondaryButton, busyKey === 'upload-passportFileId' && styles.buttonDisabled]}
+                      onPress={() => void handleUploadFamilyFile('delegate-id', 'passportFileId')}
+                      disabled={busyKey === 'upload-passportFileId'}
+                    >
+                      <Text style={styles.secondaryButtonText}>
+                        {busyKey === 'upload-passportFileId'
+                          ? 'Uploading...'
+                          : 'Upload Passport'}
+                      </Text>
+                    </Pressable>
+                    <Text style={styles.uploadIdText} numberOfLines={1}>
+                      {familyForm.passportFileId || 'No file uploaded'}
+                    </Text>
+                  </View>
                 ) : null}
 
                 {familyNeedsBirthDate ? (
@@ -803,7 +1197,7 @@ export function HouseholdHubScreen({
                         </Text>
                       </Pressable>
                       <Text style={styles.uploadIdText} numberOfLines={1}>
-                        {familyForm.birthCertificateFileId || 'Optional unless child <16'}
+                        {familyForm.birthCertificateFileId || 'No file uploaded'}
                       </Text>
                     </View>
                   </>
@@ -827,7 +1221,7 @@ export function HouseholdHubScreen({
                 ) : null}
 
                 <Pressable
-                  style={[styles.primaryButton, busyKey === 'family-add' && styles.buttonDisabled]}
+                  style={[styles.primaryButton, { backgroundColor: palette.primary }, busyKey === 'family-add' && styles.buttonDisabled]}
                   onPress={() => void handleAddFamily()}
                   disabled={busyKey === 'family-add'}
                 >
@@ -899,12 +1293,195 @@ export function HouseholdHubScreen({
         {hasUnit && !isLoading && section === 'delegates' ? (
           <>
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Authorized Users (Delegates)</Text>
+              <Text style={styles.cardTitle}>Authorized Users</Text>
               <Text style={styles.cardSub}>
-                List and revoke delegates for this unit. Create by contact will create an invited user if needed.
+                Submit authorized access requests with permissions and validity window.
               </Text>
             </View>
             {canCreateDelegates ? (
+              <View style={styles.card}>
+                <Text style={styles.formTitle}>New Authorized Request</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Full name"
+                  value={authorizedRequestForm.fullName}
+                  onChangeText={(v) => setAuthorizedRequestForm((p) => ({ ...p, fullName: v }))}
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Email (optional)"
+                  value={authorizedRequestForm.email}
+                  onChangeText={(v) => setAuthorizedRequestForm((p) => ({ ...p, email: v }))}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Phone"
+                  value={authorizedRequestForm.phone}
+                  onChangeText={(v) => setAuthorizedRequestForm((p) => ({ ...p, phone: v }))}
+                  keyboardType="phone-pad"
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="ID / Passport Number"
+                  value={authorizedRequestForm.nationalIdOrPassport}
+                  onChangeText={(v) =>
+                    setAuthorizedRequestForm((p) => ({ ...p, nationalIdOrPassport: v }))
+                  }
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Valid From (YYYY-MM-DD)"
+                  value={authorizedRequestForm.validFrom}
+                  onChangeText={(v) => setAuthorizedRequestForm((p) => ({ ...p, validFrom: v }))}
+                  autoCapitalize="none"
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Valid To (YYYY-MM-DD)"
+                  value={authorizedRequestForm.validTo}
+                  onChangeText={(v) => setAuthorizedRequestForm((p) => ({ ...p, validTo: v }))}
+                  autoCapitalize="none"
+                />
+                <View style={styles.optionRow}>
+                  {(['NO_FEE', 'FEE_REQUIRED'] as const).map((mode) => {
+                    const active = authorizedRequestForm.feeMode === mode;
+                    return (
+                      <Pressable
+                        key={mode}
+                        onPress={() => setAuthorizedRequestForm((p) => ({ ...p, feeMode: mode }))}
+                        style={[styles.choiceChip, active && styles.choiceChipActive, active && { borderColor: palette.primary, backgroundColor: palette.primarySoft8 }]}
+                      >
+                        <Text style={[styles.choiceChipText, active && styles.choiceChipTextActive, active && { color: palette.primary }]}>
+                          {mode === 'NO_FEE' ? 'No Fee' : 'Fee Required'}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                {authorizedRequestForm.feeMode === 'FEE_REQUIRED' ? (
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Fee Amount"
+                    value={authorizedRequestForm.feeAmount}
+                    onChangeText={(v) => setAuthorizedRequestForm((p) => ({ ...p, feeAmount: v }))}
+                    keyboardType="decimal-pad"
+                  />
+                ) : null}
+                <Text style={styles.fieldLabel}>Permissions</Text>
+                <View style={styles.optionRow}>
+                  {(
+                    [
+                      ['qrDelivery', 'QR Delivery'],
+                      ['qrWorkers', 'QR Workers'],
+                      ['qrDriver', 'QR Driver'],
+                      ['qrVisitor', 'QR Visitor'],
+                      ['requests', 'Requests'],
+                      ['services', 'Services'],
+                      ['utilityPayment', 'Utility Payment'],
+                      ['complaints', 'Complaints'],
+                      ['bookings', 'Bookings'],
+                      ['violations', 'Violations'],
+                    ] as const
+                  ).map(([key, label]) => {
+                    const active = authorizedRequestForm.permissions[key];
+                    return (
+                      <Pressable
+                        key={key}
+                        onPress={() =>
+                          setAuthorizedRequestForm((p) => ({
+                            ...p,
+                            permissions: {
+                              ...p.permissions,
+                              [key]: !p.permissions[key],
+                            },
+                          }))
+                        }
+                        style={[styles.choiceChip, active && styles.choiceChipActive, active && { borderColor: palette.primary, backgroundColor: palette.primarySoft8 }]}
+                      >
+                        <Text style={[styles.choiceChipText, active && styles.choiceChipTextActive, active && { color: palette.primary }]}>
+                          {label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <View style={styles.uploadRow}>
+                  <Pressable
+                    style={[styles.secondaryButton, busyKey === 'upload-auth-idOrPassportFileId' && styles.buttonDisabled]}
+                    onPress={() => void handleUploadAuthorizedFile('idOrPassportFileId', 'delegate-id')}
+                    disabled={busyKey === 'upload-auth-idOrPassportFileId'}
+                  >
+                    <Text style={styles.secondaryButtonText}>Upload ID/Passport File</Text>
+                  </Pressable>
+                  <Text style={styles.uploadIdText} numberOfLines={1}>
+                    {authorizedRequestForm.idOrPassportFileId || 'No file uploaded'}
+                  </Text>
+                </View>
+                <View style={styles.uploadRow}>
+                  <Pressable
+                    style={[styles.secondaryButton, busyKey === 'upload-auth-powerOfAttorneyFileId' && styles.buttonDisabled]}
+                    onPress={() => void handleUploadAuthorizedFile('powerOfAttorneyFileId', 'service-attachment')}
+                    disabled={busyKey === 'upload-auth-powerOfAttorneyFileId'}
+                  >
+                    <Text style={styles.secondaryButtonText}>Upload Power of Attorney</Text>
+                  </Pressable>
+                  <Text style={styles.uploadIdText} numberOfLines={1}>
+                    {authorizedRequestForm.powerOfAttorneyFileId || 'No file uploaded'}
+                  </Text>
+                </View>
+                <View style={styles.uploadRow}>
+                  <Pressable
+                    style={[styles.secondaryButton, busyKey === 'upload-auth-personalPhotoFileId' && styles.buttonDisabled]}
+                    onPress={() => void handleUploadAuthorizedFile('personalPhotoFileId', 'profile-photo')}
+                    disabled={busyKey === 'upload-auth-personalPhotoFileId'}
+                  >
+                    <Text style={styles.secondaryButtonText}>Upload Personal Photo</Text>
+                  </Pressable>
+                  <Text style={styles.uploadIdText} numberOfLines={1}>
+                    {authorizedRequestForm.personalPhotoFileId || 'No file uploaded'}
+                  </Text>
+                </View>
+                <Pressable
+                  style={[styles.primaryButton, { backgroundColor: palette.primary }, busyKey === 'authorized-request-create' && styles.buttonDisabled]}
+                  onPress={() => void handleCreateAuthorizedRequest()}
+                  disabled={busyKey === 'authorized-request-create'}
+                >
+                  <Text style={styles.primaryButtonText}>
+                    {busyKey === 'authorized-request-create' ? 'Submitting...' : 'Submit Authorized Request'}
+                  </Text>
+                </Pressable>
+              </View>
+            ) : null}
+
+            <View style={styles.card}>
+              <Text style={styles.formTitle}>Authorized Requests</Text>
+              {householdRequests.authorized.length === 0 ? (
+                <Text style={styles.emptyText}>No authorized requests for this unit.</Text>
+              ) : (
+                householdRequests.authorized.map((row: AuthorizedRequestRow) => (
+                  <View key={row.id} style={styles.rowCard}>
+                    <View style={styles.rowHeader}>
+                      <Text style={styles.rowTitle}>{row.fullName}</Text>
+                      <View style={styles.statusPill}>
+                        <Text style={styles.statusPillText}>{householdLabel(row.status)}</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.rowSub}>
+                      {row.phone || '—'} {row.email ? ` • ${row.email}` : ''}
+                    </Text>
+                    <Text style={styles.rowSub}>
+                      {row.validFrom ? formatDateTime(row.validFrom) : '—'} → {row.validTo ? formatDateTime(row.validTo) : '—'}
+                    </Text>
+                    {row.rejectionReason ? (
+                      <Text style={styles.errorText}>Rejection: {row.rejectionReason}</Text>
+                    ) : null}
+                  </View>
+                ))
+              )}
+            </View>
+            {showLegacyDelegateManagement && canCreateDelegates ? (
               <View style={styles.card}>
                 <View style={styles.formHeaderRow}>
                   <Text style={styles.formTitle}>
@@ -912,7 +1489,7 @@ export function HouseholdHubScreen({
                   </Text>
                   {editingDelegateAccessId ? (
                     <Pressable onPress={resetDelegateForm}>
-                      <Text style={styles.linkText}>Cancel Edit</Text>
+                      <Text style={[styles.linkText, { color: palette.primary }]}>Cancel Edit</Text>
                     </Pressable>
                   ) : null}
                 </View>
@@ -925,10 +1502,10 @@ export function HouseholdHubScreen({
                       <Pressable
                         key={type}
                         onPress={() => setDelegateForm((p) => ({ ...p, type }))}
-                        style={[styles.choiceChip, active && styles.choiceChipActive]}
+                        style={[styles.choiceChip, active && styles.choiceChipActive, active && { borderColor: palette.primary, backgroundColor: palette.primarySoft8 }]}
                       >
-                        <Text style={[styles.choiceChipText, active && styles.choiceChipTextActive]}>
-                          {type}
+                        <Text style={[styles.choiceChipText, active && styles.choiceChipTextActive, active && { color: palette.primary }]}>
+                          {householdLabel(type)}
                         </Text>
                       </Pressable>
                     );
@@ -994,9 +1571,9 @@ export function HouseholdHubScreen({
                         onPress={() =>
                           setDelegateForm((p) => ({ ...p, [key]: !p[key] }))
                         }
-                        style={[styles.choiceChip, active && styles.choiceChipActive]}
+                        style={[styles.choiceChip, active && styles.choiceChipActive, active && { borderColor: palette.primary, backgroundColor: palette.primarySoft8 }]}
                       >
-                        <Text style={[styles.choiceChipText, active && styles.choiceChipTextActive]}>
+                        <Text style={[styles.choiceChipText, active && styles.choiceChipTextActive, active && { color: palette.primary }]}>
                           {label}
                         </Text>
                       </Pressable>
@@ -1005,7 +1582,7 @@ export function HouseholdHubScreen({
                 </View>
 
                 <Pressable
-                  style={[styles.primaryButton, busyKey === 'delegate-create' && styles.buttonDisabled]}
+                  style={[styles.primaryButton, { backgroundColor: palette.primary }, busyKey === 'delegate-create' && styles.buttonDisabled]}
                   onPress={() => void handleCreateDelegate()}
                   disabled={busyKey === 'delegate-create'}
                 >
@@ -1046,11 +1623,11 @@ export function HouseholdHubScreen({
                         {row.user?.phone ? ` • ${row.user.phone}` : ''}
                       </Text>
                       <Text style={styles.rowSub}>
-                        Permissions: QR {row.canGenerateQR ? '✓' : '✕'} • Workers{' '}
+                        Access: QR {row.canGenerateQR ? '✓' : '✕'} • Workers{' '}
                         {row.canManageWorkers ? '✓' : '✕'} • Billing {row.canViewFinancials ? '✓' : '✕'}
                       </Text>
                       <View style={styles.rowActions}>
-                        {canCreateDelegates ? (
+                        {showLegacyDelegateManagement && canCreateDelegates ? (
                           <Pressable
                             style={styles.actionButton}
                             onPress={() => beginEditDelegate(row)}
@@ -1078,64 +1655,10 @@ export function HouseholdHubScreen({
             </View>
 
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Contractors (Authorized)</Text>
+              <Text style={styles.cardTitle}>Authorized Accounts</Text>
               <Text style={styles.cardSub}>
-                Contractors are treated as authorized parties and can be used when assigning workers.
+                Authorized user access requests are reviewed by management before activation.
               </Text>
-              {!canManageWorkers ? (
-                <View style={styles.noticeBox}>
-                  <Text style={styles.noticeText}>
-                    Current account cannot manage contractors on this unit.
-                  </Text>
-                </View>
-              ) : null}
-            </View>
-
-            {canManageWorkers ? (
-              <View style={styles.card}>
-                <Text style={styles.formTitle}>Create Contractor</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Contractor company name"
-                  value={contractorName}
-                  onChangeText={setContractorName}
-                  editable={busyKey !== 'contractor-create'}
-                />
-                <Pressable
-                  style={[
-                    styles.primaryButton,
-                    busyKey === 'contractor-create' && styles.buttonDisabled,
-                  ]}
-                  disabled={busyKey === 'contractor-create'}
-                  onPress={() => void handleCreateContractor()}
-                >
-                  <Text style={styles.primaryButtonText}>
-                    {busyKey === 'contractor-create' ? 'Creating...' : 'Create Contractor'}
-                  </Text>
-                </Pressable>
-              </View>
-            ) : null}
-
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>Contractors</Text>
-              {contractorRows.length === 0 ? (
-                <Text style={styles.emptyText}>No contractors assigned for this unit.</Text>
-              ) : (
-                contractorRows.map((contractor) => (
-                  <View key={contractor.id} style={styles.simpleRow}>
-                    <View style={styles.simpleRowIcon}>
-                      <Ionicons name="business-outline" size={16} color={akColors.primary} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.simpleRowTitle}>{contractor.name}</Text>
-                      <Text style={styles.simpleRowSub}>
-                          {householdLabel(contractor.status ?? 'ACTIVE')}
-                        {contractor.createdAt ? ` • ${formatDateTime(contractor.createdAt)}` : ''}
-                      </Text>
-                    </View>
-                  </View>
-                ))
-              )}
             </View>
           </>
         ) : null}
@@ -1143,9 +1666,9 @@ export function HouseholdHubScreen({
         {hasUnit && !isLoading && section === 'staff' ? (
           <>
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Household Staff (Workers)</Text>
+              <Text style={styles.cardTitle}>Home Staff</Text>
               <Text style={styles.cardSub}>
-                Manage workers (nanny, cook, driver, etc.) linked to a contractor on the selected unit.
+                Submit home staff access requests (driver, nanny, servant, gardener) for admin approval.
               </Text>
               {!canManageWorkers ? (
                 <View style={styles.noticeBox}>
@@ -1155,125 +1678,161 @@ export function HouseholdHubScreen({
                 </View>
               ) : null}
             </View>
-
-            <View style={styles.card}>
-              <Text style={styles.formTitle}>Create Worker</Text>
-              <Text style={styles.fieldLabel}>Contractor</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.contractorChipsRow}>
-                {contractorRows.length === 0 ? (
-                  <View style={styles.inlinePillMuted}>
-                    <Text style={styles.inlinePillMutedText}>No contractors yet</Text>
-                  </View>
-                ) : (
-                  contractorRows.map((contractor) => {
-                    const active = workerForm.contractorId === contractor.id;
+            {canManageWorkers ? (
+              <View style={styles.card}>
+                <Text style={styles.formTitle}>New Home Staff Request</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Full name"
+                  value={homeStaffRequestForm.fullName}
+                  onChangeText={(v) => setHomeStaffRequestForm((p) => ({ ...p, fullName: v }))}
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Phone"
+                  value={homeStaffRequestForm.phone}
+                  onChangeText={(v) => setHomeStaffRequestForm((p) => ({ ...p, phone: v }))}
+                  keyboardType="phone-pad"
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="ID / Passport Number"
+                  value={homeStaffRequestForm.nationalIdOrPassport}
+                  onChangeText={(v) =>
+                    setHomeStaffRequestForm((p) => ({ ...p, nationalIdOrPassport: v }))
+                  }
+                />
+                <View style={styles.optionRow}>
+                  {(['DRIVER', 'NANNY', 'SERVANT', 'GARDENER', 'OTHER'] as const).map((type) => {
+                    const active = homeStaffRequestForm.staffType === type;
                     return (
                       <Pressable
-                        key={contractor.id}
-                        onPress={() =>
-                          setWorkerForm((prev) => ({ ...prev, contractorId: contractor.id }))
-                        }
-                        style={[styles.choiceChip, active && styles.choiceChipActive]}
+                        key={type}
+                        onPress={() => setHomeStaffRequestForm((p) => ({ ...p, staffType: type }))}
+                        style={[styles.choiceChip, active && styles.choiceChipActive, active && { borderColor: palette.primary, backgroundColor: palette.primarySoft8 }]}
                       >
-                        <Text
-                          style={[styles.choiceChipText, active && styles.choiceChipTextActive]}
-                        >
-                          {contractor.name}
+                        <Text style={[styles.choiceChipText, active && styles.choiceChipTextActive, active && { color: palette.primary }]}>
+                          {householdLabel(type)}
                         </Text>
                       </Pressable>
                     );
-                  })
-                )}
-              </ScrollView>
-
-              <TextInput
-                style={styles.input}
-                placeholder="Worker full name"
-                value={workerForm.fullName}
-                onChangeText={(v) => setWorkerForm((p) => ({ ...p, fullName: v }))}
-                editable={canManageWorkers && busyKey !== 'worker-create'}
-              />
-              <TextInput
-                style={styles.input}
-                placeholder="National ID"
-                value={workerForm.nationalId}
-                onChangeText={(v) => setWorkerForm((p) => ({ ...p, nationalId: v }))}
-                editable={canManageWorkers && busyKey !== 'worker-create'}
-              />
-              <TextInput
-                style={styles.input}
-                placeholder="Phone (optional)"
-                value={workerForm.phone}
-                onChangeText={(v) => setWorkerForm((p) => ({ ...p, phone: v }))}
-                editable={canManageWorkers && busyKey !== 'worker-create'}
-                keyboardType="phone-pad"
-              />
-              <TextInput
-                style={styles.input}
-                placeholder="Job type (e.g. Nanny / Cook)"
-                value={workerForm.jobType}
-                onChangeText={(v) => setWorkerForm((p) => ({ ...p, jobType: v }))}
-                editable={canManageWorkers && busyKey !== 'worker-create'}
-              />
-
-              <Pressable
-                style={[
-                  styles.primaryButton,
-                  (!canManageWorkers || busyKey === 'worker-create') && styles.buttonDisabled,
-                ]}
-                disabled={!canManageWorkers || busyKey === 'worker-create'}
-                onPress={() => void handleCreateWorker()}
-              >
-                <Text style={styles.primaryButtonText}>
-                  {busyKey === 'worker-create' ? 'Creating...' : 'Create Worker'}
-                </Text>
-              </Pressable>
-            </View>
+                  })}
+                </View>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Employment duration (e.g. 6 months)"
+                  value={homeStaffRequestForm.employmentDuration}
+                  onChangeText={(v) =>
+                    setHomeStaffRequestForm((p) => ({ ...p, employmentDuration: v }))
+                  }
+                />
+                <View style={styles.optionRow}>
+                  {[true, false].map((value) => {
+                    const active = homeStaffRequestForm.liveIn === value;
+                    return (
+                      <Pressable
+                        key={String(value)}
+                        onPress={() => setHomeStaffRequestForm((p) => ({ ...p, liveIn: value }))}
+                        style={[styles.choiceChip, active && styles.choiceChipActive, active && { borderColor: palette.primary, backgroundColor: palette.primarySoft8 }]}
+                      >
+                        <Text style={[styles.choiceChipText, active && styles.choiceChipTextActive, active && { color: palette.primary }]}>
+                          {value ? 'Live-in' : 'Non live-in'}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Access From (YYYY-MM-DD)"
+                  value={homeStaffRequestForm.accessFrom}
+                  onChangeText={(v) => setHomeStaffRequestForm((p) => ({ ...p, accessFrom: v }))}
+                  autoCapitalize="none"
+                />
+                <TextInput
+                  style={styles.input}
+                  placeholder="Access To (YYYY-MM-DD)"
+                  value={homeStaffRequestForm.accessTo}
+                  onChangeText={(v) => setHomeStaffRequestForm((p) => ({ ...p, accessTo: v }))}
+                  autoCapitalize="none"
+                />
+                <View style={styles.uploadRow}>
+                  <Pressable
+                    style={[styles.secondaryButton, busyKey === 'upload-staff-idOrPassportFileId' && styles.buttonDisabled]}
+                    onPress={() => void handleUploadHomeStaffFile('idOrPassportFileId', 'delegate-id')}
+                    disabled={busyKey === 'upload-staff-idOrPassportFileId'}
+                  >
+                    <Text style={styles.secondaryButtonText}>Upload ID/Passport File</Text>
+                  </Pressable>
+                  <Text style={styles.uploadIdText} numberOfLines={1}>
+                    {homeStaffRequestForm.idOrPassportFileId || 'No file uploaded'}
+                  </Text>
+                </View>
+                <View style={styles.uploadRow}>
+                  <Pressable
+                    style={[styles.secondaryButton, busyKey === 'upload-staff-personalPhotoFileId' && styles.buttonDisabled]}
+                    onPress={() => void handleUploadHomeStaffFile('personalPhotoFileId', 'profile-photo')}
+                    disabled={busyKey === 'upload-staff-personalPhotoFileId'}
+                  >
+                    <Text style={styles.secondaryButtonText}>Upload Personal Photo</Text>
+                  </Pressable>
+                  <Text style={styles.uploadIdText} numberOfLines={1}>
+                    {homeStaffRequestForm.personalPhotoFileId || 'Optional'}
+                  </Text>
+                </View>
+                <Pressable
+                  style={[styles.primaryButton, { backgroundColor: palette.primary }, busyKey === 'home-staff-request-create' && styles.buttonDisabled]}
+                  onPress={() => void handleCreateHomeStaffRequest()}
+                  disabled={busyKey === 'home-staff-request-create'}
+                >
+                  <Text style={styles.primaryButtonText}>
+                    {busyKey === 'home-staff-request-create' ? 'Submitting...' : 'Submit Home Staff Request'}
+                  </Text>
+                </Pressable>
+              </View>
+            ) : null}
 
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>Workers</Text>
-              {workerRows.length === 0 ? (
-                <Text style={styles.emptyText}>No workers found for this unit.</Text>
+              <Text style={styles.formTitle}>Home Staff Requests</Text>
+              {householdRequests.homeStaff.length === 0 ? (
+                <Text style={styles.emptyText}>No home staff requests for this unit.</Text>
               ) : (
-                workerRows.map((worker) => {
-                  const workerName = worker.accessProfile?.fullName || worker.id;
-                  return (
-                    <View key={worker.id} style={styles.rowCard}>
-                      <View style={styles.rowHeader}>
-                        <Text style={styles.rowTitle}>{workerName}</Text>
-                        <View style={styles.statusPill}>
-                          <Text style={styles.statusPillText}>{worker.status ?? 'ACTIVE'}</Text>
-                        </View>
-                      </View>
-                      <Text style={styles.rowSub}>
-                        {worker.jobType || 'Worker'}
-                        {worker.contractor?.name ? ` • ${worker.contractor.name}` : ''}
-                      </Text>
-                      <Text style={styles.rowSub}>
-                        {worker.accessProfile?.nationalId || 'No National ID'}
-                        {worker.accessProfile?.phone ? ` • ${worker.accessProfile.phone}` : ''}
-                      </Text>
-                      <View style={styles.rowActions}>
-                        <Pressable
-                          disabled={!canGenerateWorkerQr || busyKey === `worker-qr-${worker.id}`}
-                          style={[
-                            styles.actionButtonPrimary,
-                            (!canGenerateWorkerQr || busyKey === `worker-qr-${worker.id}`) &&
-                              styles.buttonDisabled,
-                          ]}
-                          onPress={() => void handleGenerateWorkerQr(worker.id, worker.accessProfile?.fullName)}
-                        >
-                          <MaterialCommunityIcons name="qrcode" size={14} color="#fff" />
-                          <Text style={styles.actionButtonPrimaryText}>
-                            {busyKey === `worker-qr-${worker.id}` ? 'Generating...' : 'Generate QR'}
-                          </Text>
-                        </Pressable>
+                householdRequests.homeStaff.map((row: HomeStaffAccessRow) => (
+                  <View key={row.id} style={styles.rowCard}>
+                    <View style={styles.rowHeader}>
+                      <Text style={styles.rowTitle}>{row.fullName}</Text>
+                      <View style={styles.statusPill}>
+                        <Text style={styles.statusPillText}>{householdLabel(row.status)}</Text>
                       </View>
                     </View>
-                  );
-                })
+                    <Text style={styles.rowSub}>
+                      {householdLabel(row.staffType || 'OTHER')} • {row.isLiveIn ? 'Live-in' : 'Non live-in'}
+                    </Text>
+                    <Text style={styles.rowSub}>
+                      {row.phone || '—'} • {row.accessValidFrom ? formatDateTime(row.accessValidFrom) : '—'} → {row.accessValidTo ? formatDateTime(row.accessValidTo) : '—'}
+                    </Text>
+                    {row.rejectionReason ? (
+                      <Text style={styles.errorText}>Rejection: {row.rejectionReason}</Text>
+                    ) : null}
+                  </View>
+                ))
               )}
             </View>
+
+            {showLegacyWorkerTools ? (
+              <>
+                <View style={styles.card}>
+                  <Text style={styles.formTitle}>Create Worker</Text>
+                  <Text style={styles.cardSub}>
+                    Home staff records are linked internally after admin review.
+                  </Text>
+                </View>
+                <View style={styles.card}>
+                  <Text style={styles.cardTitle}>Workers</Text>
+                  <Text style={styles.emptyText}>Worker tools are disabled in this mode.</Text>
+                </View>
+              </>
+            ) : null}
           </>
         ) : null}
       </ScrollView>
@@ -1623,3 +2182,5 @@ const styles = StyleSheet.create({
     fontSize: 10,
   },
 });
+
+

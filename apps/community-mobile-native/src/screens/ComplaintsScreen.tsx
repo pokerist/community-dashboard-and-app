@@ -16,8 +16,6 @@ import { useAppToast } from '../components/mobile/AppToast';
 import { InlineError, ScreenCard } from '../components/mobile/Primitives';
 import { UnitPicker } from '../components/mobile/UnitPicker';
 import type { AuthSession } from '../features/auth/types';
-import { pickAndUploadServiceAttachment } from '../features/files/service';
-import type { UploadedAttachment } from '../features/files/service';
 import {
   addComplaintComment,
   createComplaint,
@@ -26,11 +24,10 @@ import {
   listMyComplaints,
 } from '../features/community/service';
 import type { ComplaintCommentRow, ComplaintRow, ResidentUnit } from '../features/community/types';
+import { useBranding } from '../features/branding/provider';
+import { getBrandPalette } from '../features/branding/palette';
 import { extractApiErrorMessage } from '../lib/http';
-import {
-  complaintStatusDisplayLabel,
-  priorityDisplayLabel,
-} from '../features/presentation/status';
+import { complaintStatusDisplayLabel } from '../features/presentation/status';
 import { akColors, akShadow } from '../theme/alkarma';
 import { formatDateTime } from '../utils/format';
 
@@ -48,10 +45,10 @@ type ComplaintsScreenProps = {
   onConsumeDeepLinkComplaintId?: (complaintId: string) => void;
 };
 
-const PRIORITY_OPTIONS = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] as const;
-type PriorityOption = (typeof PRIORITY_OPTIONS)[number];
-
-function statusBadge(status?: string | null) {
+function statusBadge(
+  status: string | null | undefined,
+  palette: ReturnType<typeof getBrandPalette>,
+) {
   const normalized = String(status ?? '').toUpperCase();
   switch (normalized) {
     case 'RESOLVED':
@@ -64,7 +61,7 @@ function statusBadge(status?: string | null) {
       return { bg: 'rgba(245,158,11,0.10)', text: '#D97706' };
     case 'SUBMITTED':
     case 'NEW':
-      return { bg: 'rgba(42,62,53,0.10)', text: akColors.primary };
+      return { bg: palette.primarySoft10, text: palette.primary };
     default:
       return { bg: 'rgba(100,116,139,0.10)', text: akColors.textMuted };
   }
@@ -88,12 +85,12 @@ export function ComplaintsScreen({
   onConsumeDeepLinkComplaintId,
 }: ComplaintsScreenProps) {
   const insets = useSafeAreaInsets();
+  const { brand } = useBranding();
+  const palette = getBrandPalette(brand);
   const toast = useAppToast();
   const [rows, setRows] = useState<ComplaintRow[]>([]);
-  const [category, setCategory] = useState('General');
+  const [team, setTeam] = useState('General');
   const [description, setDescription] = useState('');
-  const [priority, setPriority] = useState<PriorityOption>('MEDIUM');
-  const [attachments, setAttachments] = useState<UploadedAttachment[]>([]);
   const [showComposer, setShowComposer] = useState(false);
   const [subject, setSubject] = useState('');
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -102,7 +99,6 @@ export function ComplaintsScreen({
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [selectedComplaint, setSelectedComplaint] = useState<ComplaintRow | null>(null);
   const [complaintComments, setComplaintComments] = useState<ComplaintCommentRow[]>([]);
@@ -189,18 +185,15 @@ export function ComplaintsScreen({
     try {
       await createComplaint(session.accessToken, {
         unitId: selectedUnitId ?? undefined,
-        category: category.trim() || 'General',
-        description: [subject.trim(), description.trim()].filter(Boolean).join('\n\n'),
-        priority,
-        attachmentIds: attachments.map((a) => a.id),
+        title: subject.trim() || 'Complaint',
+        body: description.trim(),
+        team: team.trim() || 'General',
       });
       setSuccessMessage('Complaint submitted successfully.');
       toast.success('Complaint submitted', 'Your complaint was submitted successfully.');
       setSubject('');
       setDescription('');
-      setCategory('General');
-      setPriority('MEDIUM');
-      setAttachments([]);
+      setTeam('General');
       setShowComposer(false);
       await loadData('refresh');
     } catch (error) {
@@ -210,28 +203,7 @@ export function ComplaintsScreen({
     } finally {
       setIsSubmitting(false);
     }
-  }, [attachments, category, description, loadData, priority, selectedUnitId, session.accessToken, subject, toast]);
-
-  const uploadAttachment = useCallback(async () => {
-    setIsUploadingAttachment(true);
-    setSubmitError(null);
-    try {
-      const uploaded = await pickAndUploadServiceAttachment(session.accessToken);
-      if (!uploaded) return;
-      setAttachments((prev) => [...prev, uploaded]);
-      toast.success('Attachment uploaded');
-    } catch (error) {
-      const msg = extractApiErrorMessage(error);
-      setSubmitError(msg);
-      toast.error('Attachment upload failed', msg);
-    } finally {
-      setIsUploadingAttachment(false);
-    }
-  }, [session.accessToken, toast]);
-
-  const removeAttachment = useCallback((fileId: string) => {
-    setAttachments((prev) => prev.filter((a) => a.id !== fileId));
-  }, []);
+  }, [description, loadData, selectedUnitId, session.accessToken, subject, team, toast]);
 
   const handleDelete = useCallback(
     async (id: string) => {
@@ -307,7 +279,7 @@ export function ComplaintsScreen({
           />
           <InlineError message={unitsErrorMessage} />
           <InlineError message={loadError} />
-          {unitsLoading ? <ActivityIndicator color={akColors.primary} /> : null}
+          {unitsLoading ? <ActivityIndicator color={palette.primary} /> : null}
           {selectedUnit ? (
             <Text style={styles.helperText}>Showing complaints for unit {selectedUnit.unitNumber ?? selectedUnit.id}</Text>
           ) : (
@@ -317,11 +289,11 @@ export function ComplaintsScreen({
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>My Complaints</Text>
-          <Text style={styles.sectionCount}>{filteredRows.length}</Text>
+          <Text style={[styles.sectionCount, { color: palette.primary }]}>{filteredRows.length}</Text>
         </View>
 
         {isLoading ? (
-          <View style={styles.loadingCard}><ActivityIndicator color={akColors.primary} /></View>
+          <View style={styles.loadingCard}><ActivityIndicator color={palette.primary} /></View>
         ) : null}
 
         {!isLoading && filteredRows.length === 0 ? (
@@ -334,7 +306,7 @@ export function ComplaintsScreen({
 
         {filteredRows.map((row) => {
           const canDelete = !['RESOLVED', 'CLOSED'].includes(String(row.status).toUpperCase());
-          const badge = statusBadge(row.status);
+          const badge = statusBadge(row.status, palette);
           const subjectLine = (row.description ?? '').split('\n')[0] || row.complaintNumber || 'Complaint';
           const detailLine = (row.description ?? '').split('\n').slice(1).join(' ').trim() || row.description || 'No details';
           const isResolved = ['RESOLVED', 'CLOSED'].includes(String(row.status).toUpperCase());
@@ -348,7 +320,9 @@ export function ComplaintsScreen({
               <View style={styles.complaintTop}>
                 <View style={styles.flex}>
                   <View style={styles.complaintHeaderRow}>
-                    <Text style={styles.complaintNumber}>{row.complaintNumber ?? row.id}</Text>
+                    <Text style={[styles.complaintNumber, { color: palette.primary }]}>
+                      {row.complaintNumber ?? row.id}
+                    </Text>
                     <View style={[styles.badge, { backgroundColor: badge.bg }]}>
                       <Text style={[styles.badgeText, { color: badge.text }]}>{statusLabel(row.status)}</Text>
                     </View>
@@ -356,7 +330,7 @@ export function ComplaintsScreen({
                   <Text style={styles.complaintSubject}>{subjectLine}</Text>
                   <Text style={styles.complaintDesc} numberOfLines={3}>{detailLine}</Text>
                   <Text style={styles.complaintMeta}>
-                    {row.category ?? 'General'} • {row.priority ?? 'MEDIUM'} • {formatDateTime(row.createdAt)}
+                    {(row.team ?? row.category ?? 'General')} • {formatDateTime(row.createdAt)}
                   </Text>
                   <Text style={styles.complaintMeta}>Unit: {row.unit?.unitNumber ?? '—'}{row.assignedTo?.nameEN ? ` • Assigned: ${row.assignedTo.nameEN}` : ''}</Text>
                 </View>
@@ -394,7 +368,7 @@ export function ComplaintsScreen({
       </ScrollView>
 
       <Pressable onPress={() => { setSubmitError(null); setShowComposer(true); }} style={styles.fab}>
-        <LinearGradient colors={[akColors.primary, akColors.primaryDark]} style={styles.fabInner}>
+        <LinearGradient colors={[palette.primary, palette.primaryDark]} style={styles.fabInner}>
           <Ionicons name="add" size={26} color="#fff" />
         </LinearGradient>
       </Pressable>
@@ -417,28 +391,16 @@ export function ComplaintsScreen({
             <ScrollView contentContainerStyle={styles.modalContent} keyboardShouldPersistTaps="handled">
               {/* submit/delete feedback is shown as toasts */}
 
-              <Text style={styles.fieldLabel}>Complaint Type</Text>
+              <Text style={styles.fieldLabel}>Team</Text>
               <View style={styles.inputShell}>
                 <Ionicons name="list-outline" size={18} color={akColors.textMuted} />
-                <TextInput value={category} onChangeText={setCategory} style={styles.input} placeholder="Noise / Security / Maintenance" placeholderTextColor={akColors.textSoft} />
+                <TextInput value={team} onChangeText={setTeam} style={styles.input} placeholder="Security / Maintenance / Operations" placeholderTextColor={akColors.textSoft} />
               </View>
 
               <Text style={styles.fieldLabel}>Subject</Text>
               <View style={styles.inputShell}>
                 <Ionicons name="document-text-outline" size={18} color={akColors.textMuted} />
                 <TextInput value={subject} onChangeText={setSubject} style={styles.input} placeholder="e.g., Broken elevator" placeholderTextColor={akColors.textSoft} />
-              </View>
-
-              <Text style={styles.fieldLabel}>Priority</Text>
-              <View style={styles.priorityRow}>
-                {PRIORITY_OPTIONS.map((value) => {
-                  const active = priority === value;
-                  return (
-                    <Pressable key={value} onPress={() => setPriority(value)} style={[styles.priorityChip, active && styles.priorityChipActive]}>
-                      <Text style={[styles.priorityChipText, active && styles.priorityChipTextActive]}>{value}</Text>
-                    </Pressable>
-                  );
-                })}
               </View>
 
               <Text style={styles.fieldLabel}>Description</Text>
@@ -455,38 +417,16 @@ export function ComplaintsScreen({
                 />
               </View>
 
-              <Text style={styles.fieldLabel}>Attach Photos (Optional)</Text>
-              <Pressable onPress={() => void uploadAttachment()} disabled={isUploadingAttachment} style={[styles.uploadBox, isUploadingAttachment && styles.buttonDisabled]}>
-                <Ionicons name="cloud-upload-outline" size={24} color={akColors.textMuted} />
-                <Text style={styles.uploadTitle}>{isUploadingAttachment ? 'Uploading...' : 'Click to upload photos'}</Text>
-                <Text style={styles.uploadSub}>{attachments.length > 0 ? `${attachments.length} file(s) uploaded` : 'PNG/JPG/PDF supported'}</Text>
-              </Pressable>
-
-              {attachments.length > 0 ? (
-                <View style={styles.attachmentsList}>
-                  {attachments.map((file) => (
-                    <View key={file.id} style={styles.attachmentItem}>
-                      <View style={styles.attachmentMain}>
-                        <Ionicons name="document-outline" size={14} color={akColors.textMuted} />
-                        <View style={styles.flex}>
-                          <Text style={styles.attachmentName} numberOfLines={1}>{file.name}</Text>
-                          <Text style={styles.attachmentMeta}>{file.id}</Text>
-                        </View>
-                      </View>
-                      <Pressable onPress={() => removeAttachment(file.id)}>
-                        <Text style={styles.removeText}>Remove</Text>
-                      </Pressable>
-                    </View>
-                  ))}
-                </View>
-              ) : null}
+              <Text style={styles.helperText}>
+                Management will review your complaint, assign it to the selected team, and update you here.
+              </Text>
 
               <View style={styles.modalActions}>
                 <Pressable onPress={() => setShowComposer(false)} style={styles.cancelButton}>
                   <Text style={styles.cancelButtonText}>Cancel</Text>
                 </Pressable>
                 <Pressable onPress={() => void submitComplaint()} disabled={isSubmitting} style={[styles.submitButton, isSubmitting && styles.buttonDisabled]}>
-                  <LinearGradient colors={[akColors.primary, akColors.primaryDark]} style={styles.submitButtonInner}>
+                  <LinearGradient colors={[palette.primary, palette.primaryDark]} style={styles.submitButtonInner}>
                     {isSubmitting ? <ActivityIndicator size="small" color="#fff" /> : null}
                     <Text style={styles.submitButtonText}>{isSubmitting ? 'Submitting...' : 'Submit'}</Text>
                   </LinearGradient>
@@ -524,7 +464,7 @@ export function ComplaintsScreen({
                     <View style={styles.detailSummaryTop}>
                       <View style={styles.flex}>
                         <Text style={styles.detailSummaryTitle}>
-                          {selectedComplaint.category ?? 'General Complaint'}
+                          {selectedComplaint.title ?? selectedComplaint.team ?? selectedComplaint.category ?? 'General Complaint'}
                         </Text>
                         <Text style={styles.detailSummarySub}>
                           {selectedComplaint.complaintNumber ?? selectedComplaint.id}
@@ -533,13 +473,13 @@ export function ComplaintsScreen({
                       <View
                         style={[
                           styles.detailStatusPill,
-                          { backgroundColor: statusBadge(selectedComplaint.status).bg },
+                          { backgroundColor: statusBadge(selectedComplaint.status, palette).bg },
                         ]}
                       >
                         <Text
                           style={[
                             styles.detailStatusPillText,
-                            { color: statusBadge(selectedComplaint.status).text },
+                            { color: statusBadge(selectedComplaint.status, palette).text },
                           ]}
                         >
                           {statusLabel(selectedComplaint.status)}
@@ -548,9 +488,9 @@ export function ComplaintsScreen({
                     </View>
                     <View style={styles.detailMiniChips}>
                       <View style={styles.detailMiniChip}>
-                        <Ionicons name="flag-outline" size={12} color={akColors.textMuted} />
+                        <Ionicons name="layers-outline" size={12} color={akColors.textMuted} />
                         <Text style={styles.detailMiniChipText}>
-                          {complaintPriorityLabel(selectedComplaint.priority)}
+                          {selectedComplaint.team ?? selectedComplaint.category ?? 'General'}
                         </Text>
                       </View>
                       {selectedComplaint.unit?.unitNumber ? (
@@ -565,8 +505,7 @@ export function ComplaintsScreen({
                   </View>
                   <DetailRow label="Complaint #" value={selectedComplaint.complaintNumber ?? selectedComplaint.id} />
                   <DetailRow label="Status" value={statusLabel(selectedComplaint.status)} />
-                  <DetailRow label="Category" value={selectedComplaint.category ?? 'General'} />
-                  <DetailRow label="Priority" value={complaintPriorityLabel(selectedComplaint.priority)} />
+                  <DetailRow label="Team" value={selectedComplaint.team ?? selectedComplaint.category ?? 'General'} />
                   <DetailRow label="Created" value={formatDateTime(selectedComplaint.createdAt)} />
                   <DetailRow
                     label="Unit"
@@ -579,7 +518,13 @@ export function ComplaintsScreen({
                     <Text style={styles.detailBlockCardLabel}>Timeline</Text>
                     {complaintTimelineRows(selectedComplaint).map((line, idx) => (
                       <View key={`${selectedComplaint.id}-tl-${idx}`} style={styles.detailTimelineRow}>
-                        <View style={[styles.detailTimelineDot, idx === 0 ? styles.detailTimelineDotActive : null]} />
+                        <View
+                          style={[
+                            styles.detailTimelineDot,
+                            idx === 0 ? styles.detailTimelineDotActive : null,
+                            idx === 0 ? { backgroundColor: palette.primary } : null,
+                          ]}
+                        />
                         <Text style={styles.detailTimelineText}>{line}</Text>
                       </View>
                     ))}
@@ -593,11 +538,13 @@ export function ComplaintsScreen({
                   <View style={styles.detailBlockCard}>
                     <View style={styles.detailSectionHeader}>
                       <Text style={styles.detailBlockCardLabel}>Conversation</Text>
-                      <Text style={styles.detailSectionHint}>{complaintComments.length}</Text>
+                      <Text style={[styles.detailSectionHint, { color: palette.primary }]}>
+                        {complaintComments.length}
+                      </Text>
                     </View>
                     {commentsLoading ? (
                       <View style={styles.detailInlineLoading}>
-                        <ActivityIndicator size="small" color={akColors.primary} />
+                        <ActivityIndicator size="small" color={palette.primary} />
                         <Text style={styles.detailInlineLoadingText}>Loading comments...</Text>
                       </View>
                     ) : null}
@@ -609,7 +556,18 @@ export function ComplaintsScreen({
                       return (
                         <View
                           key={comment.id}
-                          style={[styles.commentBubble, isMine ? styles.commentBubbleMine : styles.commentBubbleOther]}
+                          style={[
+                            styles.commentBubble,
+                            isMine
+                              ? [
+                                  styles.commentBubbleMine,
+                                  {
+                                    borderColor: palette.primarySoft18,
+                                    backgroundColor: palette.primarySoft8,
+                                  },
+                                ]
+                              : styles.commentBubbleOther,
+                          ]}
                         >
                           <Text style={styles.commentAuthorText}>
                             {commentAuthorLabel(comment, isMine)}
@@ -631,7 +589,11 @@ export function ComplaintsScreen({
                       <Pressable
                         onPress={() => void handleAddComment()}
                         disabled={postingComment}
-                        style={[styles.commentComposerBtn, postingComment && styles.buttonDisabled]}
+                        style={[
+                          styles.commentComposerBtn,
+                          { backgroundColor: palette.primary },
+                          postingComment && styles.buttonDisabled,
+                        ]}
                       >
                         <Text style={styles.commentComposerBtnText}>
                           {postingComment ? 'Sending...' : 'Send'}
@@ -674,10 +636,6 @@ function DetailRow({ label, value }: { label: string; value: string }) {
       <Text style={styles.detailRowValue}>{value}</Text>
     </View>
   );
-}
-
-function complaintPriorityLabel(priority?: string | null) {
-  return priorityDisplayLabel(priority);
 }
 
 function complaintTimelineRows(complaint: ComplaintRow): string[] {

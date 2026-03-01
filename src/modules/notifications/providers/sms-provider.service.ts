@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { IntegrationConfigService } from '../../system-settings/integration-config.service';
 
 type SendSmsInput = {
   to: string;
@@ -8,6 +9,9 @@ type SendSmsInput = {
 @Injectable()
 export class SmsProviderService {
   private readonly logger = new Logger(SmsProviderService.name);
+  constructor(
+    private readonly integrationConfigService: IntegrationConfigService,
+  ) {}
 
   private get config() {
     return {
@@ -36,8 +40,17 @@ export class SmsProviderService {
   }
 
   async sendSms(input: SendSmsInput): Promise<Record<string, unknown>> {
-    const cfg = this.config;
-    const useMock = cfg.mockMode || !this.isConfigured();
+    const runtime = await this.integrationConfigService.getResolvedIntegrations();
+    const cfg = {
+      sid: runtime.smsOtp.accountSid,
+      token: runtime.smsOtp.authToken,
+      from: runtime.smsOtp.fromNumber,
+      enabled: runtime.smsOtp.enabled,
+      configured: runtime.smsOtp.configured,
+      mockMode:
+        (process.env.TWILIO_MOCK_MODE ?? '').trim().toLowerCase() === 'true',
+    };
+    const useMock = cfg.mockMode || !cfg.enabled || !cfg.configured;
 
     if (useMock) {
       this.logger.log(`[TWILIO:MOCK] SMS to ${input.to}`);
@@ -91,4 +104,3 @@ export class SmsProviderService {
     };
   }
 }
-

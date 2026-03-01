@@ -25,6 +25,8 @@ type AuthHttpHandlers = {
 let authHttpHandlers: AuthHttpHandlers | null = null;
 let inFlightRefresh: Promise<AuthHttpSessionSnapshot> | null = null;
 let sessionExpiryHandledAt = 0;
+let consecutiveRefreshFailures = 0;
+let lastRefreshFailureAt = 0;
 
 function setHeaderAuth(config: any, accessToken: string) {
   config.headers = config.headers ?? {};
@@ -36,6 +38,21 @@ async function handleSessionExpired(message: string) {
   if (now - sessionExpiryHandledAt < 1500) return;
   sessionExpiryHandledAt = now;
   await authHttpHandlers?.onSessionExpired?.(message);
+}
+
+function markRefreshFailureAndShouldExpire(): boolean {
+  const now = Date.now();
+  if (now - lastRefreshFailureAt > 90_000) {
+    consecutiveRefreshFailures = 0;
+  }
+  lastRefreshFailureAt = now;
+  consecutiveRefreshFailures += 1;
+  return consecutiveRefreshFailures >= 3;
+}
+
+function resetRefreshFailureState() {
+  consecutiveRefreshFailures = 0;
+  lastRefreshFailureAt = 0;
 }
 
 export function configureHttpAuthHandlers(handlers: AuthHttpHandlers | null) {
@@ -99,14 +116,19 @@ http.interceptors.response.use(
 
       const refreshed = await inFlightRefresh;
       if (!refreshed?.accessToken) {
-        await handleSessionExpired('Session expired. Please sign in again.');
+        if (markRefreshFailureAndShouldExpire()) {
+          await handleSessionExpired('Session expired. Please sign in again.');
+        }
         return Promise.reject(error);
       }
 
+      resetRefreshFailureState();
       setHeaderAuth(original, refreshed.accessToken);
       return http.request(original);
     } catch (refreshError) {
-      await handleSessionExpired('Session expired. Please sign in again.');
+      if (markRefreshFailureAndShouldExpire()) {
+        await handleSessionExpired('Session expired. Please sign in again.');
+      }
       return Promise.reject(refreshError);
     }
   },

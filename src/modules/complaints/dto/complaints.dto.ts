@@ -39,12 +39,34 @@ export class CreateComplaintDto {
   description!: string;
 
   @ApiProperty({
-    example: 'Noise',
-    description: 'The category of the complaint.',
+    example: 'Noise complaint',
+    description: 'Short complaint title shown in lists.',
+    required: false,
   })
   @IsString()
-  @IsNotEmpty()
-  category!: string;
+  @IsOptional()
+  @MaxLength(160)
+  title?: string;
+
+  @ApiProperty({
+    example: 'Security',
+    description: 'Team label for assignment/routing.',
+    required: false,
+  })
+  @IsString()
+  @IsOptional()
+  @MaxLength(80)
+  team?: string;
+
+  @ApiProperty({
+    example: 'Noise',
+    description: 'The category of the complaint.',
+    required: false,
+  })
+  @IsString()
+  @IsOptional()
+  @MaxLength(120)
+  category?: string;
 
   @ApiProperty({
     example: Priority.MEDIUM,

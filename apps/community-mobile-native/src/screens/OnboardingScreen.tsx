@@ -14,6 +14,7 @@ import {
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
 import { useBranding } from '../features/branding/provider';
+import type { OnboardingSlide } from '../features/branding/types';
 import { akColors, akShadow } from '../theme/alkarma';
 
 const logoImage = require('../../assets/branding/alkarma-logo.png');
@@ -26,7 +27,7 @@ type Slide = {
   title: string;
   subtitle: string;
   description: string;
-  image: string;
+  imageUrl: string;
 };
 
 const slides: Slide[] = [
@@ -35,7 +36,7 @@ const slides: Slide[] = [
     subtitle: 'SMART LIVING',
     description:
       'Experience luxury living with cutting-edge smart home technology and world-class amenities across our premium developments.',
-    image:
+    imageUrl:
       'https://images.unsplash.com/photo-1560613654-ea1945efc370?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080',
   },
   {
@@ -43,7 +44,7 @@ const slides: Slide[] = [
     subtitle: 'KARMA • KARMA GATES • KAY',
     description:
       'Access all your properties in one place. Manage services, payments, and security across your Al Karma developments.',
-    image:
+    imageUrl:
       'https://images.unsplash.com/photo-1643892605308-70a6559cfd0a?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080',
   },
   {
@@ -51,7 +52,7 @@ const slides: Slide[] = [
     subtitle: 'YOUR SAFETY, OUR PRIORITY',
     description:
       'Generate QR codes for visitors, track deliveries, manage complaints, and stay connected with the smart community system.',
-    image:
+    imageUrl:
       'https://images.unsplash.com/photo-1633194883650-df448a10d554?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080',
   },
 ];
@@ -61,13 +62,36 @@ const bgImage =
 
 export function OnboardingScreen({ onComplete }: OnboardingScreenProps) {
   const insets = useSafeAreaInsets();
-  const { brand } = useBranding();
+  const { brand, onboarding } = useBranding();
   const [index, setIndex] = useState(0);
+  const configuredSlides = useMemo(() => {
+    const source =
+      onboarding?.enabled !== false && Array.isArray(onboarding.slides) && onboarding.slides.length > 0
+        ? onboarding.slides
+        : slides;
+    return source
+      .map((slide) => {
+        const imageUrl =
+          (slide as OnboardingSlide)?.imageUrl ??
+          (slide as Slide).imageUrl ??
+          '';
+        const title = String((slide as OnboardingSlide)?.title ?? (slide as Slide).title ?? '').trim();
+        if (!title || !imageUrl) return null;
+        return {
+          title,
+          subtitle: String((slide as OnboardingSlide)?.subtitle ?? (slide as Slide).subtitle ?? '').trim(),
+          description: String((slide as OnboardingSlide)?.description ?? (slide as Slide).description ?? '').trim(),
+          imageUrl,
+        } satisfies Slide;
+      })
+      .filter((slide): slide is Slide => Boolean(slide));
+  }, [onboarding]);
   const runtimeSlides = useMemo(() => {
     const company = brand.companyName || 'Al Karma';
     const appName = brand.appDisplayName || 'Community App';
     const tagline = (brand.tagline || 'SMART LIVING').toUpperCase();
-    return slides.map((s, i) =>
+    const sourceSlides = configuredSlides.length > 0 ? configuredSlides : slides;
+    return sourceSlides.map((s, i) =>
       i === 0
         ? {
             ...s,
@@ -78,7 +102,7 @@ export function OnboardingScreen({ onComplete }: OnboardingScreenProps) {
           }
         : s,
     );
-  }, [brand.appDisplayName, brand.companyName, brand.tagline]);
+  }, [brand.appDisplayName, brand.companyName, brand.tagline, configuredSlides]);
   const slide = runtimeSlides[index];
   const brandPrimary = brand.primaryColor || akColors.primary;
   const brandAccent = brand.accentColor || akColors.gold;
@@ -133,7 +157,7 @@ export function OnboardingScreen({ onComplete }: OnboardingScreenProps) {
             <Image source={logoSource} style={styles.logo} resizeMode="contain" />
 
             <View style={styles.slideImageWrap}>
-              <Image source={{ uri: slide.image }} style={styles.slideImage} resizeMode="cover" />
+              <Image source={{ uri: slide.imageUrl }} style={styles.slideImage} resizeMode="cover" />
             </View>
 
             <Text style={styles.title}>{slide.title}</Text>

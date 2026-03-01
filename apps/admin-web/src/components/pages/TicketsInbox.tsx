@@ -17,7 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Tabs, TabsList, TabsTrigger } from "../ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { toast } from "sonner";
-import { Eye, RefreshCw, Search, Send } from "lucide-react";
+import { AlertTriangle, Eye, RefreshCw, Search, Send } from "lucide-react";
 import apiClient from "../../lib/api-client";
 import { errorMessage, extractRows, formatDateTime, getPriorityColorClass, getStatusColorClass, humanizeEnum } from "../../lib/live-data";
 import { adminPriorityLabel, adminTicketStatusLabel } from "../../lib/status-labels";
@@ -48,6 +48,7 @@ export function TicketsInbox() {
   const [residentFilter, setResidentFilter] = useState<string>("all");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [urgentOnly, setUrgentOnly] = useState(false);
   const [serviceRows, setServiceRows] = useState<any[]>([]);
   const [complaintRows, setComplaintRows] = useState<any[]>([]);
   const [units, setUnits] = useState<Array<{ id: string; label: string }>>([]);
@@ -109,6 +110,7 @@ export function TicketsInbox() {
         priority: r.priority || "MEDIUM",
         updatedAt: r.updatedAt || r.requestedAt,
         createdAt: r.requestedAt || r.updatedAt,
+        isUrgent: Boolean(r?.service?.isUrgent) || String(r?.priority || "").toUpperCase() === "CRITICAL",
         residentId: r?.createdBy?.id || "",
         residentName: r?.createdBy?.nameEN || r?.createdBy?.email || "—",
         residentSub: r?.createdBy?.email || r?.createdBy?.phone || "—",
@@ -121,7 +123,10 @@ export function TicketsInbox() {
       key: `COMPLAINT:${c.id}`,
       id: c.id,
       kind: "COMPLAINT",
-      title: c?.category ? `${humanizeEnum(c.category)} Complaint` : "Complaint",
+      title:
+        String(c?.title || "").trim() ||
+        (c?.category ? `${humanizeEnum(c.category)} Complaint` : "Complaint"),
+      team: String(c?.team || "").trim() || null,
       status: String(c.status || "NEW").toUpperCase(),
       priority: c.priority || "MEDIUM",
       updatedAt: c.updatedAt || c.createdAt,
@@ -146,6 +151,7 @@ export function TicketsInbox() {
       services: rows.filter((r) => r.kind === "SERVICE").length,
       requests: rows.filter((r) => r.kind === "REQUEST").length,
       complaints: rows.filter((r) => r.kind === "COMPLAINT").length,
+      urgent: rows.filter((r) => (r.kind === "SERVICE" || r.kind === "REQUEST") && r.isUrgent).length,
     }),
     [rows],
   );
@@ -161,11 +167,15 @@ export function TicketsInbox() {
       if (statusFilter !== "all" && r.status !== statusFilter) return false;
       if (unitFilter !== "all" && String(r.unitId || "") !== unitFilter) return false;
       if (residentFilter !== "all" && String(r.residentId || "") !== residentFilter) return false;
+      if (urgentOnly) {
+        if (r.kind !== "SERVICE" && r.kind !== "REQUEST") return false;
+        if (!r.isUrgent) return false;
+      }
       const ts = r.updatedAt ? new Date(r.updatedAt).getTime() : 0;
       if (fromTs != null && ts < fromTs) return false;
       if (toTs != null && ts > toTs) return false;
       if (q) {
-        const blob = [r.id, r.title, r.kind, r.status, r.priority, r.residentName, r.residentSub, r.unitLabel]
+        const blob = [r.id, r.title, r.team, r.kind, r.status, r.priority, r.residentName, r.residentSub, r.unitLabel]
           .filter(Boolean)
           .join(" ")
           .toLowerCase();
@@ -173,7 +183,7 @@ export function TicketsInbox() {
       }
       return true;
     });
-  }, [rows, search, tab, statusFilter, unitFilter, residentFilter, fromDate, toDate]);
+  }, [rows, search, tab, statusFilter, unitFilter, residentFilter, fromDate, toDate, urgentOnly]);
 
   const loadTicketDetail = useCallback(async (row: any) => {
     const base = {
@@ -329,11 +339,18 @@ export function TicketsInbox() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
         <Card className="p-4 shadow-card rounded-xl"><p className="text-xs text-[#64748B]">All Tickets</p><p className="text-xl font-semibold text-[#1E293B] mt-1">{counts.all}</p></Card>
         <Card className="p-4 shadow-card rounded-xl"><p className="text-xs text-[#64748B]">Services</p><p className="text-xl font-semibold text-[#1E293B] mt-1">{counts.services}</p></Card>
         <Card className="p-4 shadow-card rounded-xl"><p className="text-xs text-[#64748B]">Requests</p><p className="text-xl font-semibold text-[#1E293B] mt-1">{counts.requests}</p></Card>
         <Card className="p-4 shadow-card rounded-xl"><p className="text-xs text-[#64748B]">Complaints</p><p className="text-xl font-semibold text-[#1E293B] mt-1">{counts.complaints}</p></Card>
+        <Card className="p-4 shadow-card rounded-xl border border-[#FECACA]">
+          <div className="flex items-center gap-2 text-[#B91C1C]">
+            <AlertTriangle className="w-4 h-4" />
+            <p className="text-xs">Urgent Lane</p>
+          </div>
+          <p className="text-xl font-semibold text-[#1E293B] mt-1">{counts.urgent}</p>
+        </Card>
       </div>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as TicketTab)} className="w-full">
@@ -365,6 +382,12 @@ export function TicketsInbox() {
           </Select>
           <Input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="rounded-lg" />
           <Input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="rounded-lg" />
+          <div className="xl:col-span-6 flex items-center justify-end gap-2 pt-1">
+            <Label htmlFor="ticketsUrgentOnly" className="text-xs text-[#475569]">
+              Urgent only
+            </Label>
+            <Switch id="ticketsUrgentOnly" checked={urgentOnly} onCheckedChange={setUrgentOnly} />
+          </div>
         </div>
 
         <Table>
@@ -383,8 +406,25 @@ export function TicketsInbox() {
           <TableBody>
             {filteredRows.map((r) => (
               <TableRow key={r.key} className="hover:bg-[#F9FAFB]">
-                <TableCell><Badge className={kindBadgeClass(r.kind)}>{humanizeEnum(r.kind)}</Badge></TableCell>
-                <TableCell><div className="space-y-1"><p className="text-sm font-medium text-[#1E293B]">{r.title}</p><p className="text-xs text-[#64748B]">{r.kind === "COMPLAINT" ? (r.raw?.complaintNumber || r.id.slice(0,8)) : r.id.slice(0,8)}</p></div></TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-2">
+                    <Badge className={kindBadgeClass(r.kind)}>{humanizeEnum(r.kind)}</Badge>
+                    {r.isUrgent ? (
+                      <Badge className="bg-[#FEE2E2] text-[#B91C1C]">Urgent</Badge>
+                    ) : null}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-[#1E293B]">{r.title}</p>
+                    <p className="text-xs text-[#64748B]">
+                      {r.kind === "COMPLAINT"
+                        ? (r.raw?.complaintNumber || r.id.slice(0, 8))
+                        : r.id.slice(0, 8)}
+                      {r.kind === "COMPLAINT" && r.team ? ` • ${r.team}` : ""}
+                    </p>
+                  </div>
+                </TableCell>
                 <TableCell><div className="space-y-1"><p className="text-sm text-[#1E293B]">{r.residentName}</p><p className="text-xs text-[#64748B]">{r.residentSub}</p></div></TableCell>
                 <TableCell className="text-[#64748B]">{r.unitLabel}</TableCell>
                 <TableCell><Badge className={getPriorityColorClass(r.priority || "MEDIUM")}>{adminPriorityLabel(r.priority || "MEDIUM")}</Badge></TableCell>
@@ -415,7 +455,11 @@ export function TicketsInbox() {
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <p className="text-xs text-[#64748B] uppercase tracking-wide">{humanizeEnum(active.kind)}</p>
-                      <h4 className="text-[#1E293B] mt-1">{active.kind === "COMPLAINT" ? `${humanizeEnum(active.detail?.category || "Complaint")} Complaint` : (active.detail?.service?.name || "Ticket")}</h4>
+                      <h4 className="text-[#1E293B] mt-1">
+                        {active.kind === "COMPLAINT"
+                          ? active.detail?.title || `${humanizeEnum(active.detail?.category || "Complaint")} Complaint`
+                          : (active.detail?.service?.name || "Ticket")}
+                      </h4>
                       <p className="text-xs text-[#64748B] mt-1">ID: {active.kind === "COMPLAINT" ? (active.detail?.complaintNumber || active.id) : active.id}</p>
                     </div>
                     <Badge className={getStatusColorClass(active.detail?.status)}>{adminTicketStatusLabel(active.kind, active.detail?.status)}</Badge>

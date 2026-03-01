@@ -64,7 +64,7 @@ export function UnitsManagement() {
       case "OCCUPIED":
         return "Occupied";
       case "LEASED":
-        return "Leased";
+        return "Rented";
       default:
         return status;
     }
@@ -420,7 +420,7 @@ export function UnitsManagement() {
               <SelectItem value="NOT_DELIVERED">Not Delivered</SelectItem>
               <SelectItem value="DELIVERED">Delivered</SelectItem>
               <SelectItem value="OCCUPIED">Occupied</SelectItem>
-              <SelectItem value="LEASED">Leased</SelectItem>
+              <SelectItem value="LEASED">Rented</SelectItem>
             </SelectContent>
           </Select>
           <div className="flex gap-2 border border-[#E5E7EB] rounded-lg p-1">

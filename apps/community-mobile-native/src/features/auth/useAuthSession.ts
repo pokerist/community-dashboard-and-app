@@ -3,7 +3,7 @@ import { AppState } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { configureHttpAuthHandlers, extractApiErrorMessage } from '../../lib/http';
 import { extractUserIdFromAccessToken } from './jwt';
-import { loginRequest, refreshRequest } from './service';
+import { loginRequest, refreshRequest, verifyLoginTwoFactorRequest } from './service';
 import {
   clearAuthSession,
   clearLoginCredentials,
@@ -13,6 +13,15 @@ import {
   saveLoginCredentials,
 } from './storage';
 import type { AuthSession, SavedLoginCredentials } from './types';
+
+type PendingTwoFactorChallenge = {
+  challengeToken: string;
+  method?: string;
+  expiresInSeconds?: number;
+  email: string;
+  password: string;
+  rememberCredentials: boolean;
+};
 
 type AuthHookResult = {
   session: AuthSession | null;
@@ -24,14 +33,18 @@ type AuthHookResult = {
   biometricAvailable: boolean;
   canBiometricQuickSignIn: boolean;
   biometricLabel: string | null;
+  pendingTwoFactorChallenge: PendingTwoFactorChallenge | null;
   signIn: (
     email: string,
     password: string,
     options?: { rememberCredentials?: boolean },
   ) => Promise<void>;
+  verifyTwoFactorOtp: (otp: string) => Promise<void>;
+  clearTwoFactorChallenge: () => void;
   signInWithBiometrics: () => Promise<void>;
   refreshSession: () => Promise<void>;
   signOut: (reasonMessage?: string | null) => Promise<void>;
+  markActivationComplete: (newPassword?: string) => Promise<void>;
 };
 
 export function useAuthSession(): AuthHookResult {
@@ -42,6 +55,8 @@ export function useAuthSession(): AuthHookResult {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [savedLogin, setSavedLogin] = useState<SavedLoginCredentials | null>(null);
+  const [pendingTwoFactorChallenge, setPendingTwoFactorChallenge] =
+    useState<PendingTwoFactorChallenge | null>(null);
   const [biometricAvailable, setBiometricAvailable] = useState(false);
   const [biometricLabel, setBiometricLabel] = useState<string | null>(null);
   const sessionRef = useRef<AuthSession | null>(null);
@@ -108,6 +123,45 @@ export function useAuthSession(): AuthHookResult {
     };
   }, []);
 
+  const completeSessionSignIn = useCallback(
+    async (
+      data: {
+        accessToken?: string;
+        refreshToken?: string;
+        userStatus?: string;
+        mustCompleteActivation?: boolean;
+      },
+      email: string,
+      password: string,
+      rememberCredentials: boolean,
+    ) => {
+      if (!data.accessToken) {
+        throw new Error('Login response did not include accessToken');
+      }
+
+      const nextSession: AuthSession = {
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken ?? null,
+        userId: extractUserIdFromAccessToken(data.accessToken),
+        email: email.trim(),
+        userStatus: data.userStatus ?? null,
+        mustCompleteActivation: data.mustCompleteActivation === true,
+      };
+
+      await saveAuthSession(nextSession);
+      if (rememberCredentials) {
+        await saveLoginCredentials({ email: email.trim(), password });
+        setSavedLogin({ email: email.trim(), password });
+      } else {
+        await clearLoginCredentials();
+        setSavedLogin(null);
+      }
+      setSession(nextSession);
+      setPendingTwoFactorChallenge(null);
+    },
+    [],
+  );
+
   const signIn = useCallback(async (
     email: string,
     password: string,
@@ -119,32 +173,60 @@ export function useAuthSession(): AuthHookResult {
 
     try {
       const data = await loginRequest({ email: email.trim(), password });
-      if (!data.accessToken) {
-        throw new Error('Login response did not include accessToken');
+      if (data.challengeRequired && data.challengeToken) {
+        setPendingTwoFactorChallenge({
+          challengeToken: data.challengeToken,
+          method: data.method,
+          expiresInSeconds: data.expiresInSeconds,
+          email: email.trim(),
+          password,
+          rememberCredentials: options?.rememberCredentials ?? true,
+        });
+        return;
       }
 
-      const nextSession: AuthSession = {
-        accessToken: data.accessToken,
-        refreshToken: data.refreshToken ?? null,
-        userId: extractUserIdFromAccessToken(data.accessToken),
-        email: email.trim(),
-      };
-
-      await saveAuthSession(nextSession);
-      if (options?.rememberCredentials ?? true) {
-        await saveLoginCredentials({ email: email.trim(), password });
-        setSavedLogin({ email: email.trim(), password });
-      } else {
-        await clearLoginCredentials();
-        setSavedLogin(null);
-      }
-      setSession(nextSession);
+      await completeSessionSignIn(
+        data,
+        email,
+        password,
+        options?.rememberCredentials ?? true,
+      );
     } catch (error) {
       setErrorMessage(extractApiErrorMessage(error));
       throw error;
     } finally {
       setIsSubmitting(false);
     }
+  }, [completeSessionSignIn]);
+
+  const verifyTwoFactorOtp = useCallback(async (otp: string) => {
+    const challenge = pendingTwoFactorChallenge;
+    if (!challenge?.challengeToken) {
+      throw new Error('No active two-factor challenge.');
+    }
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    try {
+      const data = await verifyLoginTwoFactorRequest({
+        challengeToken: challenge.challengeToken,
+        otp: otp.trim(),
+      });
+      await completeSessionSignIn(
+        data,
+        challenge.email,
+        challenge.password,
+        challenge.rememberCredentials,
+      );
+    } catch (error) {
+      setErrorMessage(extractApiErrorMessage(error));
+      throw error;
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [completeSessionSignIn, pendingTwoFactorChallenge]);
+
+  const clearTwoFactorChallenge = useCallback(() => {
+    setPendingTwoFactorChallenge(null);
   }, []);
 
   const signInWithBiometrics = useCallback(async () => {
@@ -227,9 +309,40 @@ export function useAuthSession(): AuthHookResult {
     await clearAuthSession();
     setSession(null);
     sessionRef.current = null;
+    setPendingTwoFactorChallenge(null);
     setErrorMessage(reasonMessage ?? null);
     setRefreshError(reasonMessage ?? null);
   }, []);
+
+  const markActivationComplete = useCallback(
+    async (newPassword?: string) => {
+      const current = sessionRef.current;
+      if (!current) return;
+      const updated: AuthSession = {
+        ...current,
+        userStatus: 'ACTIVE',
+        mustCompleteActivation: false,
+      };
+      await saveAuthSession(updated);
+      setSession(updated);
+      sessionRef.current = updated;
+
+      if (
+        newPassword &&
+        savedLogin?.email &&
+        savedLogin.email.trim().toLowerCase() ===
+          (current.email || '').trim().toLowerCase()
+      ) {
+        const nextLogin = { email: savedLogin.email, password: newPassword };
+        await saveLoginCredentials(nextLogin);
+        setSavedLogin(nextLogin);
+      }
+
+      setErrorMessage(null);
+      setRefreshError(null);
+    },
+    [savedLogin],
+  );
 
   useEffect(() => {
     configureHttpAuthHandlers({
@@ -254,13 +367,14 @@ export function useAuthSession(): AuthHookResult {
             userId: updated.userId,
           };
         } catch (error) {
-          setRefreshError(extractApiErrorMessage(error));
+          // Keep refresh failures silent during active usage; session invalidation is handled centrally.
+          setRefreshError(null);
           return null;
         } finally {
           setIsRefreshing(false);
         }
       },
-      onSessionExpired: (message) => signOut(message),
+      onSessionExpired: () => signOut(null),
     });
 
     return () => {
@@ -298,10 +412,14 @@ export function useAuthSession(): AuthHookResult {
       biometricAvailable,
       canBiometricQuickSignIn: Boolean(savedLogin && biometricAvailable),
       biometricLabel,
+      pendingTwoFactorChallenge,
       signIn,
+      verifyTwoFactorOtp,
+      clearTwoFactorChallenge,
       signInWithBiometrics,
       refreshSession,
       signOut,
+      markActivationComplete,
     }),
     [
       session,
@@ -313,10 +431,14 @@ export function useAuthSession(): AuthHookResult {
       biometricAvailable,
       savedLogin,
       biometricLabel,
+      pendingTwoFactorChallenge,
       signIn,
+      verifyTwoFactorOtp,
+      clearTwoFactorChallenge,
       signInWithBiometrics,
       refreshSession,
       signOut,
+      markActivationComplete,
     ],
   );
 }

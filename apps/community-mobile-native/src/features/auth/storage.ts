@@ -63,6 +63,12 @@ export async function loadAuthSession(): Promise<AuthSession | null> {
         typeof parsed.refreshToken === 'string' ? parsed.refreshToken : null,
       userId: typeof parsed.userId === 'string' ? parsed.userId : null,
       email: parsed.email,
+      userStatus:
+        typeof parsed.userStatus === 'string' ? parsed.userStatus : null,
+      mustCompleteActivation:
+        typeof parsed.mustCompleteActivation === 'boolean'
+          ? parsed.mustCompleteActivation
+          : false,
     };
   } catch {
     return null;

@@ -14,7 +14,7 @@ import {
   DialogTrigger,
   DialogFooter,
 } from "../ui/dialog";
-import { QrCode, Plus, Download, Ban } from "lucide-react";
+import { QrCode, Plus, Download, Ban, CheckCheck, Clock3, ShieldCheck } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import {
@@ -34,8 +34,9 @@ export function AccessControl() {
   const [unitOptions, setUnitOptions] = useState<Array<{ id: string; label: string }>>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [actionRowId, setActionRowId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState("all");
   const [generateForm, setGenerateForm] = useState({
     unitId: "",
     type: "VISITOR",
@@ -125,7 +126,7 @@ export function AccessControl() {
   };
 
   const handleRevokeQr = async (id: string) => {
-    setRevokingId(id);
+    setActionRowId(id);
     try {
       await apiClient.patch(`/access-qrcodes/${id}/revoke`);
       toast.success("QR code revoked");
@@ -133,7 +134,58 @@ export function AccessControl() {
     } catch (error) {
       toast.error("Failed to revoke QR", { description: errorMessage(error) });
     } finally {
-      setRevokingId(null);
+      setActionRowId(null);
+    }
+  };
+
+  const handleApproveWorkerQr = async (id: string) => {
+    setActionRowId(id);
+    try {
+      const response = await apiClient.patch(`/access-qrcodes/${id}/approve`);
+      const qrId = response.data?.qrCode?.qrId ?? response.data?.qrCode?.id;
+      toast.success("Worker permit approved", {
+        description: qrId ? `QR ready: ${qrId}` : "Permit approved successfully.",
+      });
+      await loadAccessQrs();
+    } catch (error) {
+      toast.error("Failed to approve worker permit", { description: errorMessage(error) });
+    } finally {
+      setActionRowId(null);
+    }
+  };
+
+  const handleRejectWorkerQr = async (id: string) => {
+    const reason = window.prompt("Optional rejection reason", "") ?? "";
+    setActionRowId(id);
+    try {
+      await apiClient.patch(`/access-qrcodes/${id}/reject`, {
+        reason: reason.trim() || undefined,
+      });
+      toast.success("Worker permit rejected");
+      await loadAccessQrs();
+    } catch (error) {
+      toast.error("Failed to reject worker permit", { description: errorMessage(error) });
+    } finally {
+      setActionRowId(null);
+    }
+  };
+
+  const handleMarkQrUsed = async (id: string) => {
+    const gateName = window.prompt("Gate name (optional)", "");
+    if (gateName === null) return;
+    setActionRowId(id);
+    try {
+      await apiClient.patch(`/access-qrcodes/${id}/mark-used`, {
+        gateName: gateName.trim() || undefined,
+      });
+      toast.success("QR marked as used", {
+        description: "Arrival notification sent to owner.",
+      });
+      await loadAccessQrs();
+    } catch (error) {
+      toast.error("Failed to mark QR as used", { description: errorMessage(error) });
+    } finally {
+      setActionRowId(null);
     }
   };
 
@@ -142,8 +194,23 @@ export function AccessControl() {
     const visitors = accessRows.filter((r) => String(r.type || "").toUpperCase() === "VISITOR").length;
     const workers = accessRows.filter((r) => String(r.type || "").toUpperCase() === "WORKER").length;
     const deliveries = accessRows.filter((r) => String(r.type || "").toUpperCase() === "DELIVERY").length;
-    return { active, visitors, workers, deliveries };
+    const pendingWorkers = accessRows.filter(
+      (r) =>
+        String(r.status || "").toUpperCase() === "PENDING" &&
+        String(r.type || "").toUpperCase() === "WORKER",
+    ).length;
+    return { active, visitors, workers, deliveries, pendingWorkers };
   }, [accessRows]);
+
+  const pendingWorkerRows = useMemo(
+    () =>
+      accessRows.filter(
+        (row) =>
+          String(row.status || "").toUpperCase() === "PENDING" &&
+          String(row.type || "").toUpperCase() === "WORKER",
+      ),
+    [accessRows],
+  );
 
   return (
     <div className="space-y-6">
@@ -289,25 +356,97 @@ export function AccessControl() {
 
       <Card className="shadow-card rounded-xl overflow-hidden">
         <div className="p-4 border-b border-[#E5E7EB] flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-[#0B5FFF]" />
+            <h3 className="text-[#1E293B]">Pending Worker Permits</h3>
+            <Badge className="bg-[#EEF2FF] text-[#3730A3]">{stats.pendingWorkers}</Badge>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="rounded-lg"
+            onClick={() => setActiveTab("pending-workers")}
+          >
+            View in table
+          </Button>
+        </div>
+        <div className="p-4 space-y-3">
+          {pendingWorkerRows.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-[#CBD5E1] p-4 text-sm text-[#64748B]">
+              No pending worker permits right now.
+            </div>
+          ) : (
+            pendingWorkerRows.slice(0, 6).map((row) => (
+              <div
+                key={row.id}
+                className="rounded-lg border border-[#E5E7EB] p-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <p className="text-[#1E293B] font-medium">{row.visitorName || "Worker permit request"}</p>
+                    <Badge variant="secondary" className="bg-[#F8FAFC] text-[#334155]">
+                      Unit {row.unit?.unitNumber ?? row.unitId ?? "—"}
+                    </Badge>
+                  </div>
+                  <div className="text-xs text-[#64748B] flex items-center gap-1">
+                    <Clock3 className="w-3 h-3" />
+                    {row.validFrom ? formatDateTime(row.validFrom) : "—"} to{" "}
+                    {row.validTo ? formatDateTime(row.validTo) : "—"}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleRejectWorkerQr(row.id)}
+                    disabled={actionRowId === row.id}
+                  >
+                    {actionRowId === row.id ? "Working..." : "Reject"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white"
+                    onClick={() => void handleApproveWorkerQr(row.id)}
+                    disabled={actionRowId === row.id}
+                  >
+                    {actionRowId === row.id ? "Working..." : "Approve"}
+                  </Button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </Card>
+
+      <Card className="shadow-card rounded-xl overflow-hidden">
+        <div className="p-4 border-b border-[#E5E7EB] flex items-center justify-between">
           <h3 className="text-[#1E293B]">Access QR Logs</h3>
           <Button variant="outline" size="sm" className="gap-2 rounded-lg" onClick={() => void loadAccessQrs()}>
             <Download className="w-4 h-4" />
             Reload
           </Button>
         </div>
-        <Tabs defaultValue="all" className="w-full">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="w-full justify-start border-b border-[#E5E7EB] rounded-none h-12 bg-transparent px-4">
             <TabsTrigger value="all" className="rounded-lg">All</TabsTrigger>
             <TabsTrigger value="active" className="rounded-lg">Active</TabsTrigger>
+            <TabsTrigger value="pending" className="rounded-lg">Pending</TabsTrigger>
+            <TabsTrigger value="pending-workers" className="rounded-lg">
+              Pending Workers ({stats.pendingWorkers})
+            </TabsTrigger>
             <TabsTrigger value="expired" className="rounded-lg">Expired</TabsTrigger>
             <TabsTrigger value="used" className="rounded-lg">Used</TabsTrigger>
           </TabsList>
 
-          {["all", "active", "expired", "used"].map((tab) => {
+          {["all", "active", "pending", "pending-workers", "expired", "used"].map((tab) => {
             const tabRows = accessRows.filter((row) => {
               if (tab === "all") return true;
               const status = String(row.status || "").toUpperCase();
               if (tab === "active") return status === "ACTIVE";
+              if (tab === "pending") return status === "PENDING";
+              if (tab === "pending-workers") {
+                return status === "PENDING" && String(row.type || "").toUpperCase() === "WORKER";
+              }
               if (tab === "expired") return status === "EXPIRED";
               if (tab === "used") return status === "USED";
               return true;
@@ -348,24 +487,56 @@ export function AccessControl() {
                           {row.unit?.unitNumber ?? row.unitId ?? "—"}
                         </TableCell>
                         <TableCell className="text-[#64748B] text-sm">
-                          <div>{formatDateTime(row.validFrom)}</div>
-                          <div className="text-xs">to {formatDateTime(row.validTo)}</div>
+                          <div>{row.validFrom ? formatDateTime(row.validFrom) : "—"}</div>
+                          <div className="text-xs">to {row.validTo ? formatDateTime(row.validTo) : "—"}</div>
                         </TableCell>
                         <TableCell>
                           <Badge className={getStatusColorClass(row.status)}>{humanizeEnum(row.status)}</Badge>
                         </TableCell>
                         <TableCell className="text-right">
                           {String(row.status || "").toUpperCase() === "ACTIVE" ? (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="gap-2"
-                              onClick={() => void handleRevokeQr(row.id)}
-                              disabled={revokingId === row.id}
-                            >
-                              <Ban className="w-4 h-4" />
-                              {revokingId === row.id ? "Revoking..." : "Revoke"}
-                            </Button>
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="gap-2"
+                                onClick={() => void handleMarkQrUsed(row.id)}
+                                disabled={actionRowId === row.id}
+                              >
+                                <CheckCheck className="w-4 h-4" />
+                                {actionRowId === row.id ? "Working..." : "Mark Used"}
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="gap-2"
+                                onClick={() => void handleRevokeQr(row.id)}
+                                disabled={actionRowId === row.id}
+                              >
+                                <Ban className="w-4 h-4" />
+                                {actionRowId === row.id ? "Working..." : "Revoke"}
+                              </Button>
+                            </div>
+                          ) : String(row.status || "").toUpperCase() === "PENDING" &&
+                            String(row.type || "").toUpperCase() === "WORKER" ? (
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => void handleRejectWorkerQr(row.id)}
+                                disabled={actionRowId === row.id}
+                              >
+                                {actionRowId === row.id ? "Working..." : "Reject"}
+                              </Button>
+                              <Button
+                                size="sm"
+                                className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white"
+                                onClick={() => void handleApproveWorkerQr(row.id)}
+                                disabled={actionRowId === row.id}
+                              >
+                                {actionRowId === row.id ? "Working..." : "Approve"}
+                              </Button>
+                            </div>
                           ) : (
                             <span className="text-xs text-[#64748B]">—</span>
                           )}

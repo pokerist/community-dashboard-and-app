@@ -169,6 +169,7 @@ enum FacilityType {
 
 enum BookingStatus {
   PENDING
+  PENDING_PAYMENT
   APPROVED
   CANCELLED
   REJECTED
@@ -231,6 +232,56 @@ enum RelationshipType {
   CHILD
   SPOUSE
   PARENT
+}
+
+enum ProfileChangeRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum HouseholdRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum FamilyRelationType {
+  SON_DAUGHTER
+  MOTHER_FATHER
+  SPOUSE
+}
+
+enum NationalityType {
+  EGYPTIAN
+  FOREIGN
+}
+
+enum AuthorizedFeeMode {
+  NO_FEE
+  FEE_REQUIRED
+}
+
+enum HomeStaffType {
+  DRIVER
+  NANNY
+  SERVANT
+  GARDENER
+  OTHER
+}
+
+enum ViolationActionType {
+  APPEAL
+  FIX_SUBMISSION
+}
+
+enum ViolationActionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CLOSED
 }
 
 enum NotificationStatus {
@@ -315,6 +366,18 @@ enum UserStatusLogSource {
   MANUAL
 }
 
+enum OwnerPaymentMode {
+  CASH
+  INSTALLMENT
+}
+
+enum OwnerInstallmentStatus {
+  PENDING
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
 enum ContractorRoleEnum {
   ADMIN
   SUPERVISOR
@@ -380,6 +443,7 @@ model User {
 
   emailVerifiedAt DateTime?
   phoneVerifiedAt DateTime?
+  twoFactorEnabled Boolean @default(false)
 
   lastLoginAt   DateTime?
   loginAttempts Int       @default(0)
@@ -445,6 +509,20 @@ model User {
   unitAccesses            UnitAccess[]
   contractorMembers       ContractorMember[]
   clubhouseAccessRequests ClubhouseAccessRequest[]
+  ownerUnitContracts      OwnerUnitContract[] @relation("owner_unit_contract_owner")
+  ownerUnitContractsCreated OwnerUnitContract[] @relation("owner_unit_contract_created_by")
+  profileChangeRequests   ProfileChangeRequest[] @relation("profile_change_request_user")
+  profileChangeReviewed   ProfileChangeRequest[] @relation("profile_change_request_reviewer")
+  familyRequests          FamilyAccessRequest[]  @relation("family_request_owner")
+  familyRequestsReviewed  FamilyAccessRequest[]  @relation("family_request_reviewer")
+  familyRequestsActivated FamilyAccessRequest[]  @relation("family_request_activated_user")
+  authorizedRequests      AuthorizedAccessRequest[] @relation("authorized_request_owner")
+  authorizedRequestsReviewed AuthorizedAccessRequest[] @relation("authorized_request_reviewer")
+  authorizedRequestsActivated AuthorizedAccessRequest[] @relation("authorized_request_activated_user")
+  homeStaffRequests       HomeStaffAccess[] @relation("home_staff_request_owner")
+  homeStaffRequestsReviewed HomeStaffAccess[] @relation("home_staff_request_reviewer")
+  violationActionRequests ViolationActionRequest[] @relation("violation_action_request_user")
+  violationActionReviewed ViolationActionRequest[] @relation("violation_action_request_reviewer")
 
   @@index([email])
   @@index([phone])
@@ -489,6 +567,26 @@ model Resident {
   familyMembers FamilyMember[] @relation("primary_family_members")
   familyOf      FamilyMember?  @relation("family_member_of")
   documents     ResidentDocument[] @relation("resident_documents")
+  vehicles      ResidentVehicle[]
+}
+
+model ResidentVehicle {
+  id                    String   @id @default(uuid())
+  residentId            String
+  vehicleType           String
+  model                 String
+  plateNumber           String
+  plateNumberNormalized String
+  color                 String?
+  notes                 String?
+  isPrimary             Boolean  @default(false)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  resident Resident @relation(fields: [residentId], references: [id], onDelete: Cascade)
+
+  @@unique([residentId, plateNumberNormalized])
+  @@index([residentId, createdAt])
 }
 
 model FamilyMember {
@@ -572,6 +670,10 @@ model Unit {
   clubhouseAccessRequests ClubhouseAccessRequest[]
 
   workers Worker[]
+  ownerUnitContracts OwnerUnitContract[]
+  familyAccessRequests FamilyAccessRequest[]
+  authorizedAccessRequests AuthorizedAccessRequest[]
+  homeStaffAccesses HomeStaffAccess[]
 }
 
 // ⚠️ residentUnit is legacy. Do NOT use for permission checks.
@@ -612,6 +714,8 @@ model UnitAccess {
   canBookFacilities Boolean @default(true)
   canGenerateQR     Boolean @default(false)
   canManageWorkers  Boolean @default(false)
+  qrScopes          String[] @default([])
+  featurePermissions Json?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -671,6 +775,7 @@ model Worker {
 
   accessProfile AccessProfile @relation(fields: [accessProfileId], references: [id])
   contractor    Contractor    @relation(fields: [contractorId], references: [id])
+  homeStaffAccesses HomeStaffAccess[]
 }
 
 model File {
@@ -690,6 +795,54 @@ model File {
 
   pendingRegistrations PendingRegistration[]
   documents            ResidentDocument[] @relation("file_documents")
+  ownerUnitContracts   OwnerUnitContract[] @relation("owner_unit_contract_file")
+  ownerInstallments    OwnerInstallment[] @relation("owner_installment_reference_file")
+}
+
+model OwnerUnitContract {
+  id             String           @id @default(uuid())
+  ownerUserId    String
+  unitId         String
+  contractFileId String?
+  contractSignedAt DateTime?
+  paymentMode    OwnerPaymentMode @default(CASH)
+  notes          String?
+  createdById    String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  ownerUser User  @relation("owner_unit_contract_owner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  unit      Unit  @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  contractFile File? @relation("owner_unit_contract_file", fields: [contractFileId], references: [id])
+  createdBy User? @relation("owner_unit_contract_created_by", fields: [createdById], references: [id])
+  installments OwnerInstallment[]
+
+  @@unique([ownerUserId, unitId])
+  @@index([unitId])
+  @@index([paymentMode])
+}
+
+model OwnerInstallment {
+  id                  String                 @id @default(uuid())
+  ownerUnitContractId String
+  sequence            Int
+  referenceFileId     String?
+  referencePageIndex  Int?
+  dueDate             DateTime
+  amount              Decimal                @db.Decimal(12, 2)
+  status              OwnerInstallmentStatus @default(PENDING)
+  paidAt              DateTime?
+  reminderSentAt      DateTime?
+  overdueNotifiedAt   DateTime?
+  notes               String?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  ownerUnitContract OwnerUnitContract @relation(fields: [ownerUnitContractId], references: [id], onDelete: Cascade)
+  referenceFile     File?             @relation("owner_installment_reference_file", fields: [referenceFileId], references: [id])
+
+  @@unique([ownerUnitContractId, sequence])
+  @@index([dueDate, status])
 }
 
 model ResidentDocument {
@@ -734,6 +887,7 @@ model Service {
   processingTime  Int?
   description     String?
   status          Boolean          @default(true)
+  isUrgent        Boolean          @default(false)
   startingPrice   Decimal?         @db.Decimal(12, 2)
   formFields      ServiceField[]
   requests        ServiceRequest[]
@@ -894,6 +1048,7 @@ model Invoice {
   incident   Incident? @relation(fields: [incidentId], references: [id])
 
   unitFees UnitFee[] @relation("FeeInvoices")
+  authorizedActivationRequests AuthorizedAccessRequest[]
 
   @@index([createdAt])
 }
@@ -901,6 +1056,8 @@ model Invoice {
 model Complaint {
   id              String          @id @default(uuid())
   complaintNumber String          @unique
+  title           String?
+  team            String?
   reporter        User            @relation("reporter", fields: [reporterId], references: [id])
   reporterId      String
   unit            Unit?           @relation(fields: [unitId], references: [id])
@@ -953,6 +1110,7 @@ model Violation {
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
   invoices        Invoice[]
+  actionRequests  ViolationActionRequest[]
 }
 
 model Banner {
@@ -1056,6 +1214,9 @@ model Facility {
   // Pricing model
   price        Float? // optional
   billingCycle BillingCycle @default(NONE)
+  isBookable   Boolean @default(true)
+  requiresPrepayment Boolean @default(false)
+  reminderMinutesBefore Int? @default(60)
 
   // Limits
   maxReservationsPerDay Int? // per user
@@ -1206,6 +1367,178 @@ model NotificationLog {
   status           NotificationLogStatus @default(SENT)
   providerResponse Json?
   createdAt        DateTime              @default(now())
+}
+
+model ProfileChangeRequest {
+  id              String                     @id @default(uuid())
+  userId          String
+  status          ProfileChangeRequestStatus @default(PENDING)
+  requestedFields Json
+  previousSnapshot Json?
+  reviewedById    String?
+  reviewedAt      DateTime?
+  rejectionReason String?
+  createdAt       DateTime                   @default(now())
+  updatedAt       DateTime                   @updatedAt
+
+  user       User  @relation("profile_change_request_user", fields: [userId], references: [id], onDelete: Cascade)
+  reviewedBy User? @relation("profile_change_request_reviewer", fields: [reviewedById], references: [id])
+
+  @@index([userId, status, createdAt])
+  @@index([status, createdAt])
+}
+
+model FamilyAccessRequest {
+  id                       String                 @id @default(uuid())
+  ownerUserId              String
+  unitId                   String
+  status                   HouseholdRequestStatus @default(PENDING)
+  relationship             FamilyRelationType
+  fullName                 String
+  email                    String?
+  phone                    String
+  nationality              NationalityType        @default(EGYPTIAN)
+  nationalIdOrPassport     String?
+  personalPhotoFileId      String
+  nationalIdFileId         String?
+  passportFileId           String?
+  birthCertificateFileId   String?
+  marriageCertificateFileId String?
+  childAgeBracket          String?
+  reviewedById             String?
+  reviewedAt               DateTime?
+  rejectionReason          String?
+  activatedUserId          String?
+  createdAt                DateTime               @default(now())
+  updatedAt                DateTime               @updatedAt
+
+  owner      User  @relation("family_request_owner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  unit       Unit  @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  reviewedBy User? @relation("family_request_reviewer", fields: [reviewedById], references: [id])
+  activatedUser User? @relation("family_request_activated_user", fields: [activatedUserId], references: [id])
+
+  @@index([ownerUserId, unitId, status, createdAt])
+  @@index([status, createdAt])
+}
+
+model AuthorizedAccessRequest {
+  id                    String                 @id @default(uuid())
+  ownerUserId           String
+  unitId                String
+  status                HouseholdRequestStatus @default(PENDING)
+  fullName              String
+  email                 String?
+  phone                 String
+  nationality           NationalityType        @default(EGYPTIAN)
+  nationalIdOrPassport  String?
+  idOrPassportFileId    String
+  powerOfAttorneyFileId String
+  personalPhotoFileId   String
+  validFrom             DateTime
+  validTo               DateTime
+  authorizationStartsAt DateTime?
+  authorizationEndsAt   DateTime?
+  qrScopes              String[]               @default([])
+  featurePermissions    Json?
+  feeMode               AuthorizedFeeMode      @default(NO_FEE)
+  feeAmount             Decimal?               @db.Decimal(12, 2)
+  activationInvoiceId   String?
+  reviewedById          String?
+  reviewedAt            DateTime?
+  rejectionReason       String?
+  activatedUserId       String?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+
+  owner      User  @relation("authorized_request_owner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  unit       Unit  @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  reviewedBy User? @relation("authorized_request_reviewer", fields: [reviewedById], references: [id])
+  activatedUser User? @relation("authorized_request_activated_user", fields: [activatedUserId], references: [id])
+  activationInvoice Invoice? @relation(fields: [activationInvoiceId], references: [id])
+
+  @@index([ownerUserId, unitId, status, createdAt])
+  @@index([status, createdAt])
+}
+
+model HomeStaffAccess {
+  id                  String                 @id @default(uuid())
+  ownerUserId         String
+  unitId              String
+  status              HouseholdRequestStatus @default(PENDING)
+  fullName            String
+  phone               String
+  nationality         NationalityType        @default(EGYPTIAN)
+  nationalIdOrPassport String?
+  idOrPassportFileId  String
+  personalPhotoFileId String?
+  employmentFrom      DateTime?
+  employmentTo        DateTime?
+  isLiveIn            Boolean                @default(false)
+  staffType           HomeStaffType          @default(OTHER)
+  accessValidFrom     DateTime
+  accessValidTo       DateTime
+  reviewedById        String?
+  reviewedAt          DateTime?
+  rejectionReason     String?
+  workerId            String?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  owner      User  @relation("home_staff_request_owner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  unit       Unit  @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  reviewedBy User? @relation("home_staff_request_reviewer", fields: [reviewedById], references: [id])
+  worker     Worker? @relation(fields: [workerId], references: [id])
+
+  @@index([ownerUserId, unitId, status, createdAt])
+  @@index([status, createdAt])
+}
+
+model ViolationActionRequest {
+  id             String                @id @default(uuid())
+  violationId    String
+  requestedById  String
+  type           ViolationActionType
+  status         ViolationActionStatus @default(PENDING)
+  note           String?
+  attachmentIds  String[]              @default([])
+  reviewedById   String?
+  reviewedAt     DateTime?
+  rejectionReason String?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  violation   Violation @relation(fields: [violationId], references: [id], onDelete: Cascade)
+  requestedBy User      @relation("violation_action_request_user", fields: [requestedById], references: [id], onDelete: Cascade)
+  reviewedBy  User?     @relation("violation_action_request_reviewer", fields: [reviewedById], references: [id])
+
+  @@index([violationId, status, createdAt])
+  @@index([requestedById, createdAt])
+}
+
+model HelpCenterEntry {
+  id          String   @id @default(uuid())
+  title       String
+  phone       String
+  availability String?
+  priority    Int      @default(100)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model DiscoverPlace {
+  id           String   @id @default(uuid())
+  name         String
+  category     String?
+  address      String?
+  mapLink      String?
+  phone        String?
+  workingHours String?
+  imageFileId  String?
+  isActive     Boolean  @default(true)
+  distanceHint String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 model NotificationDeviceToken {

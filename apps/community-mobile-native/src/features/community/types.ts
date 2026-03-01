@@ -110,6 +110,7 @@ export type CommunityService = {
   name: string;
   description?: string | null;
   category?: string | null;
+  isUrgent?: boolean;
   status?: boolean;
   unitEligibility?: string | null;
   startingPrice?: string | number | null;
@@ -149,6 +150,8 @@ export type ServiceRequestCommentRow = {
 export type ComplaintRow = {
   id: string;
   complaintNumber?: string;
+  title?: string;
+  team?: string;
   category?: string;
   description?: string;
   status?: string;
@@ -201,6 +204,7 @@ export type AccessQrRow = {
 export type CreateAccessQrResponse = {
   qrCode: AccessQrRow;
   qrImageBase64?: string | null;
+  pendingApproval?: boolean;
 };
 
 export type InvoiceRow = {
@@ -290,10 +294,9 @@ export type CreateBookingInput = {
 
 export type CreateComplaintInput = {
   unitId?: string;
-  category: string;
-  description: string;
-  priority?: string;
-  attachmentIds?: string[];
+  title: string;
+  body: string;
+  team: string;
 };
 
 export type AddServiceRequestCommentInput = {
@@ -483,4 +486,177 @@ export type UpdateDelegateAccessInput = {
   canBookFacilities?: boolean;
   canGenerateQR?: boolean;
   canManageWorkers?: boolean;
+};
+
+export type FireEvacuationStatus = {
+  active: boolean;
+  targeted?: boolean;
+  titleEn?: string;
+  messageEn?: string;
+  messageAr?: string;
+  triggeredAt?: string | null;
+  resolvedAt?: string | null;
+  acknowledged?: boolean;
+  acknowledgedAt?: string | null;
+  counters?: {
+    totalRecipients?: number;
+    pending?: number;
+  };
+};
+
+export type HelpCenterEntry = {
+  id: string;
+  title: string;
+  phone: string;
+  availability?: string | null;
+  priority?: number;
+  isActive?: boolean;
+};
+
+export type DiscoverPlace = {
+  id: string;
+  name: string;
+  category?: string | null;
+  address?: string | null;
+  mapLink?: string | null;
+  phone?: string | null;
+  workingHours?: string | null;
+  imageFileId?: string | null;
+  distanceHint?: string | null;
+  isActive?: boolean;
+};
+
+export type ViolationActionRow = {
+  id: string;
+  violationId: string;
+  requestedById: string;
+  type: 'APPEAL' | 'FIX_SUBMISSION' | string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CLOSED' | string;
+  note?: string | null;
+  rejectionReason?: string | null;
+  attachmentIds?: string[];
+  reviewedById?: string | null;
+  reviewedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type HouseholdRequestStatus =
+  | 'PENDING'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'CANCELLED'
+  | string;
+
+export type FamilyRelationType = 'SON_DAUGHTER' | 'MOTHER_FATHER' | 'SPOUSE';
+
+export type NationalityType = 'EGYPTIAN' | 'FOREIGN';
+
+export type FamilyRequestRow = {
+  id: string;
+  unitId: string;
+  ownerUserId: string;
+  relationship: FamilyRelationType;
+  fullName: string;
+  email?: string | null;
+  phone?: string | null;
+  nationality?: NationalityType;
+  nationalIdOrPassport?: string | null;
+  childAgeBracket?: '<18' | '>=18' | string | null;
+  status: HouseholdRequestStatus;
+  rejectionReason?: string | null;
+  reviewedAt?: string | null;
+  createdAt: string;
+};
+
+export type AuthorizedRequestRow = {
+  id: string;
+  unitId: string;
+  ownerUserId: string;
+  fullName: string;
+  email?: string | null;
+  phone?: string | null;
+  nationality?: NationalityType;
+  nationalIdOrPassport?: string | null;
+  validFrom: string;
+  validTo: string;
+  feeMode?: 'NO_FEE' | 'FEE_REQUIRED' | string;
+  feeAmount?: number | string | null;
+  status: HouseholdRequestStatus;
+  rejectionReason?: string | null;
+  reviewedAt?: string | null;
+  createdAt: string;
+};
+
+export type HomeStaffAccessRow = {
+  id: string;
+  unitId: string;
+  ownerUserId: string;
+  fullName: string;
+  phone?: string | null;
+  nationality?: NationalityType;
+  nationalIdOrPassport?: string | null;
+  staffType?: 'DRIVER' | 'NANNY' | 'SERVANT' | 'GARDENER' | 'OTHER' | string | null;
+  employmentDuration?: string | null;
+  isLiveIn?: boolean;
+  accessValidFrom?: string | null;
+  accessValidTo?: string | null;
+  status: HouseholdRequestStatus;
+  rejectionReason?: string | null;
+  reviewedAt?: string | null;
+  createdAt: string;
+};
+
+export type HouseholdRequestsResponse = {
+  family: FamilyRequestRow[];
+  authorized: AuthorizedRequestRow[];
+  homeStaff: HomeStaffAccessRow[];
+};
+
+export type CreateFamilyRequestInput = {
+  unitId: string;
+  relationship: FamilyRelationType;
+  fullName: string;
+  email?: string;
+  phone: string;
+  nationality?: NationalityType;
+  nationalIdOrPassport?: string;
+  personalPhotoFileId: string;
+  nationalIdFileId?: string;
+  passportFileId?: string;
+  birthCertificateFileId?: string;
+  marriageCertificateFileId?: string;
+  childAgeBracket?: '<18' | '>=18';
+};
+
+export type CreateAuthorizedRequestInput = {
+  unitId: string;
+  fullName: string;
+  phone: string;
+  email?: string;
+  nationality?: NationalityType;
+  nationalIdOrPassport?: string;
+  idOrPassportFileId: string;
+  powerOfAttorneyFileId: string;
+  personalPhotoFileId: string;
+  validFrom: string;
+  validTo: string;
+  feeMode?: 'NO_FEE' | 'FEE_REQUIRED';
+  feeAmount?: number;
+  delegatePermissions?: Record<string, boolean>;
+};
+
+export type CreateHomeStaffInput = {
+  unitId: string;
+  fullName: string;
+  phone: string;
+  nationality?: NationalityType;
+  nationalIdOrPassport?: string;
+  idOrPassportFileId: string;
+  personalPhotoFileId?: string;
+  staffType?: 'DRIVER' | 'NANNY' | 'SERVANT' | 'GARDENER' | 'OTHER';
+  employmentDuration?: string;
+  liveIn?: boolean;
+  accessFrom: string;
+  accessTo: string;
 };

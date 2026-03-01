@@ -103,4 +103,26 @@ export class PublicFileController {
     res.setHeader('Cache-Control', 'public, max-age=300');
     stream.pipe(res);
   }
+
+  @Get('public/offer-banner/:fileId')
+  @ApiOperation({
+    summary: 'Public stream for active mobile offer banner images',
+  })
+  async getPublicOfferBanner(
+    @Param('fileId') fileId: string,
+    @Res() res: Response,
+  ) {
+    const { file, stream } = await this.fileService.getPublicOfferBannerStream(fileId);
+    const contentType =
+      file.mimeType?.trim() ||
+      inferMimeTypeFromName(file.name) ||
+      inferMimeTypeFromName(file.key) ||
+      'application/octet-stream';
+    res.setHeader('Content-Type', contentType);
+    if (typeof file.size === 'number' && Number.isFinite(file.size) && file.size >= 0) {
+      res.setHeader('Content-Length', String(file.size));
+    }
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    stream.pipe(res);
+  }
 }

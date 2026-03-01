@@ -19,9 +19,10 @@ import {
 } from 'react-native-safe-area-context';
 import { API_BASE_URL } from '../config/env';
 import { useBranding } from '../features/branding/provider';
+import { useI18n } from '../features/i18n/provider';
 import { akColors, akRadius, akShadow } from '../theme/alkarma';
 
-const logoImage = require('../../assets/branding/alkarma-logo.png');
+const logoImage = require('../../assets/branding/alkarma-logo-dark.png');
 const DEMO_ACCOUNTS = [
   { label: 'Owner Demo', email: 'owner.demo@test.com', password: 'pass123' },
   { label: 'Tenant Demo', email: 'tenant.demo@test.com', password: 'pass123' },
@@ -30,7 +31,7 @@ const DEMO_ACCOUNTS = [
     email: 'preowner.demo@test.com',
     password: 'pass123',
   },
-  { label: 'Family Demo', email: 'family.demo@test.com', password: 'pass123' },
+  { label: 'Family Member Demo', email: 'family.demo@test.com', password: 'pass123' },
   {
     label: 'Authorized (Delegate)',
     email: 'authorized.demo@test.com',
@@ -50,13 +51,21 @@ type LoginScreenProps = {
   errorMessage: string | null;
   canBiometricQuickSignIn?: boolean;
   biometricLabel?: string | null;
+  pendingTwoFactorChallenge?: {
+    challengeToken: string;
+    method?: string;
+    expiresInSeconds?: number;
+    email: string;
+  } | null;
   onSubmit: (
     email: string,
     password: string,
     options?: { rememberCredentials?: boolean },
   ) => Promise<void>;
+  onSubmitTwoFactorOtp: (otp: string) => Promise<void>;
+  onCancelTwoFactor: () => void;
   onBiometricSignIn?: () => Promise<void>;
-  onOpenRegister: () => void;
+  onOpenForgotPassword: () => void;
 };
 
 export function LoginScreen({
@@ -64,11 +73,15 @@ export function LoginScreen({
   errorMessage,
   canBiometricQuickSignIn = false,
   biometricLabel = null,
+  pendingTwoFactorChallenge = null,
   onSubmit,
+  onSubmitTwoFactorOtp,
+  onCancelTwoFactor,
   onBiometricSignIn,
-  onOpenRegister,
+  onOpenForgotPassword,
 }: LoginScreenProps) {
   const insets = useSafeAreaInsets();
+  const { language, setLanguage, t } = useI18n();
   const { brand } = useBranding();
   const [email, setEmail] = useState('residentA@test.com');
   const [password, setPassword] = useState('pass123');
@@ -77,6 +90,7 @@ export function LoginScreen({
   const [isBiometricSubmitting, setIsBiometricSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
   const [showCredentials, setShowCredentials] = useState(true);
+  const [twoFactorOtp, setTwoFactorOtp] = useState('');
 
   const combinedError = errorMessage || localError;
   const backendHint = useMemo(() => {
@@ -96,7 +110,7 @@ export function LoginScreen({
   const handleSubmit = async () => {
     setLocalError(null);
     if (!email.trim() || !password) {
-      setLocalError('Email and password are required.');
+      setLocalError(t('login.required'));
       return;
     }
 
@@ -126,6 +140,20 @@ export function LoginScreen({
     setLocalError(null);
   };
 
+  const handleSubmitTwoFactor = async () => {
+    setLocalError(null);
+    if (!twoFactorOtp.trim()) {
+      setLocalError(t('login.otpRequired'));
+      return;
+    }
+    try {
+      await onSubmitTwoFactorOtp(twoFactorOtp.trim());
+      setTwoFactorOtp('');
+    } catch {
+      // handled by hook
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom']}>
       <LinearGradient colors={['#f8f9fa', '#ffffff']} style={styles.gradientBg}>
@@ -140,6 +168,36 @@ export function LoginScreen({
           >
             <View style={styles.logoHeader}>
               <Image source={logoSource} style={styles.logo} resizeMode="contain" />
+              <View style={styles.languageRow}>
+                <Pressable
+                  onPress={() => void setLanguage('en')}
+                  style={[
+                    styles.languageBtn,
+                    language === 'en' && styles.languageBtnActive,
+                  ]}
+                >
+                  <Text style={[
+                    styles.languageBtnText,
+                    language === 'en' && styles.languageBtnTextActive,
+                  ]}>
+                    {t('common.english')}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => void setLanguage('ar')}
+                  style={[
+                    styles.languageBtn,
+                    language === 'ar' && styles.languageBtnActive,
+                  ]}
+                >
+                  <Text style={[
+                    styles.languageBtnText,
+                    language === 'ar' && styles.languageBtnTextActive,
+                  ]}>
+                    {t('common.arabic')}
+                  </Text>
+                </Pressable>
+              </View>
             </View>
 
             <View style={styles.bannerWrap}>
@@ -154,59 +212,92 @@ export function LoginScreen({
                   <Text style={[styles.bannerTag, { color: brandAccent }]}>
                     {(brand.companyName || 'Community').toUpperCase()}
                   </Text>
-                  <Text style={styles.bannerTitle}>Community Access</Text>
+                  <Text style={styles.bannerTitle}>{t('login.title')}</Text>
                   <Text style={styles.bannerSubtitle}>
-                    {(brand.appDisplayName || 'Resident app')} connected to the live backend for real booking, services and QR flows.
+                    {t('login.subtitle')}
                   </Text>
                 </View>
               </LinearGradient>
             </View>
 
             <View style={styles.formArea}>
-              <View style={styles.fieldGroup}>
-                <Text style={styles.fieldLabel}>Email or Phone</Text>
-                <View style={styles.inputShell}>
-                  <Ionicons name="mail-outline" size={18} color={akColors.textMuted} />
-                  <TextInput
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    keyboardType="email-address"
-                    value={email}
-                    onChangeText={setEmail}
-                    style={styles.input}
-                    placeholder="ahmed.hassan@email.com"
-                    placeholderTextColor={akColors.textSoft}
-                    editable={!isSubmitting}
-                  />
-                </View>
-              </View>
+              {pendingTwoFactorChallenge ? (
+                <>
+                  <View style={styles.hintBox}>
+                    <Text style={styles.hintText}>
+                      {t('login.otpSentVia', {
+                        method: String(pendingTwoFactorChallenge.method || 'OTP').toUpperCase(),
+                      })}
+                    </Text>
+                  </View>
 
-              <View style={styles.fieldGroup}>
-                <Text style={styles.fieldLabel}>Password</Text>
-                <View style={styles.inputShell}>
-                  <Feather name="lock" size={18} color={akColors.textMuted} />
-                  <TextInput
-                    secureTextEntry={!showPassword}
-                    value={password}
-                    onChangeText={setPassword}
-                    style={styles.input}
-                    placeholder="Enter your password"
-                    placeholderTextColor={akColors.textSoft}
-                    editable={!isSubmitting}
-                  />
-                  <Pressable
-                    onPress={() => setShowPassword((v) => !v)}
-                    hitSlop={8}
-                    style={styles.inputIconButton}
-                  >
-                    {showPassword ? (
-                      <Feather name="eye-off" size={18} color={akColors.textMuted} />
-                    ) : (
-                      <Feather name="eye" size={18} color={akColors.textMuted} />
-                    )}
-                  </Pressable>
-                </View>
-              </View>
+                  <View style={styles.fieldGroup}>
+                    <Text style={styles.fieldLabel}>{t('login.otpLabel')}</Text>
+                    <View style={styles.inputShell}>
+                      <Ionicons name="shield-checkmark-outline" size={18} color={akColors.textMuted} />
+                      <TextInput
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        keyboardType="number-pad"
+                        value={twoFactorOtp}
+                        onChangeText={setTwoFactorOtp}
+                        style={styles.input}
+                        placeholder={t('login.otpPlaceholder')}
+                        placeholderTextColor={akColors.textSoft}
+                        editable={!isSubmitting}
+                        maxLength={8}
+                      />
+                    </View>
+                  </View>
+                </>
+              ) : (
+                <>
+                  <View style={styles.fieldGroup}>
+                    <Text style={styles.fieldLabel}>{t('login.emailLabel')}</Text>
+                    <View style={styles.inputShell}>
+                      <Ionicons name="mail-outline" size={18} color={akColors.textMuted} />
+                      <TextInput
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        keyboardType="email-address"
+                        value={email}
+                        onChangeText={setEmail}
+                        style={styles.input}
+                        placeholder="ahmed.hassan@email.com"
+                        placeholderTextColor={akColors.textSoft}
+                        editable={!isSubmitting}
+                      />
+                    </View>
+                  </View>
+
+                  <View style={styles.fieldGroup}>
+                    <Text style={styles.fieldLabel}>{t('login.passwordLabel')}</Text>
+                    <View style={styles.inputShell}>
+                      <Feather name="lock" size={18} color={akColors.textMuted} />
+                      <TextInput
+                        secureTextEntry={!showPassword}
+                        value={password}
+                        onChangeText={setPassword}
+                        style={styles.input}
+                        placeholder="Enter your password"
+                        placeholderTextColor={akColors.textSoft}
+                        editable={!isSubmitting}
+                      />
+                      <Pressable
+                        onPress={() => setShowPassword((v) => !v)}
+                        hitSlop={8}
+                        style={styles.inputIconButton}
+                      >
+                        {showPassword ? (
+                          <Feather name="eye-off" size={18} color={akColors.textMuted} />
+                        ) : (
+                          <Feather name="eye" size={18} color={akColors.textMuted} />
+                        )}
+                      </Pressable>
+                    </View>
+                  </View>
+                </>
+              )}
 
               {combinedError ? (
                 <View style={styles.errorBox}>
@@ -219,88 +310,107 @@ export function LoginScreen({
                 </View>
               ) : null}
 
-              <View style={styles.rowBetween}>
-                <Pressable
-                  onPress={() => setRememberMe((v) => !v)}
-                  style={styles.rememberRow}
-                  hitSlop={6}
-                >
-                  <View style={[styles.checkbox, rememberMe && styles.checkboxChecked]}>
-                    {rememberMe ? <Feather name="check" size={12} color="#fff" /> : null}
-                  </View>
-                  <Text style={styles.rememberText}>Remember me</Text>
+              {!pendingTwoFactorChallenge ? (
+                <View style={styles.rowBetween}>
+                  <Pressable
+                    onPress={() => setRememberMe((v) => !v)}
+                    style={styles.rememberRow}
+                    hitSlop={6}
+                  >
+                    <View style={[styles.checkbox, rememberMe && styles.checkboxChecked]}>
+                      {rememberMe ? <Feather name="check" size={12} color="#fff" /> : null}
+                    </View>
+                    <Text style={styles.rememberText}>{t('login.rememberMe')}</Text>
+                  </Pressable>
+                  <Pressable onPress={onOpenForgotPassword} hitSlop={6}>
+                    <Text style={styles.forgotText}>{t('login.forgotPassword')}</Text>
+                  </Pressable>
+                </View>
+              ) : (
+                <Pressable onPress={onCancelTwoFactor} hitSlop={6} style={styles.twoFactorBackBtn}>
+                  <Text style={styles.forgotText}>{t('login.useDifferentAccount')}</Text>
                 </Pressable>
-                <Text style={styles.forgotText}>Forgot password?</Text>
-              </View>
+              )}
 
               <Pressable
                 style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
-                onPress={handleSubmit}
+                onPress={pendingTwoFactorChallenge ? handleSubmitTwoFactor : handleSubmit}
                 disabled={isSubmitting}
               >
                 {isSubmitting ? (
                   <View style={styles.loadingInline}>
                     <ActivityIndicator size="small" color="#FFFFFF" />
-                    <Text style={styles.submitButtonText}>Signing In...</Text>
+                    <Text style={styles.submitButtonText}>
+                      {pendingTwoFactorChallenge ? t('login.verifyingOtp') : t('login.signingIn')}
+                    </Text>
                   </View>
                 ) : (
-                  <Text style={styles.submitButtonText}>Sign In</Text>
+                  <Text style={styles.submitButtonText}>
+                    {pendingTwoFactorChallenge ? t('login.verifyOtp') : t('login.signIn')}
+                  </Text>
                 )}
               </Pressable>
 
-              <View style={styles.dividerRow}>
-                <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>Or</Text>
-                <View style={styles.dividerLine} />
-              </View>
+              {!pendingTwoFactorChallenge ? (
+                <>
+                  <View style={styles.dividerRow}>
+                    <View style={styles.dividerLine} />
+                    <Text style={styles.dividerText}>{t('common.or')}</Text>
+                    <View style={styles.dividerLine} />
+                  </View>
 
-              <Pressable
-                style={styles.outlineButton}
-                onPress={handleBiometric}
-                disabled={!canBiometricQuickSignIn || isBiometricSubmitting || isSubmitting}
-              >
-                <MaterialCommunityIcons
-                  name="fingerprint"
-                  size={18}
-                  color={canBiometricQuickSignIn ? brandPrimary : akColors.textSoft}
-                  style={{ marginRight: 8 }}
-                />
-                <Text
-                  style={[
-                    styles.outlineButtonText,
-                    !canBiometricQuickSignIn && styles.outlineButtonTextDisabled,
-                  ]}
-                >
-                  {isBiometricSubmitting
-                    ? 'Authenticating...'
-                    : canBiometricQuickSignIn
-                      ? `Sign in with ${biometricLabel || 'Biometrics'}`
-                      : 'Biometric sign-in unavailable'}
-                </Text>
-              </Pressable>
+                  <Pressable
+                    style={styles.outlineButton}
+                    onPress={handleBiometric}
+                    disabled={!canBiometricQuickSignIn || isBiometricSubmitting || isSubmitting}
+                  >
+                    <View style={styles.biometricIconsWrap}>
+                      <MaterialCommunityIcons
+                        name="face-recognition"
+                        size={17}
+                        color={canBiometricQuickSignIn ? brandPrimary : akColors.textSoft}
+                      />
+                      <MaterialCommunityIcons
+                        name="fingerprint"
+                        size={18}
+                        color={canBiometricQuickSignIn ? brandPrimary : akColors.textSoft}
+                      />
+                    </View>
+                    <Text
+                      style={[
+                        styles.outlineButtonText,
+                        !canBiometricQuickSignIn && styles.outlineButtonTextDisabled,
+                      ]}
+                    >
+                      {isBiometricSubmitting
+                        ? t('login.authenticating')
+                        : canBiometricQuickSignIn
+                          ? t('login.signInWithBiometric', { label: biometricLabel || 'Biometrics' })
+                          : t('login.biometricUnavailable')}
+                    </Text>
+                  </Pressable>
+                </>
+              ) : null}
             </View>
 
             <View style={styles.footerBlock}>
               <View style={styles.footerRow}>
-                <Text style={styles.footerLine}>Don't have an account?</Text>
-                <Pressable onPress={onOpenRegister} hitSlop={6}>
-                  <Text style={styles.footerAccent}>Register Now</Text>
-                </Pressable>
+                <Text style={styles.footerLine}>{t('login.accountCreationManaged')}</Text>
               </View>
               <Text style={styles.footerSmall}>
-                Submit a signup request for admin approval.
+                {t('login.contactAdmin')}
               </Text>
             </View>
 
-            {showCredentials ? (
+            {!pendingTwoFactorChallenge && showCredentials ? (
               <LinearGradient
                 colors={['rgba(201,169,97,0.12)', 'rgba(42,62,53,0.05)']}
                 style={styles.demoCredentialsCard}
               >
                 <View style={styles.rowBetween}>
-                  <Text style={styles.demoCredTitle}>Demo Credentials</Text>
+                  <Text style={styles.demoCredTitle}>{t('login.demoCredentials')}</Text>
                   <Pressable onPress={() => setShowCredentials(false)}>
-                    <Text style={styles.demoHideText}>Hide</Text>
+                    <Text style={styles.demoHideText}>{t('login.hideDemo')}</Text>
                   </Pressable>
                 </View>
 
@@ -315,11 +425,11 @@ export function LoginScreen({
                   </Pressable>
                 ))}
               </LinearGradient>
-            ) : (
+            ) : !pendingTwoFactorChallenge ? (
               <Pressable onPress={() => setShowCredentials(true)} style={styles.showDemoButton}>
-                <Text style={styles.showDemoText}>Show Demo Credentials</Text>
+                <Text style={styles.showDemoText}>{t('login.showDemo')}</Text>
               </Pressable>
-            )}
+            ) : null}
 
             <View style={styles.poweredWrap}>
               <Text style={styles.poweredText}>
@@ -353,6 +463,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: 14,
     paddingBottom: 4,
+  },
+  languageRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  languageBtn: {
+    borderWidth: 1,
+    borderColor: akColors.border,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: '#fff',
+  },
+  languageBtnActive: {
+    borderColor: akColors.primary,
+    backgroundColor: `${akColors.primary}12`,
+  },
+  languageBtnText: {
+    color: akColors.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  languageBtnTextActive: {
+    color: akColors.primary,
   },
   logo: {
     width: 170,
@@ -482,6 +617,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+  twoFactorBackBtn: {
+    alignSelf: 'flex-start',
+    paddingVertical: 4,
+  },
   submitButton: {
     height: 56,
     borderRadius: 16,
@@ -528,6 +667,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
+  },
+  biometricIconsWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginRight: 8,
   },
   outlineButtonText: {
     color: akColors.text,

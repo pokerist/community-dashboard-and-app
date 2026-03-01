@@ -1,10 +1,13 @@
 import { Type } from 'class-transformer';
 import {
+  IsArray,
   IsBoolean,
+  IsISO8601,
   IsInt,
   IsObject,
   IsOptional,
   IsString,
+  ValidateNested,
   Matches,
   IsUrl,
   Max,
@@ -211,6 +214,178 @@ export class UpdateBrandSettingsDto {
   @IsString()
   @MaxLength(100)
   supportPhone?: string;
+}
+
+export class UpdateOnboardingSlideDto {
+  @IsString()
+  @MaxLength(140)
+  title!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  subtitle?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(400)
+  description?: string;
+
+  @IsOptional()
+  @IsUrl({ require_tld: false })
+  imageUrl?: string;
+}
+
+export class UpdateOnboardingSettingsDto {
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => UpdateOnboardingSlideDto)
+  slides?: UpdateOnboardingSlideDto[];
+}
+
+export class UpdateOfferBannerDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  id?: string;
+
+  @IsString()
+  @MaxLength(140)
+  title!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(160)
+  subtitle?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  description?: string;
+
+  @IsOptional()
+  @IsUrl({ require_tld: false })
+  imageUrl?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  imageFileId?: string;
+
+  @IsOptional()
+  @IsUrl({ require_tld: false })
+  linkUrl?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(9999)
+  priority?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  active?: boolean;
+
+  @IsOptional()
+  @IsISO8601()
+  startAt?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  endAt?: string;
+}
+
+export class UpdateOffersSettingsDto {
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => UpdateOfferBannerDto)
+  banners?: UpdateOfferBannerDto[];
+}
+
+export class MobileFeatureFlagsDto {
+  @IsOptional()
+  @IsBoolean()
+  canUseServices?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  canUseBookings?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  canUseComplaints?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  canUseQr?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  canViewFinance?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  canManageHousehold?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  canUseDiscover?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  canUseHelpCenter?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  canUseUtilities?: boolean;
+}
+
+export class UpdateMobileAccessSettingsDto {
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => MobileFeatureFlagsDto)
+  owner?: MobileFeatureFlagsDto;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => MobileFeatureFlagsDto)
+  tenant?: MobileFeatureFlagsDto;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => MobileFeatureFlagsDto)
+  family?: MobileFeatureFlagsDto;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => MobileFeatureFlagsDto)
+  authorized?: MobileFeatureFlagsDto;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => MobileFeatureFlagsDto)
+  contractor?: MobileFeatureFlagsDto;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => MobileFeatureFlagsDto)
+  preDeliveryOwner?: MobileFeatureFlagsDto;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => MobileFeatureFlagsDto)
+  resident?: MobileFeatureFlagsDto;
 }
 
 export class TestCrmConnectionDto {

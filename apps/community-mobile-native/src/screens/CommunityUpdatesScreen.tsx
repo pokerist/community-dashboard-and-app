@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import {
   ActivityIndicator,
-  Linking,
   Modal,
   Pressable,
   RefreshControl,
@@ -14,16 +13,18 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { AuthSession } from '../features/auth/types';
-import { useAppToast } from '../components/mobile/AppToast';
+import { InAppWebViewerModal } from '../components/mobile/InAppWebViewerModal';
 import {
   communityUpdateTitle,
   formatNotificationDateTime,
   formatNotificationRelativeTime,
   isCommunityUpdateNotification,
 } from '../features/notifications/presentation';
+import { useI18n } from '../features/i18n/provider';
 import { useNotificationRealtime } from '../features/notifications/realtime';
 import type { MobileNotificationRow } from '../features/notifications/types';
-import { extractApiErrorMessage } from '../lib/http';
+import { useBranding } from '../features/branding/provider';
+import { getBrandPalette } from '../features/branding/palette';
 import { akColors, akRadius, akShadow } from '../theme/alkarma';
 
 type FilterMode = 'all' | 'unread';
@@ -46,7 +47,10 @@ function normalizeExternalUrl(raw?: string | null): string | null {
   return `https://${trimmed}`;
 }
 
-function communityVisual(type?: string) {
+function communityVisual(
+  type: string | undefined,
+  palette: ReturnType<typeof getBrandPalette>,
+) {
   const key = String(type ?? '').toUpperCase();
   if (key.includes('EMERGENCY')) {
     return {
@@ -74,25 +78,27 @@ function communityVisual(type?: string) {
   }
   return {
     icon: 'megaphone-outline' as const,
-    iconColor: akColors.primary,
-    bg: 'rgba(42,62,53,0.08)',
-    border: 'rgba(42,62,53,0.18)',
+    iconColor: palette.primary,
+    bg: palette.primarySoft8,
+    border: palette.primarySoft18,
   };
 }
 
-function dayBucketLabel(dateValue?: string | null): string {
-  if (!dateValue) return 'Earlier';
+function dayBucketLabel(
+  dateValue?: string | null,
+): 'common.today' | 'common.yesterday' | 'common.earlier' {
+  if (!dateValue) return 'common.earlier';
   const ts = new Date(dateValue);
-  if (Number.isNaN(ts.getTime())) return 'Earlier';
+  if (Number.isNaN(ts.getTime())) return 'common.earlier';
 
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const startOfYesterday = new Date(startOfToday);
   startOfYesterday.setDate(startOfYesterday.getDate() - 1);
 
-  if (ts >= startOfToday) return 'Today';
-  if (ts >= startOfYesterday) return 'Yesterday';
-  return 'Earlier';
+  if (ts >= startOfToday) return 'common.today';
+  if (ts >= startOfYesterday) return 'common.yesterday';
+  return 'common.earlier';
 }
 
 function CommunityUpdateRow({
@@ -100,19 +106,25 @@ function CommunityUpdateRow({
   isMarking,
   onMarkRead,
   onOpen,
+  palette,
 }: {
   item: MobileNotificationRow;
   isMarking: boolean;
   onMarkRead: (id: string) => void;
   onOpen: () => void;
+  palette: ReturnType<typeof getBrandPalette>;
 }) {
-  const visual = communityVisual(item.type);
+  const { t } = useI18n();
+  const visual = communityVisual(item.type, palette);
 
   return (
     <Pressable
       style={({ pressed }) => [
         styles.card,
-        !item.isRead && styles.cardUnread,
+        !item.isRead && [
+          styles.cardUnread,
+          { borderColor: palette.primarySoft22, backgroundColor: palette.primarySoft8 },
+        ],
         pressed && styles.cardPressed,
       ]}
       onPress={onOpen}
@@ -130,25 +142,30 @@ function CommunityUpdateRow({
             {formatNotificationDateTime(item.sentAt || item.createdAt)}
           </Text>
         </View>
-        {!item.isRead ? <View style={styles.unreadDot} /> : null}
+        {!item.isRead ? <View style={[styles.unreadDot, { backgroundColor: palette.primary }]} /> : null}
       </View>
 
-      <Text style={styles.cardMessage}>{item.messageEn || 'No details provided.'}</Text>
+      <Text style={styles.cardMessage}>{item.messageEn || t('communityUpdates.noDetails')}</Text>
 
       <View style={styles.cardFooter}>
         <View
           style={[
             styles.statusPill,
             item.isRead ? styles.statusPillRead : styles.statusPillUnread,
+            !item.isRead && {
+              borderColor: palette.primarySoft18,
+              backgroundColor: palette.primarySoft8,
+            },
           ]}
         >
           <Text
             style={[
               styles.statusPillText,
               item.isRead ? styles.statusPillTextRead : styles.statusPillTextUnread,
+              !item.isRead && { color: palette.primary },
             ]}
           >
-            {item.isRead ? 'Read' : 'Unread'}
+            {item.isRead ? t('common.read') : t('common.unread')}
           </Text>
         </View>
 
@@ -156,12 +173,18 @@ function CommunityUpdateRow({
           <Pressable
             onPress={() => onMarkRead(item.id)}
             disabled={isMarking}
-            style={[styles.markReadButton, isMarking && styles.markReadButtonDisabled]}
+            style={[
+              styles.markReadButton,
+              { borderColor: palette.primarySoft18 },
+              isMarking && styles.markReadButtonDisabled,
+            ]}
           >
             {isMarking ? (
-              <ActivityIndicator size="small" color={akColors.primary} />
+              <ActivityIndicator size="small" color={palette.primary} />
             ) : (
-              <Text style={styles.markReadText}>Mark as read</Text>
+              <Text style={[styles.markReadText, { color: palette.primary }]}>
+                {t('communityUpdates.markAsRead')}
+              </Text>
             )}
           </Pressable>
         ) : null}
@@ -171,11 +194,22 @@ function CommunityUpdateRow({
 }
 
 export function CommunityUpdatesScreen({ onOpenInAppRoute }: CommunityUpdatesScreenProps) {
+  const { t } = useI18n();
+  const { brand } = useBranding();
+  const palette = getBrandPalette(brand);
   const insets = useSafeAreaInsets();
   const realtime = useNotificationRealtime();
-  const toast = useAppToast();
   const [filter, setFilter] = useState<FilterMode>('all');
   const [selectedUpdate, setSelectedUpdate] = useState<MobileNotificationRow | null>(null);
+  const [webViewerState, setWebViewerState] = useState<{
+    visible: boolean;
+    url: string | null;
+    title: string;
+  }>({
+    visible: false,
+    url: null,
+    title: t('communityUpdates.communityUpdate'),
+  });
 
   const communityRows = useMemo(
     () => realtime.rows.filter(isCommunityUpdateNotification),
@@ -191,8 +225,8 @@ export function CommunityUpdatesScreen({ onOpenInAppRoute }: CommunityUpdatesScr
     [communityRows],
   );
   const groupedSections = useMemo(() => {
-    const orderedBuckets = ['Today', 'Yesterday', 'Earlier'] as const;
-    const bucketMap = new Map<string, MobileNotificationRow[]>();
+    const orderedBuckets = ['common.today', 'common.yesterday', 'common.earlier'] as const;
+    const bucketMap = new Map<(typeof orderedBuckets)[number], MobileNotificationRow[]>();
     for (const row of filteredRows) {
       const bucket = dayBucketLabel(row.sentAt || row.createdAt);
       const current = bucketMap.get(bucket) ?? [];
@@ -226,25 +260,20 @@ export function CommunityUpdatesScreen({ onOpenInAppRoute }: CommunityUpdatesScr
         selectedUpdate?.payload?.ctaText ??
         '',
     ).trim();
-    return raw || 'Open Link';
-  }, [selectedUpdate]);
+    return raw || t('common.openLink');
+  }, [selectedUpdate, t]);
   const selectedInAppLabel = useMemo(() => {
     const raw = String(selectedUpdate?.payload?.openInAppLabel ?? '').trim();
-    return raw || 'Open in App';
-  }, [selectedUpdate]);
+    return raw || t('common.openInApp');
+  }, [selectedUpdate, t]);
 
   const openSelectedLink = async () => {
     if (!selectedExternalUrl) return;
-    try {
-      const canOpen = await Linking.canOpenURL(selectedExternalUrl);
-      if (!canOpen) {
-        toast.error('Unable to open link', 'This link is not supported on your device.');
-        return;
-      }
-      await Linking.openURL(selectedExternalUrl);
-    } catch (error) {
-      toast.error('Failed to open link', extractApiErrorMessage(error));
-    }
+    setWebViewerState({
+      visible: true,
+      url: selectedExternalUrl,
+      title: selectedUpdate?.title || t('communityUpdates.communityUpdate'),
+    });
   };
   const openSelectedInAppRoute = () => {
     if (!selectedInternalRoute || !onOpenInAppRoute) return;
@@ -267,32 +296,46 @@ export function CommunityUpdatesScreen({ onOpenInAppRoute }: CommunityUpdatesScr
     <SafeAreaView style={styles.screen} edges={['bottom']}>
       <View style={[styles.topWrap, { paddingTop: Math.max(insets.top, 8) + 8 }]}>
         <View style={styles.headerCard}>
-          <Text style={styles.title}>Community Updates</Text>
+          <Text style={styles.title}>{t('communityUpdates.title')}</Text>
           <Text style={styles.subtitle}>
-            Announcements and operational updates shared by the community management.
+            {t('communityUpdates.subtitle')}
           </Text>
         </View>
 
         <View style={styles.filtersRow}>
           <Pressable
-            style={[styles.filterChip, filter === 'all' && styles.filterChipActive]}
+            style={[
+              styles.filterChip,
+              filter === 'all' && [
+                styles.filterChipActive,
+                { backgroundColor: palette.primary, borderColor: palette.primary },
+              ],
+            ]}
             onPress={() => setFilter('all')}
           >
             <Text style={[styles.filterText, filter === 'all' && styles.filterTextActive]}>
-              All ({communityRows.length})
+              {t('common.all')} ({communityRows.length})
             </Text>
           </Pressable>
           <Pressable
-            style={[styles.filterChip, filter === 'unread' && styles.filterChipActive]}
+            style={[
+              styles.filterChip,
+              filter === 'unread' && [
+                styles.filterChipActive,
+                { backgroundColor: palette.primary, borderColor: palette.primary },
+              ],
+            ]}
             onPress={() => setFilter('unread')}
           >
             <Text style={[styles.filterText, filter === 'unread' && styles.filterTextActive]}>
-              Unread ({unreadCommunityCount})
+              {t('common.unread')} ({unreadCommunityCount})
             </Text>
           </Pressable>
           <Pressable style={styles.refreshChip} onPress={() => void realtime.refreshNow()}>
             <Text style={styles.refreshChipText}>
-              {realtime.isRefreshing || realtime.isInitialLoading ? 'Refreshing...' : 'Refresh'}
+              {realtime.isRefreshing || realtime.isInitialLoading
+                ? t('common.refreshing')
+                : t('common.refresh')}
             </Text>
           </Pressable>
         </View>
@@ -313,19 +356,19 @@ export function CommunityUpdatesScreen({ onOpenInAppRoute }: CommunityUpdatesScr
         }
         renderSectionHeader={({ section }) => (
           <View style={styles.sectionHeaderWrap}>
-            <Text style={styles.sectionHeaderText}>{section.title}</Text>
+            <Text style={styles.sectionHeaderText}>{t(section.title)}</Text>
             <View style={styles.sectionHeaderLine} />
           </View>
         )}
         ListEmptyComponent={
           realtime.isInitialLoading ? (
             <View style={styles.emptyState}>
-              <ActivityIndicator size="small" color={akColors.primary} />
-              <Text style={styles.emptyText}>Loading community updates...</Text>
+              <ActivityIndicator size="small" color={palette.primary} />
+              <Text style={styles.emptyText}>{t('common.refreshing')}</Text>
             </View>
           ) : (
             <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>No community updates available.</Text>
+              <Text style={styles.emptyText}>{t('communityUpdates.noUpdates')}</Text>
             </View>
           )
         }
@@ -335,6 +378,7 @@ export function CommunityUpdatesScreen({ onOpenInAppRoute }: CommunityUpdatesScr
               item={item}
               isMarking={realtime.markingId === item.id}
               onMarkRead={(id) => void realtime.markRead(id)}
+              palette={palette}
               onOpen={async () => {
                 setSelectedUpdate(item);
                 if (!item.isRead) {
@@ -347,7 +391,7 @@ export function CommunityUpdatesScreen({ onOpenInAppRoute }: CommunityUpdatesScr
         ListFooterComponent={
           <View style={styles.footerHint}>
             <Text style={styles.footerHintText}>
-              Showing latest {communityRows.length} updates • {realtime.connectionState}
+              {t('communityUpdates.title')} • {communityRows.length} • {realtime.connectionState}
             </Text>
           </View>
         }
@@ -365,7 +409,9 @@ export function CommunityUpdatesScreen({ onOpenInAppRoute }: CommunityUpdatesScr
             <View style={styles.detailHeaderRow}>
               <View style={styles.detailHeaderTextWrap}>
                 <Text style={styles.detailTitle}>
-                  {selectedUpdate ? communityUpdateTitle(selectedUpdate) : 'Community Update'}
+                  {selectedUpdate
+                    ? communityUpdateTitle(selectedUpdate)
+                    : t('communityUpdates.communityUpdate')}
                 </Text>
                 <Text style={styles.detailMeta}>
                   {selectedUpdate
@@ -383,7 +429,7 @@ export function CommunityUpdatesScreen({ onOpenInAppRoute }: CommunityUpdatesScr
             <ScrollView contentContainerStyle={styles.detailContent}>
               <View style={styles.detailBodyCard}>
                 <Text style={styles.detailBodyText}>
-                  {selectedUpdate?.messageEn?.trim() || 'No details available.'}
+                  {selectedUpdate?.messageEn?.trim() || t('communityUpdates.noDetails')}
                 </Text>
                 {selectedUpdate?.messageAr?.trim() ? (
                   <>
@@ -398,6 +444,10 @@ export function CommunityUpdatesScreen({ onOpenInAppRoute }: CommunityUpdatesScr
                   style={[
                     styles.detailBadge,
                     selectedUpdate?.isRead ? styles.detailBadgeRead : styles.detailBadgeUnread,
+                    !selectedUpdate?.isRead && {
+                      borderColor: palette.primarySoft22,
+                      backgroundColor: palette.primarySoft8,
+                    },
                   ]}
                 >
                   <Text
@@ -406,9 +456,10 @@ export function CommunityUpdatesScreen({ onOpenInAppRoute }: CommunityUpdatesScr
                       selectedUpdate?.isRead
                         ? styles.detailBadgeTextRead
                         : styles.detailBadgeTextUnread,
+                      !selectedUpdate?.isRead && { color: palette.primary },
                     ]}
                   >
-                    {selectedUpdate?.isRead ? 'Read' : 'Unread'}
+                    {selectedUpdate?.isRead ? t('common.read') : t('common.unread')}
                   </Text>
                 </View>
                 {selectedUpdate?.type ? (
@@ -426,18 +477,33 @@ export function CommunityUpdatesScreen({ onOpenInAppRoute }: CommunityUpdatesScr
                 </Pressable>
               ) : null}
               {selectedExternalUrl ? (
-                <Pressable style={styles.detailPrimaryBtn} onPress={() => void openSelectedLink()}>
+                <Pressable
+                  style={[styles.detailPrimaryBtn, { backgroundColor: palette.primary }]}
+                  onPress={() => void openSelectedLink()}
+                >
                   <Ionicons name="open-outline" size={16} color="#fff" />
                   <Text style={styles.detailPrimaryBtnText}>{selectedExternalCtaLabel}</Text>
                 </Pressable>
               ) : null}
               <Pressable style={styles.detailSecondaryBtn} onPress={() => setSelectedUpdate(null)}>
-                <Text style={styles.detailSecondaryBtnText}>Close</Text>
+                <Text style={styles.detailSecondaryBtnText}>{t('common.cancel')}</Text>
               </Pressable>
             </View>
           </View>
         </View>
       </Modal>
+      <InAppWebViewerModal
+        visible={webViewerState.visible}
+        url={webViewerState.url}
+        title={webViewerState.title}
+        onClose={() =>
+          setWebViewerState({
+            visible: false,
+            url: null,
+            title: t('communityUpdates.communityUpdate'),
+          })
+        }
+      />
     </SafeAreaView>
   );
 }

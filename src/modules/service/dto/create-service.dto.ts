@@ -44,4 +44,8 @@ export class CreateServiceDto {
   @IsOptional()
   @Type(() => String) // Decimal in Prisma/DB is often string in DTO
   startingPrice?: string; // The mandatory starting price
+
+  @IsBoolean()
+  @IsOptional()
+  isUrgent?: boolean;
 }

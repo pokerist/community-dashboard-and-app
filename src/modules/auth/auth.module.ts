@@ -10,6 +10,7 @@ import { JwtStrategy } from './jwt.strategy';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { ReferralsModule } from '../referrals/referrals.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { SystemSettingsModule } from '../system-settings/system-settings.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
     }),
     forwardRef(() => ReferralsModule),
     forwardRef(() => NotificationsModule),
+    forwardRef(() => SystemSettingsModule),
   ],
   providers: [
     AuthService,

@@ -9,12 +9,19 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateBookingDto } from './dto/create-booking.dto';
 import { UpdateBookingStatusDto } from './dto/update-status.dto';
 import { BookingsQueryDto } from './dto/bookings-query.dto';
-import { BookingStatus, FacilityType, UnitStatus } from '@prisma/client';
+import {
+  BookingStatus,
+  FacilityType,
+  UnitStatus,
+  InvoiceType,
+  InvoiceStatus,
+} from '@prisma/client';
 import { BookingApprovedEvent } from '../../events/contracts/booking-approved.event';
 import { BookingCancelledEvent } from '../../events/contracts/booking-cancelled.event';
 import { paginate } from '../../common/utils/pagination.util';
 import { getActiveUnitAccess } from '../../common/utils/unit-access.util';
 import { ClubhouseService } from '../clubhouse/clubhouse.service';
+import { InvoicesService } from '../invoices/invoices.service';
 
 interface EffectiveSlotConfig {
   startTime: string;
@@ -29,6 +36,7 @@ export class BookingsService {
     private prisma: PrismaService,
     private eventEmitter: EventEmitter2,
     private clubhouseService: ClubhouseService,
+    private invoicesService: InvoicesService,
   ) {}
 
   private isSuperAdminRole(roles: unknown): boolean {
@@ -59,6 +67,9 @@ export class BookingsService {
 
     if (!facility) throw new NotFoundException('Facility not found');
     if (!facility.isActive) throw new BadRequestException('Facility inactive');
+    if (facility.isBookable === false) {
+      throw new BadRequestException('Facility is not available for booking');
+    }
 
     return facility;
   }
@@ -192,25 +203,6 @@ export class BookingsService {
     }
   }
 
-  private async saveBooking(
-    dto: CreateBookingDto & { userId: string; residentId?: string },
-  ) {
-    const date = new Date(dto.date);
-
-    return this.prisma.booking.create({
-      data: {
-        userId: dto.userId,
-        facilityId: dto.facilityId,
-        residentId: dto.residentId,
-        unitId: dto.unitId,
-        date,
-        startTime: dto.startTime,
-        endTime: dto.endTime,
-        status: BookingStatus.PENDING,
-      },
-    });
-  }
-
   async createForActor(actorUserId: string, dto: CreateBookingDto) {
     const access = await getActiveUnitAccess(this.prisma, actorUserId, dto.unitId);
 
@@ -270,10 +262,38 @@ export class BookingsService {
       throw new BadRequestException('Requested time does not match slot rules');
     }
 
-    return this.prisma.$transaction(async (prisma) => {
+    return this.prisma.$transaction(async (tx) => {
       await this.enforceLimits(internalDto, facility);
       await this.checkSlotCapacity(dto, facility, config);
-      return this.saveBooking(internalDto);
+
+      const booking = await tx.booking.create({
+        data: {
+          userId: internalDto.userId,
+          facilityId: internalDto.facilityId,
+          residentId: internalDto.residentId,
+          unitId: internalDto.unitId,
+          date: new Date(internalDto.date),
+          startTime: internalDto.startTime,
+          endTime: internalDto.endTime,
+          status: facility.requiresPrepayment
+            ? BookingStatus.PENDING_PAYMENT
+            : BookingStatus.PENDING,
+        },
+      });
+
+      if (facility.requiresPrepayment && Number(facility.price ?? 0) > 0) {
+        await this.invoicesService.generateInvoiceTx(tx, {
+          unitId: internalDto.unitId,
+          residentId: actorUserId,
+          amount: Number(facility.price),
+          dueDate: new Date(internalDto.date),
+          type: InvoiceType.BOOKING_FEE,
+          status: InvoiceStatus.PENDING,
+          sources: { bookingIds: [booking.id] },
+        });
+      }
+
+      return booking;
     });
   }
 

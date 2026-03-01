@@ -8,6 +8,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import {
@@ -20,8 +21,10 @@ import { InlineError, ScreenCard } from '../components/mobile/Primitives';
 import { UnitPicker } from '../components/mobile/UnitPicker';
 import type { AuthSession } from '../features/auth/types';
 import {
+  listViolationActions,
   listMyInvoices,
   listMyViolations,
+  submitViolationAction,
   simulateInvoiceSelfPayment,
 } from '../features/community/service';
 import { buildPayables, filterPayablesByUnit } from '../features/community/payables';
@@ -30,12 +33,16 @@ import type {
   PayableItem,
   ResidentUnit,
   ViolationRow,
+  ViolationActionRow,
 } from '../features/community/types';
 import { extractApiErrorMessage } from '../lib/http';
 import {
   invoiceStatusDisplayLabel,
   violationStatusDisplayLabel,
 } from '../features/presentation/status';
+import { useI18n } from '../features/i18n/provider';
+import { useBranding } from '../features/branding/provider';
+import { getBrandPalette } from '../features/branding/palette';
 import { akColors, akRadius, akShadow } from '../theme/alkarma';
 import { formatCurrency, formatDateOnly, formatDateTime } from '../utils/format';
 
@@ -64,6 +71,9 @@ export function FinanceScreen({
   deepLinkFocus = null,
   onConsumeDeepLinkFocus,
 }: FinanceScreenProps) {
+  const { t } = useI18n();
+  const { brand } = useBranding();
+  const palette = getBrandPalette(brand);
   const insets = useSafeAreaInsets();
   const toast = useAppToast();
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
@@ -75,6 +85,15 @@ export function FinanceScreen({
   const [isPaying, setIsPaying] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceRow | null>(null);
   const [selectedViolation, setSelectedViolation] = useState<ViolationRow | null>(null);
+  const [activeTab, setActiveTab] = useState<'ALL' | 'UPCOMING' | 'OVERDUE' | 'PAID'>('ALL');
+  const [violationActions, setViolationActions] = useState<ViolationActionRow[]>([]);
+  const [violationActionsLoading, setViolationActionsLoading] = useState(false);
+  const [violationActionSubmitting, setViolationActionSubmitting] = useState(false);
+  const [violationActionModal, setViolationActionModal] = useState<{
+    visible: boolean;
+    type: 'APPEAL' | 'FIX_SUBMISSION';
+  }>({ visible: false, type: 'APPEAL' });
+  const [violationActionNote, setViolationActionNote] = useState('');
 
   const loadData = useCallback(
     async (mode: 'initial' | 'refresh' = 'initial') => {
@@ -138,25 +157,68 @@ export function FinanceScreen({
     };
   }, [filteredInvoices, filteredPayables, filteredViolations]);
 
+  const tabFilteredPayables = useMemo(() => {
+    const now = Date.now();
+    if (activeTab === 'ALL') return filteredPayables;
+    if (activeTab === 'PAID') return [];
+    if (activeTab === 'UPCOMING') {
+      return filteredPayables.filter((row) => {
+        const status = String(row.status ?? '').toUpperCase();
+        if (status === 'OVERDUE') return false;
+        const dueTs = row.dueDate ? Date.parse(row.dueDate) : Number.NaN;
+        if (!Number.isFinite(dueTs)) return status === 'PENDING';
+        return dueTs >= now;
+      });
+    }
+    return filteredPayables.filter((row) => {
+      const status = String(row.status ?? '').toUpperCase();
+      if (status === 'OVERDUE') return true;
+      const dueTs = row.dueDate ? Date.parse(row.dueDate) : Number.NaN;
+      return Number.isFinite(dueTs) && dueTs < now && status !== 'PAID';
+    });
+  }, [activeTab, filteredPayables]);
+
+  const tabFilteredInvoices = useMemo(() => {
+    if (activeTab === 'ALL') return filteredInvoices;
+    if (activeTab === 'PAID') {
+      return filteredInvoices.filter((row) => String(row.status ?? '').toUpperCase() === 'PAID');
+    }
+    if (activeTab === 'UPCOMING') {
+      return filteredInvoices.filter((row) => String(row.status ?? '').toUpperCase() === 'PENDING');
+    }
+    return filteredInvoices.filter((row) => String(row.status ?? '').toUpperCase() === 'OVERDUE');
+  }, [activeTab, filteredInvoices]);
+
+  const paymentCategoryLabel = useCallback((row: InvoiceRow) => {
+    const type = String(row.type ?? '').toUpperCase();
+    if (type.includes('UTILITY') || type.includes('WATER') || type.includes('ELECTRIC') || type.includes('GAS')) {
+      return 'Utility';
+    }
+    if (type.includes('INSTALLMENT') || type.includes('CHEQUE')) return 'Installment';
+    if (type.includes('BOOKING')) return 'Amenities';
+    if (type.includes('FINE') || type.includes('VIOLATION')) return 'Violations/Fines';
+    return 'Other';
+  }, []);
+
   const handleConfirmDemoPayment = useCallback(
     async (payload: { paymentMethod: string; cardLast4?: string; notes?: string }) => {
       if (!activePaymentItem?.invoiceId) {
-        toast.info('Payment unavailable', 'This item is not linked to an invoice yet.');
+        toast.info(t('home.paymentUnavailable'), t('home.paymentUnavailableHint'));
         return;
       }
       setIsPaying(true);
       try {
         await simulateInvoiceSelfPayment(session.accessToken, activePaymentItem.invoiceId, payload);
         setActivePaymentItem(null);
-        toast.success('Payment completed', 'Invoice was marked as paid successfully.');
+        toast.success(t('home.paymentCompleted'), t('home.paymentCompletedHint'));
         await loadData('refresh');
       } catch (error) {
-        toast.error('Payment failed', extractApiErrorMessage(error));
+        toast.error(t('home.paymentFailed'), extractApiErrorMessage(error));
       } finally {
         setIsPaying(false);
       }
     },
-    [activePaymentItem, loadData, session.accessToken, toast],
+    [activePaymentItem, loadData, session.accessToken, t, toast],
   );
 
   useEffect(() => {
@@ -180,6 +242,62 @@ export function FinanceScreen({
     }
   }, [deepLinkFocus, invoices, violations, onConsumeDeepLinkFocus]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedViolation?.id) {
+      setViolationActions([]);
+      return;
+    }
+    setViolationActionsLoading(true);
+    void listViolationActions(session.accessToken, selectedViolation.id)
+      .then((rows) => {
+        if (cancelled) return;
+        setViolationActions(Array.isArray(rows) ? rows : []);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        toast.error('Failed to load violation actions', extractApiErrorMessage(error));
+      })
+      .finally(() => {
+        if (!cancelled) setViolationActionsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedViolation?.id, session.accessToken, toast]);
+
+  const handleSubmitViolationAction = useCallback(async () => {
+    if (!selectedViolation?.id) return;
+    if (!violationActionNote.trim()) {
+      toast.error('Missing note', 'Please provide a short note before submitting.');
+      return;
+    }
+    setViolationActionSubmitting(true);
+    try {
+      const created = await submitViolationAction(session.accessToken, selectedViolation.id, {
+        type: violationActionModal.type,
+        note: violationActionNote.trim(),
+      });
+      setViolationActions((prev) => [created, ...prev]);
+      setViolationActionModal((prev) => ({ ...prev, visible: false }));
+      setViolationActionNote('');
+      toast.success(
+        violationActionModal.type === 'APPEAL' ? 'Appeal submitted' : 'Fix proof submitted',
+        'Management will review your request and notify you.',
+      );
+    } catch (error) {
+      toast.error('Unable to submit action', extractApiErrorMessage(error));
+    } finally {
+      setViolationActionSubmitting(false);
+    }
+  }, [
+    selectedViolation?.id,
+    session.accessToken,
+    toast,
+    violationActionModal.type,
+    violationActionNote,
+  ]);
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom']}>
       <ScrollView
@@ -189,37 +307,27 @@ export function FinanceScreen({
         ]}
       >
       <View style={styles.headerCard}>
-        <Text style={styles.headerTitle}>Payments</Text>
-        <Text style={styles.headerSubtitle}>Invoices, dues and violation fines</Text>
+        <Text style={styles.headerTitle}>{t('drawer.payments')}</Text>
+        <Text style={styles.headerSubtitle}>{t('finance.subtitle')}</Text>
       </View>
 
       <LinearGradient
-        colors={[akColors.primary, akColors.primaryDark]}
+        colors={[palette.primary, palette.primaryDark]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.hero}
       >
-        <Text style={styles.heroBadge}>PAYMENTS & BILLS</Text>
-        <Text style={styles.heroTitle}>Invoices & Violations</Text>
+        <Text style={styles.heroBadge}>{t('finance.badge')}</Text>
+        <Text style={styles.heroTitle}>{t('finance.heroTitle')}</Text>
         <Text style={styles.heroSubtitle}>
-          Manage your financial obligations for the selected unit.
+          {t('finance.heroSubtitle')}
         </Text>
-
-        <View style={styles.outstandingCard}>
-          <Text style={styles.outstandingLabel}>Total Outstanding</Text>
-          <View style={styles.outstandingRow}>
-            <Text style={styles.outstandingAmount}>
-              {formatCurrency(metrics.payableTotal)}
-            </Text>
-            <Text style={styles.outstandingCurrency}>EGP</Text>
-          </View>
-          <Text style={styles.outstandingHint}>
-            Payables: {metrics.payableCount} • Violations: {metrics.violationCount}
-          </Text>
-        </View>
+        <Text style={styles.heroHint}>
+          Track invoices by status and category, then open any item for details or actions.
+        </Text>
       </LinearGradient>
 
-      <ScreenCard title="Unit Context">
+      <ScreenCard title={t('finance.selectedUnit')}>
         <UnitPicker
           units={units}
           selectedUnitId={selectedUnitId}
@@ -228,38 +336,70 @@ export function FinanceScreen({
           isRefreshing={unitsRefreshing}
         />
         <InlineError message={unitsErrorMessage} />
-        {unitsLoading ? <ActivityIndicator color={akColors.primary} /> : null}
+        {unitsLoading ? <ActivityIndicator color={palette.primary} /> : null}
       </ScreenCard>
 
-      <ScreenCard title="Summary" actionLabel={isRefreshing ? 'Refreshing...' : 'Refresh'} onActionPress={() => void loadData('refresh')}>
+      <ScreenCard
+        title={t('finance.summary')}
+        actionLabel={isRefreshing ? t('common.refreshing') : t('common.refresh')}
+        onActionPress={() => void loadData('refresh')}
+      >
         <InlineError message={errorMessage} />
         {isLoading ? (
-          <ActivityIndicator color={akColors.primary} />
+          <ActivityIndicator color={palette.primary} />
         ) : (
             <View style={styles.metricsGrid}>
               <View style={styles.metricCard}>
-              <Text style={styles.metricLabel}>Pending/Overdue Invoices</Text>
+              <Text style={styles.metricLabel}>{t('finance.pendingInvoices')}</Text>
               <Text style={styles.metricValue}>{metrics.pendingInvoiceCount}</Text>
-              <Text style={styles.metricHint}>Total amount: {formatCurrency(metrics.pendingInvoiceTotal)}</Text>
+              <Text style={styles.metricHint}>{t('finance.totalAmount')}: {formatCurrency(metrics.pendingInvoiceTotal)}</Text>
               </View>
               <View style={styles.metricCard}>
-              <Text style={styles.metricLabel}>Payables</Text>
+              <Text style={styles.metricLabel}>{t('finance.payablesCount')}</Text>
               <Text style={styles.metricValue}>{metrics.payableCount}</Text>
-              <Text style={styles.metricHint}>Total due: {formatCurrency(metrics.payableTotal)}</Text>
+              <Text style={styles.metricHint}>{t('finance.totalDue')}: {formatCurrency(metrics.payableTotal)}</Text>
               </View>
             </View>
           )}
       </ScreenCard>
 
+      <View style={styles.tabRow}>
+        {[
+          { key: 'ALL', label: 'All' },
+          { key: 'UPCOMING', label: 'Upcoming' },
+          { key: 'OVERDUE', label: 'Overdue' },
+          { key: 'PAID', label: 'Paid' },
+        ].map((tab) => {
+          const active = activeTab === tab.key;
+          return (
+            <Pressable
+              key={tab.key}
+              onPress={() => setActiveTab(tab.key as 'ALL' | 'UPCOMING' | 'OVERDUE' | 'PAID')}
+              style={[
+                styles.tabChip,
+                active && {
+                  borderColor: palette.primary,
+                  backgroundColor: palette.primarySoft10,
+                },
+              ]}
+            >
+              <Text style={[styles.tabChipText, active && { color: palette.primary }]}>
+                {tab.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Payables</Text>
-        <Text style={styles.sectionCount}>{filteredPayables.length}</Text>
+        <Text style={styles.sectionTitle}>{t('finance.payablesTitle')}</Text>
+        <Text style={[styles.sectionCount, { color: palette.primary }]}>{tabFilteredPayables.length}</Text>
       </View>
       <ScreenCard>
-        {!isLoading && filteredPayables.length === 0 ? (
-          <Text style={styles.emptyText}>No pending payables for this unit.</Text>
+        {!isLoading && tabFilteredPayables.length === 0 ? (
+          <Text style={styles.emptyText}>{t('finance.noPayables')}</Text>
         ) : null}
-        {filteredPayables.map((row) => (
+        {tabFilteredPayables.map((row) => (
           <Pressable
             key={row.key}
             style={styles.itemCard}
@@ -285,24 +425,28 @@ export function FinanceScreen({
               <View style={styles.flex}>
                 <Text style={styles.itemTitle}>{row.title}</Text>
                 <Text style={styles.itemSub}>
-                  {row.kind === 'VIOLATION_FINE' ? 'Violation fine' : 'Invoice'} • {invoiceStatusDisplayLabel(row.status)}
+                  {row.kind === 'VIOLATION_FINE' ? t('finance.violationFine') : t('finance.invoice')} • {invoiceStatusDisplayLabel(row.status)}
                 </Text>
               </View>
               <Text style={styles.itemAmount}>{formatCurrency(row.amount)}</Text>
             </View>
             <Text style={styles.itemSub}>
-              Due: {formatDateOnly(row.dueDate)} {row.invoiceId ? '• Payable now' : ''}
+              {t('home.duePrefix')}: {formatDateOnly(row.dueDate)} {row.invoiceId ? `• ${t('finance.payableNow')}` : ''}
             </Text>
             <View style={styles.itemActionsRow}>
               <Pressable
-                style={[styles.payNowButton, !row.invoiceId && styles.payNowButtonDisabled]}
+                style={[
+                  styles.payNowButton,
+                  { backgroundColor: palette.primary },
+                  !row.invoiceId && styles.payNowButtonDisabled,
+                ]}
                 onPress={() => {
                   if (row.invoiceId) setActivePaymentItem(row);
                 }}
                 disabled={!row.invoiceId}
               >
                 <Ionicons name="card-outline" size={14} color="#fff" />
-                <Text style={styles.payNowButtonText}>Pay Now</Text>
+                <Text style={styles.payNowButtonText}>{t('home.payNow')}</Text>
               </Pressable>
             </View>
           </Pressable>
@@ -310,14 +454,14 @@ export function FinanceScreen({
       </ScreenCard>
 
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Invoices</Text>
-        <Text style={styles.sectionCount}>{filteredInvoices.length}</Text>
+        <Text style={styles.sectionTitle}>{t('finance.invoicesTitle')}</Text>
+        <Text style={[styles.sectionCount, { color: palette.primary }]}>{tabFilteredInvoices.length}</Text>
       </View>
       <ScreenCard>
-        {!isLoading && filteredInvoices.length === 0 ? (
-          <Text style={styles.emptyText}>No invoices found.</Text>
+        {!isLoading && tabFilteredInvoices.length === 0 ? (
+          <Text style={styles.emptyText}>{t('finance.noInvoices')}</Text>
         ) : null}
-        {filteredInvoices.map((row) => (
+        {tabFilteredInvoices.map((row) => (
           <Pressable
             key={row.id}
             style={styles.itemCard}
@@ -330,28 +474,33 @@ export function FinanceScreen({
               <View style={styles.flex}>
                 <Text style={styles.itemTitle}>{row.invoiceNumber ?? row.id}</Text>
                 <Text style={styles.itemSub}>
-                  {row.type ?? 'INVOICE'} • {invoiceStatusDisplayLabel(row.status)}
+                  {row.type ?? t('finance.invoice').toUpperCase()} • {invoiceStatusDisplayLabel(row.status)}
                 </Text>
               </View>
               <Text style={styles.itemAmount}>{formatCurrency(row.amount)}</Text>
             </View>
             <Text style={styles.itemSub}>
-              Due: {formatDateOnly(row.dueDate)} {row.paidDate ? `• Paid: ${formatDateOnly(row.paidDate)}` : ''}
+              {t('home.duePrefix')}: {formatDateOnly(row.dueDate)} {row.paidDate ? `• ${t('finance.paid')}: ${formatDateOnly(row.paidDate)}` : ''}
             </Text>
+            <View style={styles.inlineGroup}>
+              <View style={styles.inlineTag}>
+                <Text style={styles.inlineTagText}>{paymentCategoryLabel(row)}</Text>
+              </View>
+            </View>
             <Text style={styles.itemSub}>
-              Unit: {row.unit?.unitNumber ?? '—'} {row.unit?.projectName ? `• ${row.unit.projectName}` : ''}
+              {t('finance.unit')}: {row.unit?.unitNumber ?? '—'} {row.unit?.projectName ? `• ${row.unit.projectName}` : ''}
             </Text>
           </Pressable>
         ))}
       </ScreenCard>
 
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Violations</Text>
-        <Text style={styles.sectionCount}>{filteredViolations.length}</Text>
+        <Text style={styles.sectionTitle}>{t('drawer.violations')}</Text>
+        <Text style={[styles.sectionCount, { color: palette.primary }]}>{filteredViolations.length}</Text>
       </View>
       <ScreenCard>
         {!isLoading && filteredViolations.length === 0 ? (
-          <Text style={styles.emptyText}>No violations found.</Text>
+          <Text style={styles.emptyText}>{t('finance.noViolations')}</Text>
         ) : null}
         {filteredViolations.map((row) => (
           <Pressable
@@ -366,14 +515,14 @@ export function FinanceScreen({
               <View style={styles.flex}>
                 <Text style={styles.itemTitle}>{row.violationNumber ?? row.id}</Text>
                 <Text style={styles.itemSub}>
-                  {row.type ?? 'VIOLATION'} • {violationStatusDisplayLabel(row.status)}
+                  {row.type ?? t('drawer.violations').toUpperCase()} • {violationStatusDisplayLabel(row.status)}
                 </Text>
               </View>
               <Text style={styles.itemAmount}>{formatCurrency(row.fineAmount)}</Text>
             </View>
             {row.description ? <Text style={styles.itemDesc}>{row.description}</Text> : null}
-            <Text style={styles.itemSub}>Created: {formatDateTime(row.createdAt)}</Text>
-            <Text style={styles.itemSub}>Unit: {row.unit?.unitNumber ?? '—'}</Text>
+            <Text style={styles.itemSub}>{t('finance.created')}: {formatDateTime(row.createdAt)}</Text>
+            <Text style={styles.itemSub}>{t('finance.unit')}: {row.unit?.unitNumber ?? '—'}</Text>
             {row.invoices?.length ? (
               <View style={styles.inlineGroup}>
                 {row.invoices.map((inv) => (
@@ -411,12 +560,12 @@ export function FinanceScreen({
             <View style={styles.detailHeader}>
               <View style={styles.flex}>
                 <Text style={styles.detailTitle}>
-                  {selectedInvoice ? 'Invoice Details' : selectedViolation ? 'Violation Details' : 'Details'}
+                  {selectedInvoice ? t('finance.invoiceDetails') : selectedViolation ? t('finance.violationDetails') : t('finance.details')}
                 </Text>
                 <Text style={styles.detailSubtitle}>
                   {selectedInvoice
-                    ? 'Review invoice amount, status and payment details.'
-                    : 'Review violation details and linked invoices.'}
+                    ? t('finance.invoiceDetailsHint')
+                    : t('finance.violationDetailsHint')}
                 </Text>
               </View>
               <Pressable
@@ -433,16 +582,16 @@ export function FinanceScreen({
             <ScrollView contentContainerStyle={styles.detailContent}>
               {selectedInvoice ? (
                 <View style={styles.detailCard}>
-                  <DetailRow label="Invoice #" value={selectedInvoice.invoiceNumber ?? selectedInvoice.id} />
-                  <DetailRow label="Type" value={String(selectedInvoice.type ?? 'INVOICE')} />
-                  <DetailRow label="Status" value={invoiceStatusDisplayLabel(selectedInvoice.status)} />
-                  <DetailRow label="Amount" value={formatCurrency(selectedInvoice.amount)} />
-                  <DetailRow label="Due Date" value={formatDateOnly(selectedInvoice.dueDate)} />
+                  <DetailRow label={t('finance.invoiceNumber')} value={selectedInvoice.invoiceNumber ?? selectedInvoice.id} />
+                  <DetailRow label={t('finance.type')} value={String(selectedInvoice.type ?? 'INVOICE')} />
+                  <DetailRow label={t('finance.status')} value={invoiceStatusDisplayLabel(selectedInvoice.status)} />
+                  <DetailRow label={t('finance.amount')} value={formatCurrency(selectedInvoice.amount)} />
+                  <DetailRow label={t('finance.dueDate')} value={formatDateOnly(selectedInvoice.dueDate)} />
                   {selectedInvoice.paidDate ? (
-                    <DetailRow label="Paid Date" value={formatDateOnly(selectedInvoice.paidDate)} />
+                    <DetailRow label={t('finance.paidDate')} value={formatDateOnly(selectedInvoice.paidDate)} />
                   ) : null}
                   <DetailRow
-                    label="Unit"
+                    label={t('finance.unit')}
                     value={`${selectedInvoice.unit?.unitNumber ?? '—'}${selectedInvoice.unit?.projectName ? ` • ${selectedInvoice.unit.projectName}` : ''}`}
                   />
                 </View>
@@ -450,21 +599,55 @@ export function FinanceScreen({
 
               {selectedViolation ? (
                 <View style={styles.detailCard}>
-                  <DetailRow label="Violation #" value={selectedViolation.violationNumber ?? selectedViolation.id} />
-                  <DetailRow label="Type" value={String(selectedViolation.type ?? 'VIOLATION')} />
-                  <DetailRow label="Status" value={violationStatusDisplayLabel(selectedViolation.status)} />
-                  <DetailRow label="Fine Amount" value={formatCurrency(selectedViolation.fineAmount)} />
-                  <DetailRow label="Created" value={formatDateTime(selectedViolation.createdAt)} />
-                  <DetailRow label="Unit" value={selectedViolation.unit?.unitNumber ?? '—'} />
+                  <DetailRow label={t('finance.violationNumber')} value={selectedViolation.violationNumber ?? selectedViolation.id} />
+                  <DetailRow label={t('finance.type')} value={String(selectedViolation.type ?? 'VIOLATION')} />
+                  <DetailRow label={t('finance.status')} value={violationStatusDisplayLabel(selectedViolation.status)} />
+                  <DetailRow label={t('finance.fineAmount')} value={formatCurrency(selectedViolation.fineAmount)} />
+                  <DetailRow label={t('finance.created')} value={formatDateTime(selectedViolation.createdAt)} />
+                  <DetailRow label={t('finance.unit')} value={selectedViolation.unit?.unitNumber ?? '—'} />
                   {selectedViolation.description ? (
                     <View style={styles.detailBlock}>
-                      <Text style={styles.detailBlockLabel}>Description</Text>
+                      <Text style={styles.detailBlockLabel}>{t('finance.description')}</Text>
                       <Text style={styles.detailBlockValue}>{selectedViolation.description}</Text>
                     </View>
                   ) : null}
+                  <View style={styles.detailActionsRow}>
+                    <Pressable
+                      style={[styles.appealButton, { backgroundColor: palette.primary }]}
+                      onPress={() => setViolationActionModal({ visible: true, type: 'APPEAL' })}
+                    >
+                      <Ionicons name="shield-checkmark-outline" size={14} color="#fff" />
+                      <Text style={styles.appealButtonText}>Submit Appeal</Text>
+                    </Pressable>
+                    <Pressable
+                      style={[styles.appealButton, { backgroundColor: palette.secondary }, styles.fixButton]}
+                      onPress={() => setViolationActionModal({ visible: true, type: 'FIX_SUBMISSION' })}
+                    >
+                      <Ionicons name="build-outline" size={14} color="#fff" />
+                      <Text style={styles.appealButtonText}>Submit Fix Proof</Text>
+                    </Pressable>
+                  </View>
+                  <View style={styles.detailBlock}>
+                    <Text style={styles.detailBlockLabel}>Action Requests</Text>
+                    {violationActionsLoading ? (
+                      <ActivityIndicator color={palette.primary} />
+                    ) : violationActions.length === 0 ? (
+                      <Text style={styles.detailBlockValue}>No actions submitted yet.</Text>
+                    ) : (
+                      <View style={styles.inlineGroup}>
+                        {violationActions.map((action) => (
+                          <View key={action.id} style={styles.inlineTag}>
+                            <Text style={styles.inlineTagText}>
+                              {String(action.type).replace(/_/g, ' ')} • {String(action.status).replace(/_/g, ' ')}
+                            </Text>
+                          </View>
+                        ))}
+                      </View>
+                    )}
+                  </View>
                   {selectedViolation.invoices?.length ? (
                     <View style={styles.detailBlock}>
-                      <Text style={styles.detailBlockLabel}>Linked Invoices</Text>
+                      <Text style={styles.detailBlockLabel}>{t('finance.linkedInvoices')}</Text>
                       <View style={styles.inlineGroup}>
                         {selectedViolation.invoices.map((inv) => (
                           <Pressable
@@ -502,6 +685,60 @@ export function FinanceScreen({
         }}
         onConfirm={handleConfirmDemoPayment}
       />
+      <Modal
+        visible={violationActionModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (violationActionSubmitting) return;
+          setViolationActionModal((prev) => ({ ...prev, visible: false }));
+        }}
+      >
+        <View style={styles.actionModalRoot}>
+          <Pressable
+            style={styles.actionModalBackdrop}
+            onPress={() => {
+              if (violationActionSubmitting) return;
+              setViolationActionModal((prev) => ({ ...prev, visible: false }));
+            }}
+          />
+          <View style={[styles.actionModalCard, { paddingBottom: Math.max(insets.bottom, 12) + 8 }]}>
+            <Text style={styles.actionModalTitle}>
+              {violationActionModal.type === 'APPEAL' ? 'Submit Appeal' : 'Submit Fix Proof'}
+            </Text>
+            <Text style={styles.actionModalHint}>
+              Add a concise note for management review.
+            </Text>
+            <TextInput
+              value={violationActionNote}
+              onChangeText={setViolationActionNote}
+              style={styles.actionModalInput}
+              placeholder="Write your note..."
+              placeholderTextColor={akColors.textSoft}
+              multiline
+              numberOfLines={4}
+            />
+            <View style={styles.actionModalActions}>
+              <Pressable
+                style={styles.actionCancelButton}
+                onPress={() => setViolationActionModal((prev) => ({ ...prev, visible: false }))}
+                disabled={violationActionSubmitting}
+              >
+                <Text style={styles.actionCancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.actionSubmitButton, violationActionSubmitting && styles.buttonDisabled]}
+                onPress={() => void handleSubmitViolationAction()}
+                disabled={violationActionSubmitting}
+              >
+                <Text style={styles.actionSubmitText}>
+                  {violationActionSubmitting ? 'Submitting...' : 'Submit'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -567,6 +804,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
+  heroHint: {
+    color: 'rgba(255,255,255,0.82)',
+    fontSize: 12,
+    marginTop: 4,
+  },
   outstandingCard: {
     marginTop: 8,
     borderRadius: 16,
@@ -602,6 +844,31 @@ const styles = StyleSheet.create({
   metricsGrid: {
     flexDirection: 'row',
     gap: 10,
+  },
+  tabRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  tabChip: {
+    borderWidth: 1,
+    borderColor: akColors.border,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: akColors.surface,
+  },
+  tabChipActive: {
+    borderColor: akColors.primary,
+    backgroundColor: 'rgba(42,62,53,0.1)',
+  },
+  tabChipText: {
+    color: akColors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  tabChipTextActive: {
+    color: akColors.primary,
   },
   metricCard: {
     flex: 1,
@@ -816,5 +1083,100 @@ const styles = StyleSheet.create({
     color: akColors.text,
     fontSize: 12,
     lineHeight: 18,
+  },
+  detailActionsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 6,
+  },
+  appealButton: {
+    flex: 1,
+    borderRadius: 12,
+    backgroundColor: '#0F766E',
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  fixButton: {
+    backgroundColor: '#334155',
+  },
+  appealButtonText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
+  actionModalRoot: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  actionModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15,23,42,0.42)',
+  },
+  actionModalCard: {
+    backgroundColor: akColors.surface,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    gap: 10,
+  },
+  actionModalTitle: {
+    color: akColors.text,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  actionModalHint: {
+    color: akColors.textMuted,
+    fontSize: 12,
+  },
+  actionModalInput: {
+    minHeight: 96,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    borderRadius: 12,
+    backgroundColor: akColors.surfaceMuted,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: akColors.text,
+    fontSize: 13,
+    textAlignVertical: 'top',
+  },
+  actionModalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+  },
+  actionCancelButton: {
+    borderWidth: 1,
+    borderColor: akColors.border,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    backgroundColor: akColors.surface,
+  },
+  actionCancelText: {
+    color: akColors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  actionSubmitButton: {
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    backgroundColor: akColors.primary,
+  },
+  actionSubmitText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
   },
 });

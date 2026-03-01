@@ -22,6 +22,8 @@ import {
 } from './dto/update-profile.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { OwnerInstallmentStatus } from '@prisma/client';
+import { Permissions } from '../auth/decorators/permissions.decorator';
 
 @Controller('owners')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -29,24 +31,16 @@ export class OwnersController {
   constructor(private readonly ownersService: OwnersService) {}
 
   @Post('create-with-unit')
+  @Permissions('owner.create')
   createWithUnit(@Body() dto: CreateOwnerWithUnitDto, @Req() req: any) {
     const createdBy = req.user.id;
     return this.ownersService.createOwnerWithUnit(dto, createdBy);
   }
 
   @Get()
+  @Permissions('owner.view')
   findAll() {
     return this.ownersService.findAll();
-  }
-
-  @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.ownersService.findOne(id);
-  }
-
-  @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.ownersService.remove(id);
   }
 
   // Remove a user from a unit (for family/tenants)
@@ -108,5 +102,64 @@ export class OwnersController {
   @Get('family/:unitId')
   getFamilyMembers(@Param('unitId') unitId: string, @Req() req: any) {
     return this.ownersService.getFamilyMembers(unitId, req.user.id);
+  }
+
+  @Get('payment-plans/installments')
+  @Permissions('owner.view')
+  listInstallments(
+    @Query('status') status?: OwnerInstallmentStatus | 'ALL',
+    @Query('dueBefore') dueBefore?: string,
+    @Query('dueAfter') dueAfter?: string,
+    @Query('ownerUserId') ownerUserId?: string,
+    @Query('unitId') unitId?: string,
+    @Query('onlyOverdue') onlyOverdue?: string,
+  ) {
+    return this.ownersService.listOwnerInstallmentsForAdmin({
+      status,
+      dueBefore,
+      dueAfter,
+      ownerUserId,
+      unitId,
+      onlyOverdue: String(onlyOverdue).toLowerCase() === 'true',
+    });
+  }
+
+  @Patch('payment-plans/installments/:installmentId/mark-paid')
+  @Permissions('owner.update')
+  markInstallmentPaid(
+    @Param('installmentId') installmentId: string,
+    @Body() body: { paidAt?: string; notes?: string },
+    @Req() req: any,
+  ) {
+    return this.ownersService.markOwnerInstallmentPaid(
+      installmentId,
+      req.user.id,
+      body?.paidAt,
+      body?.notes,
+    );
+  }
+
+  @Post('payment-plans/installments/:installmentId/send-reminder')
+  @Permissions('owner.update')
+  sendInstallmentReminder(
+    @Param('installmentId') installmentId: string,
+    @Req() req: any,
+  ) {
+    return this.ownersService.sendOwnerInstallmentReminder(
+      installmentId,
+      req.user.id,
+    );
+  }
+
+  @Get(':id')
+  @Permissions('owner.view')
+  findOne(@Param('id') id: string) {
+    return this.ownersService.findOne(id);
+  }
+
+  @Delete(':id')
+  @Permissions('owner.delete')
+  remove(@Param('id') id: string) {
+    return this.ownersService.remove(id);
   }
 }

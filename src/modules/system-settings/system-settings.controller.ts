@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Param,
   Patch,
   Post,
   Query,
@@ -12,6 +13,7 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
+import { IntegrationConfigService } from './integration-config.service';
 import { SystemSettingsService } from './system-settings.service';
 import {
   CreateSystemSettingsBackupDto,
@@ -24,6 +26,9 @@ import {
   UpdateCrmSettingsDto,
   UpdateGeneralSettingsDto,
   UpdateNotificationSettingsDto,
+  UpdateMobileAccessSettingsDto,
+  UpdateOnboardingSettingsDto,
+  UpdateOffersSettingsDto,
   UpdateSecuritySettingsDto,
 } from './dto/system-settings.dto';
 
@@ -31,7 +36,10 @@ import {
 @Controller('system-settings')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class SystemSettingsController {
-  constructor(private readonly systemSettingsService: SystemSettingsService) {}
+  constructor(
+    private readonly systemSettingsService: SystemSettingsService,
+    private readonly integrationConfigService: IntegrationConfigService,
+  ) {}
 
   private actorId(req: any): string | null {
     return req?.user?.id ?? null;
@@ -42,6 +50,38 @@ export class SystemSettingsController {
   @ApiOperation({ summary: 'Get system settings (all sections)' })
   getAll() {
     return this.systemSettingsService.getSettings();
+  }
+
+  @Get('integrations')
+  @Permissions('admin.view')
+  @ApiOperation({ summary: 'Get integration settings with readiness status' })
+  getIntegrations() {
+    return this.integrationConfigService.getAdminIntegrations();
+  }
+
+  @Patch('integrations/:provider')
+  @Permissions('admin.update')
+  @ApiOperation({ summary: 'Update integration provider settings' })
+  updateIntegrationProvider(
+    @Param('provider') provider: string,
+    @Body() body: Record<string, unknown>,
+    @Req() req: any,
+  ) {
+    return this.integrationConfigService.updateProvider(
+      provider,
+      body,
+      this.actorId(req),
+    );
+  }
+
+  @Post('integrations/:provider/test')
+  @Permissions('admin.view')
+  @ApiOperation({ summary: 'Test integration provider connectivity/configuration' })
+  testIntegrationProvider(
+    @Param('provider') provider: string,
+    @Body() body: Record<string, unknown>,
+  ) {
+    return this.integrationConfigService.testProvider(provider, body);
   }
 
   @Patch('general')
@@ -87,6 +127,30 @@ export class SystemSettingsController {
   @ApiOperation({ summary: 'Update brand settings section' })
   updateBrand(@Body() dto: UpdateBrandSettingsDto, @Req() req: any) {
     return this.systemSettingsService.updateBrand(dto, this.actorId(req));
+  }
+
+  @Patch('onboarding')
+  @Permissions('admin.update')
+  @ApiOperation({ summary: 'Update mobile onboarding settings section' })
+  updateOnboarding(@Body() dto: UpdateOnboardingSettingsDto, @Req() req: any) {
+    return this.systemSettingsService.updateOnboarding(dto, this.actorId(req));
+  }
+
+  @Patch('offers')
+  @Permissions('admin.update')
+  @ApiOperation({ summary: 'Update mobile offers banners settings section' })
+  updateOffers(@Body() dto: UpdateOffersSettingsDto, @Req() req: any) {
+    return this.systemSettingsService.updateOffers(dto, this.actorId(req));
+  }
+
+  @Patch('mobile-access')
+  @Permissions('admin.update')
+  @ApiOperation({ summary: 'Update mobile feature access policies by persona' })
+  updateMobileAccess(
+    @Body() dto: UpdateMobileAccessSettingsDto,
+    @Req() req: any,
+  ) {
+    return this.systemSettingsService.updateMobileAccess(dto, this.actorId(req));
   }
 
   @Post('crm/test')

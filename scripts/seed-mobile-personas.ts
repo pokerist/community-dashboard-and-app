@@ -191,6 +191,70 @@ async function ensureResidentUnitLink(userId: string, unitId: string, isPrimary 
   }
 }
 
+async function ensureResidentVehicle(input: {
+  userId: string;
+  vehicleType: string;
+  model: string;
+  plateNumber: string;
+  color?: string;
+  notes?: string;
+  isPrimary?: boolean;
+}) {
+  const resident = await prisma.resident.findUnique({
+    where: { userId: input.userId },
+    select: { id: true },
+  });
+  if (!resident) return;
+
+  const normalizedPlate = input.plateNumber
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, ' ')
+    .replace(/-/g, ' ');
+
+  const existing = await prisma.residentVehicle.findFirst({
+    where: {
+      residentId: resident.id,
+      plateNumberNormalized: normalizedPlate,
+    },
+    select: { id: true },
+  });
+
+  if (input.isPrimary) {
+    await prisma.residentVehicle.updateMany({
+      where: {
+        residentId: resident.id,
+        isPrimary: true,
+        ...(existing ? { id: { not: existing.id } } : {}),
+      },
+      data: { isPrimary: false },
+    });
+  }
+
+  const payload = {
+    residentId: resident.id,
+    vehicleType: input.vehicleType.trim(),
+    model: input.model.trim(),
+    plateNumber: input.plateNumber.trim(),
+    plateNumberNormalized: normalizedPlate,
+    color: input.color?.trim() || null,
+    notes: input.notes?.trim() || null,
+    isPrimary: input.isPrimary === true,
+  };
+
+  if (existing) {
+    await prisma.residentVehicle.update({
+      where: { id: existing.id },
+      data: payload,
+    });
+    return;
+  }
+
+  await prisma.residentVehicle.create({
+    data: payload,
+  });
+}
+
 async function ensureUnitAccess(input: {
   unitId: string;
   userId: string;
@@ -447,7 +511,7 @@ async function run() {
   });
   const familyDemo = await ensureDemoUser({
     email: 'family.demo@test.com',
-    nameEN: 'Family Demo',
+    nameEN: 'Family Member Demo',
     phone: '+201100000004',
     nationalId: '29901010000004',
     createResident: true,
@@ -605,13 +669,41 @@ async function run() {
     workerPhone: '+201100000099',
   });
 
+  await ensureResidentVehicle({
+    userId: ownerDemo.id,
+    vehicleType: 'Toyota',
+    model: 'Corolla 2024',
+    plateNumber: 'ق و 1234',
+    color: 'White',
+    notes: 'Main family car',
+    isPrimary: true,
+  });
+  await ensureResidentVehicle({
+    userId: ownerDemo.id,
+    vehicleType: 'Kia',
+    model: 'Sportage 2023',
+    plateNumber: 'س ب 7721',
+    color: 'Gray',
+    notes: 'Secondary car',
+    isPrimary: false,
+  });
+  await ensureResidentVehicle({
+    userId: tenantDemo.id,
+    vehicleType: 'Nissan',
+    model: 'Sunny 2022',
+    plateNumber: 'ر ل 5566',
+    color: 'Silver',
+    notes: 'Tenant vehicle',
+    isPrimary: true,
+  });
+
   await cleanupAssistantDemoArtifacts();
 
   console.log('✅ Mobile demo personas ready');
   console.log('Owner: owner.demo@test.com / pass123');
   console.log('Tenant: tenant.demo@test.com / pass123');
   console.log('Pre-Delivery Owner: preowner.demo@test.com / pass123');
-  console.log('Family: family.demo@test.com / pass123');
+  console.log('Family Member: family.demo@test.com / pass123');
   console.log('Authorized (Delegate): authorized.demo@test.com / pass123');
   console.log('Contractor: contractor.demo@test.com / pass123');
 }

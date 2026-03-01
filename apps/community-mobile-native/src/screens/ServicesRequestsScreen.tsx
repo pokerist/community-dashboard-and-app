@@ -45,6 +45,8 @@ import {
   priorityDisplayLabel,
   serviceRequestStatusDisplayLabel,
 } from '../features/presentation/status';
+import { useBranding } from '../features/branding/provider';
+import { getBrandPalette } from '../features/branding/palette';
 import { akColors, akShadow } from '../theme/alkarma';
 import { formatCurrency, formatDateTime } from '../utils/format';
 
@@ -76,7 +78,7 @@ function humanizeEnumToken(value?: string | null): string {
 
 function serviceCategoryLabel(value?: string | null): string {
   const key = String(value ?? '').toUpperCase();
-  if (key === 'REQUESTS' || key === 'ADMIN') return 'Request';
+  if (key === 'REQUESTS' || key === 'ADMIN') return 'Resident Request';
   if (key === 'MAINTENANCE') return 'Maintenance';
   if (key === 'UTILITY') return 'Utilities';
   if (key === 'SECURITY') return 'Security';
@@ -124,7 +126,10 @@ function commentAuthorLabel(comment: ServiceRequestCommentRow, session: AuthSess
 
 function userFieldLabel(field: ServiceField): string {
   const raw = String(field.label ?? '').trim();
-  if (!raw) return 'Field';
+  if (!raw) return 'Required Information';
+  const normalized = raw.toLowerCase().replace(/[_\s-]+/g, '');
+  if (normalized === 'description') return 'Additional Details';
+  if (normalized === 'priority') return 'Service Priority';
   if (/^[a-z0-9_ -]+$/i.test(raw)) return humanizeEnumToken(raw);
   return raw;
 }
@@ -163,6 +168,8 @@ export function ServicesRequestsScreen({
   onConsumeDeepLinkTicketId,
 }: ServicesRequestsScreenProps) {
   const insets = useSafeAreaInsets();
+  const { brand } = useBranding();
+  const palette = getBrandPalette(brand);
   const toast = useAppToast();
   const [services, setServices] = useState<CommunityService[]>([]);
   const [requests, setRequests] = useState<ServiceRequestRow[]>([]);
@@ -248,6 +255,15 @@ export function ServicesRequestsScreen({
     });
   }, [searchQuery, services]);
 
+  const urgentServices = useMemo(
+    () =>
+      filteredServices.filter((service) => {
+        if (isRequestsMode) return false;
+        return Boolean(service.isUrgent);
+      }),
+    [filteredServices, isRequestsMode],
+  );
+
   const setFieldText = useCallback((fieldId: string, value: string) => {
     setFieldTextDrafts((prev) => ({ ...prev, [fieldId]: value }));
     setFieldFileDrafts((prev) => {
@@ -296,13 +312,15 @@ export function ServicesRequestsScreen({
       if (type === 'NUMBER') {
         const valueNumber = Number(raw);
         if (!Number.isFinite(valueNumber)) {
-          throw new Error(`Field "${field.label}" expects a numeric value.`);
+          throw new Error(`Please enter a valid number for "${userFieldLabel(field)}".`);
         }
         result.push({ fieldId: field.id, valueNumber });
       } else if (type === 'DATE') {
         const parsed = parseDateFieldInput(raw);
         if (!parsed) {
-          throw new Error(`Field "${field.label}" expects a valid date (YYYY-MM-DD).`);
+          throw new Error(
+            `Please enter a valid date for "${userFieldLabel(field)}" in YYYY-MM-DD format.`,
+          );
         }
         result.push({ fieldId: field.id, valueDate: raw });
       } else if (type === 'FILE') {
@@ -329,7 +347,7 @@ export function ServicesRequestsScreen({
         if (type === 'FILE') {
           const file = fieldFileDrafts[field.id];
           if (!file) continue;
-          parts.push(`${userFieldLabel(field)}: ${file.name || 'Attachment uploaded'}`);
+          parts.push(`${userFieldLabel(field)}: ${file.name || 'Attachment added'}`);
           continue;
         }
 
@@ -342,7 +360,7 @@ export function ServicesRequestsScreen({
         return parts.join(' | ').slice(0, 900);
       }
 
-      return `Submitted from mobile app for ${service.name}`;
+      return `Submitted from resident mobile app for ${service.name}`;
     },
     [fieldBoolDrafts, fieldFileDrafts, fieldTextDrafts],
   );
@@ -350,7 +368,7 @@ export function ServicesRequestsScreen({
   const submitRequest = useCallback(async () => {
     if (!selectedUnitId) {
       setSubmitError('Select a unit first.');
-      toast.error('Missing unit', 'Select a unit before submitting a request.');
+      toast.error('Missing unit', 'Select a unit before submitting your request.');
       return;
     }
     if (!selectedService) {
@@ -373,13 +391,14 @@ export function ServicesRequestsScreen({
           selectedService,
           selectedService.formFields ?? [],
         ),
+        priority: selectedService.isUrgent ? 'CRITICAL' : undefined,
         fieldValues,
       };
       await createServiceRequest(session.accessToken, payload);
-      setSuccessMessage(isRequestsMode ? 'Request submitted.' : 'Service request submitted.');
+      setSuccessMessage(isRequestsMode ? 'Request submitted.' : 'Service ticket submitted.');
       toast.success(
-        isRequestsMode ? 'Request submitted' : 'Service request submitted',
-        'Your request was sent successfully.',
+        isRequestsMode ? 'Request submitted' : 'Service ticket submitted',
+        'Your request has been sent successfully.',
       );
       setFieldTextDrafts({});
       setFieldBoolDrafts({});
@@ -388,7 +407,7 @@ export function ServicesRequestsScreen({
     } catch (error) {
       const msg = extractApiErrorMessage(error);
       setSubmitError(msg);
-      toast.error(isRequestsMode ? 'Request failed' : 'Service request failed', msg);
+      toast.error(isRequestsMode ? 'Request failed' : 'Service ticket failed', msg);
     } finally {
       setIsSubmitting(false);
     }
@@ -411,11 +430,11 @@ export function ServicesRequestsScreen({
         const uploaded = await pickAndUploadServiceAttachment(session.accessToken);
         if (!uploaded) return;
         setFieldFile(field.id, uploaded);
-        toast.success('Field file uploaded');
+        toast.success('File uploaded');
       } catch (error) {
         const msg = extractApiErrorMessage(error);
         setSubmitError(msg);
-        toast.error('Field upload failed', msg);
+        toast.error('File upload failed', msg);
       } finally {
         setUploadingFieldId((current) => (current === field.id ? null : current));
       }
@@ -435,7 +454,7 @@ export function ServicesRequestsScreen({
         setTicketComments(comments);
       } catch (error) {
         const msg = extractApiErrorMessage(error);
-        toast.error('Unable to load ticket', msg);
+        toast.error('Unable to open request details', msg);
       } finally {
         setTicketLoading(false);
       }
@@ -483,7 +502,7 @@ export function ServicesRequestsScreen({
     if (!activeTicket) return;
     const body = ticketCommentDraft.trim();
     if (!body) {
-      toast.info('Add a comment', 'Write a short message first.');
+      toast.info('Add a comment', 'Write a short message before sending.');
       return;
     }
 
@@ -497,7 +516,7 @@ export function ServicesRequestsScreen({
       toast.success('Comment added');
       await loadData('refresh');
     } catch (error) {
-      toast.error('Comment failed', extractApiErrorMessage(error));
+      toast.error('Unable to add comment', extractApiErrorMessage(error));
     } finally {
       setTicketCommentSubmitting(false);
     }
@@ -524,12 +543,12 @@ export function ServicesRequestsScreen({
       const updated = await cancelServiceRequest(session.accessToken, activeTicket.id, payload);
       setActiveTicket(updated);
       toast.success(
-        isRequestsMode ? 'Request cancelled' : 'Service request cancelled',
+        isRequestsMode ? 'Request cancelled' : 'Service ticket cancelled',
       );
       await loadTicketDetails(activeTicket.id);
       await loadData('refresh');
     } catch (error) {
-      toast.error('Cancel failed', extractApiErrorMessage(error));
+      toast.error('Unable to cancel request', extractApiErrorMessage(error));
     } finally {
       setTicketCancelling(false);
     }
@@ -563,13 +582,13 @@ export function ServicesRequestsScreen({
             value={searchQuery}
             onChangeText={setSearchQuery}
             style={styles.searchInput}
-            placeholder={isRequestsMode ? 'Search request types...' : 'Search services...'}
+            placeholder={isRequestsMode ? 'Search request types...' : 'Search available services...'}
             placeholderTextColor={akColors.textSoft}
           />
         </View>
       </View>
 
-      <ScreenCard title="Unit Context">
+      <ScreenCard title="Selected Unit">
         <UnitPicker
           units={units}
           selectedUnitId={selectedUnitId}
@@ -578,34 +597,74 @@ export function ServicesRequestsScreen({
           isRefreshing={unitsRefreshing}
         />
         <InlineError message={unitsErrorMessage} />
-        {unitsLoading ? <ActivityIndicator color={akColors.primary} /> : null}
+        {unitsLoading ? <ActivityIndicator color={palette.primary} /> : null}
         {selectedUnit ? (
           <Text style={styles.helperText}>
-            Requests will be created for unit {selectedUnit.unitNumber ?? selectedUnit.id}
+            New requests will be submitted for unit {selectedUnit.unitNumber ?? selectedUnit.id}.
           </Text>
         ) : null}
       </ScreenCard>
 
       <ScreenCard
-        title={isRequestsMode ? 'Submit Request' : 'Create Service Request'}
-        actionLabel={isRefreshing ? 'Refreshing...' : 'Reload'}
+        title={isRequestsMode ? 'Submit New Request' : 'Create Service Ticket'}
+        actionLabel={isRefreshing ? 'Refreshing...' : 'Refresh'}
         onActionPress={() => void loadData('refresh')}
       >
         <InlineError message={loadError} />
         {/* submit/upload feedback is shown as toasts */}
         {successMessage ? <Text style={styles.successText}>{successMessage}</Text> : null}
+        <View
+          style={[
+            styles.guidedHintBox,
+            { borderColor: palette.primarySoft18, backgroundColor: palette.primarySoft8 },
+          ]}
+        >
+          <Ionicons name="information-circle-outline" size={16} color={palette.primary} />
+          <Text style={styles.guidedHintText}>
+            Follow the required steps below. Any approved cost will be added to your invoices.
+          </Text>
+        </View>
 
         {isLoading ? (
-          <ActivityIndicator color={akColors.primary} />
+          <ActivityIndicator color={palette.primary} />
         ) : (
           <>
-            <Text style={styles.label}>{isRequestsMode ? 'Request Type' : 'Service'}</Text>
+            <Text style={styles.label}>{isRequestsMode ? 'Request Type' : 'Service Type'}</Text>
             {filteredServices.length === 0 ? (
               <View style={styles.noServicesBox}>
                 <Ionicons name="search-outline" size={20} color={akColors.textSoft} />
                 <Text style={styles.dynamicHint}>
                   {isRequestsMode ? 'No request types match your search.' : 'No services match your search.'}
                 </Text>
+              </View>
+            ) : null}
+            {!isRequestsMode && urgentServices.length > 0 ? (
+              <View style={styles.urgentLane}>
+                <View style={styles.urgentLaneHeader}>
+                  <Text style={styles.urgentLaneTitle}>Urgent Services</Text>
+                  <Text style={styles.urgentLaneSub}>Management will contact you within 5 minutes.</Text>
+                </View>
+                <View style={styles.urgentLaneChips}>
+                  {urgentServices.map((service) => {
+                    const active = service.id === selectedServiceId;
+                    return (
+                      <Pressable
+                        key={`urgent-${service.id}`}
+                        onPress={() => setSelectedServiceId(service.id)}
+                        style={[styles.urgentChip, active && styles.urgentChipActive]}
+                      >
+                        <Ionicons
+                          name="flash-outline"
+                          size={14}
+                          color={active ? '#fff' : '#DC2626'}
+                        />
+                        <Text style={[styles.urgentChipText, active && styles.urgentChipTextActive]}>
+                          {service.name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
               </View>
             ) : null}
             <View style={styles.serviceGrid}>
@@ -615,14 +674,22 @@ export function ServicesRequestsScreen({
                   <Pressable
                     key={service.id}
                     onPress={() => setSelectedServiceId(service.id)}
-                    style={[styles.choiceChip, active && styles.choiceChipActive]}
+                    style={[
+                      styles.choiceChip,
+                      active && styles.choiceChipActive,
+                      active && {
+                        backgroundColor: palette.primaryDark,
+                        borderColor: palette.primarySoft22,
+                        shadowColor: palette.primaryDark,
+                      },
+                    ]}
                   >
                     <View style={styles.choiceChipTopRow}>
                       <View style={styles.choiceChipLead}>
                         <Ionicons
                           name={isRequestsMode ? 'file-tray-outline' : 'construct-outline'}
                           size={18}
-                          color={active ? akColors.white : akColors.primary}
+                          color={active ? akColors.white : palette.primary}
                           style={styles.choiceChipIcon}
                         />
                         <Text
@@ -645,11 +712,23 @@ export function ServicesRequestsScreen({
                       {service.name}
                     </Text>
                     <Text style={[styles.choiceChipSub, active && styles.choiceChipSubActive]} numberOfLines={2}>
-                      {service.description?.trim() || 'Tap to view details and submit a request.'}
+                      {service.description?.trim() || 'Tap to review details and continue.'}
                     </Text>
                     <Text style={[styles.choiceChipMeta, active && styles.choiceChipMetaActive]} numberOfLines={1}>
                       {eligibilityLabel(service.unitEligibility)}
                     </Text>
+                    {service.isUrgent ? (
+                      <View style={[styles.urgentTag, active && styles.urgentTagActive]}>
+                        <Ionicons
+                          name="flash-outline"
+                          size={12}
+                          color={active ? '#fff' : '#DC2626'}
+                        />
+                        <Text style={[styles.urgentTagText, active && styles.urgentTagTextActive]}>
+                          Urgent
+                        </Text>
+                      </View>
+                    ) : null}
                   </Pressable>
                 );
               })}
@@ -659,10 +738,10 @@ export function ServicesRequestsScreen({
               <View style={styles.serviceInfo}>
                 <Text style={styles.serviceInfoTitle}>{selectedService.name}</Text>
                 <Text style={styles.serviceInfoBody}>
-                  {selectedService.description || 'No description'}
+                  {selectedService.description || 'No details available.'}
                 </Text>
                 <Text style={styles.serviceInfoMeta}>
-                  {eligibilityLabel(selectedService.unitEligibility)} • Starting price:{' '}
+                  {eligibilityLabel(selectedService.unitEligibility)} • Estimated starting price:{' '}
                   {formatCurrency(selectedService.startingPrice)}
                 </Text>
               </View>
@@ -681,6 +760,7 @@ export function ServicesRequestsScreen({
                     boolValue={fieldBoolDrafts[field.id]}
                     fileValue={fieldFileDrafts[field.id] ?? null}
                     isUploadingFile={uploadingFieldId === field.id}
+                    palette={palette}
                     onTextChange={(value) => setFieldText(field.id, value)}
                     onBoolChange={(value) => setFieldBool(field.id, value)}
                     onUploadFile={() => void uploadDynamicFieldFile(field)}
@@ -688,7 +768,7 @@ export function ServicesRequestsScreen({
                   />
                 ))}
                 <Text style={styles.dynamicHint}>
-                  Fill only the fields required for this {isRequestsMode ? 'request type' : 'service'}.
+                  Fill only the required fields shown above.
                 </Text>
               </View>
             ) : null}
@@ -698,10 +778,14 @@ export function ServicesRequestsScreen({
               onPress={() => void submitRequest()}
               disabled={isSubmitting}
             >
-              <LinearGradient colors={[akColors.primary, akColors.primaryDark]} style={styles.primaryButtonInner}>
+              <LinearGradient colors={[palette.primary, palette.primaryDark]} style={styles.primaryButtonInner}>
                 {isSubmitting ? <ActivityIndicator size="small" color="#fff" /> : null}
                 <Text style={styles.primaryButtonText}>
-                  {isSubmitting ? 'Submitting...' : 'Submit Request'}
+                  {isSubmitting
+                    ? 'Submitting...'
+                    : isRequestsMode
+                      ? 'Submit Request'
+                      : 'Submit Service Ticket'}
                 </Text>
               </LinearGradient>
             </Pressable>
@@ -711,19 +795,19 @@ export function ServicesRequestsScreen({
 
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>
-          {isRequestsMode ? 'My Requests' : 'My Service Requests'}
+          {isRequestsMode ? 'My Requests' : 'My Service Tickets'}
         </Text>
-        <Text style={styles.sectionCount}>{visibleRequests.length}</Text>
+        <Text style={[styles.sectionCount, { color: palette.primary }]}>{visibleRequests.length}</Text>
       </View>
       <ScreenCard>
         {visibleRequests.length === 0 ? (
-          <Text style={styles.emptyText}>No service requests yet for the selected unit.</Text>
+          <Text style={styles.emptyText}>No requests found for the selected unit yet.</Text>
         ) : (
           visibleRequests.map((row) => (
             <Pressable key={row.id} style={styles.itemCard} onPress={() => void openTicket(row)}>
               <View style={styles.itemHeader}>
                 <View style={styles.flex}>
-                  <Text style={styles.itemTitle}>{row.service?.name ?? 'Service Request'}</Text>
+                  <Text style={styles.itemTitle}>{row.service?.name ?? 'Request Ticket'}</Text>
                   <Text style={styles.itemSub}>
                     {priorityDisplayLabel(row.priority)} • {serviceRequestStatusDisplayLabel(row.status)}
                   </Text>
@@ -739,7 +823,7 @@ export function ServicesRequestsScreen({
                   </Text>
                 </View>
               ) : null}
-              <Text style={styles.itemSub}>Updated: {formatDateTime(row.updatedAt)}</Text>
+              <Text style={styles.itemSub}>Last update: {formatDateTime(row.updatedAt)}</Text>
             </Pressable>
           ))
         )}
@@ -757,10 +841,10 @@ export function ServicesRequestsScreen({
             <View style={styles.ticketModalHeader}>
               <View style={styles.flex}>
                 <Text style={styles.ticketModalTitle}>
-                  {activeTicket?.service?.name ?? (isRequestsMode ? 'Request' : 'Service Request')}
+                  {activeTicket?.service?.name ?? (isRequestsMode ? 'Request' : 'Service Ticket')}
                 </Text>
                 <Text style={styles.ticketModalSubtitle}>
-                  Ticket details, status updates, and replies
+                  Request details, status updates, and conversation
                 </Text>
               </View>
               <Pressable onPress={closeTicketModal} style={styles.iconRoundButton}>
@@ -770,13 +854,13 @@ export function ServicesRequestsScreen({
 
             {ticketLoading ? (
               <View style={styles.ticketLoadingBox}>
-                <ActivityIndicator color={akColors.primary} />
+                <ActivityIndicator color={palette.primary} />
               </View>
             ) : activeTicket ? (
               <>
                 <View style={styles.ticketMetaCard}>
                   <View style={styles.ticketMetaRow}>
-                    <Text style={styles.ticketMetaLabel}>Status</Text>
+                    <Text style={styles.ticketMetaLabel}>Current status</Text>
                     <View
                       style={[
                         styles.ticketStatusPill,
@@ -798,10 +882,10 @@ export function ServicesRequestsScreen({
                     </View>
                   </View>
                   <Text style={styles.ticketMetaValue}>
-                    Submitted: {formatDateTime(activeTicket.requestedAt)}
+                    Submitted on: {formatDateTime(activeTicket.requestedAt)}
                   </Text>
                   <Text style={styles.ticketMetaValue}>
-                    Last update: {formatDateTime(activeTicket.updatedAt)}
+                    Last updated: {formatDateTime(activeTicket.updatedAt)}
                   </Text>
                   {activeTicket.description ? (
                     <View style={styles.ticketDescriptionBox}>
@@ -813,13 +897,15 @@ export function ServicesRequestsScreen({
 
                 <View style={styles.ticketCommentsHeader}>
                   <Text style={styles.ticketCommentsTitle}>Conversation</Text>
-                  <Text style={styles.ticketCommentsCount}>{ticketComments.length}</Text>
+                  <Text style={[styles.ticketCommentsCount, { color: palette.primary }]}>
+                    {ticketComments.length}
+                  </Text>
                 </View>
 
                 <ScrollView style={styles.ticketCommentsList} contentContainerStyle={styles.ticketCommentsListContent}>
                   {ticketComments.length === 0 ? (
                     <Text style={styles.ticketEmptyComments}>
-                      No replies yet. You can send a message to the management team.
+                      No replies yet. You can send a message to management.
                     </Text>
                   ) : (
                     ticketComments.map((comment) => {
@@ -835,6 +921,7 @@ export function ServicesRequestsScreen({
                           <Text
                             style={[
                               styles.ticketCommentAuthor,
+                              !mine && { color: palette.primary },
                               mine && styles.ticketCommentAuthorMine,
                             ]}
                           >
@@ -867,7 +954,7 @@ export function ServicesRequestsScreen({
                     value={ticketCommentDraft}
                     onChangeText={setTicketCommentDraft}
                     style={[styles.input, styles.ticketComposerInput]}
-                    placeholder="Write a reply..."
+                    placeholder="Write your message..."
                     placeholderTextColor="#94A3B8"
                     multiline
                     numberOfLines={3}
@@ -886,7 +973,11 @@ export function ServicesRequestsScreen({
                       </Text>
                     </Pressable>
                     <Pressable
-                      style={[styles.primarySolidButton, ticketCommentSubmitting && styles.buttonDisabled]}
+                      style={[
+                        styles.primarySolidButton,
+                        { backgroundColor: palette.primary },
+                        ticketCommentSubmitting && styles.buttonDisabled,
+                      ]}
                       disabled={ticketCommentSubmitting}
                       onPress={() => void submitTicketComment()}
                     >
@@ -895,14 +986,14 @@ export function ServicesRequestsScreen({
                       ) : (
                         <>
                           <Ionicons name="send" size={14} color="#fff" />
-                          <Text style={styles.primarySolidButtonText}>Send</Text>
+                          <Text style={styles.primarySolidButtonText}>Send Reply</Text>
                         </>
                       )}
                     </Pressable>
                   </View>
                   {!canUserCancelTicket(activeTicket.status) ? (
                     <Text style={styles.ticketCancelHint}>
-                      Cancellation is available only while the request is still pending review.
+                      You can cancel only while this request is still pending review.
                     </Text>
                   ) : null}
                 </View>
@@ -918,6 +1009,7 @@ export function ServicesRequestsScreen({
 
 type DynamicFieldInputProps = {
   field: ServiceField;
+  palette: ReturnType<typeof getBrandPalette>;
   textValue: string;
   boolValue?: boolean;
   fileValue?: UploadedAttachment | null;
@@ -930,6 +1022,7 @@ type DynamicFieldInputProps = {
 
 function DynamicFieldInput({
   field,
+  palette,
   textValue,
   boolValue,
   fileValue,
@@ -953,8 +1046,8 @@ function DynamicFieldInput({
         <Switch
           value={Boolean(boolValue)}
           onValueChange={onBoolChange}
-          trackColor={{ false: '#CBD5E1', true: 'rgba(42,62,53,0.25)' }}
-          thumbColor={Boolean(boolValue) ? akColors.primary : '#F8FAFC'}
+          trackColor={{ false: '#CBD5E1', true: palette.primarySoft22 }}
+          thumbColor={Boolean(boolValue) ? palette.primary : '#F8FAFC'}
         />
       </View>
     );
@@ -973,8 +1066,8 @@ function DynamicFieldInput({
             disabled={Boolean(isUploadingFile)}
             style={[styles.ghostButton, Boolean(isUploadingFile) && styles.buttonDisabled]}
           >
-            <Text style={styles.ghostButtonText}>
-              {isUploadingFile ? 'Uploading...' : fileValue ? 'Replace File' : 'Upload File'}
+            <Text style={[styles.ghostButtonText, { color: palette.primary }]}>
+              {isUploadingFile ? 'Uploading...' : fileValue ? 'Replace file' : 'Upload file'}
             </Text>
           </Pressable>
         </View>
@@ -992,7 +1085,7 @@ function DynamicFieldInput({
             </Pressable>
           </View>
         ) : (
-          <Text style={styles.dynamicHint}>Upload a file to populate this field.</Text>
+          <Text style={styles.dynamicHint}>Upload a file for this field.</Text>
         )}
 
         {/* file ID is stored internally after upload; never shown to end users */}
@@ -1013,7 +1106,7 @@ function DynamicFieldInput({
             onPress={() => setShowDatePicker(true)}
             style={styles.ghostButton}
           >
-            <Text style={styles.ghostButtonText}>Pick Date</Text>
+            <Text style={[styles.ghostButtonText, { color: palette.primary }]}>Pick Date</Text>
           </Pressable>
         </View>
 
@@ -1043,7 +1136,7 @@ function DynamicFieldInput({
 
         {Platform.OS === 'ios' && showDatePicker ? (
           <Pressable onPress={() => setShowDatePicker(false)} style={styles.ghostButton}>
-            <Text style={styles.ghostButtonText}>Done</Text>
+            <Text style={[styles.ghostButtonText, { color: palette.primary }]}>Done</Text>
           </Pressable>
         ) : null}
       </View>
@@ -1065,7 +1158,7 @@ function DynamicFieldInput({
       />
       <Text style={styles.dynamicMeta}>
         {type === 'MEMBER_SELECTOR'
-          ? 'Select a household member (name or ID).'
+          ? 'Select a household member by name.'
           : fieldTypeHint(type)}
       </Text>
     </View>
@@ -1105,9 +1198,9 @@ function placeholderForType(type: string): string {
     case 'NUMBER':
       return 'Enter number';
     case 'FILE':
-      return 'Upload an attachment';
+      return 'Upload file';
     default:
-      return 'Enter value';
+      return 'Enter details';
   }
 }
 
@@ -1209,6 +1302,71 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
+  guidedHintBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(42,62,53,0.16)',
+    borderRadius: 12,
+    backgroundColor: 'rgba(42,62,53,0.08)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  guidedHintText: {
+    flex: 1,
+    color: akColors.textMuted,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  urgentLane: {
+    borderWidth: 1,
+    borderColor: 'rgba(220,38,38,0.18)',
+    borderRadius: 14,
+    backgroundColor: 'rgba(254,242,242,0.9)',
+    padding: 10,
+    gap: 8,
+  },
+  urgentLaneHeader: {
+    gap: 2,
+  },
+  urgentLaneTitle: {
+    color: '#B91C1C',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  urgentLaneSub: {
+    color: '#7F1D1D',
+    fontSize: 11,
+  },
+  urgentLaneChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  urgentChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(220,38,38,0.28)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    backgroundColor: '#fff',
+  },
+  urgentChipActive: {
+    backgroundColor: '#DC2626',
+    borderColor: '#DC2626',
+  },
+  urgentChipText: {
+    color: '#B91C1C',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  urgentChipTextActive: {
+    color: '#fff',
+  },
   choiceChip: {
     width: '48%',
     borderWidth: 1,
@@ -1274,6 +1432,31 @@ const styles = StyleSheet.create({
   },
   choiceChipMetaActive: {
     color: 'rgba(255,255,255,0.88)',
+  },
+  urgentTag: {
+    alignSelf: 'flex-start',
+    marginTop: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(220,38,38,0.25)',
+    borderRadius: 999,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    backgroundColor: '#FEF2F2',
+  },
+  urgentTagActive: {
+    borderColor: 'rgba(255,255,255,0.24)',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  urgentTagText: {
+    color: '#B91C1C',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  urgentTagTextActive: {
+    color: '#fff',
   },
   choiceChipSub: {
     color: akColors.textMuted,
