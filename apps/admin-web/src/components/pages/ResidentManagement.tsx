@@ -23,13 +23,7 @@ import {
   TableRow,
 } from "../ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { Search, Plus, MoreVertical, Trash2, Ban, User } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "../ui/dropdown-menu";
+import { Search, Plus, Trash2, Ban, User } from "lucide-react";
 import { Avatar, AvatarFallback } from "../ui/avatar";
 import apiClient from "../../lib/api-client";
 import {
@@ -49,6 +43,7 @@ type ResidentRow = {
   mobile: string;
   email: string;
   units: string[];
+  rawStatus: string;
   status: string;
   registrationDate: string;
   avatar: string;
@@ -190,6 +185,7 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
           mobile: user.phone ?? "—",
           email: user.email ?? "—",
           units: unitLabels.length > 0 ? unitLabels : ["—"],
+          rawStatus: String(user.userStatus ?? "ACTIVE").toUpperCase(),
           status: humanizeEnum(user.userStatus ?? "ACTIVE"),
           registrationDate: formatDate(user.createdAt),
           avatar: toInitials(user.nameEN),
@@ -483,7 +479,7 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
         resident.mobile.toLowerCase().includes(q) ||
         resident.units.some((u) => u.toLowerCase().includes(q));
       const matchesStatus =
-        statusFilter === "all" || resident.status.toUpperCase() === statusFilter.toUpperCase();
+        statusFilter === "all" || resident.rawStatus === statusFilter.toUpperCase();
       return matchesSearch && matchesStatus;
     });
   }, [rows, searchTerm, statusFilter]);
@@ -500,8 +496,7 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
             {isLoading ? "Refreshing..." : "Refresh"}
           </Button>
           <Button
-            variant="outline"
-            className="rounded-lg gap-2 text-[#0F172A] border-[#CBD5E1] bg-white hover:bg-[#F8FAFC]"
+            className="rounded-lg gap-2 bg-[#0F172A] hover:bg-[#0F172A]/90 text-white border border-[#0F172A]"
             onClick={() => {
               if (onNavigateToCreate) {
                 onNavigateToCreate();
@@ -835,7 +830,7 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
                   Cancel
                 </Button>
                 <Button
-                  className="bg-[#16A34A] hover:bg-[#16A34A]/90 text-white"
+                  className="bg-[#0F172A] hover:bg-[#0F172A]/90 text-white"
                   onClick={() => void handleCreateOwner()}
                   disabled={isCreatingOwner}
                 >
@@ -967,7 +962,7 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
                   Cancel
                 </Button>
                 <Button
-                  className="bg-[#00B386] hover:bg-[#00B386]/90 text-white"
+                  className="bg-[#0F172A] hover:bg-[#0F172A]/90 text-white"
                   onClick={() => void handleCreateResident()}
                   disabled={isCreatingResident}
                 >
@@ -1057,33 +1052,34 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
                 </TableCell>
                 <TableCell className="text-[#64748B]">{resident.registrationDate}</TableCell>
                 <TableCell className="text-right">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                        <MoreVertical className="w-4 h-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => void handleToggleSuspend(resident.id, resident.name)}>
-                        <Ban className="w-4 h-4 mr-2" />
-                        {resident.status.toUpperCase() === "SUSPENDED" ? "Activate" : "Suspend"}
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => void handleDeleteResident(resident.id, resident.name)}
-                        className="text-[#EF4444]"
-                      >
-                        <Trash2 className="w-4 h-4 mr-2" />
-                        Deactivate User
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        onClick={() => void handleHardDeleteResident(resident.id, resident.name)}
-                        className="text-[#B91C1C]"
-                      >
-                        <Trash2 className="w-4 h-4 mr-2" />
-                        Delete User (Permanent)
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                  <div className="inline-flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-[#0F172A] border-[#CBD5E1] bg-white hover:bg-[#F8FAFC]"
+                      onClick={() => void handleToggleSuspend(resident.id, resident.name)}
+                    >
+                      <Ban className="w-4 h-4 mr-1" />
+                      {resident.rawStatus === "SUSPENDED" ? "Activate" : "Suspend"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="text-[#B91C1C] border-[#FECACA] bg-[#FEF2F2] hover:bg-[#FEE2E2]"
+                      onClick={() => void handleDeleteResident(resident.id, resident.name)}
+                    >
+                      <Trash2 className="w-4 h-4 mr-1" />
+                      Deactivate
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="bg-[#7F1D1D] hover:bg-[#7F1D1D]/90 text-white"
+                      onClick={() => void handleHardDeleteResident(resident.id, resident.name)}
+                    >
+                      <Trash2 className="w-4 h-4 mr-1" />
+                      Delete
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}

@@ -121,16 +121,8 @@ export class UsersService {
     skip: number = 0,
     take: number = 20,
   ): Promise<UserWithRelations[]> {
-    const where: Prisma.UserWhereInput = {
-      userStatus: {
-        in: [
-          UserStatusEnum.ACTIVE,
-          UserStatusEnum.SUSPENDED,
-          UserStatusEnum.INVITED,
-          UserStatusEnum.DISABLED,
-        ],
-      },
-    };
+    // Return all users regardless of status so deactivated users remain visible in admin lists.
+    const where: Prisma.UserWhereInput = {};
 
     // Filter by user type if provided
     if (userType === 'resident') {
