@@ -3,6 +3,7 @@ import { SidebarProvider, SidebarInset } from "./components/ui/sidebar";
 import { AppSidebar } from "./components/AppSidebar";
 import { DashboardOverview } from "./components/pages/DashboardOverview";
 import { ResidentManagement } from "./components/pages/ResidentManagement";
+import { ResidentCreatePage } from "./components/pages/ResidentCreatePage";
 import { UnitsManagement } from "./components/pages/UnitsManagement";
 import { ServiceManagement } from "./components/pages/ServiceManagement";
 import { TicketsInbox } from "./components/pages/TicketsInbox";
@@ -36,6 +37,7 @@ type FooterPanel = "documentation" | "support" | "privacy" | null;
 const VALID_SECTIONS = new Set([
   "dashboard",
   "residents",
+  "residents-create",
   "units",
   "services",
   "tickets",
@@ -145,7 +147,9 @@ export default function App() {
       case "dashboard":
         return <DashboardOverview onNavigate={navigateToSection} />;
       case "residents":
-        return <ResidentManagement />;
+        return <ResidentManagement onNavigateToCreate={() => navigateToSection("residents-create")} />;
+      case "residents-create":
+        return <ResidentCreatePage onBack={() => navigateToSection("residents")} onCreated={() => navigateToSection("residents")} />;
       case "units":
         return <UnitsManagement />;
       case "services":

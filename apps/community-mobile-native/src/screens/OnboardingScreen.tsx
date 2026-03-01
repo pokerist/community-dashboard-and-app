@@ -162,7 +162,7 @@ export function OnboardingScreen({ onComplete }: OnboardingScreenProps) {
 
             <Text style={styles.title}>{slide.title}</Text>
             <View style={styles.subtitleDivider} />
-            <Text style={[styles.subtitle, { color: brandAccent }]}>{slide.subtitle}</Text>
+            <Text style={styles.subtitle}>{slide.subtitle}</Text>
             <Text style={styles.description}>{slide.description}</Text>
           </View>
 
@@ -282,7 +282,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(201,169,97,0.55)',
   },
   subtitle: {
-    color: akColors.gold,
+    color: '#FFFFFF',
     fontSize: 11,
     letterSpacing: 2.4,
     fontWeight: '500',

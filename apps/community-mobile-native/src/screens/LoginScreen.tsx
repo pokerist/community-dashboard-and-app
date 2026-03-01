@@ -19,6 +19,7 @@ import {
 } from 'react-native-safe-area-context';
 import { API_BASE_URL } from '../config/env';
 import { useBranding } from '../features/branding/provider';
+import { getBrandPalette } from '../features/branding/palette';
 import { useI18n } from '../features/i18n/provider';
 import { akColors, akRadius, akShadow } from '../theme/alkarma';
 
@@ -101,6 +102,8 @@ export function LoginScreen({
   }, [combinedError]);
   const topPadding = Math.max(insets.top, 10) + 8;
   const brandPrimary = brand.primaryColor || akColors.primary;
+  const palette = getBrandPalette(brand);
+  const brandSecondary = palette.secondary;
   const brandAccent = brand.accentColor || akColors.gold;
   const logoSource =
     brand.logoUrl && brand.logoUrl.trim()
@@ -174,11 +177,18 @@ export function LoginScreen({
                   style={[
                     styles.languageBtn,
                     language === 'en' && styles.languageBtnActive,
+                    language === 'en'
+                      ? {
+                          borderColor: brandSecondary,
+                          backgroundColor: `${brandSecondary}1A`,
+                        }
+                      : null,
                   ]}
                 >
                   <Text style={[
                     styles.languageBtnText,
                     language === 'en' && styles.languageBtnTextActive,
+                    language === 'en' ? { color: brandSecondary } : null,
                   ]}>
                     {t('common.english')}
                   </Text>
@@ -188,11 +198,18 @@ export function LoginScreen({
                   style={[
                     styles.languageBtn,
                     language === 'ar' && styles.languageBtnActive,
+                    language === 'ar'
+                      ? {
+                          borderColor: brandSecondary,
+                          backgroundColor: `${brandSecondary}1A`,
+                        }
+                      : null,
                   ]}
                 >
                   <Text style={[
                     styles.languageBtnText,
                     language === 'ar' && styles.languageBtnTextActive,
+                    language === 'ar' ? { color: brandSecondary } : null,
                   ]}>
                     {t('common.arabic')}
                   </Text>
@@ -202,14 +219,14 @@ export function LoginScreen({
 
             <View style={styles.bannerWrap}>
               <LinearGradient
-                colors={[brandPrimary, akColors.primaryDark, brandPrimary]}
+                colors={[brandPrimary, palette.primaryDark, brandPrimary]}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={styles.bannerCard}
               >
                 <View style={styles.bannerOverlay} />
                 <View style={styles.bannerContent}>
-                  <Text style={[styles.bannerTag, { color: brandAccent }]}>
+                  <Text style={styles.bannerTag}>
                     {(brand.companyName || 'Community').toUpperCase()}
                   </Text>
                   <Text style={styles.bannerTitle}>{t('login.title')}</Text>
@@ -333,7 +350,11 @@ export function LoginScreen({
               )}
 
               <Pressable
-                style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
+                style={[
+                  styles.submitButton,
+                  { backgroundColor: brandSecondary },
+                  isSubmitting && styles.submitButtonDisabled,
+                ]}
                 onPress={pendingTwoFactorChallenge ? handleSubmitTwoFactor : handleSubmit}
                 disabled={isSubmitting}
               >
@@ -513,7 +534,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   bannerTag: {
-    color: akColors.gold,
+    color: '#FFFFFF',
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 1,

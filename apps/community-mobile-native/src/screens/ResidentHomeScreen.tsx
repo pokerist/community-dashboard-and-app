@@ -728,6 +728,23 @@ export function ResidentHomeScreen({
                                       {banner.description}
                                     </Text>
                                   ) : null}
+                                  {homeBanners.length > 1 ? (
+                                    <View style={styles.heroBannerOverlayDotsWrap}>
+                                      <View style={styles.heroBannerDotsRow}>
+                                        {homeBanners.slice(0, 5).map((b, idx) => (
+                                          <Pressable
+                                            key={b.id}
+                                            onPress={() => scrollToBanner(idx)}
+                                            style={[
+                                              styles.heroBannerDot,
+                                              idx === bannerIndex && styles.heroBannerDotActive,
+                                              idx === bannerIndex ? { backgroundColor: brandAccent } : null,
+                                            ]}
+                                          />
+                                        ))}
+                                      </View>
+                                    </View>
+                                  ) : null}
                                 </LinearGradient>
                               </Pressable>
                             ) : (
@@ -745,6 +762,23 @@ export function ResidentHomeScreen({
                                   <Text style={styles.heroBannerOverlayText} numberOfLines={2}>
                                     {banner.description}
                                   </Text>
+                                ) : null}
+                                {homeBanners.length > 1 ? (
+                                  <View style={styles.heroBannerOverlayDotsWrap}>
+                                    <View style={styles.heroBannerDotsRow}>
+                                      {homeBanners.slice(0, 5).map((b, idx) => (
+                                        <Pressable
+                                          key={b.id}
+                                          onPress={() => scrollToBanner(idx)}
+                                          style={[
+                                            styles.heroBannerDot,
+                                            idx === bannerIndex && styles.heroBannerDotActive,
+                                            idx === bannerIndex ? { backgroundColor: brandAccent } : null,
+                                          ]}
+                                        />
+                                      ))}
+                                    </View>
+                                  </View>
                                 ) : null}
                               </LinearGradient>
                             )}
@@ -790,30 +824,6 @@ export function ResidentHomeScreen({
                             {t('home.bannerFeedIssue', { message: bannerError })}
                           </Text>
                         ) : null}
-                        <View style={styles.heroBannerActionsRow}>
-                          {homeBanners.length > 1 ? (
-                            <View style={styles.heroBannerDotsRow}>
-                              {homeBanners.slice(0, 5).map((b, idx) => (
-                                <Pressable
-                                  key={b.id}
-                                  onPress={() => scrollToBanner(idx)}
-                                  style={[
-                                    styles.heroBannerDot,
-                                idx === bannerIndex && styles.heroBannerDotActive,
-                                idx === bannerIndex ? { backgroundColor: brandAccent } : null,
-                              ]}
-                                />
-                              ))}
-                            </View>
-                          ) : (
-                            <View />
-                          )}
-                          {hasBannerLink ? (
-                            <Text style={[styles.heroBannerTapHint, { color: brandAccent }]}>
-                              {t('home.bannerTapHint')}
-                            </Text>
-                          ) : null}
-                        </View>
                       </View>
                     );
                   })}
@@ -1338,6 +1348,11 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     gap: 4,
   },
+  heroBannerOverlayDotsWrap: {
+    marginTop: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   heroBannerOverlayText: {
     color: 'rgba(255,255,255,0.9)',
     fontSize: 11,
@@ -1384,17 +1399,11 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 15,
   },
-  heroBannerActionsRow: {
-    marginTop: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
   heroBannerDotsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    justifyContent: 'center',
   },
   heroBannerDot: {
     width: 6,
@@ -1405,11 +1414,6 @@ const styles = StyleSheet.create({
   heroBannerDotActive: {
     width: 14,
     backgroundColor: akColors.gold,
-  },
-  heroBannerTapHint: {
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.2,
   },
   homeSection: {
     gap: 10,

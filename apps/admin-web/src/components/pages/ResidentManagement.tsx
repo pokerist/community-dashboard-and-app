@@ -23,7 +23,7 @@ import {
   TableRow,
 } from "../ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { Search, Plus, MoreVertical, Trash2, Ban } from "lucide-react";
+import { Search, Plus, MoreVertical, Trash2, Ban, User } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -137,7 +137,11 @@ const defaultCreateOwnerForm: CreateOwnerForm = {
   units: [createDefaultOwnerUnitDraft()],
 };
 
-export function ResidentManagement() {
+type ResidentManagementProps = {
+  onNavigateToCreate?: () => void;
+};
+
+export function ResidentManagement({ onNavigateToCreate }: ResidentManagementProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [isLoading, setIsLoading] = useState(false);
@@ -476,6 +480,22 @@ export function ResidentManagement() {
           <Button variant="outline" onClick={() => void loadResidents()} disabled={isLoading}>
             {isLoading ? "Refreshing..." : "Refresh"}
           </Button>
+          <Button
+            variant="outline"
+            className="rounded-lg gap-2 text-[#0F172A] border-[#CBD5E1] bg-white hover:bg-[#F8FAFC]"
+            onClick={() => {
+              if (onNavigateToCreate) {
+                onNavigateToCreate();
+                return;
+              }
+              setIsCreateOwnerDialogOpen(true);
+            }}
+          >
+            <User className="w-4 h-4" />
+            Add Resident
+          </Button>
+
+          <div className="hidden">
           <Dialog open={isCreateOwnerDialogOpen} onOpenChange={setIsCreateOwnerDialogOpen}>
             <DialogTrigger asChild>
               <Button className="bg-[#16A34A] hover:bg-[#16A34A]/90 text-white rounded-lg gap-2">
@@ -805,6 +825,7 @@ export function ResidentManagement() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
+          </div>
           <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" className="hidden rounded-lg gap-2">

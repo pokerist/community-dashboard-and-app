@@ -172,11 +172,17 @@ export function AppSidebar({ onNavigate, activeSection }: AppSidebarProps) {
             <SidebarMenu>
               {menuItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
+                  {(() => {
+                    const section = item.url.replace("#", "");
+                    const isActive =
+                      activeSection === section ||
+                      (section === "residents" && activeSection === "residents-create");
+                    return (
                   <SidebarMenuButton
-                    onClick={() => onNavigate(item.url.replace("#", ""))}
-                    isActive={activeSection === item.url.replace("#", "")}
+                    onClick={() => onNavigate(section)}
+                    isActive={isActive}
                     className={`rounded-lg transition-all ${
-                      activeSection === item.url.replace("#", "")
+                      isActive
                         ? "bg-[#00B386]/10 text-[#00B386] border-l-4 border-[#00B386] pl-3"
                         : "hover:bg-[#F9FAFB]"
                     }`}
@@ -184,6 +190,8 @@ export function AppSidebar({ onNavigate, activeSection }: AppSidebarProps) {
                     <item.icon className="w-4 h-4" />
                     <span>{item.title}</span>
                   </SidebarMenuButton>
+                    );
+                  })()}
                 </SidebarMenuItem>
               ))}
             </SidebarMenu>
