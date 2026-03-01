@@ -13,6 +13,7 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import type { ResidentUnit } from '../../features/community/types';
 import type { AuthBootstrapProfile } from '../../features/auth/types';
 import { useBranding } from '../../features/branding/provider';
+import { getBrandPalette } from '../../features/branding/palette';
 import { useI18n } from '../../features/i18n/provider';
 import { akColors } from '../../theme/alkarma';
 
@@ -70,8 +71,9 @@ export function AppDrawerMenu({
 }: AppDrawerMenuProps) {
   const { brand } = useBranding();
   const { t } = useI18n();
-  const brandPrimary = brand.primaryColor || akColors.primary;
-  const brandAccent = brand.accentColor || akColors.gold;
+  const palette = getBrandPalette(brand);
+  const brandPrimary = palette.primary;
+  const brandAccent = palette.accent;
   const selectedUnit = useMemo(
     () => units.find((u) => u.id === selectedUnitId) ?? units[0] ?? null,
     [selectedUnitId, units],
@@ -178,7 +180,7 @@ export function AppDrawerMenu({
         <SafeAreaView style={styles.drawerSafeArea} edges={['top', 'bottom']}>
           <View style={styles.drawer}>
             <LinearGradient
-              colors={[brandPrimary, akColors.primaryDark]}
+              colors={[brandPrimary, palette.primaryDark]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={styles.header}

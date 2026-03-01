@@ -313,11 +313,11 @@ export function ResidentManagement() {
 
   const handleCreateOwner = async () => {
     if (!createOwnerForm.nameEN.trim()) {
-      toast.error("Owner English name is required");
+      toast.error("Resident English name is required");
       return;
     }
     if (!createOwnerForm.phone.trim()) {
-      toast.error("Owner phone is required");
+      toast.error("Resident phone is required");
       return;
     }
     if (!createOwnerForm.nationalIdPhotoFile) {
@@ -406,16 +406,16 @@ export function ResidentManagement() {
         units: mappedUnits,
       });
 
-      toast.success("Owner created", {
+      toast.success("Resident created", {
         description: response.data?.userEmail
-          ? "Owner account and unit payment plans were created. Login credentials email was queued."
-          : "Owner account and unit payment plans were created.",
+          ? "Resident account and unit payment plans were created. Login credentials email was queued."
+          : "Resident account and unit payment plans were created.",
       });
       setCreateOwnerForm(defaultCreateOwnerForm);
       setIsCreateOwnerDialogOpen(false);
       await loadResidents();
     } catch (error) {
-      toast.error("Failed to create owner", { description: errorMessage(error) });
+      toast.error("Failed to create resident", { description: errorMessage(error) });
     } finally {
       setIsCreatingOwner(false);
     }
@@ -485,14 +485,14 @@ export function ResidentManagement() {
             </DialogTrigger>
             <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto">
               <DialogHeader>
-                <DialogTitle>Create Resident (Owner + Multi-Unit Payment Plan)</DialogTitle>
+                <DialogTitle>Create Resident (Multi-Unit + Payment Plan)</DialogTitle>
                 <DialogDescription>
-                  Creates a resident owner account, links one or more units, stores contract documents, and configures unit payment plans.
+                  Creates resident account, links one or more units, stores contract documents, and configures unit payment plans.
                 </DialogDescription>
               </DialogHeader>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Owner Name (EN)</Label>
+                  <Label>Resident Name (EN)</Label>
                   <Input
                     value={createOwnerForm.nameEN}
                     onChange={(e) => setCreateOwnerForm((prev) => ({ ...prev, nameEN: e.target.value }))}
@@ -500,7 +500,7 @@ export function ResidentManagement() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Owner Name (AR)</Label>
+                  <Label>Resident Name (AR)</Label>
                   <Input
                     value={createOwnerForm.nameAR}
                     onChange={(e) => setCreateOwnerForm((prev) => ({ ...prev, nameAR: e.target.value }))}
@@ -513,7 +513,7 @@ export function ResidentManagement() {
                     type="email"
                     value={createOwnerForm.email}
                     onChange={(e) => setCreateOwnerForm((prev) => ({ ...prev, email: e.target.value }))}
-                    placeholder="owner@example.com"
+                    placeholder="resident@example.com"
                   />
                 </div>
                 <div className="space-y-2">
@@ -800,23 +800,23 @@ export function ResidentManagement() {
                   onClick={() => void handleCreateOwner()}
                   disabled={isCreatingOwner}
                 >
-                  {isCreatingOwner ? "Creating Owner..." : "Create Owner"}
+                  {isCreatingOwner ? "Creating Resident..." : "Create Resident"}
                 </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
           <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
             <DialogTrigger asChild>
-              <Button variant="outline" className="rounded-lg gap-2">
+              <Button variant="outline" className="hidden rounded-lg gap-2">
                 <Plus className="w-4 h-4" />
-                Quick Resident (Legacy)
+                Quick Resident
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-2xl">
               <DialogHeader>
-                <DialogTitle>Quick Resident (Legacy)</DialogTitle>
+                <DialogTitle>Quick Resident</DialogTitle>
                 <DialogDescription>
-                  Legacy lightweight flow: creates base user, resident profile, and optional unit assignment.
+                  Lightweight flow: creates base user, resident profile, and optional unit assignment.
                 </DialogDescription>
               </DialogHeader>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

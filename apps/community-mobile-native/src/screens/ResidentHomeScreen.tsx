@@ -20,6 +20,7 @@ import { UnitPickerSheet } from '../components/mobile/UnitPickerSheet';
 import { API_BASE_URL } from '../config/env';
 import type { AuthBootstrapProfile, AuthSession } from '../features/auth/types';
 import { useBranding } from '../features/branding/provider';
+import { getBrandPalette } from '../features/branding/palette';
 import { useI18n } from '../features/i18n/provider';
 import {
   listAccessQrs,
@@ -178,9 +179,11 @@ export function ResidentHomeScreen({
   const toast = useAppToast();
   const { t } = useI18n();
   const { brand, offers } = useBranding();
-  const brandPrimary = brand.primaryColor || akColors.primary;
-  const brandSecondary = brand.secondaryColor || akColors.gold;
-  const brandAccent = brand.accentColor || '#0B5FFF';
+  const palette = getBrandPalette(brand);
+  const brandPrimary = palette.primary;
+  const brandPrimaryDark = palette.primaryDark;
+  const brandSecondary = palette.secondary;
+  const brandAccent = palette.accent;
 
   const notifications = useNotificationRealtime();
 
@@ -555,7 +558,7 @@ export function ResidentHomeScreen({
         ]}
       >
       <LinearGradient
-        colors={[brandPrimary, akColors.primaryDark]}
+        colors={[brandPrimary, brandPrimaryDark]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={[
@@ -1028,7 +1031,7 @@ export function ResidentHomeScreen({
                   title: activeOffer?.title?.trim() || t('home.offerTitle'),
                 });
               }}
-              style={styles.offerImageWrap}
+              style={[styles.offerImageWrap, { backgroundColor: brandPrimaryDark }]}
             >
               {activeOffer?.imageUrl ? (
                 <Image
@@ -1046,7 +1049,7 @@ export function ResidentHomeScreen({
                 />
               ) : (
                 <LinearGradient
-                  colors={[brandPrimary, akColors.primaryDark]}
+                  colors={[brandPrimary, brandPrimaryDark]}
                   style={styles.offerImage}
                 />
               )}
@@ -1121,7 +1124,7 @@ export function ResidentHomeScreen({
           />
           <View style={styles.comingSoonCard}>
             <LinearGradient
-              colors={[brandPrimary, akColors.primaryDark]}
+              colors={[brandPrimary, brandPrimaryDark]}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={styles.comingSoonHero}
@@ -1877,7 +1880,7 @@ const styles = StyleSheet.create({
   offerImageWrap: {
     position: 'relative',
     height: 300,
-    backgroundColor: '#0f172a',
+    backgroundColor: akColors.surfaceMuted,
   },
   offerImage: {
     width: '100%',
