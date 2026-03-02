@@ -51,7 +51,7 @@ export class NotificationListener {
     try {
       const channels =
         payload.type === InvoiceType.FINE
-          ? [Channel.IN_APP]
+          ? [Channel.IN_APP, Channel.PUSH]
           : [Channel.IN_APP, Channel.PUSH, Channel.EMAIL];
       // Send payment reminder notification
       await this.notificationsService.sendNotification({
@@ -101,7 +101,7 @@ export class NotificationListener {
         type: NotificationType.EMERGENCY_ALERT,
         title: 'New Incident Reported',
         messageEn: `A new ${payload.type} incident has been reported${payload.unitId ? ' in your area' : ''}. Incident ID: ${payload.incidentNumber}`,
-        channels: [Channel.IN_APP, Channel.EMAIL],
+        channels: [Channel.IN_APP, Channel.PUSH, Channel.EMAIL],
         targetAudience: audience,
         audienceMeta,
       });
@@ -133,7 +133,7 @@ export class NotificationListener {
         type: NotificationType.MAINTENANCE_ALERT,
         title: 'Incident Resolved',
         messageEn: `The ${payload.type} incident (${payload.incidentNumber}) has been resolved. Response time: ${Math.floor(payload.responseTime / 60)} minutes.`,
-        channels: [Channel.IN_APP, Channel.EMAIL],
+        channels: [Channel.IN_APP, Channel.PUSH, Channel.EMAIL],
         targetAudience: audience,
         audienceMeta,
       });
@@ -223,7 +223,7 @@ export class NotificationListener {
         type: NotificationType.EVENT_NOTIFICATION,
         title: 'Referral created',
         messageEn: `Your referral invitation for ${payload.friendFullName} (${payload.friendMobile}) has been created.`,
-        channels: [Channel.IN_APP, Channel.EMAIL],
+        channels: [Channel.IN_APP, Channel.PUSH, Channel.EMAIL],
         targetAudience: Audience.SPECIFIC_RESIDENCES,
         audienceMeta: { userIds: [payload.referrerId] },
       });
@@ -234,7 +234,7 @@ export class NotificationListener {
           type: NotificationType.EVENT_NOTIFICATION,
           title: "You've been invited",
           messageEn: `${payload.referrerName} invited you to join the community.`,
-          channels: [Channel.IN_APP, Channel.EMAIL],
+          channels: [Channel.IN_APP, Channel.PUSH, Channel.EMAIL],
           targetAudience: Audience.SPECIFIC_RESIDENCES,
           audienceMeta: { userIds: [payload.inviteeUserId] },
         });
@@ -311,7 +311,7 @@ export class NotificationListener {
         type: NotificationType.MAINTENANCE_ALERT,
         title: 'Request submitted',
         messageEn: `Your request for ${payload.serviceName} has been submitted successfully.`,
-        channels: [Channel.IN_APP],
+        channels: [Channel.IN_APP, Channel.PUSH],
         targetAudience: Audience.SPECIFIC_RESIDENCES,
         audienceMeta: { userIds: [payload.createdById] },
         payload: {
@@ -356,7 +356,7 @@ export class NotificationListener {
           type: NotificationType.MAINTENANCE_ALERT,
           title: 'New resident ticket submitted',
           messageEn: `${payload.serviceName} was submitted and is waiting for review.`,
-          channels: [Channel.IN_APP],
+          channels: [Channel.IN_APP, Channel.PUSH],
           targetAudience: Audience.SPECIFIC_RESIDENCES,
           audienceMeta: { userIds },
           payload: {
@@ -383,12 +383,6 @@ export class NotificationListener {
   async handleServiceRequestStatusChanged(payload: ServiceRequestStatusChangedEvent) {
     if (payload.oldStatus === payload.newStatus) return;
 
-    const pushStatuses = new Set<ServiceRequestStatus>([
-      ServiceRequestStatus.IN_PROGRESS,
-      ServiceRequestStatus.RESOLVED,
-      ServiceRequestStatus.CLOSED,
-    ]);
-
     try {
       const statusLabel = String(payload.newStatus).replace(/_/g, ' ').toLowerCase();
       const title =
@@ -399,9 +393,7 @@ export class NotificationListener {
             : payload.newStatus === ServiceRequestStatus.CLOSED
               ? 'Request closed'
               : 'Request updated';
-      const channels = pushStatuses.has(payload.newStatus)
-        ? [Channel.IN_APP, Channel.PUSH]
-        : [Channel.IN_APP];
+      const channels = [Channel.IN_APP, Channel.PUSH];
 
       await this.notificationsService.sendNotification({
         type: NotificationType.MAINTENANCE_ALERT,

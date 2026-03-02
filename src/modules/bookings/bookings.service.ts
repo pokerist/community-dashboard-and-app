@@ -15,6 +15,9 @@ import {
   UnitStatus,
   InvoiceType,
   InvoiceStatus,
+  Channel,
+  Audience,
+  NotificationType,
 } from '@prisma/client';
 import { BookingApprovedEvent } from '../../events/contracts/booking-approved.event';
 import { BookingCancelledEvent } from '../../events/contracts/booking-cancelled.event';
@@ -22,6 +25,7 @@ import { paginate } from '../../common/utils/pagination.util';
 import { getActiveUnitAccess } from '../../common/utils/unit-access.util';
 import { ClubhouseService } from '../clubhouse/clubhouse.service';
 import { InvoicesService } from '../invoices/invoices.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 interface EffectiveSlotConfig {
   startTime: string;
@@ -37,6 +41,7 @@ export class BookingsService {
     private eventEmitter: EventEmitter2,
     private clubhouseService: ClubhouseService,
     private invoicesService: InvoicesService,
+    private notificationsService: NotificationsService,
   ) {}
 
   private isSuperAdminRole(roles: unknown): boolean {
@@ -262,7 +267,7 @@ export class BookingsService {
       throw new BadRequestException('Requested time does not match slot rules');
     }
 
-    return this.prisma.$transaction(async (tx) => {
+    const booking = await this.prisma.$transaction(async (tx) => {
       await this.enforceLimits(internalDto, facility);
       await this.checkSlotCapacity(dto, facility, config);
 
@@ -295,6 +300,28 @@ export class BookingsService {
 
       return booking;
     });
+
+    try {
+      await this.notificationsService.sendNotification({
+        type: NotificationType.EVENT_NOTIFICATION,
+        title: 'Booking request submitted',
+        messageEn: `Your booking for ${facility.name} on ${new Date(booking.date).toDateString()} from ${booking.startTime} to ${booking.endTime} has been submitted.`,
+        channels: [Channel.IN_APP, Channel.PUSH],
+        targetAudience: Audience.SPECIFIC_RESIDENCES,
+        audienceMeta: { userIds: [actorUserId] },
+        payload: {
+          route: '/bookings',
+          entityType: 'BOOKING',
+          entityId: booking.id,
+          eventKey: 'booking.created',
+          status: booking.status,
+        },
+      });
+    } catch (error) {
+      void error;
+    }
+
+    return booking;
   }
 
   async findAll(query: BookingsQueryDto) {

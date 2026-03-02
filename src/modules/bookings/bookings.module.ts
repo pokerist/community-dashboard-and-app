@@ -6,6 +6,7 @@ import { FacilitiesModule } from '../facilities/facilities.module';
 import { AuthModule } from '../auth/auth.module';
 import { ClubhouseModule } from '../clubhouse/clubhouse.module';
 import { InvoicesModule } from '../invoices/invoices.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { InvoicesModule } from '../invoices/invoices.module';
     AuthModule,
     ClubhouseModule,
     InvoicesModule,
+    NotificationsModule,
   ],
   controllers: [BookingsController],
   providers: [BookingsService],

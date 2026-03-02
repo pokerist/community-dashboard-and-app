@@ -76,10 +76,34 @@ type NotificationRow = {
 };
 
 type Option = { id: string; label: string };
+type ProviderState = {
+  provider?: string;
+  configured?: boolean;
+  enabled?: boolean;
+  mockMode?: boolean;
+};
+
+type PushProviderState = ProviderState & {
+  effectiveProvider?: string;
+  fcm?: ProviderState & { projectId?: string | null };
+  expo?: ProviderState;
+};
+
 type ProvidersStatus = {
-  email?: { configured?: boolean; mockMode?: boolean };
-  sms?: { configured?: boolean; mockMode?: boolean };
-  push?: { configured?: boolean; mockMode?: boolean };
+  email?: ProviderState;
+  sms?: ProviderState;
+  push?: PushProviderState;
+  runtime?: {
+    diagnostics?: {
+      activeDeviceTokens?: number;
+      recentPushFailures?: Array<{
+        id: string;
+        reasonCode?: string;
+        message?: string;
+        createdAt?: string;
+      }>;
+    };
+  };
 };
 
 type ComposeForm = {
@@ -532,6 +556,24 @@ export function NotificationCenter() {
     });
   }, [providersStatus]);
 
+  const pushDiagnostics = useMemo(() => {
+    const runtime = providersStatus.runtime ?? {};
+    const diagnostics = runtime.diagnostics ?? {};
+    const activeTokens = Number(diagnostics.activeDeviceTokens ?? 0);
+    const latestFailure = Array.isArray(diagnostics.recentPushFailures)
+      ? diagnostics.recentPushFailures[0]
+      : undefined;
+    const latestFailureText = latestFailure
+      ? `${latestFailure.reasonCode ?? "PUSH_SEND_FAILED"}${latestFailure.message ? ` (${latestFailure.message})` : ""}`
+      : "No recent push failures";
+
+    return {
+      effectiveProvider: String(providersStatus.push?.effectiveProvider ?? "none"),
+      activeTokens,
+      latestFailureText,
+    };
+  }, [providersStatus]);
+
   const statusOptions = useMemo(() => Array.from(new Set(rows.map((r) => r.status))), [rows]);
 
   return (
@@ -557,7 +599,7 @@ export function NotificationCenter() {
               <DialogHeader>
                 <DialogTitle>New Notification</DialogTitle>
                 <DialogDescription>
-                  Uses <code>/notifications</code>. SMS/PUSH delivery depends on backend provider setup.
+                  Uses <code>/notifications</code>. Admin notifications are always enforced as <strong>IN_APP + PUSH</strong> by backend policy.
                 </DialogDescription>
               </DialogHeader>
               <div className="flex flex-wrap gap-2 rounded-lg border border-[#E5E7EB] bg-[#F8FAFC] p-3">
@@ -985,6 +1027,9 @@ export function NotificationCenter() {
               </Badge>
             ))}
           </div>
+        </div>
+        <div className="text-xs text-[#475569] rounded-md border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2">
+          Push diagnostics: effective provider <strong>{pushDiagnostics.effectiveProvider}</strong>, active device tokens <strong>{pushDiagnostics.activeTokens}</strong>, latest failure <strong>{pushDiagnostics.latestFailureText}</strong>.
         </div>
       </Card>
 

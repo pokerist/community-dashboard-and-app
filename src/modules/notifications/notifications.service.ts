@@ -25,10 +25,16 @@ import {
 } from '@prisma/client';
 
 type DeliveryMode = 'pending' | 'failed';
+type NotificationDedupEntry = {
+  notificationId: string;
+  expiresAt: number;
+};
 
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
+  private readonly dedupWindowMs = 30_000;
+  private readonly dedupCache = new Map<string, NotificationDedupEntry>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -43,24 +49,111 @@ export class NotificationsService {
   async getProviderStatus() {
     const integrations = await this.integrationConfigService.getResolvedIntegrations();
     const pushDispatch = this.pushDispatchRouter.getStatus();
+    const capabilities = await this.integrationConfigService.getMobileCapabilities();
+    const resendKey = (process.env.RESEND_API_KEY ?? '').trim();
+    const resendConfigured = Boolean(resendKey);
+    const emailMockMode = this.emailService.isMockMode();
+    const emailProvider = resendConfigured
+      ? 'resend'
+      : integrations.smtp.configured
+        ? 'smtp'
+        : 'none';
+
+    const fcmConfigured = Boolean((pushDispatch as any)?.fcm?.configured);
+    const fcmMockMode = Boolean((pushDispatch as any)?.fcm?.mockMode);
+    const expoConfigured = Boolean((pushDispatch as any)?.expo?.configured);
+    const expoMockMode = Boolean((pushDispatch as any)?.expo?.mockMode);
+    const pushConfigured = fcmConfigured || expoConfigured;
+    const pushLive =
+      (fcmConfigured && !fcmMockMode) || (expoConfigured && !expoMockMode);
+    const effectiveProvider = fcmConfigured
+      ? fcmMockMode
+        ? 'fcm-mock'
+        : 'fcm'
+      : expoConfigured
+        ? expoMockMode
+          ? 'expo-mock'
+          : 'expo'
+        : 'none';
+
+    const [activeDeviceTokens, recentPushFailures] = await Promise.all([
+      this.prisma.notificationDeviceToken.count({ where: { isActive: true } }),
+      this.prisma.notificationLog.findMany({
+        where: {
+          channel: Channel.PUSH,
+          status: NotificationLogStatus.FAILED,
+        },
+        select: {
+          id: true,
+          notificationId: true,
+          recipient: true,
+          providerResponse: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+      }),
+    ]);
+
+    const mappedPushFailures = recentPushFailures.map((row) => {
+      const response =
+        row.providerResponse && typeof row.providerResponse === 'object'
+          ? (row.providerResponse as Record<string, unknown>)
+          : {};
+      const reasonCode = String(
+        response.reasonCode ??
+          response.reason ??
+          this.classifyPushFailure(
+            String(response.error ?? response.message ?? ''),
+            String(response.provider ?? ''),
+          ),
+      );
+      return {
+        id: row.id,
+        notificationId: row.notificationId,
+        recipient: row.recipient,
+        reasonCode,
+        message: String(response.error ?? response.message ?? 'Push send failed'),
+        createdAt: row.createdAt,
+      };
+    });
+
     return {
       providers: {
         email: {
-          provider: 'smtp',
-          enabled: integrations.smtp.enabled,
-          configured: integrations.smtp.configured,
+          provider: emailProvider,
+          enabled: resendConfigured || integrations.smtp.enabled,
+          configured: resendConfigured || integrations.smtp.configured,
+          mockMode: emailMockMode,
+          resendConfigured,
+          smtpEnabled: integrations.smtp.enabled,
           host: integrations.smtp.host || null,
           port: integrations.smtp.port || null,
-          from: integrations.smtp.fromEmail || null,
+          from:
+            (process.env.RESEND_FROM_EMAIL ?? '').trim() ||
+            integrations.smtp.fromEmail ||
+            null,
         },
         sms: {
           ...this.smsProvider.getStatus(),
           enabled: integrations.smsOtp.enabled,
           configured: integrations.smsOtp.configured,
         },
-        push: pushDispatch,
+        push: {
+          configured: pushConfigured,
+          enabled: integrations.fcm.enabled || expoConfigured,
+          mockMode: pushConfigured && !pushLive,
+          effectiveProvider,
+          router: 'auto',
+          fcm: (pushDispatch as any)?.fcm ?? null,
+          expo: (pushDispatch as any)?.expo ?? null,
+        },
         runtime: {
-          capabilities: await this.integrationConfigService.getMobileCapabilities(),
+          capabilities,
+          diagnostics: {
+            activeDeviceTokens,
+            recentPushFailures: mappedPushFailures,
+          },
         },
       },
     };
@@ -173,15 +266,21 @@ export class NotificationsService {
       title,
       messageEn,
       messageAr,
-      channels,
+      channels: requestedChannels,
       targetAudience,
       audienceMeta,
       payload,
       scheduledAt,
     } = dto;
 
-    if (!channels?.length) {
+    if (!requestedChannels?.length) {
       throw new BadRequestException('At least one channel is required');
+    }
+
+    let channels = [...new Set(requestedChannels)];
+    const isAdminSender = senderId ? await this.isAdminUser(senderId) : false;
+    if (isAdminSender) {
+      channels = [...new Set([...channels, Channel.IN_APP, Channel.PUSH])];
     }
 
     const normalizedAudienceMeta = this.validateAudienceMeta(
@@ -194,6 +293,21 @@ export class NotificationsService {
 
     const isScheduled =
       scheduledDate !== null && scheduledDate.getTime() > now.getTime();
+
+    const dedupKey = this.buildDedupKey({
+      targetAudience,
+      audienceMeta: normalizedAudienceMeta,
+      payload,
+      channels,
+      isScheduled,
+    });
+    const existingDedup = dedupKey ? this.consumeDedupEntry(dedupKey) : null;
+    if (existingDedup) {
+      this.logger.debug(
+        `Skipping duplicate notification for dedupKey=${dedupKey} -> ${existingDedup}`,
+      );
+      return existingDedup;
+    }
 
     const notification = await this.prisma.notification.create({
       data: {
@@ -216,9 +330,15 @@ export class NotificationsService {
       this.logger.log(
         `Notification ${notification.id} scheduled for ${scheduledAt}`,
       );
+      if (dedupKey) {
+        this.rememberDedupEntry(dedupKey, notification.id);
+      }
       return notification.id;
     }
 
+    if (dedupKey) {
+      this.rememberDedupEntry(dedupKey, notification.id);
+    }
     await this.dispatchNow(notification.id);
     return notification.id;
   }
@@ -632,11 +752,40 @@ export class NotificationsService {
       { attempted: 0, sent: 0, failed: 0 },
     );
 
+    const refreshedFailedLogs = await this.prisma.notificationLog.findMany({
+      where: {
+        notificationId,
+        channel: { in: [Channel.EMAIL, Channel.SMS, Channel.PUSH] },
+        status: NotificationLogStatus.FAILED,
+      },
+      select: {
+        channel: true,
+        providerResponse: true,
+      },
+    });
+    const failureReasons: Record<string, number> = {};
+    for (const log of refreshedFailedLogs) {
+      const response =
+        log.providerResponse && typeof log.providerResponse === 'object'
+          ? (log.providerResponse as Record<string, unknown>)
+          : {};
+      const reasonCode = String(
+        response.reasonCode ??
+          response.reason ??
+          this.classifyPushFailure(
+            String(response.error ?? response.message ?? ''),
+            String(response.provider ?? ''),
+          ),
+      );
+      failureReasons[reasonCode] = (failureReasons[reasonCode] ?? 0) + 1;
+    }
+
     return {
       success: true,
       notificationId,
       ...totals,
       byChannel: channelResults,
+      failureReasons,
     };
   }
 
@@ -656,9 +805,12 @@ export class NotificationsService {
     if (!targetLogs.length) return { attempted: 0, sent: 0, failed: 0 };
 
     const integrations = await this.integrationConfigService.getResolvedIntegrations();
-    if (!integrations.smtp.enabled || !integrations.smtp.configured) {
+    const resendConfigured = Boolean((process.env.RESEND_API_KEY ?? '').trim());
+    const smtpReady = integrations.smtp.enabled && integrations.smtp.configured;
+    const emailReady = resendConfigured || smtpReady;
+    if (!emailReady) {
       this.logger.warn(
-        `SMTP disabled or not configured. Skipping ${targetLogs.length} email logs for notification ${notification.id}`,
+        `Email provider disabled or not configured. Skipping ${targetLogs.length} email logs for notification ${notification.id}`,
       );
       for (const log of targetLogs) {
         await this.prisma.notificationLog.update({
@@ -666,10 +818,11 @@ export class NotificationsService {
           data: {
             status: NotificationLogStatus.FAILED,
             providerResponse: ({
-              provider: 'smtp',
+              provider: resendConfigured ? 'resend' : 'smtp',
               mode,
               skipped: true,
-              reason: 'SMTP_DISABLED_OR_NOT_CONFIGURED',
+              reason: 'EMAIL_PROVIDER_DISABLED_OR_NOT_CONFIGURED',
+              reasonCode: 'EMAIL_PROVIDER_DISABLED_OR_NOT_CONFIGURED',
               attemptedAt: new Date().toISOString(),
               actorUserId: actorUserId ?? null,
             } as Prisma.InputJsonValue),
@@ -694,7 +847,7 @@ export class NotificationsService {
 
     for (const log of targetLogs) {
       const metaBase = {
-        provider: 'smtp',
+        provider: resendConfigured ? 'resend' : 'smtp',
         mode,
         attemptedAt: new Date().toISOString(),
         actorUserId: actorUserId ?? null,
@@ -879,8 +1032,14 @@ export class NotificationsService {
     );
     if (!targetLogs.length) return { attempted: 0, sent: 0, failed: 0 };
 
-    const integrations = await this.integrationConfigService.getResolvedIntegrations();
-    if (!integrations.fcm.enabled || !integrations.fcm.configured) {
+    const pushStatus = this.pushDispatchRouter.getStatus() as any;
+    const fcmConfigured = Boolean(pushStatus?.fcm?.configured);
+    const expoConfigured = Boolean(pushStatus?.expo?.configured);
+    const pushConfigured = fcmConfigured || expoConfigured;
+    const pushLive =
+      (fcmConfigured && !Boolean(pushStatus?.fcm?.mockMode)) ||
+      (expoConfigured && !Boolean(pushStatus?.expo?.mockMode));
+    if (!pushConfigured || !pushLive) {
       this.logger.warn(
         `Push provider disabled or not configured. Skipping ${targetLogs.length} push logs for notification ${notification.id}`,
       );
@@ -894,6 +1053,7 @@ export class NotificationsService {
               mode,
               skipped: true,
               reason: 'PUSH_DISABLED_OR_NOT_CONFIGURED',
+              reasonCode: 'PUSH_PROVIDER_DISABLED',
               attemptedAt: new Date().toISOString(),
               actorUserId: actorUserId ?? null,
             } as Prisma.InputJsonValue),
@@ -959,6 +1119,7 @@ export class NotificationsService {
             providerResponse: ({
               ...metaBase,
               error: 'No active device tokens for recipient',
+              reasonCode: 'NO_ACTIVE_DEVICE_TOKEN',
             } as Prisma.InputJsonValue),
           },
         });
@@ -988,6 +1149,8 @@ export class NotificationsService {
               response,
             };
           } catch (error: unknown) {
+            const errorMessage =
+              error instanceof Error ? error.message : String(error);
             return {
               ok: false as const,
               tokenId: tokenRow.id,
@@ -997,7 +1160,14 @@ export class NotificationsService {
                 tokenRow.token.startsWith('ExponentPushToken[')
                   ? 'expo'
                   : 'fcm',
-              error: error instanceof Error ? error.message : String(error),
+              error: errorMessage,
+              reasonCode: this.classifyPushFailure(
+                errorMessage,
+                tokenRow.token.startsWith('ExpoPushToken[') ||
+                  tokenRow.token.startsWith('ExponentPushToken[')
+                  ? 'expo'
+                  : 'fcm',
+              ),
             };
           }
         }),
@@ -1020,6 +1190,7 @@ export class NotificationsService {
               platform: r.platform,
               provider: r.provider,
               error: r.error,
+              reasonCode: r.reasonCode,
             },
       );
 
@@ -1053,6 +1224,9 @@ export class NotificationsService {
               failedDevices: failedResults.length,
               deviceResults: deviceResultsJson,
               error: 'All device sends failed',
+              reasonCode:
+                String((failedResults[0] as any)?.reasonCode ?? '') ||
+                'PUSH_SEND_FAILED',
             } as Prisma.InputJsonValue),
           },
         });
@@ -1135,5 +1309,70 @@ export class NotificationsService {
       select: { id: true },
     });
     return !!admin;
+  }
+
+  private classifyPushFailure(errorMessage: string, provider: string): string {
+    const normalized = String(errorMessage ?? '').toLowerCase();
+    const providerNorm = String(provider ?? '').toLowerCase();
+    if (normalized.includes('no active device token')) return 'NO_ACTIVE_DEVICE_TOKEN';
+    if (
+      normalized.includes('oauth') ||
+      normalized.includes('jwt') ||
+      normalized.includes('invalid_grant') ||
+      normalized.includes('permission') ||
+      normalized.includes('unauth') ||
+      normalized.includes('token')
+    ) {
+      return providerNorm.includes('expo') ? 'EXPO_AUTH_ERROR' : 'FCM_AUTH_ERROR';
+    }
+    if (providerNorm.includes('expo')) return 'EXPO_TICKET_ERROR';
+    return 'PUSH_SEND_FAILED';
+  }
+
+  private buildDedupKey(params: {
+    targetAudience: Audience;
+    audienceMeta: Record<string, unknown> | undefined;
+    payload: Record<string, unknown> | undefined;
+    channels: Channel[];
+    isScheduled: boolean;
+  }): string | null {
+    if (params.isScheduled) return null;
+    const payload = params.payload ?? {};
+    const eventKey =
+      typeof payload.eventKey === 'string' ? payload.eventKey.trim() : '';
+    const entityId =
+      typeof payload.entityId === 'string' ? payload.entityId.trim() : '';
+    if (!eventKey || !entityId) return null;
+    const audienceMeta = params.audienceMeta ?? {};
+    const userIds = Array.isArray((audienceMeta as any).userIds)
+      ? ((audienceMeta as any).userIds as unknown[])
+          .map((id) => String(id))
+          .sort()
+          .join(',')
+      : '';
+    return [
+      eventKey,
+      entityId,
+      params.targetAudience,
+      userIds,
+      [...params.channels].sort().join(','),
+    ].join('|');
+  }
+
+  private consumeDedupEntry(key: string): string | null {
+    const entry = this.dedupCache.get(key);
+    if (!entry) return null;
+    if (entry.expiresAt < Date.now()) {
+      this.dedupCache.delete(key);
+      return null;
+    }
+    return entry.notificationId;
+  }
+
+  private rememberDedupEntry(key: string, notificationId: string) {
+    this.dedupCache.set(key, {
+      notificationId,
+      expiresAt: Date.now() + this.dedupWindowMs,
+    });
   }
 }

@@ -188,7 +188,7 @@ export function NotificationRealtimeProvider({
   onNavigateFromPush,
   children,
 }: ProviderProps) {
-  const { capabilities, brand } = useBranding();
+  const { brand } = useBranding();
   const palette = getBrandPalette(brand);
   const [rows, setRows] = useState<MobileNotificationRow[]>([]);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
@@ -415,18 +415,6 @@ export function NotificationRealtimeProvider({
   }, [refreshNow]);
 
   useEffect(() => {
-    if (!capabilities.push) {
-      return () => {
-        const tokenId = backendDeviceTokenIdRef.current;
-        backendDeviceTokenIdRef.current = null;
-        if (tokenId) {
-          void revokePushDeviceToken(session.accessToken, tokenId).catch(
-            () => undefined,
-          );
-        }
-      };
-    }
-
     let cancelled = false;
     let receivedSub: Notifications.EventSubscription | null = null;
     let responseSub: Notifications.EventSubscription | null = null;
@@ -480,6 +468,7 @@ export function NotificationRealtimeProvider({
             });
             backendDeviceTokenIdRef.current = registered.id || null;
           } catch (error) {
+            // Do not break realtime polling if push token registration fails.
             setErrorMessage(extractApiErrorMessage(error));
           }
         }
@@ -570,7 +559,6 @@ export function NotificationRealtimeProvider({
       }
     };
   }, [
-    capabilities.push,
     onNavigateFromPush,
     palette.primary,
     refreshNow,
