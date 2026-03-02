@@ -80,7 +80,8 @@ type SmsOtpDiagnostics = {
     | 'READY'
     | 'FIREBASE_AUTH_DISABLED'
     | 'FIREBASE_SERVICE_ACCOUNT_JSON_INVALID'
-    | 'FIREBASE_CREDENTIALS_INCOMPLETE';
+    | 'FIREBASE_CREDENTIALS_INCOMPLETE'
+    | 'FIREBASE_PRIVATE_KEY_INVALID_PEM';
   smsOtpEnabled: boolean;
   smsOtpConfigured: boolean;
   fcmConfigured: boolean;
@@ -561,9 +562,40 @@ export class IntegrationConfigService {
       return diagnostics;
     }
 
+    const parsedKey = this.extractNormalizedFirebasePrivateKey(resolved);
+    const hasPemMarkers =
+      parsedKey.includes('-----BEGIN PRIVATE KEY-----') &&
+      parsedKey.includes('-----END PRIVATE KEY-----');
+    if (!hasPemMarkers) {
+      diagnostics.reasonCode = 'FIREBASE_PRIVATE_KEY_INVALID_PEM';
+      return diagnostics;
+    }
+
     diagnostics.ready = true;
     diagnostics.reasonCode = 'READY';
     return diagnostics;
+  }
+
+  private extractNormalizedFirebasePrivateKey(
+    resolved: ResolvedIntegrationsState,
+  ): string {
+    let privateKey = String(resolved.fcm.privateKey ?? '');
+    if (!privateKey && resolved.fcm.serviceAccountJson) {
+      try {
+        const parsed = JSON.parse(resolved.fcm.serviceAccountJson);
+        privateKey = String(parsed?.private_key ?? '');
+      } catch {
+        privateKey = '';
+      }
+    }
+    let normalized = privateKey.trim();
+    if (
+      (normalized.startsWith('"') && normalized.endsWith('"')) ||
+      (normalized.startsWith("'") && normalized.endsWith("'"))
+    ) {
+      normalized = normalized.slice(1, -1);
+    }
+    return normalized.replace(/\\n/g, '\n');
   }
 
   private applyProviderPatch(

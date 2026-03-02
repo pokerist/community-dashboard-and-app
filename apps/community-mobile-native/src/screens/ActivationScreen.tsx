@@ -235,6 +235,8 @@ export function ActivationScreen({
               ? 'OTP service credentials are incomplete on server.'
               : reasonCode === 'FIREBASE_SERVICE_ACCOUNT_JSON_INVALID'
                 ? 'OTP service credentials are invalid on server.'
+                : reasonCode === 'FIREBASE_PRIVATE_KEY_INVALID_PEM'
+                  ? 'OTP private key format is invalid on server.'
                 : error?.message ?? 'Failed to send OTP.';
       const debugHint =
         reasonCode && (details.smsOtpEnabled === false || details.smsOtpConfigured === false)

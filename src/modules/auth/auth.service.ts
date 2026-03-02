@@ -62,6 +62,17 @@ export class AuthService {
     return String(value ?? '').replace(/[^\d]/g, '');
   }
 
+  private normalizeFirebasePrivateKey(value: string | null | undefined): string {
+    let normalized = String(value ?? '').trim();
+    if (
+      (normalized.startsWith('"') && normalized.endsWith('"')) ||
+      (normalized.startsWith("'") && normalized.endsWith("'"))
+    ) {
+      normalized = normalized.slice(1, -1);
+    }
+    return normalized.replace(/\\n/g, '\n').replace(/\r\n/g, '\n');
+  }
+
   private async getFirebaseAuthClient(): Promise<FirebaseAuth> {
     const integrations = await this.integrationConfigService.getResolvedIntegrations();
     const smsOtpDiagnostics = await this.integrationConfigService.getSmsOtpDiagnostics();
@@ -91,9 +102,9 @@ export class AuthService {
     const projectId =
       integrations.fcm.projectId || parsedJson?.project_id || integrations.smsOtp.firebaseProjectId;
     const clientEmail = integrations.fcm.clientEmail || parsedJson?.client_email;
-    const privateKey = String(
+    const privateKey = this.normalizeFirebasePrivateKey(
       integrations.fcm.privateKey || parsedJson?.private_key || '',
-    ).replace(/\\n/g, '\n');
+    );
 
     if (!projectId || !clientEmail || !privateKey) {
       throw new ServiceUnavailableException({
@@ -103,22 +114,43 @@ export class AuthService {
           : 'FIREBASE_CREDENTIALS_INCOMPLETE',
       });
     }
+    const hasPemMarkers =
+      privateKey.includes('-----BEGIN PRIVATE KEY-----') &&
+      privateKey.includes('-----END PRIVATE KEY-----');
+    if (!hasPemMarkers) {
+      throw new ServiceUnavailableException({
+        message: 'Firebase private key is invalid (PEM format required).',
+        reasonCode: 'FIREBASE_PRIVATE_KEY_INVALID_PEM',
+      });
+    }
 
     if (!this.firebaseAuthApp) {
       const appName = 'community-firebase-auth';
       try {
         this.firebaseAuthApp = getApp(appName);
       } catch {
-        this.firebaseAuthApp = initializeApp(
-          {
-            credential: cert({
-              projectId,
-              clientEmail,
-              privateKey,
-            }),
-          },
-          appName,
-        );
+        try {
+          this.firebaseAuthApp = initializeApp(
+            {
+              credential: cert({
+                projectId,
+                clientEmail,
+                privateKey,
+              }),
+            },
+            appName,
+          );
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : 'Failed to initialize Firebase app';
+          const reasonCode = message.toLowerCase().includes('invalid pem')
+            ? 'FIREBASE_PRIVATE_KEY_INVALID_PEM'
+            : 'FIREBASE_CREDENTIALS_INCOMPLETE';
+          throw new ServiceUnavailableException({
+            message: 'Firebase OTP verification is currently unavailable.',
+            reasonCode,
+          });
+        }
       }
     }
 
