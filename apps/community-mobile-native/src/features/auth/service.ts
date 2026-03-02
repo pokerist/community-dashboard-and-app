@@ -62,8 +62,20 @@ export async function getActivationStatusRequest(
 export async function sendPhoneOtpRequest(
   accessToken: string,
   phone: string,
-): Promise<{ message?: string }> {
-  const response = await http.post<{ message?: string }>(
+): Promise<{
+  message?: string;
+  provider?: string;
+  channel?: 'SMS' | 'EMAIL' | string;
+  cooldownSeconds?: number;
+  expiresInSeconds?: number;
+}> {
+  const response = await http.post<{
+    message?: string;
+    provider?: string;
+    channel?: 'SMS' | 'EMAIL' | string;
+    cooldownSeconds?: number;
+    expiresInSeconds?: number;
+  }>(
     '/auth/send-phone-otp',
     { phone },
     {
@@ -77,11 +89,11 @@ export async function sendPhoneOtpRequest(
 
 export async function verifyPhoneOtpRequest(
   accessToken: string,
-  firebaseIdToken: string,
+  payload: { otp?: string; firebaseIdToken?: string },
 ): Promise<{ message?: string }> {
   const response = await http.post<{ message?: string }>(
     '/auth/verify-phone-otp',
-    { firebaseIdToken },
+    payload,
     {
       headers: {
         Authorization: `Bearer ${accessToken}`,

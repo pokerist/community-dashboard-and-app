@@ -48,6 +48,15 @@ type ActivationStatus = {
   };
 };
 
+type ActivationStep = 'documents' | 'phone-confirm' | 'phone-otp' | 'password';
+
+function formatRemaining(totalSeconds: number) {
+  const safe = Math.max(0, totalSeconds);
+  const mins = String(Math.floor(safe / 60)).padStart(2, '0');
+  const secs = String(safe % 60).padStart(2, '0');
+  return `${mins}:${secs}`;
+}
+
 export function ActivationScreen({
   session,
   onActivationCompleted,
@@ -56,14 +65,58 @@ export function ActivationScreen({
   const toast = useAppToast();
   const { brand } = useBranding();
   const brandPrimary = brand.primaryColor || akColors.primary;
+
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSendingOtp, setIsSendingOtp] = useState(false);
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
   const [status, setStatus] = useState<ActivationStatus | null>(null);
-  const [firebaseIdToken, setFirebaseIdToken] = useState('');
+
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [nationalIdFileId, setNationalIdFileId] = useState<string | null>(null);
   const [profilePhotoId, setProfilePhotoId] = useState<string | null>(null);
+  const [otpCode, setOtpCode] = useState('');
+  const [currentStep, setCurrentStep] = useState<ActivationStep>('documents');
+  const [otpDeliveryChannel, setOtpDeliveryChannel] = useState<'SMS' | 'EMAIL' | string>('SMS');
+  const [otpCooldownUntilMs, setOtpCooldownUntilMs] = useState<number>(0);
+  const [otpSecondsLeft, setOtpSecondsLeft] = useState(0);
+
+  const requiresPhoneOtp = Boolean(status?.checklist.requiresPhoneOtp);
+  const phoneVerified = Boolean(status?.checklist.phoneVerified);
+  const hasDocs = Boolean(nationalIdFileId && profilePhotoId);
+
+  const stepMeta = useMemo(() => {
+    if (!requiresPhoneOtp) {
+      return {
+        total: 2,
+        current: currentStep === 'password' ? 2 : 1,
+      };
+    }
+    const map: Record<ActivationStep, number> = {
+      documents: 1,
+      'phone-confirm': 2,
+      'phone-otp': 3,
+      password: 4,
+    };
+    return { total: 4, current: map[currentStep] };
+  }, [currentStep, requiresPhoneOtp]);
+
+  const canSubmitActivation = useMemo(() => {
+    if (!status) return false;
+    if (!hasDocs) return false;
+    if (requiresPhoneOtp && !phoneVerified) return false;
+    if (newPassword.length < 8) return false;
+    if (newPassword !== confirmPassword) return false;
+    return true;
+  }, [
+    confirmPassword,
+    hasDocs,
+    newPassword,
+    phoneVerified,
+    requiresPhoneOtp,
+    status,
+  ]);
 
   const loadStatus = useCallback(async () => {
     setIsLoading(true);
@@ -74,6 +127,15 @@ export function ActivationScreen({
       setStatus(result);
       setNationalIdFileId(result.user.nationalIdFileId ?? null);
       setProfilePhotoId(result.user.profilePhotoId ?? null);
+      if (result.checklist.phoneVerified) {
+        setCurrentStep('password');
+      } else if (!result.checklist.requiresPhoneOtp && result.checklist.hasNationalId && result.checklist.hasProfilePhoto) {
+        setCurrentStep('password');
+      } else if (result.checklist.hasNationalId && result.checklist.hasProfilePhoto && result.checklist.requiresPhoneOtp) {
+        setCurrentStep((prev) => (prev === 'phone-otp' ? prev : 'phone-confirm'));
+      } else {
+        setCurrentStep('documents');
+      }
     } catch (error: any) {
       toast.error('Activation status failed', error?.message ?? 'Try again.');
     } finally {
@@ -85,14 +147,15 @@ export function ActivationScreen({
     void loadStatus();
   }, [loadStatus]);
 
-  const canSubmit = useMemo(() => {
-    if (!status) return false;
-    if (status.checklist.requiresPhoneOtp && !status.checklist.phoneVerified) return false;
-    if (!nationalIdFileId || !profilePhotoId) return false;
-    if (newPassword.length < 8) return false;
-    if (newPassword !== confirmPassword) return false;
-    return true;
-  }, [confirmPassword, nationalIdFileId, newPassword, profilePhotoId, status]);
+  useEffect(() => {
+    const tick = () => {
+      const left = Math.max(0, Math.ceil((otpCooldownUntilMs - Date.now()) / 1000));
+      setOtpSecondsLeft(left);
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [otpCooldownUntilMs]);
 
   const uploadNationalId = async () => {
     try {
@@ -128,32 +191,44 @@ export function ActivationScreen({
       toast.error('Phone required', 'No phone number found on your account.');
       return;
     }
+    setIsSendingOtp(true);
     try {
       const result = await sendPhoneOtpRequest(session.accessToken, phone);
-      toast.success('Verification started', result.message || 'Complete Firebase phone verification in-app.');
+      const cooldown = Number(result.cooldownSeconds ?? 120);
+      setOtpCooldownUntilMs(Date.now() + cooldown * 1000);
+      setOtpDeliveryChannel(result.channel ?? 'SMS');
+      setCurrentStep('phone-otp');
+      toast.success('Verification started', result.message || 'OTP has been sent.');
     } catch (error: any) {
       toast.error('OTP failed', error?.message ?? 'Failed to send OTP.');
+    } finally {
+      setIsSendingOtp(false);
     }
   };
 
   const verifyOtp = async () => {
-    if (!firebaseIdToken.trim()) {
-      toast.error('Token required', 'Enter Firebase ID token first.');
+    const trimmedOtp = otpCode.trim();
+    if (!/^\d{6}$/.test(trimmedOtp)) {
+      toast.error('OTP required', 'Enter the 6-digit code.');
       return;
     }
+    setIsVerifyingOtp(true);
     try {
-      const result = await verifyPhoneOtpRequest(session.accessToken, firebaseIdToken.trim());
+      const result = await verifyPhoneOtpRequest(session.accessToken, { otp: trimmedOtp });
       toast.success('Phone verified', result.message || 'Phone verified successfully.');
+      setOtpCode('');
       await loadStatus();
-      setFirebaseIdToken('');
+      setCurrentStep('password');
     } catch (error: any) {
       toast.error('Verification failed', error?.message ?? 'Phone verification failed.');
+    } finally {
+      setIsVerifyingOtp(false);
     }
   };
 
   const submitActivation = async () => {
     if (!status) return;
-    if (!canSubmit) {
+    if (!canSubmitActivation) {
       toast.error('Missing steps', 'Complete required activation steps first.');
       return;
     }
@@ -192,98 +267,156 @@ export function ActivationScreen({
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={[styles.hero, { backgroundColor: brandPrimary }]}>
           <Text style={styles.heroTitle}>Welcome{status?.user.nameEN ? `, ${status.user.nameEN}` : ''}</Text>
-          <Text style={styles.heroSubtitle}>
-            Complete your account activation to continue.
-          </Text>
+          <Text style={styles.heroSubtitle}>Complete your account activation to continue.</Text>
+          <Text style={styles.stepMeta}>Step {stepMeta.current} of {stepMeta.total}</Text>
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Required Documents</Text>
-          <Pressable style={styles.actionRow} onPress={uploadNationalId}>
-            <Text style={styles.actionTitle}>Upload National ID / Passport</Text>
-            <Text style={nationalIdFileId ? styles.done : styles.todo}>
-              {nationalIdFileId ? 'Uploaded' : 'Required'}
-            </Text>
-          </Pressable>
-          <Pressable style={styles.actionRow} onPress={uploadProfilePhoto}>
-            <Text style={styles.actionTitle}>Upload Personal Photo</Text>
-            <Text style={profilePhotoId ? styles.done : styles.todo}>
-              {profilePhotoId ? 'Uploaded' : 'Required'}
-            </Text>
-          </Pressable>
-        </View>
-
-        {status?.checklist.requiresPhoneOtp ? (
+        {currentStep === 'documents' ? (
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Phone Verification</Text>
-            <Text style={styles.caption}>
-              {status.user.phone || 'No phone number available'}
-            </Text>
-            {status.checklist.phoneVerified ? (
-              <Text style={styles.done}>Phone already verified</Text>
-            ) : (
-              <>
-                <View style={styles.row}>
-                  <Pressable style={[styles.smallButton, { backgroundColor: brandPrimary }]} onPress={sendOtp}>
-                    <Text style={styles.smallButtonText}>Start Firebase Flow</Text>
-                  </Pressable>
-                </View>
-                <View style={styles.otpRow}>
-                  <TextInput
-                    style={styles.input}
-                    value={firebaseIdToken}
-                    onChangeText={setFirebaseIdToken}
-                    placeholder="Paste Firebase ID token"
-                    placeholderTextColor={akColors.textSoft}
-                    autoCapitalize="none"
-                  />
-                  <Pressable style={[styles.smallButton, { backgroundColor: brandPrimary }]} onPress={verifyOtp}>
-                    <Text style={styles.smallButtonText}>Verify</Text>
-                  </Pressable>
-                </View>
-              </>
-            )}
+            <Text style={styles.sectionTitle}>Step 1: Upload Required Documents</Text>
+            <Pressable style={styles.actionRow} onPress={uploadNationalId}>
+              <Text style={styles.actionTitle}>National ID / Passport</Text>
+              <Text style={nationalIdFileId ? styles.done : styles.todo}>
+                {nationalIdFileId ? 'Uploaded' : 'Required'}
+              </Text>
+            </Pressable>
+            <Pressable style={styles.actionRow} onPress={uploadProfilePhoto}>
+              <Text style={styles.actionTitle}>Personal Photo</Text>
+              <Text style={profilePhotoId ? styles.done : styles.todo}>
+                {profilePhotoId ? 'Uploaded' : 'Required'}
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.submitButton,
+                { backgroundColor: brandPrimary },
+                !hasDocs && styles.submitButtonDisabled,
+              ]}
+              onPress={() =>
+                setCurrentStep(requiresPhoneOtp && !phoneVerified ? 'phone-confirm' : 'password')
+              }
+              disabled={!hasDocs}
+            >
+              <Text style={styles.submitText}>Continue</Text>
+            </Pressable>
           </View>
         ) : null}
 
-        <View style={styles.card}>
-          <Text style={styles.sectionTitle}>Set New Password</Text>
-          <TextInput
-            style={styles.input}
-            value={newPassword}
-            onChangeText={setNewPassword}
-            secureTextEntry
-            placeholder="New password"
-            placeholderTextColor={akColors.textSoft}
-          />
-          <TextInput
-            style={styles.input}
-            value={confirmPassword}
-            onChangeText={setConfirmPassword}
-            secureTextEntry
-            placeholder="Confirm password"
-            placeholderTextColor={akColors.textSoft}
-          />
-          {confirmPassword.length > 0 && newPassword !== confirmPassword ? (
-            <Text style={styles.todo}>Passwords do not match</Text>
-          ) : null}
-        </View>
+        {currentStep === 'phone-confirm' && requiresPhoneOtp ? (
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Step 2: Confirm Phone Number</Text>
+            <Text style={styles.caption}>
+              Verification code will be sent to:
+            </Text>
+            <Text style={styles.phoneValue}>{status?.user.phone || 'No phone number available'}</Text>
+            <Text style={styles.caption}>
+              Press OK to receive a 6-digit OTP, then enter it on the next screen.
+            </Text>
+            <Pressable
+              style={[styles.submitButton, { backgroundColor: brandPrimary }, isSendingOtp && styles.submitButtonDisabled]}
+              onPress={sendOtp}
+              disabled={isSendingOtp}
+            >
+              {isSendingOtp ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.submitText}>OK, Send OTP</Text>
+              )}
+            </Pressable>
+          </View>
+        ) : null}
 
-        <Pressable
-          style={[
-            styles.submitButton,
-            { backgroundColor: brandPrimary },
-            (!canSubmit || isSubmitting) && styles.submitButtonDisabled,
-          ]}
-          onPress={submitActivation}
-          disabled={!canSubmit || isSubmitting}
-        >
-          {isSubmitting ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <Text style={styles.submitText}>Complete Activation</Text>
-          )}
-        </Pressable>
+        {currentStep === 'phone-otp' && requiresPhoneOtp ? (
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>Step 3: Verify OTP</Text>
+            <Text style={styles.caption}>
+              Enter the 6-digit code sent via {otpDeliveryChannel}.
+            </Text>
+            <TextInput
+              style={styles.input}
+              value={otpCode}
+              onChangeText={(value) => setOtpCode(value.replace(/[^\d]/g, '').slice(0, 6))}
+              placeholder="Enter 6-digit OTP"
+              placeholderTextColor={akColors.textSoft}
+              keyboardType="number-pad"
+              maxLength={6}
+            />
+            <Pressable
+              style={[
+                styles.submitButton,
+                { backgroundColor: brandPrimary },
+                (isVerifyingOtp || otpCode.trim().length !== 6) && styles.submitButtonDisabled,
+              ]}
+              onPress={verifyOtp}
+              disabled={isVerifyingOtp || otpCode.trim().length !== 6}
+            >
+              {isVerifyingOtp ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.submitText}>Verify OTP</Text>
+              )}
+            </Pressable>
+
+            <Pressable
+              style={[
+                styles.secondaryButton,
+                otpSecondsLeft > 0 && styles.secondaryButtonDisabled,
+              ]}
+              onPress={sendOtp}
+              disabled={otpSecondsLeft > 0 || isSendingOtp}
+            >
+              <Text style={styles.secondaryButtonText}>
+                {otpSecondsLeft > 0
+                  ? `Resend in ${formatRemaining(otpSecondsLeft)}`
+                  : isSendingOtp
+                    ? 'Sending...'
+                    : 'Resend OTP'}
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {currentStep === 'password' ? (
+          <View style={styles.card}>
+            <Text style={styles.sectionTitle}>
+              {requiresPhoneOtp ? 'Step 4: Change Password' : 'Step 2: Change Password'}
+            </Text>
+            <TextInput
+              style={styles.input}
+              value={newPassword}
+              onChangeText={setNewPassword}
+              secureTextEntry
+              placeholder="New password"
+              placeholderTextColor={akColors.textSoft}
+            />
+            <TextInput
+              style={styles.input}
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              secureTextEntry
+              placeholder="Confirm password"
+              placeholderTextColor={akColors.textSoft}
+            />
+            {confirmPassword.length > 0 && newPassword !== confirmPassword ? (
+              <Text style={styles.todo}>Passwords do not match</Text>
+            ) : null}
+            <Pressable
+              style={[
+                styles.submitButton,
+                { backgroundColor: brandPrimary },
+                (!canSubmitActivation || isSubmitting) && styles.submitButtonDisabled,
+              ]}
+              onPress={submitActivation}
+              disabled={!canSubmitActivation || isSubmitting}
+            >
+              {isSubmitting ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.submitText}>Complete Activation</Text>
+              )}
+            </Pressable>
+          </View>
+        ) : null}
 
         <Pressable style={styles.logoutButton} onPress={onLogout}>
           <Text style={styles.logoutText}>Sign out</Text>
@@ -328,6 +461,13 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontSize: 13,
   },
+  stepMeta: {
+    marginTop: 10,
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 12,
+    opacity: 0.95,
+  },
   card: {
     borderRadius: akRadius.lg,
     backgroundColor: '#fff',
@@ -370,17 +510,12 @@ const styles = StyleSheet.create({
     color: akColors.textMuted,
     fontSize: 13,
   },
-  row: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  otpRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
+  phoneValue: {
+    color: akColors.text,
+    fontSize: 16,
+    fontWeight: '800',
   },
   input: {
-    flex: 1,
     borderWidth: 1,
     borderColor: akColors.border,
     borderRadius: akRadius.md,
@@ -389,19 +524,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: akColors.text,
     backgroundColor: '#fff',
-  },
-  smallButton: {
-    borderRadius: akRadius.md,
-    backgroundColor: akColors.primary,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  smallButtonText: {
-    color: '#fff',
-    fontWeight: '700',
-    fontSize: 13,
   },
   submitButton: {
     backgroundColor: akColors.primary,
@@ -418,6 +540,23 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '800',
     fontSize: 15,
+  },
+  secondaryButton: {
+    borderRadius: akRadius.lg,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: akColors.border,
+    backgroundColor: '#fff',
+  },
+  secondaryButtonDisabled: {
+    opacity: 0.6,
+  },
+  secondaryButtonText: {
+    color: akColors.text,
+    fontWeight: '700',
+    fontSize: 14,
   },
   logoutButton: {
     alignSelf: 'center',
