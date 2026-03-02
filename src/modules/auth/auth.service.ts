@@ -635,6 +635,7 @@ export class AuthService {
 
   private readonly defaultMobileFeaturePolicy = {
     canUseServices: true,
+    canUseRequests: true,
     canUseBookings: true,
     canUseComplaints: true,
     canUseQr: true,
@@ -655,6 +656,10 @@ export class AuthService {
         typeof raw.canUseServices === 'boolean'
           ? raw.canUseServices
           : this.defaultMobileFeaturePolicy.canUseServices,
+      canUseRequests:
+        typeof raw.canUseRequests === 'boolean'
+          ? raw.canUseRequests
+          : this.defaultMobileFeaturePolicy.canUseRequests,
       canUseBookings:
         typeof raw.canUseBookings === 'boolean'
           ? raw.canUseBookings
@@ -825,6 +830,7 @@ export class AuthService {
           canBookFacilities: access.canBookFacilities,
           canGenerateQR: access.canGenerateQR,
           canManageWorkers: access.canManageWorkers,
+          featurePermissions: access.featurePermissions,
         });
       } else {
         activeUnitsById.set(access.unit.id, {
@@ -848,6 +854,7 @@ export class AuthService {
               canBookFacilities: access.canBookFacilities,
               canGenerateQR: access.canGenerateQR,
               canManageWorkers: access.canManageWorkers,
+              featurePermissions: access.featurePermissions,
             },
           ],
           legacyResidentLinks: [],
@@ -917,6 +924,12 @@ export class AuthService {
     const canViewFinancials = allAccesses.some(
       (a) => a.canViewFinancials === true || a.canReceiveBilling === true,
     );
+    const hasFeaturePermission = (key: string) =>
+      allAccesses.some((a) => {
+        const raw = a.featurePermissions;
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+        return Boolean((raw as Record<string, unknown>)[key]);
+      });
     const isDashboardCreated = String(user.signupSource ?? '').toLowerCase() === 'dashboard';
     const isPreDeliveryOwner =
       !isDashboardCreated &&
@@ -947,7 +960,12 @@ export class AuthService {
     const personaPolicy = await this.resolveMobileAccessPolicy(resolvedPersona);
     const baseCanUseServices =
       permissionSet.has('service.read') ||
-      permissionSet.has('service_request.create');
+      permissionSet.has('service_request.create') ||
+      hasFeaturePermission('services');
+    const baseCanUseRequests =
+      permissionSet.has('service_request.create') ||
+      permissionSet.has('service_request.read_own') ||
+      hasFeaturePermission('requests');
     const baseCanUseBookings =
       permissionSet.has('booking.create') || canBookFacilities;
     const baseCanUseComplaints = permissionSet.has('complaint.report');
@@ -1023,6 +1041,7 @@ export class AuthService {
       featureAvailability: {
         canViewBanners: permissionSet.has('banner.view'),
         canUseServices: baseCanUseServices && personaPolicy.canUseServices,
+        canUseRequests: baseCanUseRequests && personaPolicy.canUseRequests,
         canUseBookings: baseCanUseBookings && personaPolicy.canUseBookings,
         canUseComplaints: baseCanUseComplaints && personaPolicy.canUseComplaints,
         canUseQr: baseCanUseQr && personaPolicy.canUseQr,

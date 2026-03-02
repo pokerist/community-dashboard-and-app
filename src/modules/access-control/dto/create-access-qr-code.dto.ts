@@ -6,6 +6,7 @@ import {
   IsArray,
   IsDate,
   IsEnum,
+  IsIn,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -68,5 +69,14 @@ export class CreateAccessQrCodeDto {
   @IsString()
   @IsOptional()
   notes?: string;
+
+  @ApiPropertyOptional({
+    enum: ['SINGLE_USE', 'MULTI_USE'],
+    default: 'SINGLE_USE',
+    description: 'Visitor QR usage mode. MULTI_USE stays active until expiry/revoke.',
+  })
+  @IsIn(['SINGLE_USE', 'MULTI_USE'])
+  @IsOptional()
+  usageMode?: 'SINGLE_USE' | 'MULTI_USE';
 }
 

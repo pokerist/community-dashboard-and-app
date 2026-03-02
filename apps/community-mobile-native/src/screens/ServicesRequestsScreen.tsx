@@ -589,13 +589,15 @@ export function ServicesRequestsScreen({
       </View>
 
       <ScreenCard title="Selected Unit">
-        <UnitPicker
-          units={units}
-          selectedUnitId={selectedUnitId}
-          onSelect={onSelectUnit}
-          onRefresh={() => void onRefreshUnits()}
-          isRefreshing={unitsRefreshing}
-        />
+        {units.length > 1 ? (
+          <UnitPicker
+            units={units}
+            selectedUnitId={selectedUnitId}
+            onSelect={onSelectUnit}
+            onRefresh={() => void onRefreshUnits()}
+            isRefreshing={unitsRefreshing}
+          />
+        ) : null}
         <InlineError message={unitsErrorMessage} />
         {unitsLoading ? <ActivityIndicator color={palette.primary} /> : null}
         {selectedUnit ? (

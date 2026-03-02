@@ -181,6 +181,7 @@ export function AccessQrScreen({
   const toast = useAppToast();
   const [rows, setRows] = useState<AccessQrRow[]>([]);
   const [type, setType] = useState<QrTypeOption>('VISITOR');
+  const [visitorUsageMode, setVisitorUsageMode] = useState<'SINGLE_USE' | 'MULTI_USE'>('SINGLE_USE');
   const [visitorName, setVisitorName] = useState('');
   const [visitorPhone, setVisitorPhone] = useState('');
   const [visitorPurpose, setVisitorPurpose] = useState('');
@@ -385,6 +386,7 @@ export function AccessQrScreen({
       const created = await createAccessQr(session.accessToken, {
         unitId: selectedUnitId,
         type,
+        usageMode: type === 'VISITOR' ? visitorUsageMode : 'SINGLE_USE',
         visitorName: payloadVisitorName,
         validFrom: payloadValidFrom,
         validTo: payloadValidTo,
@@ -406,6 +408,7 @@ export function AccessQrScreen({
       if (type === 'VISITOR') {
         setVisitorPhone('');
         setVisitorPurpose('');
+        setVisitorUsageMode('SINGLE_USE');
       }
       if (type === 'RIDESHARE') {
         setDriverName('');
@@ -432,7 +435,7 @@ export function AccessQrScreen({
     } finally {
       setIsSubmitting(false);
     }
-  }, [carNumber, deliveryCompany, driverName, loadData, selectedUnitId, session.accessToken, toast, type, validFrom, validTo, visitorName, visitorPhone, visitorPurpose, workerIdFiles, workersCount, workDuration, workType, rideCompany]);
+  }, [carNumber, deliveryCompany, driverName, loadData, selectedUnitId, session.accessToken, toast, type, validFrom, validTo, visitorName, visitorPhone, visitorPurpose, visitorUsageMode, workerIdFiles, workersCount, workDuration, workType, rideCompany]);
 
   const handleRevoke = useCallback(
     async (id: string) => {
@@ -542,14 +545,16 @@ export function AccessQrScreen({
       </View>
 
       <ScreenCard title="Selected Unit">
-        <UnitPicker
-          units={units}
-          selectedUnitId={selectedUnitId}
-          onSelect={onSelectUnit}
-          onRefresh={() => void onRefreshUnits()}
-          isRefreshing={unitsRefreshing}
-          title="Choose Unit"
-        />
+        {units.length > 1 ? (
+          <UnitPicker
+            units={units}
+            selectedUnitId={selectedUnitId}
+            onSelect={onSelectUnit}
+            onRefresh={() => void onRefreshUnits()}
+            isRefreshing={unitsRefreshing}
+            title="Choose Unit"
+          />
+        ) : null}
         <InlineError message={unitsErrorMessage} />
         {unitsLoading ? <ActivityIndicator color={palette.primary} /> : null}
         {selectedUnit ? (
@@ -660,6 +665,37 @@ export function AccessQrScreen({
                 placeholder="Family visit, business, etc."
                 placeholderTextColor={akColors.textSoft}
               />
+            </View>
+
+            <Text style={styles.label}>Usage Mode</Text>
+            <View style={styles.selectInlineRow}>
+              {[
+                { key: 'SINGLE_USE' as const, label: 'Single use' },
+                { key: 'MULTI_USE' as const, label: 'Multi-time (until expiry)' },
+              ].map((mode) => {
+                const active = visitorUsageMode === mode.key;
+                return (
+                  <Pressable
+                    key={mode.key}
+                    onPress={() => setVisitorUsageMode(mode.key)}
+                    style={[
+                      styles.selectChip,
+                      active && styles.selectChipActive,
+                      active && { borderColor: palette.primary, backgroundColor: palette.primarySoft10 },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.selectChipText,
+                        active && styles.selectChipTextActive,
+                        active && { color: palette.primary },
+                      ]}
+                    >
+                      {mode.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
             </View>
           </>
         ) : null}
@@ -1062,6 +1098,15 @@ export function AccessQrScreen({
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Type</Text>
                 <Text style={styles.detailValue}>{formatTypeLabel(selectedQr?.type)}</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Usage</Text>
+                <Text style={styles.detailValue}>
+                  {String(selectedQr?.usageMode ?? 'SINGLE_USE') === 'MULTI_USE'
+                    ? 'Multi-time'
+                    : 'Single use'}
+                  {typeof selectedQr?.scans === 'number' ? ` • Scans ${selectedQr.scans}` : ''}
+                </Text>
               </View>
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Status</Text>

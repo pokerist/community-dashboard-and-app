@@ -36,11 +36,13 @@ import { UnitPickerSheet } from '../components/mobile/UnitPickerSheet';
 import { Pressable, StyleSheet, Text, View, Vibration, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Notifications from 'expo-notifications';
+import * as Location from 'expo-location';
 import { useAppToast } from '../components/mobile/AppToast';
 import { FireEvacuationAlertModal } from '../components/mobile/FireEvacuationAlertModal';
 import {
   acknowledgeFireEvacuation,
   getMyFireEvacuationStatus,
+  requestFireEvacuationHelp,
 } from '../features/community/service';
 import type { FireEvacuationStatus } from '../features/community/types';
 
@@ -142,6 +144,7 @@ function MobileShellInner(props: MobileShellProps) {
   const [fireStatus, setFireStatus] = useState<FireEvacuationStatus | null>(null);
   const [fireChecking, setFireChecking] = useState(false);
   const [fireAckSubmitting, setFireAckSubmitting] = useState(false);
+  const [fireHelpSubmitting, setFireHelpSubmitting] = useState(false);
   const [forceFireModal, setForceFireModal] = useState(false);
   const units = useResidentUnits(props.session.accessToken, props.session.userId);
   const realtime = useNotificationRealtime();
@@ -255,6 +258,47 @@ function MobileShellInner(props: MobileShellProps) {
       setFireAckSubmitting(false);
     }
   }, [props.session.accessToken, t, toast]);
+
+  const handleNeedHelpFire = useCallback(async () => {
+    setFireHelpSubmitting(true);
+    try {
+      let payload: {
+        source: 'GPS' | 'NO_LOCATION';
+        location?: { lat: number; lng: number; accuracy?: number; capturedAt?: string };
+      } = {
+        source: 'NO_LOCATION',
+      };
+
+      try {
+        const permission = await Location.requestForegroundPermissionsAsync();
+        if (permission.status === 'granted') {
+          const current = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+            mayShowUserSettingsDialog: true,
+          });
+          payload = {
+            source: 'GPS',
+            location: {
+              lat: current.coords.latitude,
+              lng: current.coords.longitude,
+              accuracy: current.coords.accuracy ?? undefined,
+              capturedAt: new Date(current.timestamp).toISOString(),
+            },
+          };
+        }
+      } catch {
+        payload = { source: 'NO_LOCATION' };
+      }
+
+      const next = await requestFireEvacuationHelp(props.session.accessToken, payload);
+      setFireStatus(next);
+      toast.success('Emergency help requested', 'Security team has been notified.');
+    } catch {
+      toast.error('Failed to request help', 'Please try again or call security.');
+    } finally {
+      setFireHelpSubmitting(false);
+    }
+  }, [props.session.accessToken, toast]);
 
   useEffect(() => {
     void loadFireStatus();
@@ -802,7 +846,9 @@ function MobileShellInner(props: MobileShellProps) {
         visible={fireModalVisible}
         status={fireStatus}
         isSubmitting={fireAckSubmitting}
+        isHelpSubmitting={fireHelpSubmitting}
         onConfirmSafe={() => void handleAcknowledgeFire()}
+        onNeedHelp={() => void handleNeedHelpFire()}
         onCloseAcknowledged={() => setForceFireModal(false)}
       />
       <UnitPickerSheet

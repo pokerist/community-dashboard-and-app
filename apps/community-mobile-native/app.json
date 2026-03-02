@@ -13,12 +13,19 @@
       "backgroundColor": "#0f172a"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Location is used during emergency alerts when you request help."
+      }
     },
     "android": {
       "package": "com.ssscomunity.app",
       "googleServicesFile": "./google-services.json",
       "usesCleartextTraffic": true,
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/Alkarma-community.png",
         "backgroundColor": "#ffffff"

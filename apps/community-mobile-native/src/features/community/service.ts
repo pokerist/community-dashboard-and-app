@@ -484,6 +484,24 @@ export async function acknowledgeFireEvacuation(accessToken: string) {
   return response.data;
 }
 
+export async function requestFireEvacuationHelp(
+  accessToken: string,
+  payload: {
+    source: 'GPS' | 'NO_LOCATION';
+    location?: { lat: number; lng: number; accuracy?: number; capturedAt?: string };
+    note?: string;
+  },
+) {
+  const response = await http.post<FireEvacuationStatus>(
+    '/fire-evacuation/me/help',
+    payload,
+    {
+      headers: authHeaders(accessToken),
+    },
+  );
+  return response.data;
+}
+
 export async function listHelpCenterEntries(accessToken: string) {
   const response = await http.get<HelpCenterEntry[]>('/help-center', {
     headers: authHeaders(accessToken),

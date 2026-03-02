@@ -428,7 +428,7 @@ export function ResidentHomeScreen({
         case 'complaints':
           return featureFlags?.canUseComplaints ?? true;
         case 'requests':
-          return !isPreDeliveryUnit && (featureFlags?.canUseServices ?? true);
+          return !isPreDeliveryUnit && (featureFlags?.canUseRequests ?? true);
         case 'smart-home':
           return true;
         case 'finance':

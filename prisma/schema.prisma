@@ -87,6 +87,11 @@ enum QRType {
   RIDESHARE
 }
 
+enum QrUsageMode {
+  SINGLE_USE
+  MULTI_USE
+}
+
 enum AccessStatus {
   PENDING
   APPROVED
@@ -988,6 +993,7 @@ model AccessQRCode {
   id            String       @id @default(uuid())
   qrId          String       @unique
   type          QRType
+  usageMode     QrUsageMode  @default(SINGLE_USE)
   generatedBy   User         @relation("generated_by", fields: [generatedById], references: [id])
   generatedById String
   forUnit       Unit?        @relation(fields: [unitId], references: [id])
@@ -1451,6 +1457,7 @@ model FamilyAccessRequest {
   birthCertificateFileId   String?
   marriageCertificateFileId String?
   childAgeBracket          String?
+  featurePermissions       Json?
   reviewedById             String?
   reviewedAt               DateTime?
   rejectionReason          String?

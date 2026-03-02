@@ -333,6 +333,8 @@ export class AccessControlService {
       throw new BadRequestException('validTo must be after validFrom');
     }
 
+    const usageMode =
+      dto.usageMode === 'MULTI_USE' ? 'MULTI_USE' : 'SINGLE_USE';
     const gates = dto.gates ?? [];
 
     if (this.enforceSingleActivePerTypeUnit) {
@@ -387,6 +389,7 @@ export class AccessControlService {
           data: {
             qrId: `PENDING-${randomUUID()}`,
             type: dto.type,
+            usageMode,
             generatedById: userId,
             unitId: dto.unitId,
             accessGrantId,
@@ -430,6 +433,7 @@ export class AccessControlService {
         data: {
           qrId: hik.qrId,
           type: dto.type,
+          usageMode,
           generatedById: userId,
           unitId: dto.unitId,
           accessGrantId,
@@ -585,6 +589,8 @@ export class AccessControlService {
       select: {
         id: true,
         status: true,
+        usageMode: true,
+        scans: true,
         generatedById: true,
         visitorName: true,
         notes: true,
@@ -617,12 +623,19 @@ export class AccessControlService {
       `Marked as USED at ${scannedAt.toISOString()}`,
     ].filter(Boolean);
 
+    const isMultiUse = String((qr as any).usageMode ?? 'SINGLE_USE') === 'MULTI_USE';
     const updated = await this.prisma.accessQRCode.update({
       where: { id: qr.id },
-      data: {
-        status: AccessStatus.USED,
-        notes: noteParts.join('\n'),
-      },
+      data: isMultiUse
+        ? {
+            scans: { increment: 1 },
+            notes: noteParts.join('\n'),
+          }
+        : {
+            status: AccessStatus.USED,
+            scans: { increment: 1 },
+            notes: noteParts.join('\n'),
+          },
     });
 
     await this.notifyOwnerQrUsedArrival({
@@ -636,7 +649,9 @@ export class AccessControlService {
 
     return {
       qrCode: updated,
-      message: 'QR marked as used and owner notified',
+      message: isMultiUse
+        ? 'QR scan recorded and owner notified'
+        : 'QR marked as used and owner notified',
     };
   }
 

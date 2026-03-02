@@ -13,6 +13,7 @@ import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { ResolveFireEvacuationDto } from './dto/resolve-fire-evacuation.dto';
 import { TriggerFireEvacuationDto } from './dto/trigger-fire-evacuation.dto';
 import { FireEvacuationService } from './fire-evacuation.service';
+import { FireEvacuationNeedHelpDto } from './dto/fire-evacuation-need-help.dto';
 
 @ApiTags('Fire Evacuation')
 @Controller('fire-evacuation')
@@ -54,5 +55,12 @@ export class FireEvacuationController {
   @ApiOperation({ summary: 'Acknowledge fire evacuation confirmation as safe' })
   acknowledge(@Request() req: any) {
     return this.fireEvacuationService.acknowledge(req.user.id);
+  }
+
+  @Post('me/help')
+  @Permissions('notification.view_own')
+  @ApiOperation({ summary: 'Mark current resident as needing help during fire evacuation' })
+  needHelp(@Request() req: any, @Body() dto: FireEvacuationNeedHelpDto) {
+    return this.fireEvacuationService.needHelp(req.user.id, dto);
   }
 }

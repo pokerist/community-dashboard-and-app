@@ -192,6 +192,8 @@ export type AccessQrRow = {
   id: string;
   qrId?: string;
   type?: string;
+  usageMode?: 'SINGLE_USE' | 'MULTI_USE' | string;
+  scans?: number;
   visitorName?: string | null;
   validFrom?: string;
   validTo?: string;
@@ -329,6 +331,7 @@ export type CreateServiceRequestInput = {
 export type CreateAccessQrInput = {
   unitId: string;
   type: string;
+  usageMode?: 'SINGLE_USE' | 'MULTI_USE';
   visitorName?: string;
   validFrom?: string;
   validTo?: string;
@@ -498,9 +501,11 @@ export type FireEvacuationStatus = {
   resolvedAt?: string | null;
   acknowledged?: boolean;
   acknowledgedAt?: string | null;
+  needsHelp?: boolean;
   counters?: {
     totalRecipients?: number;
     pending?: number;
+    needHelp?: number;
   };
 };
 
@@ -594,7 +599,7 @@ export type FamilyRequestRow = {
   phone?: string | null;
   nationality?: NationalityType;
   nationalIdOrPassport?: string | null;
-  childAgeBracket?: '<18' | '>=18' | string | null;
+  childAgeBracket?: '<16' | '>=16' | string | null;
   status: HouseholdRequestStatus;
   rejectionReason?: string | null;
   reviewedAt?: string | null;
@@ -658,7 +663,8 @@ export type CreateFamilyRequestInput = {
   passportFileId?: string;
   birthCertificateFileId?: string;
   marriageCertificateFileId?: string;
-  childAgeBracket?: '<18' | '>=18';
+  childAgeBracket?: '<16' | '>=16';
+  featurePermissions?: Record<string, boolean>;
 };
 
 export type CreateAuthorizedRequestInput = {

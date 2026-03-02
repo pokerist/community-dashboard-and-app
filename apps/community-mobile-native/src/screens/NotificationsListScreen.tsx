@@ -645,7 +645,7 @@ const styles = StyleSheet.create({
     borderRadius: akRadius.card,
     borderWidth: 1,
     borderColor: akColors.border,
-    padding: 12,
+    padding: 14,
     gap: 8,
     ...akShadow.soft,
     overflow: 'hidden',
@@ -677,8 +677,8 @@ const styles = StyleSheet.create({
   },
   rowTitle: {
     color: '#0F172A',
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '700',
   },
   rowTitleUnread: {
     color: akColors.text,
@@ -686,8 +686,9 @@ const styles = StyleSheet.create({
   },
   rowSubtitle: {
     marginTop: 3,
-    color: '#64748B',
-    fontSize: 11,
+    color: '#475569',
+    fontSize: 12,
+    fontWeight: '500',
   },
   readBadge: {
     borderRadius: 999,
@@ -714,9 +715,9 @@ const styles = StyleSheet.create({
     color: '#166534',
   },
   rowMessage: {
-    color: '#334155',
-    fontSize: 12,
-    lineHeight: 18,
+    color: '#1E293B',
+    fontSize: 13,
+    lineHeight: 20,
   },
   rowTime: {
     color: akColors.textSoft,

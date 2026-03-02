@@ -189,6 +189,7 @@ export type AuthBootstrapProfile = {
   featureAvailability?: {
     canViewBanners?: boolean;
     canUseServices?: boolean;
+    canUseRequests?: boolean;
     canUseBookings?: boolean;
     canUseComplaints?: boolean;
     canUseQr?: boolean;

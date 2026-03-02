@@ -269,14 +269,16 @@ export function ComplaintsScreen({
         ) : null}
 
         <ScreenCard title="Unit Filter" actionLabel={isRefreshing ? 'Refreshing...' : 'Reload'} onActionPress={() => void loadData('refresh')}>
-          <UnitPicker
-            units={units}
-            selectedUnitId={selectedUnitId}
-            onSelect={onSelectUnit}
-            onRefresh={() => void onRefreshUnits()}
-            isRefreshing={unitsRefreshing}
-            title="Filter by Unit"
-          />
+          {units.length > 1 ? (
+            <UnitPicker
+              units={units}
+              selectedUnitId={selectedUnitId}
+              onSelect={onSelectUnit}
+              onRefresh={() => void onRefreshUnits()}
+              isRefreshing={unitsRefreshing}
+              title="Filter by Unit"
+            />
+          ) : null}
           <InlineError message={unitsErrorMessage} />
           <InlineError message={loadError} />
           {unitsLoading ? <ActivityIndicator color={palette.primary} /> : null}

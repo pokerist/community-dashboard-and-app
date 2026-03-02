@@ -60,10 +60,10 @@ export class HouseholdService {
 
     if (nationality === NationalityType.EGYPTIAN) {
       const isChild = dto.relationship === FamilyRelationType.SON_DAUGHTER;
-      if (isChild && dto.childAgeBracket === '<18' && !dto.birthCertificateFileId) {
-        throw new BadRequestException('Birth certificate is required for children under 18');
+      if (isChild && dto.childAgeBracket === '<16' && !dto.birthCertificateFileId) {
+        throw new BadRequestException('Birth certificate is required for children under 16');
       }
-      if ((!isChild || dto.childAgeBracket === '>=18') && !dto.nationalIdFileId) {
+      if ((!isChild || dto.childAgeBracket !== '<16') && !dto.nationalIdFileId) {
         throw new BadRequestException('National ID document is required');
       }
     }
@@ -105,6 +105,17 @@ export class HouseholdService {
       canViewFinancials,
       canReceiveBilling,
       canManageWorkers,
+    };
+  }
+
+  private buildFamilyCapabilities(featurePermissions: Record<string, unknown> | null) {
+    const flags = featurePermissions ?? {};
+    return {
+      canBookFacilities: Boolean(flags.bookings ?? true),
+      canGenerateQR: Boolean(flags.qrVisitor || flags.qrDelivery || flags.qrDriver || flags.qrWorkers),
+      canViewFinancials: Boolean(flags.utilityPayment || flags.violations),
+      canReceiveBilling: Boolean(flags.utilityPayment || flags.violations),
+      canManageWorkers: Boolean(flags.qrWorkers || flags.workers),
     };
   }
 
@@ -194,6 +205,7 @@ export class HouseholdService {
         birthCertificateFileId: dto.birthCertificateFileId ?? null,
         marriageCertificateFileId: dto.marriageCertificateFileId ?? null,
         childAgeBracket: dto.childAgeBracket ?? null,
+        featurePermissions: (dto.featurePermissions ?? {}) as Prisma.JsonObject,
       },
     });
   }
@@ -414,6 +426,9 @@ export class HouseholdService {
         current.nationality === NationalityType.FOREIGN
           ? current.passportFileId ?? null
           : current.nationalIdFileId ?? current.birthCertificateFileId ?? null;
+      const familyCapabilities = this.buildFamilyCapabilities(
+        current.featurePermissions as Record<string, unknown> | null,
+      );
 
       const createdUser = await tx.user.create({
         data: {
@@ -466,11 +481,13 @@ export class HouseholdService {
           grantedBy: reviewerUserId,
           status: 'ACTIVE',
           source: 'FAMILY_AUTO',
-          canViewFinancials: false,
-          canReceiveBilling: false,
-          canBookFacilities: true,
-          canGenerateQR: false,
-          canManageWorkers: false,
+          canViewFinancials: familyCapabilities.canViewFinancials,
+          canReceiveBilling: familyCapabilities.canReceiveBilling,
+          canBookFacilities: familyCapabilities.canBookFacilities,
+          canGenerateQR: familyCapabilities.canGenerateQR,
+          canManageWorkers: familyCapabilities.canManageWorkers,
+          featurePermissions:
+            (current.featurePermissions as Prisma.JsonObject | null) ?? {},
         },
       });
 

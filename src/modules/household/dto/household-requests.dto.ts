@@ -81,10 +81,24 @@ export class CreateFamilyRequestDto {
   @IsUUID()
   marriageCertificateFileId?: string;
 
-  @ApiPropertyOptional({ example: '<18' })
+  @ApiPropertyOptional({ example: '<16' })
   @IsOptional()
   @IsString()
   childAgeBracket?: string;
+
+  @ApiPropertyOptional({
+    example: {
+      requests: true,
+      services: true,
+      bookings: true,
+      complaints: true,
+      utilityPayment: false,
+      violations: false,
+    },
+  })
+  @IsOptional()
+  @IsObject()
+  featurePermissions?: Record<string, unknown>;
 }
 
 export class CreateAuthorizedRequestDto {

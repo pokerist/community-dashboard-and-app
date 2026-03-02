@@ -151,14 +151,16 @@ export function UtilityTrackerScreen({
           </Text>
         </View>
 
-        <UnitPicker
-          units={units}
-          selectedUnitId={selectedUnitId}
-          onSelect={onSelectUnit}
-          onRefresh={() => void onRefreshUnits()}
-          isRefreshing={unitsRefreshing}
-          title={t('utility.unitTitle')}
-        />
+        {units.length > 1 ? (
+          <UnitPicker
+            units={units}
+            selectedUnitId={selectedUnitId}
+            onSelect={onSelectUnit}
+            onRefresh={() => void onRefreshUnits()}
+            isRefreshing={unitsRefreshing}
+            title={t('utility.unitTitle')}
+          />
+        ) : null}
         {unitsErrorMessage ? <Text style={styles.errorText}>{unitsErrorMessage}</Text> : null}
 
         <View style={styles.tabsRow}>

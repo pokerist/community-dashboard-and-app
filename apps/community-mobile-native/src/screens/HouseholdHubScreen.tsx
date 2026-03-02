@@ -125,10 +125,11 @@ export function HouseholdHubScreen({
     nationalId: string;
     nationalIdFileId: string;
     passportFileId: string;
-    childAgeBracket: '<18' | '>=18';
+    childAgeBracket: '<16' | '>=16';
     birthDate: string;
     birthCertificateFileId: string;
     marriageCertificateFileId: string;
+    permissions: Record<string, boolean>;
   }>({
     relationship: 'CHILD',
     nationality: 'EGYPTIAN',
@@ -139,10 +140,18 @@ export function HouseholdHubScreen({
     nationalId: '',
     nationalIdFileId: '',
     passportFileId: '',
-    childAgeBracket: '<18',
+    childAgeBracket: '<16',
     birthDate: '',
     birthCertificateFileId: '',
     marriageCertificateFileId: '',
+    permissions: {
+      requests: true,
+      services: true,
+      bookings: true,
+      complaints: true,
+      utilityPayment: false,
+      violations: false,
+    },
   });
   const [delegateForm, setDelegateForm] = useState<{
     type: CreateDelegateByContactInput['type'];
@@ -321,10 +330,18 @@ export function HouseholdHubScreen({
       nationalId: '',
       nationalIdFileId: '',
       passportFileId: '',
-      childAgeBracket: '<18',
+      childAgeBracket: '<16',
       birthDate: '',
       birthCertificateFileId: '',
       marriageCertificateFileId: '',
+      permissions: {
+        requests: true,
+        services: true,
+        bookings: true,
+        complaints: true,
+        utilityPayment: false,
+        violations: false,
+      },
     });
   };
 
@@ -363,6 +380,7 @@ export function HouseholdHubScreen({
       birthDate: '',
       birthCertificateFileId: '',
       marriageCertificateFileId: '',
+      permissions: prev.permissions,
     }));
     setSection('family');
   };
@@ -484,15 +502,15 @@ export function HouseholdHubScreen({
   const familyRelationship = familyForm.relationship;
   const familyNationality = familyForm.nationality;
   const familyNeedsBirthDate =
-    familyRelationship === 'CHILD' && familyForm.childAgeBracket === '<18';
+    familyRelationship === 'CHILD' && familyForm.childAgeBracket === '<16';
   const familyNeedsMarriageCert = familyRelationship === 'SPOUSE';
   const familyNeedsNationalIdFile =
     familyNationality === 'EGYPTIAN' &&
-    (familyRelationship !== 'CHILD' || familyForm.childAgeBracket === '>=18');
+    (familyRelationship !== 'CHILD' || familyForm.childAgeBracket === '>=16');
   const familyNeedsBirthCert =
     familyNationality === 'EGYPTIAN' &&
     familyRelationship === 'CHILD' &&
-    familyForm.childAgeBracket === '<18';
+    familyForm.childAgeBracket === '<16';
   const familyNeedsPassportFile = familyNationality === 'FOREIGN';
 
   const handleUploadFamilyFile = async (
@@ -801,6 +819,7 @@ export function HouseholdHubScreen({
             familyForm.relationship === 'CHILD'
               ? familyForm.childAgeBracket
               : undefined,
+          featurePermissions: familyForm.permissions,
         });
       }
       resetFamilyForm();
@@ -911,14 +930,16 @@ export function HouseholdHubScreen({
             </Pressable>
           </View>
 
-          <UnitPicker
-            units={units}
-            selectedUnitId={selectedUnitId}
-            onSelect={onSelectUnit}
-            onRefresh={() => void onRefreshUnits()}
-            isRefreshing={unitsRefreshing}
-            title="Household Unit"
-          />
+          {units.length > 1 ? (
+            <UnitPicker
+              units={units}
+              selectedUnitId={selectedUnitId}
+              onSelect={onSelectUnit}
+              onRefresh={() => void onRefreshUnits()}
+              isRefreshing={unitsRefreshing}
+              title="Household Unit"
+            />
+          ) : null}
 
           {selectedUnit ? (
             <Text style={styles.helperText}>
@@ -1067,7 +1088,7 @@ export function HouseholdHubScreen({
                   <>
                     <Text style={styles.fieldLabel}>Child Age Group</Text>
                     <View style={styles.optionRow}>
-                      {(['<18', '>=18'] as const).map((age) => {
+                      {(['<16', '>=16'] as const).map((age) => {
                         const active = familyForm.childAgeBracket === age;
                         return (
                           <Pressable
@@ -1080,7 +1101,7 @@ export function HouseholdHubScreen({
                             <Text
                               style={[styles.choiceChipText, active && styles.choiceChipTextActive, active && { color: palette.primary }]}
                             >
-                              {age === '<18' ? 'Under 18' : '18 and above'}
+                              {age === '<16' ? 'Under 16' : '16 and above'}
                             </Text>
                           </Pressable>
                         );
@@ -1220,6 +1241,54 @@ export function HouseholdHubScreen({
                   </View>
                 ) : null}
 
+                <Text style={styles.fieldLabel}>Family Permissions</Text>
+                <View style={styles.optionRow}>
+                  {(
+                    [
+                      ['requests', 'Requests'],
+                      ['services', 'Services'],
+                      ['bookings', 'Bookings'],
+                      ['complaints', 'Complaints'],
+                      ['utilityPayment', 'Utility Payment'],
+                      ['violations', 'Violations'],
+                    ] as const
+                  ).map(([key, label]) => {
+                    const active = Boolean(familyForm.permissions[key]);
+                    return (
+                      <Pressable
+                        key={key}
+                        onPress={() =>
+                          setFamilyForm((p) => ({
+                            ...p,
+                            permissions: {
+                              ...p.permissions,
+                              [key]: !p.permissions[key],
+                            },
+                          }))
+                        }
+                        style={[
+                          styles.choiceChip,
+                          active && styles.choiceChipActive,
+                          active && {
+                            borderColor: palette.primary,
+                            backgroundColor: palette.primarySoft8,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.choiceChipText,
+                            active && styles.choiceChipTextActive,
+                            active && { color: palette.primary },
+                          ]}
+                        >
+                          {label}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
                 <Pressable
                   style={[styles.primaryButton, { backgroundColor: palette.primary }, busyKey === 'family-add' && styles.buttonDisabled]}
                   onPress={() => void handleAddFamily()}
@@ -1240,7 +1309,13 @@ export function HouseholdHubScreen({
 
             <View style={styles.listWrap}>
               {familyRows.length === 0 ? (
-                <Text style={styles.emptyText}>No active family members for this unit.</Text>
+                <View style={styles.emptyStateCard}>
+                  <Ionicons name="person-add-outline" size={24} color={palette.primary} />
+                  <Text style={styles.emptyTitle}>No family members added yet</Text>
+                  <Text style={styles.emptyText}>
+                    Use Add Family Member to start creating household access.
+                  </Text>
+                </View>
               ) : (
                 familyRows.map((row) => {
                   const name = row.user?.nameEN || row.user?.nameAR || row.user?.email || row.userId || row.id;
@@ -2098,6 +2173,21 @@ const styles = StyleSheet.create({
   emptyText: {
     color: akColors.textMuted,
     fontSize: 12,
+  },
+  emptyStateCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    backgroundColor: akColors.surface,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    gap: 6,
+  },
+  emptyTitle: {
+    color: akColors.text,
+    fontSize: 14,
+    fontWeight: '700',
   },
   errorText: {
     color: '#DC2626',

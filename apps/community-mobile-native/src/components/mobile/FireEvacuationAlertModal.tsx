@@ -9,7 +9,9 @@ type FireEvacuationAlertModalProps = {
   visible: boolean;
   status: FireEvacuationStatus | null;
   isSubmitting: boolean;
+  isHelpSubmitting: boolean;
   onConfirmSafe: () => void;
+  onNeedHelp: () => void;
   onCloseAcknowledged: () => void;
 };
 
@@ -17,11 +19,14 @@ export function FireEvacuationAlertModal({
   visible,
   status,
   isSubmitting,
+  isHelpSubmitting,
   onConfirmSafe,
+  onNeedHelp,
   onCloseAcknowledged,
 }: FireEvacuationAlertModalProps) {
   const { t, language } = useI18n();
   const hasAcknowledged = status?.acknowledged === true;
+  const hasNeedHelp = status?.needsHelp === true;
   const title = status?.titleEn?.trim() || t('fire.title');
   const message =
     language === 'ar'
@@ -47,23 +52,37 @@ export function FireEvacuationAlertModal({
             </Text>
           </View>
 
-          {hasAcknowledged ? (
+          {hasAcknowledged || hasNeedHelp ? (
             <>
               <View style={styles.ackBox}>
-                <Ionicons name="checkmark-circle" size={18} color="#34D399" />
-                <Text style={styles.ackText}>{t('fire.confirmedSafe')}</Text>
+                <Ionicons
+                  name={hasNeedHelp ? 'alert-circle' : 'checkmark-circle'}
+                  size={18}
+                  color={hasNeedHelp ? '#FBBF24' : '#34D399'}
+                />
+                <Text style={styles.ackText}>
+                  {hasNeedHelp ? 'Help requested. Security team is notified.' : t('fire.confirmedSafe')}
+                </Text>
               </View>
               <Pressable style={styles.secondaryButton} onPress={onCloseAcknowledged}>
                 <Text style={styles.secondaryButtonText}>{t('common.close')}</Text>
               </Pressable>
             </>
           ) : (
-            <Pressable style={styles.primaryButton} onPress={onConfirmSafe} disabled={isSubmitting}>
-              {isSubmitting ? <ActivityIndicator size="small" color="#7F1D1D" /> : null}
-              <Text style={styles.primaryButtonText}>
-                {isSubmitting ? t('fire.confirming') : t('fire.iAmSafe')}
-              </Text>
-            </Pressable>
+            <>
+              <Pressable style={styles.primaryButton} onPress={onConfirmSafe} disabled={isSubmitting || isHelpSubmitting}>
+                {isSubmitting ? <ActivityIndicator size="small" color="#7F1D1D" /> : null}
+                <Text style={styles.primaryButtonText}>
+                  {isSubmitting ? t('fire.confirming') : t('fire.iAmSafe')}
+                </Text>
+              </Pressable>
+              <Pressable style={styles.helpButton} onPress={onNeedHelp} disabled={isSubmitting || isHelpSubmitting}>
+                {isHelpSubmitting ? <ActivityIndicator size="small" color="#FEF2F2" /> : null}
+                <Text style={styles.helpButtonText}>
+                  {isHelpSubmitting ? 'Sending help request...' : 'Need Help'}
+                </Text>
+              </Pressable>
+            </>
           )}
         </LinearGradient>
       </View>
@@ -134,6 +153,21 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     color: '#7F1D1D',
     fontSize: 14,
+    fontWeight: '800',
+  },
+  helpButton: {
+    minHeight: 46,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(254,226,226,0.48)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  helpButtonText: {
+    color: '#FEF2F2',
+    fontSize: 13,
     fontWeight: '800',
   },
   secondaryButton: {

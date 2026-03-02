@@ -7,6 +7,7 @@ import {
 import { Audience, Channel, NotificationType } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { FireEvacuationNeedHelpDto } from './dto/fire-evacuation-need-help.dto';
 import { ResolveFireEvacuationDto } from './dto/resolve-fire-evacuation.dto';
 import { TriggerFireEvacuationDto } from './dto/trigger-fire-evacuation.dto';
 
@@ -18,6 +19,20 @@ type FireEvacuationRecipient = {
 type FireEvacuationAck = {
   userId: string;
   at: string;
+};
+
+type FireEvacuationHelpRequest = {
+  userId: string;
+  at: string;
+  status: 'REQUESTED';
+  source: 'GPS' | 'NO_LOCATION';
+  note: string | null;
+  location: {
+    lat: number;
+    lng: number;
+    accuracy: number | undefined;
+    capturedAt: string | undefined;
+  } | null;
 };
 
 type FireEvacuationState = {
@@ -32,6 +47,7 @@ type FireEvacuationState = {
   resolutionNote: string | null;
   recipients: FireEvacuationRecipient[];
   acknowledged: FireEvacuationAck[];
+  helpRequests: FireEvacuationHelpRequest[];
 };
 
 @Injectable()
@@ -73,6 +89,7 @@ export class FireEvacuationService {
       resolutionNote: null,
       recipients,
       acknowledged: [],
+      helpRequests: [],
     };
 
     await this.saveState(nextState, actorUserId);
@@ -197,6 +214,56 @@ export class FireEvacuationService {
     return this.toResidentView(nextState, userId);
   }
 
+  async needHelp(userId: string, dto: FireEvacuationNeedHelpDto) {
+    const current = await this.getState();
+    if (!current.active) {
+      return this.toResidentView(current, userId);
+    }
+
+    const isRecipient = current.recipients.some((recipient) => recipient.userId === userId);
+    if (!isRecipient) {
+      throw new ForbiddenException(
+        'Current user is not targeted by the active fire evacuation alert.',
+      );
+    }
+
+    if (current.helpRequests.some((row) => row.userId === userId)) {
+      return this.toResidentView(current, userId);
+    }
+
+    const source = dto.source === 'GPS' ? 'GPS' : 'NO_LOCATION';
+    const location =
+      dto.location &&
+      Number.isFinite(dto.location.lat) &&
+      Number.isFinite(dto.location.lng)
+        ? {
+            lat: Number(dto.location.lat),
+            lng: Number(dto.location.lng),
+            accuracy: typeof dto.location.accuracy === 'number'
+              ? dto.location.accuracy
+              : undefined,
+            capturedAt: dto.location.capturedAt,
+          }
+        : null;
+
+    const helpRequest: FireEvacuationHelpRequest = {
+      userId,
+      at: new Date().toISOString(),
+      status: 'REQUESTED',
+      source,
+      note: dto.note?.trim() || null,
+      location,
+    };
+
+    const nextState: FireEvacuationState = {
+      ...current,
+      helpRequests: [...current.helpRequests, helpRequest],
+    };
+    await this.saveState(nextState, userId);
+    await this.notifyAdminsNeedHelp(helpRequest, nextState);
+    return this.toResidentView(nextState, userId);
+  }
+
   async getAdminStatus() {
     const state = await this.getState();
     return this.toAdminView(state);
@@ -222,6 +289,7 @@ export class FireEvacuationService {
       resolutionNote: null,
       recipients: [],
       acknowledged: [],
+      helpRequests: [],
     };
   }
 
@@ -274,6 +342,9 @@ export class FireEvacuationService {
     const acknowledgedRaw = Array.isArray(record.acknowledged)
       ? record.acknowledged
       : [];
+    const helpRequestsRaw = Array.isArray(record.helpRequests)
+      ? record.helpRequests
+      : [];
 
     const recipients = recipientsRaw
       .map((item) => {
@@ -297,6 +368,51 @@ export class FireEvacuationService {
       })
       .filter((row): row is FireEvacuationAck => Boolean(row));
 
+    const helpRequests = helpRequestsRaw
+      .map((item) => {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+        const row = item as Record<string, unknown>;
+        const userId = String(row.userId ?? '').trim();
+        const at = String(row.at ?? '').trim();
+        if (!userId || !at) return null;
+
+        const source = String(row.source ?? '').trim().toUpperCase() === 'GPS'
+          ? 'GPS'
+          : 'NO_LOCATION';
+        const note = row.note ? String(row.note) : null;
+        const locationRaw =
+          row.location && typeof row.location === 'object' && !Array.isArray(row.location)
+            ? (row.location as Record<string, unknown>)
+            : null;
+        const location =
+          locationRaw &&
+          typeof locationRaw.lat === 'number' &&
+          typeof locationRaw.lng === 'number'
+            ? {
+                lat: locationRaw.lat,
+                lng: locationRaw.lng,
+                accuracy:
+                  typeof locationRaw.accuracy === 'number'
+                    ? locationRaw.accuracy
+                    : undefined,
+                capturedAt:
+                  typeof locationRaw.capturedAt === 'string'
+                    ? locationRaw.capturedAt
+                    : undefined,
+              }
+            : null;
+
+        return {
+          userId,
+          at,
+          status: 'REQUESTED',
+          source,
+          note,
+          location,
+        } satisfies FireEvacuationHelpRequest;
+      })
+      .filter((row): row is FireEvacuationHelpRequest => Boolean(row));
+
     return {
       active: record.active === true,
       titleEn: String(record.titleEn ?? fallback.titleEn).trim() || fallback.titleEn,
@@ -311,6 +427,7 @@ export class FireEvacuationService {
       resolutionNote: record.resolutionNote ? String(record.resolutionNote) : null,
       recipients,
       acknowledged,
+      helpRequests,
     };
   }
 
@@ -343,14 +460,25 @@ export class FireEvacuationService {
   private toAdminView(state: FireEvacuationState) {
     const acknowledgedSet = new Set(state.acknowledged.map((row) => row.userId));
     const acknowledgedByUser = new Map(state.acknowledged.map((row) => [row.userId, row.at]));
+    const needHelpByUser = new Map(state.helpRequests.map((row) => [row.userId, row]));
+    const needHelpSet = new Set(state.helpRequests.map((row) => row.userId));
     const acknowledgedRecipients = state.recipients
       .filter((recipient) => acknowledgedSet.has(recipient.userId))
       .map((recipient) => ({
         ...recipient,
         acknowledgedAt: acknowledgedByUser.get(recipient.userId) ?? null,
       }));
+    const needHelpRecipients = state.recipients
+      .filter((recipient) => needHelpSet.has(recipient.userId))
+      .map((recipient) => ({
+        ...recipient,
+        help: needHelpByUser.get(recipient.userId) ?? null,
+      }));
     const pendingRecipients = state.recipients
-      .filter((recipient) => !acknowledgedSet.has(recipient.userId))
+      .filter(
+        (recipient) =>
+          !acknowledgedSet.has(recipient.userId) && !needHelpSet.has(recipient.userId),
+      )
       .map((recipient) => ({
         ...recipient,
       }));
@@ -368,10 +496,13 @@ export class FireEvacuationService {
       counters: {
         totalRecipients: state.recipients.length,
         acknowledged: acknowledgedRecipients.length,
+        needHelp: needHelpRecipients.length,
         pending: pendingRecipients.length,
       },
       recipients: state.recipients,
       acknowledgedRecipients,
+      helpRequests: state.helpRequests,
+      needHelpRecipients,
       pendingRecipients,
       updatedAt: new Date().toISOString(),
     };
@@ -381,8 +512,9 @@ export class FireEvacuationService {
     const recipient = state.recipients.find((row) => row.userId === userId);
     const ack = state.acknowledged.find((row) => row.userId === userId);
     const acknowledgedSet = new Set(state.acknowledged.map((row) => row.userId));
+    const needHelpSet = new Set(state.helpRequests.map((row) => row.userId));
     const pendingCount = state.recipients.filter(
-      (row) => !acknowledgedSet.has(row.userId),
+      (row) => !acknowledgedSet.has(row.userId) && !needHelpSet.has(row.userId),
     ).length;
 
     return {
@@ -395,10 +527,63 @@ export class FireEvacuationService {
       resolvedAt: state.resolvedAt,
       acknowledged: Boolean(ack),
       acknowledgedAt: ack?.at ?? null,
+      needsHelp: state.helpRequests.some((row) => row.userId === userId),
       counters: {
         totalRecipients: state.recipients.length,
         pending: pendingCount,
       },
     };
+  }
+
+  private async notifyAdminsNeedHelp(
+    helpRequest: FireEvacuationHelpRequest,
+    state: FireEvacuationState,
+  ) {
+    try {
+      const admins = await this.prisma.admin.findMany({
+        select: { userId: true },
+      });
+      const adminUserIds = admins.map((a) => a.userId).filter(Boolean);
+      if (adminUserIds.length === 0) return;
+
+      const residentName =
+        state.recipients.find((recipient) => recipient.userId === helpRequest.userId)?.name ??
+        `User ${helpRequest.userId.slice(0, 8)}`;
+
+      await this.notificationsService.sendNotification(
+        {
+          type: NotificationType.EMERGENCY_ALERT,
+          title: `Emergency help requested by ${residentName}`,
+          messageEn:
+            helpRequest.source === 'GPS'
+              ? `${residentName} requested emergency help and shared location.`
+              : `${residentName} requested emergency help (location unavailable).`,
+          messageAr:
+            helpRequest.source === 'GPS'
+              ? `${residentName} طلب المساعدة وتمت مشاركة الموقع.`
+              : `${residentName} طلب المساعدة بدون مشاركة موقع.`,
+          channels: [Channel.IN_APP, Channel.PUSH],
+          targetAudience: Audience.SPECIFIC_RESIDENCES,
+          audienceMeta: { userIds: adminUserIds },
+          payload: {
+            route: '/security-emergency',
+            entityType: 'FIRE_EVACUATION_HELP',
+            entityId: helpRequest.userId,
+            eventKey: 'fire_evacuation.need_help',
+            source: helpRequest.source,
+            note: helpRequest.note ?? null,
+            location: helpRequest.location ?? null,
+            requestedAt: helpRequest.at,
+          },
+        },
+        helpRequest.userId,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Failed to dispatch fire evacuation need-help notification: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 }
