@@ -9,7 +9,6 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import auth, { type FirebaseAuthTypes } from '@react-native-firebase/auth';
 import type { AuthSession } from '../features/auth/types';
 import {
   completeActivationRequest,
@@ -83,7 +82,7 @@ export function ActivationScreen({
   const [otpCooldownUntilMs, setOtpCooldownUntilMs] = useState<number>(0);
   const [otpSecondsLeft, setOtpSecondsLeft] = useState(0);
   const [confirmationResult, setConfirmationResult] =
-    useState<FirebaseAuthTypes.ConfirmationResult | null>(null);
+    useState<any | null>(null);
 
   const requiresPhoneOtp = Boolean(status?.checklist.requiresPhoneOtp);
   const phoneVerified = Boolean(status?.checklist.phoneVerified);
@@ -197,7 +196,17 @@ export function ActivationScreen({
     setIsSendingOtp(true);
     try {
       const result = await sendPhoneOtpRequest(session.accessToken, phone);
-      const confirmation = await auth().signInWithPhoneNumber(phone);
+      let rnFirebaseAuth: any;
+      try {
+        // Lazy-require so the app doesn't crash at startup on Expo Go/old binaries.
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        rnFirebaseAuth = require('@react-native-firebase/auth').default;
+      } catch {
+        throw new Error(
+          'Firebase native module is missing. Install a newly built APK (not Expo Go).',
+        );
+      }
+      const confirmation = await rnFirebaseAuth().signInWithPhoneNumber(phone);
       const cooldown = Number(result.cooldownSeconds ?? 120);
       setOtpCooldownUntilMs(Date.now() + cooldown * 1000);
       setOtpDeliveryChannel('SMS');
