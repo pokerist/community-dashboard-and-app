@@ -81,8 +81,8 @@ export function IconPicker({ value, tone = "auto", onChange, onToneChange }: Ico
 
   const filteredIcons = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    if (!normalized) return iconEntries.slice(0, 420);
-    return iconEntries.filter((entry) => entry.key.includes(normalized)).slice(0, 420);
+    if (!normalized) return iconEntries.slice(0, 180);
+    return iconEntries.filter((entry) => entry.key.includes(normalized)).slice(0, 260);
   }, [iconEntries, query]);
 
   const SelectedIcon = value ? iconMap.get(value) : undefined;
@@ -105,11 +105,16 @@ export function IconPicker({ value, tone = "auto", onChange, onToneChange }: Ico
               Choose Icon
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-4xl">
-            <DialogHeader>
-              <DialogTitle>Choose Service Icon</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-3">
+          <DialogContent className="max-h-[82vh] max-w-4xl overflow-hidden p-0">
+            <div className="flex h-full flex-col">
+              <DialogHeader className="border-b border-[#E2E8F0] px-5 pt-5 pb-3">
+                <DialogTitle>Choose Service Icon</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3 px-5 py-4">
+                <p className="text-xs text-[#64748B]">
+                  Showing {filteredIcons.length} of {iconEntries.length} icons
+                  {query.trim() ? " (filtered)" : " (type in search to narrow down)"}.
+                </p>
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#64748B]" />
                 <Input
@@ -144,8 +149,10 @@ export function IconPicker({ value, tone = "auto", onChange, onToneChange }: Ico
                   </div>
                 </div>
               ) : null}
-              <div className="max-h-[420px] overflow-y-auto rounded-lg border border-[#E2E8F0] p-3">
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+              </div>
+              <div className="min-h-0 flex-1 px-5 pb-5">
+                <div className="h-full max-h-[360px] overflow-y-auto rounded-lg border border-[#E2E8F0] p-3">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
                   {filteredIcons.map(({ key, IconComponent }) => (
                     <button
                       key={key}
@@ -161,6 +168,7 @@ export function IconPicker({ value, tone = "auto", onChange, onToneChange }: Ico
                       <span className="truncate">{key}</span>
                     </button>
                   ))}
+                  </div>
                 </div>
               </div>
             </div>
