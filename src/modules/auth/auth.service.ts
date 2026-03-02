@@ -917,13 +917,16 @@ export class AuthService {
     const canViewFinancials = allAccesses.some(
       (a) => a.canViewFinancials === true || a.canReceiveBilling === true,
     );
-    const isPreDeliveryOwner = units.some(
-      (u) =>
-        String(u.status ?? '').toUpperCase() === 'NOT_DELIVERED' &&
-        (u.accesses ?? []).some(
-          (a) => String(a.role ?? '').toUpperCase() === 'OWNER',
-        ),
-    );
+    const isDashboardCreated = String(user.signupSource ?? '').toLowerCase() === 'dashboard';
+    const isPreDeliveryOwner =
+      !isDashboardCreated &&
+      units.some(
+        (u) =>
+          String(u.status ?? '').toUpperCase() === 'NOT_DELIVERED' &&
+          (u.accesses ?? []).some(
+            (a) => String(a.role ?? '').toUpperCase() === 'OWNER',
+          ),
+      );
 
     let resolvedPersona:
       | 'PRE_DELIVERY_OWNER'
