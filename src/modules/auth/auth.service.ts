@@ -1707,97 +1707,30 @@ export class AuthService {
 
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, phone: true, email: true },
+      select: { phone: true },
     });
 
     if (!user?.phone) {
       throw new BadRequestException('User has no phone number on file');
     }
 
-    const expectedPhone = this.normalizePhoneForComparison(user.phone);
-    const providedPhone = this.normalizePhoneForComparison(phone);
-    if (!expectedPhone || expectedPhone !== providedPhone) {
+    if (user.phone !== phone) {
       throw new BadRequestException('Phone does not match the current profile');
     }
 
     const capabilities = await this.integrationConfigService.getMobileCapabilities();
-    const canSendSms = capabilities.smsOtp;
-    const canSendEmail = capabilities.smtpMail && Boolean(user.email);
-    if (!canSendSms && !canSendEmail) {
+    if (!capabilities.smsOtp) {
       throw new ServiceUnavailableException(
-        'OTP delivery is currently unavailable. Please contact support.',
+        'Firebase OTP verification is currently unavailable. Please try again later.',
       );
     }
-
-    const now = Date.now();
-    const cooldownSeconds = 120;
-    const latestOtp = await this.prisma.phoneVerificationOtp.findFirst({
-      where: {
-        userId,
-        usedAt: null,
-        expiresAt: { gt: new Date() },
-      },
-      orderBy: { createdAt: 'desc' },
-      select: { createdAt: true },
-    });
-    if (latestOtp) {
-      const elapsedSeconds = Math.floor(
-        (now - latestOtp.createdAt.getTime()) / 1000,
-      );
-      if (elapsedSeconds < cooldownSeconds) {
-        throw new BadRequestException(
-          `Please wait ${cooldownSeconds - elapsedSeconds} seconds before requesting a new OTP.`,
-        );
-      }
-    }
-
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    const otpHash = await bcrypt.hash(otp, 12);
-
-    await this.prisma.phoneVerificationOtp.updateMany({
-      where: { userId, usedAt: null },
-      data: { usedAt: new Date() },
-    });
-    await this.prisma.phoneVerificationOtp.create({
-      data: {
-        userId,
-        otpHash,
-        expiresAt: new Date(now + 5 * 60 * 1000),
-      },
-    });
-
-    const channel = canSendSms ? 'SMS' : 'EMAIL';
-    await this.notificationsService.sendNotification(
-      {
-        type: 'OTP',
-        title: 'Phone Verification OTP',
-        messageEn:
-          channel === 'SMS'
-            ? `Your verification code is ${otp}. It expires in 5 minutes.`
-            : `Your verification code is ${otp}. SMS is unavailable so this code was sent via email. It expires in 5 minutes.`,
-        channels: [channel as $Enums.Channel],
-        targetAudience: 'SPECIFIC_RESIDENCES',
-        audienceMeta: { userIds: [user.id] },
-        payload: {
-          eventKey: 'auth.activation_phone_otp',
-          channel,
-        },
-      },
-      undefined,
-    );
-
     this.logger.log(
-      `Activation OTP generated for user ${userId} via ${channel}.`,
+      `Firebase OTP flow initiated for user ${userId}. OTP dispatch is handled client-side by Firebase SDK.`,
     );
     return {
       message:
-        channel === 'SMS'
-          ? 'Verification code sent successfully.'
-          : 'Verification code sent to your email because SMS is unavailable.',
-      provider: channel,
-      channel,
-      cooldownSeconds,
-      expiresInSeconds: 300,
+        'Start phone verification from the mobile Firebase flow, then submit firebaseIdToken to verify-phone-otp.',
+      provider: 'FIREBASE_AUTH',
     };
   }
 
@@ -1811,43 +1744,11 @@ export class AuthService {
       throw new BadRequestException('User has no phone number on file');
     }
 
-    const otp = String(dto.otp ?? '').trim();
-    if (otp) {
-      const storedOtp = await this.prisma.phoneVerificationOtp.findFirst({
-        where: {
-          userId,
-          usedAt: null,
-          expiresAt: { gt: new Date() },
-        },
-        orderBy: { createdAt: 'desc' },
-      });
-      if (!storedOtp) {
-        throw new BadRequestException('Invalid or expired OTP');
-      }
-      const isValid = await bcrypt.compare(otp, storedOtp.otpHash);
-      if (!isValid) {
-        throw new BadRequestException('Invalid OTP');
-      }
-
-      await this.prisma.phoneVerificationOtp.update({
-        where: { id: storedOtp.id },
-        data: { usedAt: new Date() },
-      });
-
-      await this.prisma.user.update({
-        where: { id: userId },
-        data: { phoneVerifiedAt: new Date() },
-      });
-
-      return { message: 'Phone verified successfully' };
-    }
-
+    const authClient = await this.getFirebaseAuthClient();
     const token = String(dto.firebaseIdToken ?? '').trim();
     if (!token) {
-      throw new BadRequestException('otp or firebaseIdToken is required');
+      throw new BadRequestException('firebaseIdToken is required');
     }
-
-    const authClient = await this.getFirebaseAuthClient();
     let decoded: any;
     try {
       decoded = await authClient.verifyIdToken(token, true);

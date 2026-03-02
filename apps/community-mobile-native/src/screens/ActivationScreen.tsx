@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -9,6 +9,13 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { FirebaseRecaptchaVerifierModal } from 'expo-firebase-recaptcha';
+import { getApp, getApps, initializeApp } from 'firebase/app';
+import {
+  type ConfirmationResult,
+  getAuth,
+  signInWithPhoneNumber,
+} from 'firebase/auth';
 import type { AuthSession } from '../features/auth/types';
 import {
   completeActivationRequest,
@@ -57,6 +64,15 @@ function formatRemaining(totalSeconds: number) {
   return `${mins}:${secs}`;
 }
 
+const firebaseConfig = {
+  apiKey: 'AIzaSyA_Lspm4Qn0DjEqyq1et1rA91v6eeHQ6KE',
+  authDomain: 'sss-community-app.firebaseapp.com',
+  projectId: 'sss-community-app',
+  storageBucket: 'sss-community-app.firebasestorage.app',
+  messagingSenderId: '802369850040',
+  appId: '1:802369850040:android:9c49e822477feac131424d',
+};
+
 export function ActivationScreen({
   session,
   onActivationCompleted,
@@ -81,6 +97,9 @@ export function ActivationScreen({
   const [otpDeliveryChannel, setOtpDeliveryChannel] = useState<'SMS' | 'EMAIL' | string>('SMS');
   const [otpCooldownUntilMs, setOtpCooldownUntilMs] = useState<number>(0);
   const [otpSecondsLeft, setOtpSecondsLeft] = useState(0);
+  const [confirmationResult, setConfirmationResult] =
+    useState<ConfirmationResult | null>(null);
+  const recaptchaVerifier = useRef<FirebaseRecaptchaVerifierModal>(null);
 
   const requiresPhoneOtp = Boolean(status?.checklist.requiresPhoneOtp);
   const phoneVerified = Boolean(status?.checklist.phoneVerified);
@@ -117,6 +136,11 @@ export function ActivationScreen({
     requiresPhoneOtp,
     status,
   ]);
+
+  const firebaseAuth = useMemo(() => {
+    const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+    return getAuth(app);
+  }, []);
 
   const loadStatus = useCallback(async () => {
     setIsLoading(true);
@@ -194,11 +218,17 @@ export function ActivationScreen({
     setIsSendingOtp(true);
     try {
       const result = await sendPhoneOtpRequest(session.accessToken, phone);
+      const confirmation = await signInWithPhoneNumber(
+        firebaseAuth,
+        phone,
+        recaptchaVerifier.current as any,
+      );
       const cooldown = Number(result.cooldownSeconds ?? 120);
       setOtpCooldownUntilMs(Date.now() + cooldown * 1000);
-      setOtpDeliveryChannel(result.channel ?? 'SMS');
+      setOtpDeliveryChannel('SMS');
+      setConfirmationResult(confirmation);
       setCurrentStep('phone-otp');
-      toast.success('Verification started', result.message || 'OTP has been sent.');
+      toast.success('Verification started', 'OTP has been sent to your phone.');
     } catch (error: any) {
       toast.error('OTP failed', error?.message ?? 'Failed to send OTP.');
     } finally {
@@ -212,11 +242,20 @@ export function ActivationScreen({
       toast.error('OTP required', 'Enter the 6-digit code.');
       return;
     }
+    if (!confirmationResult) {
+      toast.error('OTP session missing', 'Please request OTP again.');
+      return;
+    }
     setIsVerifyingOtp(true);
     try {
-      const result = await verifyPhoneOtpRequest(session.accessToken, { otp: trimmedOtp });
+      const userCredential = await confirmationResult.confirm(trimmedOtp);
+      const firebaseIdToken = await userCredential.user.getIdToken(true);
+      const result = await verifyPhoneOtpRequest(session.accessToken, {
+        firebaseIdToken,
+      });
       toast.success('Phone verified', result.message || 'Phone verified successfully.');
       setOtpCode('');
+      setConfirmationResult(null);
       await loadStatus();
       setCurrentStep('password');
     } catch (error: any) {
@@ -264,6 +303,10 @@ export function ActivationScreen({
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <FirebaseRecaptchaVerifierModal
+        ref={recaptchaVerifier}
+        firebaseConfig={firebaseConfig}
+      />
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={[styles.hero, { backgroundColor: brandPrimary }]}>
           <Text style={styles.heroTitle}>Welcome{status?.user.nameEN ? `, ${status.user.nameEN}` : ''}</Text>
@@ -345,10 +388,11 @@ export function ActivationScreen({
               style={[
                 styles.submitButton,
                 { backgroundColor: brandPrimary },
-                (isVerifyingOtp || otpCode.trim().length !== 6) && styles.submitButtonDisabled,
+                (isVerifyingOtp || otpCode.trim().length !== 6 || !confirmationResult) &&
+                  styles.submitButtonDisabled,
               ]}
               onPress={verifyOtp}
-              disabled={isVerifyingOtp || otpCode.trim().length !== 6}
+              disabled={isVerifyingOtp || otpCode.trim().length !== 6 || !confirmationResult}
             >
               {isVerifyingOtp ? (
                 <ActivityIndicator size="small" color="#fff" />
