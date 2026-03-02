@@ -54,6 +54,12 @@ type MobileShellProps = {
   onLogout: () => Promise<void>;
 };
 
+type FireStatusBanner = {
+  kind: 'safe' | 'help';
+  title: string;
+  description: string;
+};
+
 type RootTabsParamList = {
   Home: undefined;
   ManageUnits: undefined;
@@ -146,10 +152,15 @@ function MobileShellInner(props: MobileShellProps) {
   const [fireAckSubmitting, setFireAckSubmitting] = useState(false);
   const [fireHelpSubmitting, setFireHelpSubmitting] = useState(false);
   const [forceFireModal, setForceFireModal] = useState(false);
+  const [fireStatusBanner, setFireStatusBanner] = useState<FireStatusBanner | null>(
+    null,
+  );
   const units = useResidentUnits(props.session.accessToken, props.session.userId);
   const realtime = useNotificationRealtime();
   const toast = useAppToast();
   const lastFireAlertAtRef = useRef<string | null>(null);
+  const fireActiveRef = useRef(false);
+  const fireReconnectToastAtRef = useRef(0);
   const firePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const insets = useSafeAreaInsets();
   const { width: viewportWidth } = useWindowDimensions();
@@ -184,9 +195,19 @@ function MobileShellInner(props: MobileShellProps) {
     [brandPrimary],
   );
   const fireModalVisible = Boolean(
-    (fireStatus?.active && fireStatus?.targeted) ||
-      (forceFireModal && fireStatus?.targeted !== false),
+    (fireStatus?.active &&
+      fireStatus?.targeted &&
+      !fireStatus?.acknowledged &&
+      !fireStatus?.needsHelp) ||
+      (forceFireModal &&
+        fireStatus?.targeted !== false &&
+        !fireStatus?.acknowledged &&
+        !fireStatus?.needsHelp),
   );
+
+  useEffect(() => {
+    fireActiveRef.current = Boolean(fireStatus?.active && fireStatus?.targeted);
+  }, [fireStatus]);
 
   useEffect(() => {
     let cancelled = false;
@@ -236,14 +257,21 @@ function MobileShellInner(props: MobileShellProps) {
           }
         } else if (!next?.active) {
           setForceFireModal(false);
+          setFireStatusBanner(null);
         }
       } catch {
-        // fire drill endpoint is optional by design
+        if (fireActiveRef.current) {
+          const now = Date.now();
+          if (now - fireReconnectToastAtRef.current > 20000) {
+            fireReconnectToastAtRef.current = now;
+            toast.info('Emergency status connection issue', 'Reconnecting automatically...');
+          }
+        }
       } finally {
         if (!forceAlarmHint) setFireChecking(false);
       }
     },
-    [props.session.accessToken, t],
+    [props.session.accessToken, t, toast],
   );
 
   const handleAcknowledgeFire = useCallback(async () => {
@@ -251,6 +279,12 @@ function MobileShellInner(props: MobileShellProps) {
     try {
       const next = await acknowledgeFireEvacuation(props.session.accessToken);
       setFireStatus(next);
+      setForceFireModal(false);
+      setFireStatusBanner({
+        kind: 'safe',
+        title: 'Evacuated and Safe',
+        description: 'Security team has recorded your confirmation.',
+      });
       toast.success(t('fire.confirmationSuccess'));
     } catch {
       toast.error(t('fire.confirmationFailed'));
@@ -292,6 +326,12 @@ function MobileShellInner(props: MobileShellProps) {
 
       const next = await requestFireEvacuationHelp(props.session.accessToken, payload);
       setFireStatus(next);
+      setForceFireModal(false);
+      setFireStatusBanner({
+        kind: 'help',
+        title: 'Help requested',
+        description: 'Security team has been notified and is responding.',
+      });
       toast.success('Emergency help requested', 'Security team has been notified.');
     } catch {
       toast.error('Failed to request help', 'Please try again or call security.');
@@ -842,6 +882,28 @@ function MobileShellInner(props: MobileShellProps) {
         </Pressable>
       ) : null}
       <ForegroundNotificationToast onPressToast={navigateFromPushPayload} />
+      {fireStatusBanner ? (
+        <Pressable
+          onPress={() => setFireStatusBanner(null)}
+          style={[
+            shellStyles.fireStatusBannerWrap,
+            fireStatusBanner.kind === 'safe'
+              ? shellStyles.fireStatusBannerSafe
+              : shellStyles.fireStatusBannerHelp,
+          ]}
+        >
+          <Ionicons
+            name={fireStatusBanner.kind === 'safe' ? 'checkmark-circle' : 'alert-circle'}
+            size={18}
+            color={fireStatusBanner.kind === 'safe' ? '#047857' : '#B45309'}
+          />
+          <View style={shellStyles.fireStatusBannerTextWrap}>
+            <Text style={shellStyles.fireStatusBannerTitle}>{fireStatusBanner.title}</Text>
+            <Text style={shellStyles.fireStatusBannerDesc}>{fireStatusBanner.description}</Text>
+          </View>
+          <Ionicons name="close" size={16} color="#475569" />
+        </Pressable>
+      ) : null}
       <FireEvacuationAlertModal
         visible={fireModalVisible}
         status={fireStatus}
@@ -850,6 +912,11 @@ function MobileShellInner(props: MobileShellProps) {
         onConfirmSafe={() => void handleAcknowledgeFire()}
         onNeedHelp={() => void handleNeedHelpFire()}
         onCloseAcknowledged={() => setForceFireModal(false)}
+        onRequestClose={() => {
+          if (fireStatus?.acknowledged || fireStatus?.needsHelp || !fireStatus?.active) {
+            setForceFireModal(false);
+          }
+        }}
       />
       <UnitPickerSheet
         visible={units.requiresSelection}
@@ -967,6 +1034,41 @@ const shellStyles = StyleSheet.create({
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 6 },
     elevation: 8,
+  },
+  fireStatusBannerWrap: {
+    position: 'absolute',
+    top: 92,
+    left: 12,
+    right: 12,
+    zIndex: 999,
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  fireStatusBannerSafe: {
+    backgroundColor: '#ECFDF5',
+    borderColor: '#A7F3D0',
+  },
+  fireStatusBannerHelp: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FCD34D',
+  },
+  fireStatusBannerTextWrap: {
+    flex: 1,
+  },
+  fireStatusBannerTitle: {
+    color: '#0F172A',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  fireStatusBannerDesc: {
+    color: '#475569',
+    fontSize: 11,
+    marginTop: 1,
   },
   toastTitle: {
     fontSize: 13,

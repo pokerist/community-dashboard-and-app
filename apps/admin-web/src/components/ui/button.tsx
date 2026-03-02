@@ -11,6 +11,8 @@ const buttonVariants = cva(
       variant: {
         default:
           "bg-primary text-primary-foreground border border-black/10 shadow-sm hover:bg-primary/90",
+        dangerSolid:
+          "border border-[#7F1D1D] bg-[#B91C1C] text-white shadow-sm hover:bg-[#991B1B] focus-visible:ring-[#B91C1C]/35",
         destructive:
           "bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/60",
         outline:

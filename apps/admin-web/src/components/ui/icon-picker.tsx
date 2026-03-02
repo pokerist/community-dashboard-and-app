@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState, type ComponentType } from "react";
-import { Search, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Search, X } from "lucide-react";
 import * as IoIcons from "react-icons/io5";
 import { Button } from "./button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "./dialog";
 import { Input } from "./input";
 import { Badge } from "./badge";
 
@@ -99,86 +98,86 @@ export function IconPicker({ value, tone = "auto", onChange, onToneChange }: Ico
           {SelectedIcon ? <SelectedIcon className="h-4 w-4" /> : <span className="text-[#94A3B8]">No icon</span>}
           <span>{value ?? "Choose an icon"}</span>
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button type="button" variant="outline">
+        <Button type="button" variant="outline" onClick={() => setOpen((current) => !current)}>
+          {open ? (
+            <>
+              <ChevronUp className="mr-1 h-4 w-4" />
+              Hide Icons
+            </>
+          ) : (
+            <>
+              <ChevronDown className="mr-1 h-4 w-4" />
               Choose Icon
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-h-[82vh] max-w-4xl overflow-hidden p-0">
-            <div className="flex h-full flex-col">
-              <DialogHeader className="border-b border-[#E2E8F0] px-5 pt-5 pb-3">
-                <DialogTitle>Choose Service Icon</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-3 px-5 py-4">
-                <p className="text-xs text-[#64748B]">
-                  Showing {filteredIcons.length} of {iconEntries.length} icons
-                  {query.trim() ? " (filtered)" : " (type in search to narrow down)"}.
-                </p>
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#64748B]" />
-                <Input
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  className="pl-9"
-                  placeholder="Search icons..."
-                />
-              </div>
-              {recentIcons.length > 0 ? (
-                <div className="space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-[#64748B]">Recent</p>
-                  <div className="flex flex-wrap gap-2">
-                    {recentIcons.map((iconName) => {
-                      const IconComponent = iconMap.get(iconName);
-                      if (!IconComponent) return null;
-                      return (
-                        <button
-                          key={iconName}
-                          type="button"
-                          onClick={() => {
-                            onChange(iconName);
-                            setOpen(false);
-                          }}
-                          className="inline-flex items-center gap-2 rounded-md border border-[#E2E8F0] bg-white px-3 py-2 text-xs text-[#334155] hover:border-[#0F172A]/20"
-                        >
-                          <IconComponent className="h-4 w-4" />
-                          {iconName}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : null}
-              </div>
-              <div className="min-h-0 flex-1 px-5 pb-5">
-                <div className="h-full max-h-[360px] overflow-y-auto rounded-lg border border-[#E2E8F0] p-3">
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-                  {filteredIcons.map(({ key, IconComponent }) => (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => {
-                        onChange(key);
-                        writeRecentIcon(key);
-                        setOpen(false);
-                      }}
-                      className="inline-flex items-center gap-2 rounded-md border border-[#E2E8F0] bg-white px-2 py-2 text-left text-xs text-[#334155] hover:border-[#0F172A]/20"
-                    >
-                      <IconComponent className="h-4 w-4 shrink-0" />
-                      <span className="truncate">{key}</span>
-                    </button>
-                  ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
+            </>
+          )}
+        </Button>
         <Button type="button" variant="ghost" onClick={() => onChange(null)} className="text-[#64748B]">
           <X className="mr-1 h-4 w-4" />
           Clear
         </Button>
       </div>
+
+      {open ? (
+        <div className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-3">
+          <div className="space-y-3">
+            <p className="text-xs text-[#64748B]">
+              Showing {filteredIcons.length} of {iconEntries.length} icons
+              {query.trim() ? " (filtered)" : " (type in search to narrow down)"}.
+            </p>
+            <div className="sticky top-0 z-10 bg-[#F8FAFC] pb-1">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#64748B]" />
+                <Input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  className="bg-white pl-9"
+                  placeholder="Search icons..."
+                />
+              </div>
+            </div>
+            {recentIcons.length > 0 ? (
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-[#64748B]">Recent</p>
+                <div className="flex max-h-24 flex-wrap gap-2 overflow-y-auto rounded-md bg-white p-2">
+                  {recentIcons.map((iconName) => {
+                    const IconComponent = iconMap.get(iconName);
+                    if (!IconComponent) return null;
+                    return (
+                      <button
+                        key={iconName}
+                        type="button"
+                        onClick={() => onChange(iconName)}
+                        className="inline-flex items-center gap-2 rounded-md border border-[#E2E8F0] bg-white px-3 py-2 text-xs text-[#334155] hover:border-[#0F172A]/20"
+                      >
+                        <IconComponent className="h-4 w-4" />
+                        {iconName}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+            <div className="max-h-[320px] overflow-y-auto rounded-lg border border-[#E2E8F0] bg-white p-2">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+                {filteredIcons.map(({ key, IconComponent }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => {
+                      onChange(key);
+                      writeRecentIcon(key);
+                    }}
+                    className="inline-flex items-center gap-2 rounded-md border border-[#E2E8F0] bg-white px-2 py-2 text-left text-xs text-[#334155] hover:border-[#0F172A]/20"
+                  >
+                    <IconComponent className="h-4 w-4 shrink-0" />
+                    <span className="truncate">{key}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
         {ICON_TONES.map((option) => (

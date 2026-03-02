@@ -13,6 +13,7 @@ type FireEvacuationAlertModalProps = {
   onConfirmSafe: () => void;
   onNeedHelp: () => void;
   onCloseAcknowledged: () => void;
+  onRequestClose?: () => void;
 };
 
 export function FireEvacuationAlertModal({
@@ -23,6 +24,7 @@ export function FireEvacuationAlertModal({
   onConfirmSafe,
   onNeedHelp,
   onCloseAcknowledged,
+  onRequestClose,
 }: FireEvacuationAlertModalProps) {
   const { t, language } = useI18n();
   const hasAcknowledged = status?.acknowledged === true;
@@ -34,7 +36,13 @@ export function FireEvacuationAlertModal({
       : status?.messageEn?.trim() || status?.messageAr?.trim() || t('fire.message');
 
   return (
-    <Modal visible={visible} transparent animationType="fade" presentationStyle="overFullScreen">
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      presentationStyle="overFullScreen"
+      onRequestClose={onRequestClose ?? onCloseAcknowledged}
+    >
       <View style={styles.backdrop}>
         <LinearGradient colors={['#7F1D1D', '#991B1B', '#7C2D12']} style={styles.card}>
           <View style={styles.iconWrap}>

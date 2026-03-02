@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
+import axios from 'axios';
 import { configureHttpAuthHandlers, extractApiErrorMessage } from '../../lib/http';
 import { extractUserIdFromAccessToken } from './jwt';
 import { loginRequest, refreshRequest, verifyLoginTwoFactorRequest } from './service';
@@ -367,7 +368,14 @@ export function useAuthSession(): AuthHookResult {
             userId: updated.userId,
           };
         } catch (error) {
-          // Keep refresh failures silent during active usage; session invalidation is handled centrally.
+          if (axios.isAxiosError(error)) {
+            const status = error.response?.status;
+            const url = String(error.config?.url ?? '').toLowerCase();
+            if ((status === 401 || status === 403) && url.includes('/auth/refresh')) {
+              throw error;
+            }
+          }
+          // Keep transient refresh failures silent during active usage.
           setRefreshError(null);
           return null;
         } finally {
