@@ -21,6 +21,7 @@ import { SendPhoneOtpDto } from './dto/send-phone-otp.dto';
 import { VerifyPhoneOtpDto } from './dto/verify-phone-otp.dto';
 import { UpdateMeProfileDto } from './dto/update-me-profile.dto';
 import { CompleteActivationDto } from './dto/complete-activation.dto';
+import { UpdateActivationDraftDto } from './dto/update-activation-draft.dto';
 import { VerifyLoginTwoFactorDto } from './dto/verify-login-two-factor.dto';
 import { UpdateMeSecurityDto } from './dto/update-me-security.dto';
 import { CreateProfileChangeRequestDto } from './dto/profile-change-request.dto';
@@ -71,6 +72,81 @@ export class AuthService {
       normalized = normalized.slice(1, -1);
     }
     return normalized.replace(/\\n/g, '\n').replace(/\r\n/g, '\n');
+  }
+
+  private buildActivationChecklist(user: {
+    phone: string | null;
+    phoneVerifiedAt: Date | null;
+    nationalIdFileId: string | null;
+    profilePhotoId: string | null;
+    userStatus: UserStatusEnum;
+  }) {
+    const requiresPhoneOtp = Boolean(user.phone);
+    const phoneVerified = Boolean(user.phoneVerifiedAt);
+    const hasNationalId = Boolean(user.nationalIdFileId);
+    const hasProfilePhoto = Boolean(user.profilePhotoId);
+    const mustCompleteActivation = user.userStatus !== UserStatusEnum.ACTIVE;
+    const canCompleteActivation =
+      mustCompleteActivation &&
+      (!requiresPhoneOtp || phoneVerified) &&
+      hasNationalId &&
+      hasProfilePhoto;
+
+    return {
+      mustCompleteActivation,
+      checklist: {
+        requiresPhoneOtp,
+        phoneVerified,
+        hasNationalId,
+        hasProfilePhoto,
+        canCompleteActivation,
+      },
+    };
+  }
+
+  private formatActivationStatus(user: {
+    id: string;
+    email: string | null;
+    phone: string | null;
+    nameEN: string | null;
+    nameAR: string | null;
+    userStatus: UserStatusEnum;
+    phoneVerifiedAt: Date | null;
+    nationalIdFileId: string | null;
+    profilePhotoId: string | null;
+  }) {
+    const computed = this.buildActivationChecklist(user);
+    return {
+      user: {
+        id: user.id,
+        email: user.email,
+        phone: user.phone,
+        nameEN: user.nameEN,
+        nameAR: user.nameAR,
+        userStatus: user.userStatus,
+        nationalIdFileId: user.nationalIdFileId,
+        profilePhotoId: user.profilePhotoId,
+      },
+      mustCompleteActivation: computed.mustCompleteActivation,
+      checklist: computed.checklist,
+    };
+  }
+
+  private async assertActivationFileCategory(
+    fileId: string,
+    expected: $Enums.FileCategory,
+    reasonCode: 'NATIONAL_ID_REQUIRED' | 'PROFILE_PHOTO_REQUIRED',
+  ): Promise<void> {
+    const file = await this.prisma.file.findUnique({
+      where: { id: fileId },
+      select: { id: true, category: true },
+    });
+    if (!file || file.category !== expected) {
+      throw new BadRequestException({
+        message: reasonCode === 'NATIONAL_ID_REQUIRED' ? 'Invalid national ID file' : 'Invalid profile photo file',
+        reasonCode,
+      });
+    }
   }
 
   private async getFirebaseAuthClient(): Promise<FirebaseAuth> {
@@ -1193,39 +1269,102 @@ export class AuthService {
     });
 
     if (!user) throw new NotFoundException('User not found');
+    return this.formatActivationStatus(user);
+  }
 
-    const requiresPhoneOtp = Boolean(user.phone);
-    const phoneVerified = Boolean(user.phoneVerifiedAt);
-    const hasNationalId = Boolean(user.nationalIdFileId);
-    const hasProfilePhoto = Boolean(user.profilePhotoId);
-    const mustCompleteActivation = user.userStatus !== UserStatusEnum.ACTIVE;
-
-    const canCompleteActivation =
-      mustCompleteActivation &&
-      (!requiresPhoneOtp || phoneVerified) &&
-      hasNationalId &&
-      hasProfilePhoto;
-
-    return {
-      user: {
-        id: user.id,
-        email: user.email,
-        phone: user.phone,
-        nameEN: user.nameEN,
-        nameAR: user.nameAR,
-        userStatus: user.userStatus,
-        nationalIdFileId: user.nationalIdFileId,
-        profilePhotoId: user.profilePhotoId,
+  async updateActivationDraft(userId: string, dto: UpdateActivationDraftDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        nameEN: true,
+        nameAR: true,
+        userStatus: true,
+        phoneVerifiedAt: true,
+        nationalIdFileId: true,
+        profilePhotoId: true,
       },
-      mustCompleteActivation,
-      checklist: {
-        requiresPhoneOtp,
-        phoneVerified,
-        hasNationalId,
-        hasProfilePhoto,
-        canCompleteActivation,
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    if (user.userStatus === UserStatusEnum.SUSPENDED) {
+      throw new ForbiddenException('Account is suspended');
+    }
+    if (user.userStatus === UserStatusEnum.DISABLED) {
+      throw new ForbiddenException('Account is disabled');
+    }
+
+    const updateData: { nationalIdFileId?: string; profilePhotoId?: string } = {};
+
+    if (dto.nationalIdFileId !== undefined) {
+      await this.assertActivationFileCategory(
+        dto.nationalIdFileId,
+        $Enums.FileCategory.NATIONAL_ID,
+        'NATIONAL_ID_REQUIRED',
+      );
+      const conflict = await this.prisma.user.findFirst({
+        where: {
+          id: { not: userId },
+          nationalIdFileId: dto.nationalIdFileId,
+        },
+        select: { id: true },
+      });
+      if (conflict) {
+        throw new BadRequestException({
+          message: 'Provided national ID file is already linked to another account',
+          reasonCode: 'NATIONAL_ID_REQUIRED',
+        });
+      }
+      updateData.nationalIdFileId = dto.nationalIdFileId;
+    }
+
+    if (dto.profilePhotoId !== undefined) {
+      await this.assertActivationFileCategory(
+        dto.profilePhotoId,
+        $Enums.FileCategory.PROFILE_PHOTO,
+        'PROFILE_PHOTO_REQUIRED',
+      );
+      const conflict = await this.prisma.user.findFirst({
+        where: {
+          id: { not: userId },
+          profilePhotoId: dto.profilePhotoId,
+        },
+        select: { id: true },
+      });
+      if (conflict) {
+        throw new BadRequestException({
+          message: 'Provided profile photo is already linked to another account',
+          reasonCode: 'PROFILE_PHOTO_REQUIRED',
+        });
+      }
+      updateData.profilePhotoId = dto.profilePhotoId;
+    }
+
+    if (Object.keys(updateData).length > 0) {
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: updateData,
+      });
+    }
+
+    const fresh = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        phone: true,
+        nameEN: true,
+        nameAR: true,
+        userStatus: true,
+        phoneVerifiedAt: true,
+        nationalIdFileId: true,
+        profilePhotoId: true,
       },
-    };
+    });
+    if (!fresh) throw new NotFoundException('User not found');
+    return this.formatActivationStatus(fresh);
   }
 
   async completeActivation(userId: string, dto: CompleteActivationDto) {
@@ -1233,9 +1372,14 @@ export class AuthService {
       where: { id: userId },
       select: {
         id: true,
+        email: true,
+        nameEN: true,
+        nameAR: true,
         userStatus: true,
         phone: true,
         phoneVerifiedAt: true,
+        nationalIdFileId: true,
+        profilePhotoId: true,
       },
     });
 
@@ -1246,6 +1390,13 @@ export class AuthService {
     }
     if (user.userStatus === UserStatusEnum.DISABLED) {
       throw new ForbiddenException('Account is disabled');
+    }
+
+    if (!dto.newPassword || dto.newPassword.length < 8) {
+      throw new BadRequestException({
+        message: 'Password must be at least 8 characters',
+        reasonCode: 'PASSWORD_INVALID',
+      });
     }
 
     const [nationalIdFile, profilePhotoFile] = await Promise.all([
@@ -1260,13 +1411,19 @@ export class AuthService {
     ]);
 
     if (!nationalIdFile || nationalIdFile.category !== $Enums.FileCategory.NATIONAL_ID) {
-      throw new BadRequestException('Invalid national ID file');
+      throw new BadRequestException({
+        message: 'Invalid national ID file',
+        reasonCode: 'NATIONAL_ID_REQUIRED',
+      });
     }
     if (
       !profilePhotoFile ||
       profilePhotoFile.category !== $Enums.FileCategory.PROFILE_PHOTO
     ) {
-      throw new BadRequestException('Invalid profile photo file');
+      throw new BadRequestException({
+        message: 'Invalid profile photo file',
+        reasonCode: 'PROFILE_PHOTO_REQUIRED',
+      });
     }
 
     const fileConflict = await this.prisma.user.findFirst({
@@ -1286,9 +1443,36 @@ export class AuthService {
     }
 
     if (user.phone && !user.phoneVerifiedAt) {
-      throw new BadRequestException(
-        'Phone verification is required before activation',
-      );
+      throw new BadRequestException({
+        message: 'Phone verification is required before activation',
+        reasonCode: 'PHONE_OTP_REQUIRED',
+      });
+    }
+
+    const precheck = this.buildActivationChecklist({
+      phone: user.phone,
+      phoneVerifiedAt: user.phoneVerifiedAt,
+      nationalIdFileId: dto.nationalIdFileId,
+      profilePhotoId: dto.profilePhotoId,
+      userStatus: user.userStatus,
+    });
+    if (!precheck.checklist.hasNationalId) {
+      throw new BadRequestException({
+        message: 'National ID file is required before activation',
+        reasonCode: 'NATIONAL_ID_REQUIRED',
+      });
+    }
+    if (!precheck.checklist.hasProfilePhoto) {
+      throw new BadRequestException({
+        message: 'Profile photo is required before activation',
+        reasonCode: 'PROFILE_PHOTO_REQUIRED',
+      });
+    }
+    if (precheck.checklist.requiresPhoneOtp && !precheck.checklist.phoneVerified) {
+      throw new BadRequestException({
+        message: 'Phone verification is required before activation',
+        reasonCode: 'PHONE_OTP_REQUIRED',
+      });
     }
 
     const passwordHash = await bcrypt.hash(dto.newPassword, 12);

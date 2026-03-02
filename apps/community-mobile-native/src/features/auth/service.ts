@@ -7,6 +7,7 @@ import type {
   RefreshResponse,
   SignupPayload,
   SignupResponse,
+  UpdateActivationDraftPayload,
   VerifyLoginTwoFactorPayload,
 } from './types';
 
@@ -128,5 +129,21 @@ export async function completeActivationRequest(
       Authorization: `Bearer ${accessToken}`,
     },
   });
+  return response.data;
+}
+
+export async function updateActivationDraftRequest(
+  accessToken: string,
+  payload: UpdateActivationDraftPayload,
+): Promise<ActivationStatusResponse> {
+  const response = await http.patch<ActivationStatusResponse>(
+    '/auth/activation/draft',
+    payload,
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
   return response.data;
 }

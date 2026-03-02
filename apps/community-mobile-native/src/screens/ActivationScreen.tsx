@@ -16,6 +16,7 @@ import {
   completeActivationRequest,
   getActivationStatusRequest,
   sendPhoneOtpRequest,
+  updateActivationDraftRequest,
   verifyPhoneOtpRequest,
 } from '../features/auth/service';
 import { pickAndUploadFileByPurpose } from '../features/files/service';
@@ -90,7 +91,7 @@ export function ActivationScreen({
 
   const requiresPhoneOtp = Boolean(status?.checklist.requiresPhoneOtp);
   const phoneVerified = Boolean(status?.checklist.phoneVerified);
-  const hasDocs = Boolean(nationalIdFileId && profilePhotoId);
+  const hasDocs = Boolean(status?.checklist.hasNationalId && status?.checklist.hasProfilePhoto);
 
   const stepMeta = useMemo(() => {
     if (!requiresPhoneOtp) {
@@ -108,21 +109,44 @@ export function ActivationScreen({
     return { total: 4, current: map[currentStep] };
   }, [currentStep, requiresPhoneOtp]);
 
-  const canSubmitActivation = useMemo(() => {
-    if (!status) return false;
-    if (!hasDocs) return false;
-    if (requiresPhoneOtp && !phoneVerified) return false;
-    if (newPassword.length < 8) return false;
-    if (newPassword !== confirmPassword) return false;
-    return true;
-  }, [
-    confirmPassword,
-    hasDocs,
-    newPassword,
-    phoneVerified,
-    requiresPhoneOtp,
-    status,
-  ]);
+  const activationBlocker = useMemo(() => {
+    if (!status) return 'Activation status is loading';
+    if (!status.checklist.hasNationalId) return 'Upload National ID first';
+    if (!status.checklist.hasProfilePhoto) return 'Upload Profile Photo first';
+    if (status.checklist.requiresPhoneOtp && !status.checklist.phoneVerified) {
+      return 'Verify your phone OTP first';
+    }
+    if (newPassword.length < 8) return 'Password must be at least 8 characters';
+    if (newPassword !== confirmPassword) return 'Passwords do not match';
+    return null;
+  }, [confirmPassword, newPassword, status]);
+
+  const applyStatus = useCallback((result: ActivationStatus) => {
+    setStatus(result);
+    setNationalIdFileId(result.user.nationalIdFileId ?? null);
+    setProfilePhotoId(result.user.profilePhotoId ?? null);
+    if (result.checklist.phoneVerified) {
+      setCurrentStep('password');
+      return;
+    }
+    if (
+      !result.checklist.requiresPhoneOtp &&
+      result.checklist.hasNationalId &&
+      result.checklist.hasProfilePhoto
+    ) {
+      setCurrentStep('password');
+      return;
+    }
+    if (
+      result.checklist.hasNationalId &&
+      result.checklist.hasProfilePhoto &&
+      result.checklist.requiresPhoneOtp
+    ) {
+      setCurrentStep((prev) => (prev === 'phone-otp' ? prev : 'phone-confirm'));
+      return;
+    }
+    setCurrentStep('documents');
+  }, []);
 
   const loadStatus = useCallback(async () => {
     setIsLoading(true);
@@ -130,24 +154,13 @@ export function ActivationScreen({
       const result = (await getActivationStatusRequest(
         session.accessToken,
       )) as ActivationStatus;
-      setStatus(result);
-      setNationalIdFileId(result.user.nationalIdFileId ?? null);
-      setProfilePhotoId(result.user.profilePhotoId ?? null);
-      if (result.checklist.phoneVerified) {
-        setCurrentStep('password');
-      } else if (!result.checklist.requiresPhoneOtp && result.checklist.hasNationalId && result.checklist.hasProfilePhoto) {
-        setCurrentStep('password');
-      } else if (result.checklist.hasNationalId && result.checklist.hasProfilePhoto && result.checklist.requiresPhoneOtp) {
-        setCurrentStep((prev) => (prev === 'phone-otp' ? prev : 'phone-confirm'));
-      } else {
-        setCurrentStep('documents');
-      }
+      applyStatus(result);
     } catch (error: any) {
       toast.error('Activation status failed', error?.message ?? 'Try again.');
     } finally {
       setIsLoading(false);
     }
-  }, [session.accessToken, toast]);
+  }, [applyStatus, session.accessToken, toast]);
 
   useEffect(() => {
     void loadStatus();
@@ -170,7 +183,10 @@ export function ActivationScreen({
         'national-id',
       );
       if (!uploaded) return;
-      setNationalIdFileId(uploaded.id);
+      const updated = await updateActivationDraftRequest(session.accessToken, {
+        nationalIdFileId: uploaded.id,
+      });
+      applyStatus(updated as ActivationStatus);
       toast.success('Document uploaded', 'National ID uploaded successfully.');
     } catch (error: any) {
       toast.error('Upload failed', error?.message ?? 'Failed to upload document.');
@@ -184,7 +200,10 @@ export function ActivationScreen({
         'profile-photo',
       );
       if (!uploaded) return;
-      setProfilePhotoId(uploaded.id);
+      const updated = await updateActivationDraftRequest(session.accessToken, {
+        profilePhotoId: uploaded.id,
+      });
+      applyStatus(updated as ActivationStatus);
       toast.success('Photo uploaded', 'Profile photo uploaded successfully.');
     } catch (error: any) {
       toast.error('Upload failed', error?.message ?? 'Failed to upload photo.');
@@ -285,16 +304,16 @@ export function ActivationScreen({
 
   const submitActivation = async () => {
     if (!status) return;
-    if (!canSubmitActivation) {
-      toast.error('Missing steps', 'Complete required activation steps first.');
+    if (activationBlocker) {
+      toast.error('Cannot complete activation', activationBlocker);
       return;
     }
 
     setIsSubmitting(true);
     try {
       await completeActivationRequest(session.accessToken, {
-        nationalIdFileId: nationalIdFileId!,
-        profilePhotoId: profilePhotoId!,
+        nationalIdFileId: status.user.nationalIdFileId!,
+        profilePhotoId: status.user.profilePhotoId!,
         newPassword,
         nameEN: status.user.nameEN || undefined,
         nameAR: status.user.nameAR || undefined,
@@ -487,20 +506,15 @@ export function ActivationScreen({
             {confirmPassword.length > 0 && newPassword !== confirmPassword ? (
               <Text style={styles.todo}>Passwords do not match</Text>
             ) : null}
-            {!hasDocs ? (
-              <Text style={styles.todo}>Upload both National ID and Profile Photo first</Text>
-            ) : null}
-            {requiresPhoneOtp && !phoneVerified ? (
-              <Text style={styles.todo}>Verify your phone OTP first</Text>
-            ) : null}
+            {activationBlocker ? <Text style={styles.todo}>{activationBlocker}</Text> : null}
             <Pressable
               style={[
                 styles.submitButton,
                 { backgroundColor: brandPrimary },
-                (!canSubmitActivation || isSubmitting) && styles.submitButtonDisabled,
+                isSubmitting && styles.submitButtonDisabled,
               ]}
               onPress={submitActivation}
-              disabled={!canSubmitActivation || isSubmitting}
+              disabled={isSubmitting}
             >
               {isSubmitting ? (
                 <ActivityIndicator size="small" color="#fff" />

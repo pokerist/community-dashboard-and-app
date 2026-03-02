@@ -21,6 +21,7 @@ import { SendPhoneOtpDto } from './dto/send-phone-otp.dto';
 import { VerifyPhoneOtpDto } from './dto/verify-phone-otp.dto';
 import { UpdateMeProfileDto } from './dto/update-me-profile.dto';
 import { CompleteActivationDto } from './dto/complete-activation.dto';
+import { UpdateActivationDraftDto } from './dto/update-activation-draft.dto';
 import { VerifyLoginTwoFactorDto } from './dto/verify-login-two-factor.dto';
 import { UpdateMeSecurityDto } from './dto/update-me-security.dto';
 import {
@@ -215,5 +216,16 @@ export class AuthController {
   @ApiBearerAuth()
   completeActivation(@Body() dto: CompleteActivationDto, @Request() req: any) {
     return this.authService.completeActivation(req.user.id, dto);
+  }
+
+  @Patch('activation/draft')
+  @ApiOperation({ summary: 'Save activation draft files for current user' })
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  updateActivationDraft(
+    @Body() dto: UpdateActivationDraftDto,
+    @Request() req: any,
+  ) {
+    return this.authService.updateActivationDraft(req.user.id, dto);
   }
 }

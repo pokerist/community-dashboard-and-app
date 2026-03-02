@@ -79,6 +79,11 @@ export type CompleteActivationPayload = {
   nameAR?: string;
 };
 
+export type UpdateActivationDraftPayload = {
+  nationalIdFileId?: string;
+  profilePhotoId?: string;
+};
+
 export type SignupResponse = {
   id: string;
   status?: string;
