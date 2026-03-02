@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import axios from 'axios';
+import Ionicons from '@expo/vector-icons/Ionicons';
 import {
   ActivityIndicator,
   Pressable,
@@ -84,6 +85,8 @@ export function ActivationScreen({
   const [otpSecondsLeft, setOtpSecondsLeft] = useState(0);
   const [confirmationResult, setConfirmationResult] =
     useState<any | null>(null);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   const requiresPhoneOtp = Boolean(status?.checklist.requiresPhoneOtp);
   const phoneVerified = Boolean(status?.checklist.phoneVerified);
@@ -436,24 +439,59 @@ export function ActivationScreen({
             <Text style={styles.sectionTitle}>
               {requiresPhoneOtp ? 'Step 4: Change Password' : 'Step 2: Change Password'}
             </Text>
-            <TextInput
-              style={styles.input}
-              value={newPassword}
-              onChangeText={setNewPassword}
-              secureTextEntry
-              placeholder="New password"
-              placeholderTextColor={akColors.textSoft}
-            />
-            <TextInput
-              style={styles.input}
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-              secureTextEntry
-              placeholder="Confirm password"
-              placeholderTextColor={akColors.textSoft}
-            />
+            <View style={styles.passwordField}>
+              <TextInput
+                style={styles.passwordInput}
+                value={newPassword}
+                onChangeText={setNewPassword}
+                secureTextEntry={!showNewPassword}
+                placeholder="New password (min 8 characters)"
+                placeholderTextColor={akColors.textSoft}
+              />
+              <Pressable
+                onPress={() => setShowNewPassword((v) => !v)}
+                style={styles.eyeButton}
+                hitSlop={8}
+              >
+                <Ionicons
+                  name={showNewPassword ? 'eye-off-outline' : 'eye-outline'}
+                  size={20}
+                  color={akColors.textMuted}
+                />
+              </Pressable>
+            </View>
+            <View style={styles.passwordField}>
+              <TextInput
+                style={styles.passwordInput}
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                secureTextEntry={!showConfirmPassword}
+                placeholder="Confirm password"
+                placeholderTextColor={akColors.textSoft}
+              />
+              <Pressable
+                onPress={() => setShowConfirmPassword((v) => !v)}
+                style={styles.eyeButton}
+                hitSlop={8}
+              >
+                <Ionicons
+                  name={showConfirmPassword ? 'eye-off-outline' : 'eye-outline'}
+                  size={20}
+                  color={akColors.textMuted}
+                />
+              </Pressable>
+            </View>
+            {newPassword.length > 0 && newPassword.length < 8 ? (
+              <Text style={styles.todo}>Password must be at least 8 characters</Text>
+            ) : null}
             {confirmPassword.length > 0 && newPassword !== confirmPassword ? (
               <Text style={styles.todo}>Passwords do not match</Text>
+            ) : null}
+            {!hasDocs ? (
+              <Text style={styles.todo}>Upload both National ID and Profile Photo first</Text>
+            ) : null}
+            {requiresPhoneOtp && !phoneVerified ? (
+              <Text style={styles.todo}>Verify your phone OTP first</Text>
             ) : null}
             <Pressable
               style={[
@@ -579,6 +617,29 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: akColors.text,
     backgroundColor: '#fff',
+  },
+  passwordField: {
+    borderWidth: 1,
+    borderColor: akColors.border,
+    borderRadius: akRadius.md,
+    paddingHorizontal: 12,
+    minHeight: 44,
+    backgroundColor: '#fff',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  passwordInput: {
+    flex: 1,
+    fontSize: 14,
+    color: akColors.text,
+    paddingVertical: 10,
+  },
+  eyeButton: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   submitButton: {
     backgroundColor: akColors.primary,
