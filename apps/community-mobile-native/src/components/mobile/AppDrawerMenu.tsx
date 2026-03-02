@@ -143,8 +143,8 @@ export function AppDrawerMenu({
       : []),
     { key: 'qr', label: t('drawer.qrCodes'), icon: 'qrcode', iconSet: 'mc', route: 'Access', disabled: preConstruction || !allowQr },
     { key: 'bookings', label: t('drawer.bookings'), icon: 'calendar-outline', route: 'Bookings', disabled: preConstruction || !allowBookings },
-    { key: 'requests', label: t('drawer.requests'), icon: 'file-tray-outline', route: 'Requests', disabled: preConstruction || !allowRequests },
-    { key: 'services', label: t('drawer.services'), icon: 'construct-outline', route: 'Services', disabled: preConstruction || !allowServices },
+    { key: 'requests', label: t('drawer.requests'), icon: 'file-tray-outline', route: 'Requests', disabled: !allowRequests },
+    { key: 'services', label: t('drawer.services'), icon: 'construct-outline', route: 'Services', disabled: !allowServices },
     { key: 'complaints', label: t('drawer.complaints'), icon: 'chatbubble-ellipses-outline', route: 'Complaints', disabled: !allowComplaints },
     ...(allowUtilities
       ? ([{ key: 'utilities', label: t('drawer.trackUtility'), icon: 'speedometer-outline', route: 'Utilities', disabled: false }] as DrawerMenuItem[])

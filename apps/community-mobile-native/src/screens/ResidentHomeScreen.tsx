@@ -424,11 +424,11 @@ export function ResidentHomeScreen({
             canBookFacilitiesByUnit
           );
         case 'services':
-          return !isPreDeliveryUnit && (featureFlags?.canUseServices ?? true);
+          return featureFlags?.canUseServices ?? true;
         case 'complaints':
           return featureFlags?.canUseComplaints ?? true;
         case 'requests':
-          return !isPreDeliveryUnit && (featureFlags?.canUseRequests ?? true);
+          return featureFlags?.canUseRequests ?? true;
         case 'smart-home':
           return true;
         case 'finance':
