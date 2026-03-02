@@ -559,9 +559,33 @@ export class UsersService {
       );
     }
 
-    return this.prisma.resident.create({
-      data,
-      include: { user: true },
+    return this.prisma.$transaction(async (tx) => {
+      const resident = await tx.resident.create({
+        data,
+        include: { user: true },
+      });
+
+      const communityRole = await tx.role.findUnique({
+        where: { name: 'COMMUNITY_USER' },
+        select: { id: true },
+      });
+      if (communityRole) {
+        await tx.userRole.upsert({
+          where: {
+            userId_roleId: {
+              userId: data.userId,
+              roleId: communityRole.id,
+            },
+          },
+          create: {
+            userId: data.userId,
+            roleId: communityRole.id,
+          },
+          update: {},
+        });
+      }
+
+      return resident;
     });
   }
 

@@ -74,6 +74,49 @@ export class AuthService {
     return normalized.replace(/\\n/g, '\n').replace(/\r\n/g, '\n');
   }
 
+  private async ensureDefaultCommunityRoleForUser(userId: string): Promise<boolean> {
+    const existingRoleCount = await this.prisma.userRole.count({
+      where: { userId },
+    });
+    if (existingRoleCount > 0) return false;
+
+    const userContext = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        resident: { select: { id: true } },
+        owner: { select: { id: true } },
+        tenant: { select: { id: true } },
+        unitAccesses: {
+          where: { status: 'ACTIVE' },
+          select: { id: true },
+          take: 1,
+        },
+      },
+    });
+    if (!userContext) return false;
+
+    const isCommunityUser =
+      Boolean(userContext.resident) ||
+      Boolean(userContext.owner) ||
+      Boolean(userContext.tenant) ||
+      userContext.unitAccesses.length > 0;
+    if (!isCommunityUser) return false;
+
+    const communityRole = await this.prisma.role.findUnique({
+      where: { name: 'COMMUNITY_USER' },
+      select: { id: true },
+    });
+    if (!communityRole) return false;
+
+    await this.prisma.userRole.create({
+      data: {
+        userId,
+        roleId: communityRole.id,
+      },
+    });
+    return true;
+  }
+
   private buildActivationChecklist(user: {
     phone: string | null;
     phoneVerifiedAt: Date | null;
@@ -289,24 +332,33 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    const rolePatched = await this.ensureDefaultCommunityRoleForUser(user.id);
+    const authUser = rolePatched
+      ? await this.prisma.user.findUnique({
+          where: { id: user.id },
+          include: { roles: { include: { role: true } } },
+        })
+      : user;
+    if (!authUser) throw new UnauthorizedException('Invalid credentials');
+
     // Skip unit access check for admin roles (SUPER_ADMIN, MANAGER)
-    const isAdmin = user.roles.some((ur) =>
+    const isAdmin = authUser.roles.some((ur) =>
       ['SUPER_ADMIN', 'MANAGER'].includes(ur.role.name),
     );
 
     if (!isAdmin) {
       let hasActiveAccess = await this.prisma.unitAccess.findFirst({
         where: {
-          userId: user.id,
+          userId: authUser.id,
           status: 'ACTIVE',
         },
       });
 
       if (!hasActiveAccess) {
-        const activation = await this.ensureAuthorizedAccessActivated(user.id);
+        const activation = await this.ensureAuthorizedAccessActivated(authUser.id);
         hasActiveAccess = await this.prisma.unitAccess.findFirst({
           where: {
-            userId: user.id,
+            userId: authUser.id,
             status: 'ACTIVE',
           },
         });
@@ -323,17 +375,18 @@ export class AuthService {
     }
 
     const shouldUseTwoFactor =
-      user.twoFactorEnabled === true && user.userStatus === UserStatusEnum.ACTIVE;
+      authUser.twoFactorEnabled === true &&
+      authUser.userStatus === UserStatusEnum.ACTIVE;
     if (shouldUseTwoFactor) {
-      return this.beginLoginTwoFactorChallenge(user);
+      return this.beginLoginTwoFactorChallenge(authUser);
     }
 
-    const tokens = await this.generateTokens(user);
-    await this.markSuccessfulLogin(user.id);
+    const tokens = await this.generateTokens(authUser);
+    await this.markSuccessfulLogin(authUser.id);
     return {
       ...tokens,
-      userStatus: user.userStatus,
-      mustCompleteActivation: user.userStatus !== 'ACTIVE',
+      userStatus: authUser.userStatus,
+      mustCompleteActivation: authUser.userStatus !== 'ACTIVE',
     };
   }
 
@@ -1501,6 +1554,7 @@ export class AuthService {
         },
       });
     });
+    await this.ensureDefaultCommunityRoleForUser(userId);
 
     return {
       message: 'Activation completed successfully',
