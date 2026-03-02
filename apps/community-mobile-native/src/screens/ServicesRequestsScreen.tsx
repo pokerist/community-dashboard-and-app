@@ -102,6 +102,50 @@ function eligibilityLabel(value?: string | null): string {
   }
 }
 
+function fallbackServiceIcon(category?: string | null, isRequestsMode = false): keyof typeof Ionicons.glyphMap {
+  const key = String(category ?? "").toUpperCase();
+  if (isRequestsMode || key === "REQUESTS" || key === "ADMIN") return "file-tray-outline";
+  if (key === "MAINTENANCE") return "construct-outline";
+  if (key === "SECURITY") return "shield-checkmark-outline";
+  if (key === "FITNESS") return "barbell-outline";
+  if (key === "RECREATION" || key === "FACILITIES") return "calendar-outline";
+  return "apps-outline";
+}
+
+function resolveIconTone(
+  tone?: string | null,
+  seed?: string | null,
+): { bubbleBg: string; iconColor: string } {
+  const paletteMap: Record<string, { bubbleBg: string; iconColor: string }> = {
+    blue: { bubbleBg: "#EAF2FF", iconColor: "#2563EB" },
+    orange: { bubbleBg: "#FFF2E8", iconColor: "#EA580C" },
+    purple: { bubbleBg: "#F3ECFF", iconColor: "#7C3AED" },
+    green: { bubbleBg: "#EAF9EF", iconColor: "#16A34A" },
+    pink: { bubbleBg: "#FDEAF4", iconColor: "#DB2777" },
+    teal: { bubbleBg: "#E8FAFA", iconColor: "#0F766E" },
+  };
+
+  if (tone && tone !== "auto" && paletteMap[tone]) return paletteMap[tone];
+
+  const deterministic = ["blue", "orange", "purple", "green", "pink", "teal"];
+  const hash = String(seed ?? "")
+    .split("")
+    .reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  return paletteMap[deterministic[hash % deterministic.length]];
+}
+
+function resolveServiceIcon(
+  iconName: string | null | undefined,
+  category: string | null | undefined,
+  isRequestsMode: boolean,
+): keyof typeof Ionicons.glyphMap {
+  const requested = String(iconName ?? "").trim() as keyof typeof Ionicons.glyphMap;
+  if (requested && Object.prototype.hasOwnProperty.call(Ionicons.glyphMap, requested)) {
+    return requested;
+  }
+  return fallbackServiceIcon(category, isRequestsMode);
+}
+
 function canUserCancelTicket(status?: string | null): boolean {
   return String(status ?? '').toUpperCase() === 'NEW';
 }
@@ -254,15 +298,6 @@ export function ServicesRequestsScreen({
       return hay.includes(q);
     });
   }, [searchQuery, services]);
-
-  const urgentServices = useMemo(
-    () =>
-      filteredServices.filter((service) => {
-        if (isRequestsMode) return false;
-        return Boolean(service.isUrgent);
-      }),
-    [filteredServices, isRequestsMode],
-  );
 
   const setFieldText = useCallback((fieldId: string, value: string) => {
     setFieldTextDrafts((prev) => ({ ...prev, [fieldId]: value }));
@@ -570,19 +605,24 @@ export function ServicesRequestsScreen({
         ]}
       >
       <View style={styles.headerCard}>
-        <Text style={styles.headerTitle}>{isRequestsMode ? 'Requests' : 'Services'}</Text>
-        <Text style={styles.headerSubtitle}>
-          {isRequestsMode
-            ? 'Permits and administrative requests for your unit'
-            : 'Browse available services and submit requests for your unit'}
-        </Text>
+        <View style={styles.headerTopRow}>
+          <View style={styles.headerBackChip}>
+            <Ionicons name="arrow-back" size={18} color={akColors.text} />
+          </View>
+          <View style={styles.flex}>
+            <Text style={styles.headerTitle}>{isRequestsMode ? 'Requests' : 'Services'}</Text>
+            <Text style={styles.headerSubtitle}>
+              {isRequestsMode ? 'Submit your requests' : 'Submit your service tickets'}
+            </Text>
+          </View>
+        </View>
         <View style={styles.searchShell}>
           <Ionicons name="search-outline" size={18} color={akColors.textMuted} />
           <TextInput
             value={searchQuery}
             onChangeText={setSearchQuery}
             style={styles.searchInput}
-            placeholder={isRequestsMode ? 'Search request types...' : 'Search available services...'}
+            placeholder={isRequestsMode ? 'Search requests...' : 'Search services...'}
             placeholderTextColor={akColors.textSoft}
           />
         </View>
@@ -640,97 +680,43 @@ export function ServicesRequestsScreen({
                 </Text>
               </View>
             ) : null}
-            {!isRequestsMode && urgentServices.length > 0 ? (
-              <View style={styles.urgentLane}>
-                <View style={styles.urgentLaneHeader}>
-                  <Text style={styles.urgentLaneTitle}>Urgent Services</Text>
-                  <Text style={styles.urgentLaneSub}>Management will contact you within 5 minutes.</Text>
-                </View>
-                <View style={styles.urgentLaneChips}>
-                  {urgentServices.map((service) => {
-                    const active = service.id === selectedServiceId;
-                    return (
-                      <Pressable
-                        key={`urgent-${service.id}`}
-                        onPress={() => setSelectedServiceId(service.id)}
-                        style={[styles.urgentChip, active && styles.urgentChipActive]}
-                      >
-                        <Ionicons
-                          name="flash-outline"
-                          size={14}
-                          color={active ? '#fff' : '#DC2626'}
-                        />
-                        <Text style={[styles.urgentChipText, active && styles.urgentChipTextActive]}>
-                          {service.name}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              </View>
-            ) : null}
             <View style={styles.serviceGrid}>
               {filteredServices.map((service) => {
                 const active = service.id === selectedServiceId;
+                const iconName = resolveServiceIcon(service.iconName, service.category, isRequestsMode);
+                const iconTone = resolveIconTone(service.iconTone, service.id);
                 return (
                   <Pressable
                     key={service.id}
                     onPress={() => setSelectedServiceId(service.id)}
                     style={[
-                      styles.choiceChip,
-                      active && styles.choiceChipActive,
-                      active && {
-                        backgroundColor: palette.primaryDark,
-                        borderColor: palette.primarySoft22,
-                        shadowColor: palette.primaryDark,
-                      },
+                      styles.serviceCard,
+                      active && styles.serviceCardActive,
                     ]}
                   >
-                    <View style={styles.choiceChipTopRow}>
-                      <View style={styles.choiceChipLead}>
+                    <View style={styles.serviceCardTop}>
+                      <View style={[styles.serviceIconBubble, { backgroundColor: iconTone.bubbleBg }]}>
                         <Ionicons
-                          name={isRequestsMode ? 'file-tray-outline' : 'construct-outline'}
-                          size={18}
-                          color={active ? akColors.white : palette.primary}
-                          style={styles.choiceChipIcon}
+                          name={iconName}
+                          size={20}
+                          color={iconTone.iconColor}
                         />
-                        <Text
-                          style={[
-                            styles.choiceChipCategoryText,
-                            active && styles.choiceChipCategoryTextActive,
-                          ]}
-                          numberOfLines={1}
-                        >
-                          {serviceCategoryLabel(service.category)}
-                        </Text>
                       </View>
                       <Ionicons
-                        name={active ? 'checkmark-circle' : 'chevron-forward'}
+                        name={active ? 'checkmark-circle' : 'chevron-forward-outline'}
                         size={16}
-                        color={active ? akColors.white : akColors.textSoft}
+                        color={active ? palette.primary : akColors.textSoft}
                       />
                     </View>
-                    <Text style={[styles.choiceChipTitle, active && styles.choiceChipTitleActive]} numberOfLines={2}>
+                    <Text style={styles.serviceCardTitle} numberOfLines={2}>
                       {service.name}
                     </Text>
-                    <Text style={[styles.choiceChipSub, active && styles.choiceChipSubActive]} numberOfLines={2}>
-                      {service.description?.trim() || 'Tap to review details and continue.'}
+                    <Text style={styles.serviceCardSubtitle} numberOfLines={2}>
+                      {service.description?.trim() || (isRequestsMode ? 'Submit your request details.' : 'Submit a service ticket.')}
                     </Text>
-                    <Text style={[styles.choiceChipMeta, active && styles.choiceChipMetaActive]} numberOfLines={1}>
-                      {eligibilityLabel(service.unitEligibility)}
+                    <Text style={styles.serviceCardMeta} numberOfLines={1}>
+                      {serviceCategoryLabel(service.category)}
                     </Text>
-                    {service.isUrgent ? (
-                      <View style={[styles.urgentTag, active && styles.urgentTagActive]}>
-                        <Ionicons
-                          name="flash-outline"
-                          size={12}
-                          color={active ? '#fff' : '#DC2626'}
-                        />
-                        <Text style={[styles.urgentTagText, active && styles.urgentTagTextActive]}>
-                          Urgent
-                        </Text>
-                      </View>
-                    ) : null}
                   </Pressable>
                 );
               })}
@@ -1217,31 +1203,46 @@ const styles = StyleSheet.create({
     backgroundColor: akColors.bg,
   },
   headerCard: {
-    backgroundColor: akColors.surface,
-    borderRadius: 22,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: akColors.border,
-    paddingHorizontal: 18,
-    paddingVertical: 18,
-    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 10,
     ...akShadow.soft,
+  },
+  headerTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  headerBackChip: {
+    width: 38,
+    height: 38,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    backgroundColor: "#F8FAFC",
+    alignItems: "center",
+    justifyContent: "center",
   },
   headerTitle: {
     color: akColors.text,
-    fontSize: 22,
+    fontSize: 28,
     fontWeight: '700',
   },
   headerSubtitle: {
     color: akColors.textMuted,
-    fontSize: 13,
+    fontSize: 14,
   },
   searchShell: {
-    borderRadius: 14,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: akColors.border,
-    backgroundColor: akColors.surfaceMuted,
+    backgroundColor: "#F1F5F9",
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 11,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -1321,152 +1322,58 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 16,
   },
-  urgentLane: {
-    borderWidth: 1,
-    borderColor: 'rgba(220,38,38,0.18)',
-    borderRadius: 14,
-    backgroundColor: 'rgba(254,242,242,0.9)',
-    padding: 10,
-    gap: 8,
-  },
-  urgentLaneHeader: {
-    gap: 2,
-  },
-  urgentLaneTitle: {
-    color: '#B91C1C',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  urgentLaneSub: {
-    color: '#7F1D1D',
-    fontSize: 11,
-  },
-  urgentLaneChips: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  urgentChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(220,38,38,0.28)',
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    backgroundColor: '#fff',
-  },
-  urgentChipActive: {
-    backgroundColor: '#DC2626',
-    borderColor: '#DC2626',
-  },
-  urgentChipText: {
-    color: '#B91C1C',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  urgentChipTextActive: {
-    color: '#fff',
-  },
-  choiceChip: {
+  serviceCard: {
     width: '48%',
     borderWidth: 1,
-    borderColor: 'rgba(226,232,240,0.84)',
-    borderRadius: 20,
+    borderColor: '#E2E8F0',
+    borderRadius: 18,
     padding: 14,
-    gap: 8,
-    backgroundColor: 'rgba(255,255,255,0.88)',
-    minHeight: 132,
+    gap: 7,
+    backgroundColor: '#FFFFFF',
+    minHeight: 165,
     shadowColor: '#0F172A',
     shadowOpacity: 0.05,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
     elevation: 2,
   },
-  choiceChipActive: {
-    backgroundColor: 'rgba(42,62,53,0.94)',
-    borderColor: 'rgba(255,255,255,0.15)',
-    shadowColor: akColors.primaryDark,
-    shadowOpacity: 0.18,
+  serviceCardActive: {
+    borderColor: "rgba(37,99,235,0.38)",
+    shadowColor: "#1D4ED8",
+    shadowOpacity: 0.14,
     elevation: 4,
   },
-  choiceChipTopRow: {
+  serviceCardTop: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 8,
   },
-  choiceChipLead: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    flex: 1,
-    minWidth: 0,
+  serviceIconBubble: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  choiceChipIcon: {
-    opacity: 0.95,
-  },
-  choiceChipCategoryText: {
-    color: akColors.textMuted,
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-    flexShrink: 1,
-  },
-  choiceChipCategoryTextActive: {
-    color: 'rgba(255,255,255,0.82)',
-  },
-  choiceChipTitle: {
-    color: akColors.text,
-    fontWeight: '700',
-    fontSize: 14,
-    lineHeight: 18,
-  },
-  choiceChipTitleActive: {
-    color: '#fff',
-  },
-  choiceChipMeta: {
-    color: akColors.textMuted,
-    fontSize: 10,
-    lineHeight: 14,
-  },
-  choiceChipMetaActive: {
-    color: 'rgba(255,255,255,0.88)',
-  },
-  urgentTag: {
-    alignSelf: 'flex-start',
+  serviceCardTitle: {
+    color: "#0F172A",
+    fontWeight: "700",
+    fontSize: 15,
+    lineHeight: 20,
     marginTop: 2,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(220,38,38,0.25)',
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    backgroundColor: '#FEF2F2',
   },
-  urgentTagActive: {
-    borderColor: 'rgba(255,255,255,0.24)',
-    backgroundColor: 'rgba(255,255,255,0.12)',
+  serviceCardSubtitle: {
+    color: "#64748B",
+    fontSize: 12,
+    lineHeight: 17,
+    minHeight: 34,
   },
-  urgentTagText: {
-    color: '#B91C1C',
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  urgentTagTextActive: {
-    color: '#fff',
-  },
-  choiceChipSub: {
-    color: akColors.textMuted,
+  serviceCardMeta: {
+    color: "#475569",
     fontSize: 11,
-    lineHeight: 16,
-  },
-  choiceChipSubActive: {
-    color: 'rgba(255,255,255,0.76)',
+    fontWeight: "600",
+    marginTop: 4,
   },
   serviceInfo: {
     borderWidth: 1,
@@ -1531,8 +1438,8 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   attachmentsHeader: {
-    flexDirection: 'row',
     alignItems: 'center',
+    flexDirection: 'row',
     justifyContent: 'space-between',
     gap: 8,
   },

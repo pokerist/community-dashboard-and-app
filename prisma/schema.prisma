@@ -902,6 +902,8 @@ model Service {
   id              String           @id @default(uuid())
   name            String
   category        ServiceCategory
+  iconName        String?
+  iconTone        String           @default("auto")
   unitEligibility EligibilityType  @default(ALL)
   processingTime  Int?
   description     String?

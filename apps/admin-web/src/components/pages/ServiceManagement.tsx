@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ComponentType } from "react";
 import { Card } from "../ui/card";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -26,7 +26,9 @@ import {
 import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
 import { Switch } from "../ui/switch";
+import { IconPicker } from "../ui/icon-picker";
 import apiClient from "../../lib/api-client";
+import * as IoIcons from "react-icons/io5";
 import {
   errorMessage,
   formatDateTime,
@@ -58,6 +60,8 @@ interface BackendService {
   status: boolean;
   startingPrice?: string | number | null;
   totalRequests?: number | null;
+  iconName?: string | null;
+  iconTone?: string | null;
   createdAt?: string;
   formFields?: Array<{
     id: string;
@@ -189,6 +193,21 @@ function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
+function kebabToPascalIconKey(iconName: string): string {
+  return `Io${iconName
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join("")}`;
+}
+
+function resolveServiceIcon(iconName?: string | null) {
+  if (!iconName) return null;
+  const key = kebabToPascalIconKey(iconName);
+  const icon = (IoIcons as Record<string, ComponentType<{ className?: string }>>)[key];
+  return icon ?? null;
+}
+
 export function ServiceManagement() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -218,6 +237,10 @@ export function ServiceManagement() {
   const [description, setDescription] = useState("");
   const [serviceIsActive, setServiceIsActive] = useState(true);
   const [serviceIsUrgent, setServiceIsUrgent] = useState(false);
+  const [serviceIconName, setServiceIconName] = useState<string | null>(null);
+  const [serviceIconTone, setServiceIconTone] = useState<
+    "auto" | "blue" | "orange" | "purple" | "green" | "pink" | "teal"
+  >("auto");
   const [formFields, setFormFields] = useState<FormField[]>([]);
 
   const [newFieldLabel, setNewFieldLabel] = useState("");
@@ -404,6 +427,8 @@ export function ServiceManagement() {
     setDescription("");
     setServiceIsActive(true);
     setServiceIsUrgent(false);
+    setServiceIconName(null);
+    setServiceIconTone("auto");
     setFormFields([]);
     setEditingServiceId(null);
     setNewFieldLabel("");
@@ -429,6 +454,12 @@ export function ServiceManagement() {
     setDescription(service.description ?? "");
     setServiceIsActive(Boolean(service.status));
     setServiceIsUrgent(Boolean(service.isUrgent));
+    setServiceIconName(service.iconName ?? null);
+    setServiceIconTone(
+      (["auto", "blue", "orange", "purple", "green", "pink", "teal"].includes(String(service.iconTone))
+        ? service.iconTone
+        : "auto") as "auto" | "blue" | "orange" | "purple" | "green" | "pink" | "teal",
+    );
     setFormFields(
       (service.formFields ?? [])
         .slice()
@@ -490,7 +521,7 @@ export function ServiceManagement() {
     const eligibilityApi =
       ELIGIBILITY_OPTIONS.find((e) => e.ui === unitEligibility)?.api ?? "ALL";
 
-    const servicePayload = {
+    const servicePayload: Record<string, unknown> = {
       name: serviceName.trim(),
       category: normalizeServiceCategoryForApi(serviceCategory),
       unitEligibility: eligibilityApi,
@@ -499,7 +530,14 @@ export function ServiceManagement() {
       status: serviceIsActive,
       isUrgent: serviceIsUrgent,
       startingPrice: startingPrice ? String(startingPrice) : undefined,
+      iconTone: serviceIconTone,
     };
+
+    if (editingServiceId) {
+      servicePayload.iconName = serviceIconName ?? null;
+    } else if (serviceIconName) {
+      servicePayload.iconName = serviceIconName;
+    }
 
     if (processingTime && Number.isNaN(Number(processingTime))) {
       toast.error("Processing time must be a number (hours)");
@@ -685,6 +723,16 @@ export function ServiceManagement() {
                         </SelectContent>
                       </Select>
                     </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Service Icon</Label>
+                    <IconPicker
+                      value={serviceIconName}
+                      tone={serviceIconTone}
+                      onChange={setServiceIconName}
+                      onToneChange={setServiceIconTone}
+                    />
                   </div>
 
                   <div className="grid grid-cols-2 gap-4">
@@ -941,7 +989,17 @@ export function ServiceManagement() {
               const requestCount = requestCountsByServiceId.get(service.id) ?? Number(service.totalRequests ?? 0);
               return (
                 <TableRow key={service.id} className="hover:bg-[#F9FAFB]">
-                  <TableCell className="font-medium text-[#1E293B]">{service.name}</TableCell>
+                  <TableCell className="font-medium text-[#1E293B]">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-[#F1F5F9] text-[#334155]">
+                        {(() => {
+                          const IconComponent = resolveServiceIcon(service.iconName);
+                          return IconComponent ? <IconComponent className="h-4 w-4" /> : <Eye className="h-4 w-4" />;
+                        })()}
+                      </span>
+                      <span>{service.name}</span>
+                    </div>
+                  </TableCell>
                   <TableCell>
                     <Badge variant="secondary" className="bg-[#F3F4F6] text-[#1E293B]">
                       {serviceCategoryLabel(service.category)}

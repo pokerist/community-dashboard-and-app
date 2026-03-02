@@ -110,6 +110,8 @@ export type CommunityService = {
   name: string;
   description?: string | null;
   category?: string | null;
+  iconName?: string | null;
+  iconTone?: 'auto' | 'blue' | 'orange' | 'purple' | 'green' | 'pink' | 'teal' | string | null;
   isUrgent?: boolean;
   status?: boolean;
   unitEligibility?: string | null;

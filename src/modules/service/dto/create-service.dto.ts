@@ -9,6 +9,9 @@ import {
   IsBoolean,
   Min,
   IsDecimal,
+  Matches,
+  MaxLength,
+  IsIn,
 } from 'class-validator';
 import { ServiceCategory, EligibilityType } from '@prisma/client';
 import { Type } from 'class-transformer';
@@ -48,4 +51,17 @@ export class CreateServiceDto {
   @IsBoolean()
   @IsOptional()
   isUrgent?: boolean;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(64)
+  @Matches(/^[a-z0-9-]+$/, {
+    message: 'iconName must be a valid kebab-case icon key',
+  })
+  iconName?: string;
+
+  @IsString()
+  @IsOptional()
+  @IsIn(['auto', 'blue', 'orange', 'purple', 'green', 'pink', 'teal'])
+  iconTone?: 'auto' | 'blue' | 'orange' | 'purple' | 'green' | 'pink' | 'teal';
 }
