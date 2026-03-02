@@ -136,6 +136,7 @@ export function ResidentCreatePage({ onBack, onCreated }: ResidentCreatePageProp
     formData.append("file", file);
     const response = await apiClient.post(endpoint, formData, {
       headers: { "Content-Type": "multipart/form-data" },
+      timeout: 120000,
     });
     const fileId = response.data?.id as string | undefined;
     if (!fileId) throw new Error("Upload did not return file id");

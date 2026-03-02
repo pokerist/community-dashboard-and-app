@@ -157,7 +157,7 @@ export default function App() {
 
     const loadBranding = async () => {
       try {
-        const response = await apiClient.get("/system-settings/mobile-app-config");
+        const response = await apiClient.get("/mobile/app-config");
         applyBrandPrimary(response.data?.brand?.primaryColor ?? "");
       } catch {
         // Keep defaults if branding is unavailable.

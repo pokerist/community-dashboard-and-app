@@ -1,4 +1,5 @@
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { NodeHttpHandler } from '@smithy/node-http-handler';
 import type { Express } from 'express';
 import { randomUUID } from 'crypto';
 import { Readable } from 'stream';
@@ -24,6 +25,11 @@ export class S3StorageAdapter implements IFileStorageAdapter {
       region: config.region,
       endpoint: config.endpoint || undefined,
       forcePathStyle: config.forcePathStyle ?? true,
+      requestHandler: new NodeHttpHandler({
+        connectionTimeout: 8_000,
+        socketTimeout: 20_000,
+      }),
+      maxAttempts: 2,
       credentials: {
         accessKeyId: config.accessKeyId,
         secretAccessKey: config.secretAccessKey,
@@ -99,4 +105,3 @@ export class S3StorageAdapter implements IFileStorageAdapter {
     throw new Error('Unsupported S3 response body type');
   }
 }
-
