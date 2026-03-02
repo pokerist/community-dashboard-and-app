@@ -81,6 +81,7 @@ type ProviderState = {
   configured?: boolean;
   enabled?: boolean;
   mockMode?: boolean;
+  reason?: string;
 };
 
 type PushProviderState = ProviderState & {
@@ -92,6 +93,7 @@ type PushProviderState = ProviderState & {
 type ProvidersStatus = {
   email?: ProviderState;
   sms?: ProviderState;
+  smsOtp?: ProviderState;
   push?: PushProviderState;
   runtime?: {
     diagnostics?: {
@@ -534,15 +536,20 @@ export function NotificationCenter() {
   const providerBadgeMeta = useMemo(() => {
     const entries = [
       { key: "email", label: "Email", value: providersStatus.email },
-      { key: "sms", label: "SMS", value: providersStatus.sms },
+      { key: "smsOtp", label: "SMS OTP", value: providersStatus.smsOtp },
+      { key: "sms", label: "SMS Transport", value: providersStatus.sms },
       { key: "push", label: "Push", value: providersStatus.push },
     ];
     return entries.map((entry) => {
       const configured = !!entry.value?.configured;
+      const enabled = entry.value?.enabled;
       const mockMode = !!entry.value?.mockMode;
       let tone = "bg-[#E2E8F0] text-[#475569]";
       let status = "Unknown";
-      if (configured && !mockMode) {
+      if (enabled === false) {
+        tone = "bg-[#F1F5F9] text-[#475569]";
+        status = "Disabled";
+      } else if (configured && !mockMode) {
         tone = "bg-[#DCFCE7] text-[#166534]";
         status = "Live";
       } else if (mockMode) {
@@ -552,7 +559,7 @@ export function NotificationCenter() {
         tone = "bg-[#FEE2E2] text-[#991B1B]";
         status = "Not Configured";
       }
-      return { ...entry, configured, mockMode, tone, status };
+      return { ...entry, configured, enabled, mockMode, tone, status };
     });
   }, [providersStatus]);
 
@@ -572,6 +579,13 @@ export function NotificationCenter() {
       activeTokens,
       latestFailureText,
     };
+  }, [providersStatus]);
+
+  const smsOtpDiagnostics = useMemo(() => {
+    const enabled = providersStatus.smsOtp?.enabled === true;
+    const configured = providersStatus.smsOtp?.configured === true;
+    const reason = String(providersStatus.smsOtp?.reason ?? "UNKNOWN");
+    return { enabled, configured, reason };
   }, [providersStatus]);
 
   const statusOptions = useMemo(() => Array.from(new Set(rows.map((r) => r.status))), [rows]);
@@ -1030,6 +1044,9 @@ export function NotificationCenter() {
         </div>
         <div className="text-xs text-[#475569] rounded-md border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2">
           Push diagnostics: effective provider <strong>{pushDiagnostics.effectiveProvider}</strong>, active device tokens <strong>{pushDiagnostics.activeTokens}</strong>, latest failure <strong>{pushDiagnostics.latestFailureText}</strong>.
+        </div>
+        <div className="text-xs text-[#475569] rounded-md border border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2">
+          Firebase OTP diagnostics: enabled <strong>{smsOtpDiagnostics.enabled ? "yes" : "no"}</strong>, configured <strong>{smsOtpDiagnostics.configured ? "yes" : "no"}</strong>, reason <strong>{smsOtpDiagnostics.reason}</strong>.
         </div>
       </Card>
 

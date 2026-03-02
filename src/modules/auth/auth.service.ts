@@ -64,18 +64,27 @@ export class AuthService {
 
   private async getFirebaseAuthClient(): Promise<FirebaseAuth> {
     const integrations = await this.integrationConfigService.getResolvedIntegrations();
-    if (!integrations.smsOtp.enabled) {
-      throw new ServiceUnavailableException(
-        'Firebase OTP verification is disabled by admin settings.',
-      );
+    const smsOtpDiagnostics = await this.integrationConfigService.getSmsOtpDiagnostics();
+    if (!smsOtpDiagnostics.ready) {
+      throw new ServiceUnavailableException({
+        message: 'Firebase OTP verification is currently unavailable.',
+        reasonCode: smsOtpDiagnostics.reasonCode,
+        details: {
+          smsOtpEnabled: smsOtpDiagnostics.smsOtpEnabled,
+          smsOtpConfigured: smsOtpDiagnostics.smsOtpConfigured,
+          fcmConfigured: smsOtpDiagnostics.fcmConfigured,
+        },
+      });
     }
 
     let parsedJson: Record<string, any> | null = null;
+    let serviceJsonParseError = false;
     if (integrations.fcm.serviceAccountJson) {
       try {
         parsedJson = JSON.parse(integrations.fcm.serviceAccountJson);
       } catch {
         parsedJson = null;
+        serviceJsonParseError = true;
       }
     }
 
@@ -87,9 +96,12 @@ export class AuthService {
     ).replace(/\\n/g, '\n');
 
     if (!projectId || !clientEmail || !privateKey) {
-      throw new ServiceUnavailableException(
-        'Firebase service account is incomplete. Configure FCM credentials first.',
-      );
+      throw new ServiceUnavailableException({
+        message: 'Firebase service account is incomplete. Configure FCM credentials first.',
+        reasonCode: serviceJsonParseError
+          ? 'FIREBASE_SERVICE_ACCOUNT_JSON_INVALID'
+          : 'FIREBASE_CREDENTIALS_INCOMPLETE',
+      });
     }
 
     if (!this.firebaseAuthApp) {
@@ -1718,11 +1730,17 @@ export class AuthService {
       throw new BadRequestException('Phone does not match the current profile');
     }
 
-    const capabilities = await this.integrationConfigService.getMobileCapabilities();
-    if (!capabilities.smsOtp) {
-      throw new ServiceUnavailableException(
-        'Firebase OTP verification is currently unavailable. Please try again later.',
-      );
+    const smsOtpDiagnostics = await this.integrationConfigService.getSmsOtpDiagnostics();
+    if (!smsOtpDiagnostics.ready) {
+      throw new ServiceUnavailableException({
+        message: 'Firebase OTP verification is currently unavailable. Please try again later.',
+        reasonCode: 'FIREBASE_OTP_NOT_CONFIGURED',
+        details: {
+          smsOtpEnabled: smsOtpDiagnostics.smsOtpEnabled,
+          smsOtpConfigured: smsOtpDiagnostics.smsOtpConfigured,
+          fcmConfigured: smsOtpDiagnostics.fcmConfigured,
+        },
+      });
     }
     this.logger.log(
       `Firebase OTP flow initiated for user ${userId}. OTP dispatch is handled client-side by Firebase SDK.`,

@@ -48,6 +48,7 @@ export class NotificationsService {
 
   async getProviderStatus() {
     const integrations = await this.integrationConfigService.getResolvedIntegrations();
+    const smsOtpDiagnostics = await this.integrationConfigService.getSmsOtpDiagnostics();
     const pushDispatch = this.pushDispatchRouter.getStatus();
     const capabilities = await this.integrationConfigService.getMobileCapabilities();
     const resendKey = (process.env.RESEND_API_KEY ?? '').trim();
@@ -136,8 +137,12 @@ export class NotificationsService {
         },
         sms: {
           ...this.smsProvider.getStatus(),
+        },
+        smsOtp: {
+          provider: 'firebase_auth',
           enabled: integrations.smsOtp.enabled,
           configured: integrations.smsOtp.configured,
+          reason: smsOtpDiagnostics.reasonCode,
         },
         push: {
           configured: pushConfigured,

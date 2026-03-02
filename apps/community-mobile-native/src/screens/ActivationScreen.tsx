@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import axios from 'axios';
 import {
   ActivityIndicator,
   Pressable,
@@ -214,7 +215,32 @@ export function ActivationScreen({
       setCurrentStep('phone-otp');
       toast.success('Verification started', 'OTP has been sent to your phone.');
     } catch (error: any) {
-      toast.error('OTP failed', error?.message ?? 'Failed to send OTP.');
+      const reasonCode = axios.isAxiosError(error)
+        ? String((error.response?.data as { reasonCode?: string } | undefined)?.reasonCode ?? '')
+        : '';
+      const details = axios.isAxiosError(error)
+        ? ((error.response?.data as {
+            details?: {
+              smsOtpEnabled?: boolean;
+              smsOtpConfigured?: boolean;
+            };
+          } | undefined)?.details ?? {})
+        : {};
+      const message =
+        reasonCode === 'FIREBASE_OTP_NOT_CONFIGURED'
+          ? 'OTP service is not configured on server. Please contact support.'
+          : reasonCode === 'FIREBASE_AUTH_DISABLED'
+            ? 'OTP service is disabled by admin settings.'
+            : reasonCode === 'FIREBASE_CREDENTIALS_INCOMPLETE'
+              ? 'OTP service credentials are incomplete on server.'
+              : reasonCode === 'FIREBASE_SERVICE_ACCOUNT_JSON_INVALID'
+                ? 'OTP service credentials are invalid on server.'
+                : error?.message ?? 'Failed to send OTP.';
+      const debugHint =
+        reasonCode && (details.smsOtpEnabled === false || details.smsOtpConfigured === false)
+          ? ` (${reasonCode})`
+          : '';
+      toast.error('OTP failed', `${message}${debugHint}`);
     } finally {
       setIsSendingOtp(false);
     }

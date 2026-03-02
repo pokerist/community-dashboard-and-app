@@ -65,16 +65,28 @@ export async function sendPhoneOtpRequest(
 ): Promise<{
   message?: string;
   provider?: string;
+  reasonCode?: string;
   channel?: 'SMS' | 'EMAIL' | string;
   cooldownSeconds?: number;
   expiresInSeconds?: number;
+  details?: {
+    smsOtpEnabled?: boolean;
+    smsOtpConfigured?: boolean;
+    fcmConfigured?: boolean;
+  };
 }> {
   const response = await http.post<{
     message?: string;
     provider?: string;
+    reasonCode?: string;
     channel?: 'SMS' | 'EMAIL' | string;
     cooldownSeconds?: number;
     expiresInSeconds?: number;
+    details?: {
+      smsOtpEnabled?: boolean;
+      smsOtpConfigured?: boolean;
+      fcmConfigured?: boolean;
+    };
   }>(
     '/auth/send-phone-otp',
     { phone },

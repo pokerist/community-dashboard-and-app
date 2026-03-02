@@ -441,6 +441,8 @@ sync_env_key_from_example "$ROOT_ENV_PROD" "$ROOT_ENV_PROD_EXAMPLE" "RESEND_API_
 sync_env_key_from_example "$ROOT_ENV_PROD" "$ROOT_ENV_PROD_EXAMPLE" "RESEND_FROM_EMAIL"
 if [[ -n "$(get_env_value "$ROOT_ENV_PROD" "FCM_PROJECT_ID")" && -n "$(get_env_value "$ROOT_ENV_PROD" "FCM_CLIENT_EMAIL")" && -n "$(get_env_value "$ROOT_ENV_PROD" "FCM_PRIVATE_KEY")" ]]; then
   upsert_env "$ROOT_ENV_PROD" "FCM_MOCK_MODE" "false"
+  upsert_env "$ROOT_ENV_PROD" "SMS_OTP_ENABLED" "true"
+  note "Firebase OTP auto-enabled from env"
 fi
 if [[ -n "$(get_env_value "$ROOT_ENV_PROD" "RESEND_API_KEY")" ]]; then
   upsert_env "$ROOT_ENV_PROD" "EMAIL_MOCK_MODE" "false"

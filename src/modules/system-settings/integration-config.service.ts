@@ -74,6 +74,23 @@ type IntegrationCapabilities = {
   s3Storage: boolean;
 };
 
+type SmsOtpDiagnostics = {
+  ready: boolean;
+  reasonCode:
+    | 'READY'
+    | 'FIREBASE_AUTH_DISABLED'
+    | 'FIREBASE_SERVICE_ACCOUNT_JSON_INVALID'
+    | 'FIREBASE_CREDENTIALS_INCOMPLETE';
+  smsOtpEnabled: boolean;
+  smsOtpConfigured: boolean;
+  fcmConfigured: boolean;
+};
+
+type RawIntegrationsMetadata = {
+  hasIntegrationsRow: boolean;
+  hasExplicitSmsOtpEnabled: boolean;
+};
+
 type PrismaLikeClient = PrismaService | Prisma.TransactionClient;
 
 const INTEGRATIONS_SECTION = 'integrations';
@@ -89,8 +106,13 @@ export class IntegrationConfigService {
         expiresAt: number;
         raw: SystemIntegrationsState;
         resolved: ResolvedIntegrationsState;
+        rawMeta: RawIntegrationsMetadata;
       }
     | null = null;
+  private lastRawMeta: RawIntegrationsMetadata = {
+    hasIntegrationsRow: false,
+    hasExplicitSmsOtpEnabled: false,
+  };
 
   private readonly defaults: SystemIntegrationsState = {
     version: 1,
@@ -197,9 +219,15 @@ export class IntegrationConfigService {
     this.cache = {
       raw,
       resolved,
+      rawMeta: this.lastRawMeta,
       expiresAt: now + CACHE_TTL_MS,
     };
     return resolved;
+  }
+
+  async getSmsOtpDiagnostics(): Promise<SmsOtpDiagnostics> {
+    const resolved = await this.getResolvedIntegrations();
+    return this.buildSmsOtpDiagnostics(resolved);
   }
 
   async updateProvider(
@@ -332,12 +360,14 @@ export class IntegrationConfigService {
   private async getRawState(forceRefresh = false): Promise<SystemIntegrationsState> {
     const now = Date.now();
     if (!forceRefresh && this.cache && this.cache.expiresAt > now) {
+      this.lastRawMeta = this.cache.rawMeta;
       return this.cache.raw;
     }
 
     const row = await this.prisma.systemSetting.findUnique({
       where: { section: INTEGRATIONS_SECTION },
     });
+    this.lastRawMeta = this.extractRawMetadata(row?.value);
     return this.decodeState(row?.value);
   }
 
@@ -368,6 +398,15 @@ export class IntegrationConfigService {
     if (normalized === 'true' || normalized === '1') return true;
     if (normalized === 'false' || normalized === '0') return false;
     return fallback;
+  }
+
+  private readOptionalEnvBool(name: string): boolean | null {
+    const raw = process.env[name];
+    if (typeof raw !== 'string') return null;
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1') return true;
+    if (normalized === 'false' || normalized === '0') return false;
+    return null;
   }
 
   private readEnvNumber(name: string, fallback: number): number {
@@ -420,6 +459,7 @@ export class IntegrationConfigService {
       provider: 'FIREBASE_AUTH' as const,
       firebaseProjectId:
         raw.smsOtp.firebaseProjectId || fcm.projectId || process.env.FCM_PROJECT_ID || '',
+      enabled: this.resolveSmsOtpEnabled(raw, fcmConfigured),
     };
     const smsConfigured = fcmConfigured;
 
@@ -460,6 +500,70 @@ export class IntegrationConfigService {
       fcm: { ...fcm, configured: fcmConfigured },
       s3: { ...s3, configured: s3Configured },
     };
+  }
+
+  private resolveSmsOtpEnabled(
+    raw: SystemIntegrationsState,
+    fcmConfigured: boolean,
+  ): boolean {
+    const envOverride = this.readOptionalEnvBool('SMS_OTP_ENABLED');
+    if (envOverride !== null) return envOverride;
+    if (this.lastRawMeta.hasExplicitSmsOtpEnabled) {
+      return raw.smsOtp.enabled;
+    }
+    // Auto-enable Firebase OTP from valid FCM env/config when no explicit DB override exists.
+    return raw.smsOtp.enabled || fcmConfigured;
+  }
+
+  private extractRawMetadata(value: unknown): RawIntegrationsMetadata {
+    if (!this.isObject(value)) {
+      return {
+        hasIntegrationsRow: false,
+        hasExplicitSmsOtpEnabled: false,
+      };
+    }
+    const smsOtpValue = (value as Record<string, unknown>).smsOtp;
+    const smsOtpEnabledExplicit =
+      this.isObject(smsOtpValue) &&
+      Object.prototype.hasOwnProperty.call(smsOtpValue, 'enabled');
+    return {
+      hasIntegrationsRow: true,
+      hasExplicitSmsOtpEnabled: smsOtpEnabledExplicit,
+    };
+  }
+
+  private buildSmsOtpDiagnostics(
+    resolved: ResolvedIntegrationsState,
+  ): SmsOtpDiagnostics {
+    const diagnostics: SmsOtpDiagnostics = {
+      ready: false,
+      reasonCode: 'FIREBASE_CREDENTIALS_INCOMPLETE',
+      smsOtpEnabled: resolved.smsOtp.enabled,
+      smsOtpConfigured: resolved.smsOtp.configured,
+      fcmConfigured: resolved.fcm.configured,
+    };
+
+    if (!resolved.smsOtp.enabled) {
+      diagnostics.reasonCode = 'FIREBASE_AUTH_DISABLED';
+      return diagnostics;
+    }
+
+    if (!resolved.smsOtp.configured) {
+      if (resolved.fcm.serviceAccountJson) {
+        try {
+          JSON.parse(resolved.fcm.serviceAccountJson);
+        } catch {
+          diagnostics.reasonCode = 'FIREBASE_SERVICE_ACCOUNT_JSON_INVALID';
+          return diagnostics;
+        }
+      }
+      diagnostics.reasonCode = 'FIREBASE_CREDENTIALS_INCOMPLETE';
+      return diagnostics;
+    }
+
+    diagnostics.ready = true;
+    diagnostics.reasonCode = 'READY';
+    return diagnostics;
   }
 
   private applyProviderPatch(
