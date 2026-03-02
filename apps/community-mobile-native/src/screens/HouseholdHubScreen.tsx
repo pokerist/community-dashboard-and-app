@@ -67,6 +67,7 @@ type HouseholdHubScreenProps = {
 };
 
 type SectionKey = 'family' | 'delegates' | 'staff';
+type FamilyWizardStep = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 function householdLabel(value?: string | null): string {
   return String(value ?? '')
@@ -114,6 +115,7 @@ export function HouseholdHubScreen({
   });
   const [workerQrResult, setWorkerQrResult] = useState<string | null>(null);
   const [editingFamilyUserId, setEditingFamilyUserId] = useState<string | null>(null);
+  const [familyWizardStep, setFamilyWizardStep] = useState<FamilyWizardStep>(1);
   const [editingDelegateAccessId, setEditingDelegateAccessId] = useState<string | null>(null);
   const [familyForm, setFamilyForm] = useState<{
     relationship: AddFamilyMemberInput['relationship'];
@@ -320,6 +322,7 @@ export function HouseholdHubScreen({
 
   const resetFamilyForm = () => {
     setEditingFamilyUserId(null);
+    setFamilyWizardStep(1);
     setFamilyForm({
       relationship: 'CHILD',
       nationality: 'EGYPTIAN',
@@ -363,6 +366,7 @@ export function HouseholdHubScreen({
 
   const beginEditFamily = (row: FamilyAccessRow) => {
     setEditingFamilyUserId(row.userId ?? null);
+    setFamilyWizardStep(1);
     setFamilyForm((prev) => ({
       ...prev,
       relationship:
@@ -512,6 +516,87 @@ export function HouseholdHubScreen({
     familyRelationship === 'CHILD' &&
     familyForm.childAgeBracket === '<16';
   const familyNeedsPassportFile = familyNationality === 'FOREIGN';
+  const familyIsEditing = Boolean(editingFamilyUserId);
+
+  const familyWizardSteps: Array<{ key: FamilyWizardStep; title: string }> = [
+    { key: 1, title: 'Relationship' },
+    { key: 2, title: 'Nationality' },
+    { key: 3, title: 'Age' },
+    { key: 4, title: 'Documents' },
+    { key: 5, title: 'Identity & Contact' },
+    { key: 6, title: 'Permissions' },
+    { key: 7, title: 'Review' },
+  ];
+
+  const canMoveFamilyWizardStep = (step: FamilyWizardStep): boolean => {
+    switch (step) {
+      case 1:
+        return Boolean(familyForm.relationship);
+      case 2:
+        return Boolean(familyForm.nationality);
+      case 3:
+        return familyForm.relationship === 'CHILD'
+          ? familyForm.childAgeBracket === '<16' || familyForm.childAgeBracket === '>=16'
+          : true;
+      case 4:
+        if (familyIsEditing) return true;
+        if (!familyForm.personalPhotoId.trim()) return false;
+        if (familyNeedsNationalIdFile && !familyForm.nationalIdFileId.trim()) return false;
+        if (familyNeedsPassportFile && !familyForm.passportFileId.trim()) return false;
+        if (familyNeedsBirthDate && !familyForm.birthDate.trim()) return false;
+        if (familyNeedsBirthCert && !familyForm.birthCertificateFileId.trim()) return false;
+        if (familyNeedsMarriageCert && !familyForm.marriageCertificateFileId.trim()) return false;
+        return true;
+      case 5:
+        if (!familyForm.name.trim()) return false;
+        if (!familyIsEditing && !familyForm.phone.trim()) return false;
+        return true;
+      case 6:
+      case 7:
+        return true;
+      default:
+        return true;
+    }
+  };
+
+  const familyWizardStepHint = (step: FamilyWizardStep): string | null => {
+    switch (step) {
+      case 4:
+        if (familyIsEditing) return null;
+        if (!familyForm.personalPhotoId.trim()) return 'Upload personal photo first.';
+        if (familyNeedsNationalIdFile && !familyForm.nationalIdFileId.trim())
+          return 'National ID file is required for this member.';
+        if (familyNeedsPassportFile && !familyForm.passportFileId.trim())
+          return 'Passport file is required for foreign family members.';
+        if (familyNeedsBirthDate && !familyForm.birthDate.trim())
+          return 'Birth date is required for child under 16.';
+        if (familyNeedsBirthCert && !familyForm.birthCertificateFileId.trim())
+          return 'Birth certificate is required for child under 16.';
+        if (familyNeedsMarriageCert && !familyForm.marriageCertificateFileId.trim())
+          return 'Marriage certificate is required for spouse.';
+        return null;
+      case 5:
+        if (!familyForm.name.trim()) return 'Full name is required.';
+        if (!familyIsEditing && !familyForm.phone.trim())
+          return 'Phone is required for new family member.';
+        return null;
+      default:
+        return null;
+    }
+  };
+
+  const goFamilyWizardNext = () => {
+    if (!canMoveFamilyWizardStep(familyWizardStep)) {
+      const hint = familyWizardStepHint(familyWizardStep);
+      if (hint) toast.error('Complete this step', hint);
+      return;
+    }
+    setFamilyWizardStep((prev) => (prev < 7 ? ((prev + 1) as FamilyWizardStep) : prev));
+  };
+
+  const goFamilyWizardBack = () => {
+    setFamilyWizardStep((prev) => (prev > 1 ? ((prev - 1) as FamilyWizardStep) : prev));
+  };
 
   const handleUploadFamilyFile = async (
     purpose:
@@ -1031,60 +1116,103 @@ export function HouseholdHubScreen({
                     </Pressable>
                   ) : null}
                 </View>
-
-                <Text style={styles.fieldLabel}>Relationship</Text>
-                <View style={styles.optionRow}>
-                  {(['CHILD', 'PARENT', 'SPOUSE'] as const).map((rel) => {
-                    const active = familyForm.relationship === rel;
-                    const label =
-                      rel === 'CHILD'
-                        ? 'Son / Daughter'
-                        : rel === 'PARENT'
-                          ? 'Mother / Father'
-                          : 'Spouse';
+                <View style={styles.wizardStepsRow}>
+                  {familyWizardSteps.map((step) => {
+                    const active = familyWizardStep === step.key;
+                    const completed = familyWizardStep > step.key;
                     return (
                       <Pressable
-                        key={rel}
-                        onPress={() => setFamilyForm((p) => ({ ...p, relationship: rel }))}
-                        style={[styles.choiceChip, active && styles.choiceChipActive, active && { borderColor: palette.primary, backgroundColor: palette.primarySoft8 }]}
-                      >
-                        <Text style={[styles.choiceChipText, active && styles.choiceChipTextActive, active && { color: palette.primary }]}>
-                          {label}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-                <Text style={styles.fieldLabel}>Nationality</Text>
-                <View style={styles.optionRow}>
-                  {(['EGYPTIAN', 'FOREIGN'] as const).map((nationality) => {
-                    const active = familyForm.nationality === nationality;
-                    return (
-                      <Pressable
-                        key={nationality}
+                        key={step.key}
                         onPress={() =>
-                          setFamilyForm((p) => ({
-                            ...p,
-                            nationality,
-                            nationalIdFileId:
-                              nationality === 'FOREIGN' ? '' : p.nationalIdFileId,
-                            passportFileId:
-                              nationality === 'EGYPTIAN' ? '' : p.passportFileId,
-                          }))
+                          setFamilyWizardStep((prev) =>
+                            step.key <= prev || canMoveFamilyWizardStep(prev) ? step.key : prev,
+                          )
                         }
-                        style={[styles.choiceChip, active && styles.choiceChipActive, active && { borderColor: palette.primary, backgroundColor: palette.primarySoft8 }]}
+                        style={[
+                          styles.wizardStepChip,
+                          active && styles.wizardStepChipActive,
+                          completed && styles.wizardStepChipDone,
+                          active && { borderColor: palette.primary, backgroundColor: palette.primarySoft8 },
+                        ]}
                       >
                         <Text
-                          style={[styles.choiceChipText, active && styles.choiceChipTextActive, active && { color: palette.primary }]}
+                          style={[
+                            styles.wizardStepChipText,
+                            active && { color: palette.primary },
+                            completed && styles.wizardStepChipTextDone,
+                          ]}
                         >
-                          {nationality === 'EGYPTIAN' ? 'Egyptian' : 'Foreign'}
+                          {step.key}
                         </Text>
                       </Pressable>
                     );
                   })}
                 </View>
+                <Text style={styles.wizardStepTitle}>
+                  Step {familyWizardStep}: {familyWizardSteps.find((step) => step.key === familyWizardStep)?.title}
+                </Text>
 
-                {familyForm.relationship === 'CHILD' ? (
+                {familyWizardStep === 1 ? (
+                  <>
+                    <Text style={styles.fieldLabel}>Relationship</Text>
+                    <View style={styles.optionRow}>
+                      {(['CHILD', 'PARENT', 'SPOUSE'] as const).map((rel) => {
+                        const active = familyForm.relationship === rel;
+                        const label =
+                          rel === 'CHILD'
+                            ? 'Son / Daughter'
+                            : rel === 'PARENT'
+                              ? 'Mother / Father'
+                              : 'Spouse';
+                        return (
+                          <Pressable
+                            key={rel}
+                            onPress={() => setFamilyForm((p) => ({ ...p, relationship: rel }))}
+                            style={[styles.choiceChip, active && styles.choiceChipActive, active && { borderColor: palette.primary, backgroundColor: palette.primarySoft8 }]}
+                          >
+                            <Text style={[styles.choiceChipText, active && styles.choiceChipTextActive, active && { color: palette.primary }]}>
+                              {label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </>
+                ) : null}
+                {familyWizardStep === 2 ? (
+                  <>
+                    <Text style={styles.fieldLabel}>Nationality</Text>
+                    <View style={styles.optionRow}>
+                      {(['EGYPTIAN', 'FOREIGN'] as const).map((nationality) => {
+                        const active = familyForm.nationality === nationality;
+                        return (
+                          <Pressable
+                            key={nationality}
+                            onPress={() =>
+                              setFamilyForm((p) => ({
+                                ...p,
+                                nationality,
+                                nationalIdFileId:
+                                  nationality === 'FOREIGN' ? '' : p.nationalIdFileId,
+                                passportFileId:
+                                  nationality === 'EGYPTIAN' ? '' : p.passportFileId,
+                              }))
+                            }
+                            style={[styles.choiceChip, active && styles.choiceChipActive, active && { borderColor: palette.primary, backgroundColor: palette.primarySoft8 }]}
+                          >
+                            <Text
+                              style={[styles.choiceChipText, active && styles.choiceChipTextActive, active && { color: palette.primary }]}
+                            >
+                              {nationality === 'EGYPTIAN' ? 'Egyptian' : 'Foreign'}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </>
+                ) : null}
+
+                {familyWizardStep === 3 && familyForm.relationship === 'CHILD' ? (
                   <>
                     <Text style={styles.fieldLabel}>Child Age Group</Text>
                     <View style={styles.optionRow}>
@@ -1109,49 +1237,71 @@ export function HouseholdHubScreen({
                     </View>
                   </>
                 ) : null}
-
-                <TextInput
-                  style={styles.input}
-                  placeholder="Full name"
-                  value={familyForm.name}
-                  onChangeText={(v) => setFamilyForm((p) => ({ ...p, name: v }))}
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Email (optional)"
-                  value={familyForm.email}
-                  onChangeText={(v) => setFamilyForm((p) => ({ ...p, email: v }))}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Phone"
-                  value={familyForm.phone}
-                  onChangeText={(v) => setFamilyForm((p) => ({ ...p, phone: v }))}
-                  keyboardType="phone-pad"
-                />
-
-                <View style={styles.uploadRow}>
-                  <Pressable
-                    style={[styles.secondaryButton, busyKey === 'upload-personalPhotoId' && styles.buttonDisabled]}
-                    onPress={() => void handleUploadFamilyFile('profile-photo', 'personalPhotoId')}
-                    disabled={busyKey === 'upload-personalPhotoId'}
-                  >
-                    <Text style={styles.secondaryButtonText}>
-                      {busyKey === 'upload-personalPhotoId' ? 'Uploading...' : 'Upload Personal Photo'}
+                {familyWizardStep === 3 && familyForm.relationship !== 'CHILD' ? (
+                  <View style={styles.noticeBox}>
+                    <Text style={styles.noticeText}>
+                      Age step is not required for this relationship.
                     </Text>
-                  </Pressable>
-                  <Text style={styles.uploadIdText} numberOfLines={1}>
-                    {familyForm.personalPhotoId || 'No file uploaded'}
-                  </Text>
-                </View>
+                  </View>
+                ) : null}
 
-                {(familyNeedsNationalIdFile ||
+                {familyWizardStep === 5 ? (
+                  <>
+                    <Text style={styles.fieldLabel}>Full Name</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Full name"
+                      value={familyForm.name}
+                      onChangeText={(v) => setFamilyForm((p) => ({ ...p, name: v }))}
+                    />
+                    <Text style={styles.fieldLabel}>Email</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Email (optional)"
+                      value={familyForm.email}
+                      onChangeText={(v) => setFamilyForm((p) => ({ ...p, email: v }))}
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                    />
+                    <Text style={styles.fieldLabel}>Phone</Text>
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Phone"
+                      value={familyForm.phone}
+                      onChangeText={(v) => setFamilyForm((p) => ({ ...p, phone: v }))}
+                      keyboardType="phone-pad"
+                    />
+                  </>
+                ) : null}
+
+                {familyWizardStep === 4 ? (
+                  <>
+                    <Text style={styles.fieldLabel}>Personal Photo</Text>
+                    <View style={styles.uploadRow}>
+                      <Pressable
+                        style={[styles.secondaryButton, busyKey === 'upload-personalPhotoId' && styles.buttonDisabled]}
+                        onPress={() => void handleUploadFamilyFile('profile-photo', 'personalPhotoId')}
+                        disabled={busyKey === 'upload-personalPhotoId'}
+                      >
+                        <Text style={styles.secondaryButtonText}>
+                          {busyKey === 'upload-personalPhotoId' ? 'Uploading...' : 'Upload Personal Photo'}
+                        </Text>
+                      </Pressable>
+                      <Text style={styles.uploadIdText} numberOfLines={1}>
+                        {familyForm.personalPhotoId || 'No file uploaded'}
+                      </Text>
+                    </View>
+                  </>
+                ) : null}
+
+                {familyWizardStep === 4 && (familyNeedsNationalIdFile ||
                   familyNeedsPassportFile ||
                   familyForm.nationalId ||
                   familyForm.nationalIdFileId) ? (
                   <>
+                    <Text style={styles.fieldLabel}>
+                      {familyForm.nationality === 'FOREIGN' ? 'Passport Number' : 'National ID'}
+                    </Text>
                     <TextInput
                       style={styles.input}
                       placeholder={
@@ -1162,44 +1312,53 @@ export function HouseholdHubScreen({
                       value={familyForm.nationalId}
                       onChangeText={(v) => setFamilyForm((p) => ({ ...p, nationalId: v }))}
                     />
+                    {familyNeedsNationalIdFile ? (
+                      <>
+                        <Text style={styles.fieldLabel}>National ID File</Text>
+                        <View style={styles.uploadRow}>
+                          <Pressable
+                            style={[styles.secondaryButton, busyKey === 'upload-nationalIdFileId' && styles.buttonDisabled]}
+                            onPress={() => void handleUploadFamilyFile('national-id', 'nationalIdFileId')}
+                            disabled={busyKey === 'upload-nationalIdFileId'}
+                          >
+                            <Text style={styles.secondaryButtonText}>
+                              {busyKey === 'upload-nationalIdFileId' ? 'Uploading...' : 'Upload National ID File'}
+                            </Text>
+                          </Pressable>
+                          <Text style={styles.uploadIdText} numberOfLines={1}>
+                            {familyForm.nationalIdFileId || 'No file uploaded'}
+                          </Text>
+                        </View>
+                      </>
+                    ) : null}
+                  </>
+                ) : null}
+
+                {familyWizardStep === 4 && familyNeedsPassportFile ? (
+                  <>
+                    <Text style={styles.fieldLabel}>Passport File</Text>
                     <View style={styles.uploadRow}>
                       <Pressable
-                        style={[styles.secondaryButton, busyKey === 'upload-nationalIdFileId' && styles.buttonDisabled]}
-                        onPress={() => void handleUploadFamilyFile('national-id', 'nationalIdFileId')}
-                        disabled={busyKey === 'upload-nationalIdFileId'}
+                        style={[styles.secondaryButton, busyKey === 'upload-passportFileId' && styles.buttonDisabled]}
+                        onPress={() => void handleUploadFamilyFile('delegate-id', 'passportFileId')}
+                        disabled={busyKey === 'upload-passportFileId'}
                       >
                         <Text style={styles.secondaryButtonText}>
-                          {busyKey === 'upload-nationalIdFileId' ? 'Uploading...' : 'Upload National ID File'}
+                          {busyKey === 'upload-passportFileId'
+                            ? 'Uploading...'
+                            : 'Upload Passport'}
                         </Text>
                       </Pressable>
                       <Text style={styles.uploadIdText} numberOfLines={1}>
-                        {familyForm.nationalIdFileId || 'No file uploaded'}
+                        {familyForm.passportFileId || 'No file uploaded'}
                       </Text>
                     </View>
                   </>
                 ) : null}
 
-                {familyNeedsPassportFile ? (
-                  <View style={styles.uploadRow}>
-                    <Pressable
-                      style={[styles.secondaryButton, busyKey === 'upload-passportFileId' && styles.buttonDisabled]}
-                      onPress={() => void handleUploadFamilyFile('delegate-id', 'passportFileId')}
-                      disabled={busyKey === 'upload-passportFileId'}
-                    >
-                      <Text style={styles.secondaryButtonText}>
-                        {busyKey === 'upload-passportFileId'
-                          ? 'Uploading...'
-                          : 'Upload Passport'}
-                      </Text>
-                    </Pressable>
-                    <Text style={styles.uploadIdText} numberOfLines={1}>
-                      {familyForm.passportFileId || 'No file uploaded'}
-                    </Text>
-                  </View>
-                ) : null}
-
-                {familyNeedsBirthDate ? (
+                {familyWizardStep === 4 && familyNeedsBirthDate ? (
                   <>
+                    <Text style={styles.fieldLabel}>Birth Date</Text>
                     <TextInput
                       style={styles.input}
                       placeholder="Birth Date (YYYY-MM-DD)"
@@ -1207,103 +1366,149 @@ export function HouseholdHubScreen({
                       onChangeText={(v) => setFamilyForm((p) => ({ ...p, birthDate: v }))}
                       autoCapitalize="none"
                     />
+                    {familyNeedsBirthCert ? (
+                      <>
+                        <Text style={styles.fieldLabel}>Birth Certificate</Text>
+                        <View style={styles.uploadRow}>
+                          <Pressable
+                            style={[styles.secondaryButton, busyKey === 'upload-birthCertificateFileId' && styles.buttonDisabled]}
+                            onPress={() => void handleUploadFamilyFile('birth-certificate', 'birthCertificateFileId')}
+                            disabled={busyKey === 'upload-birthCertificateFileId'}
+                          >
+                            <Text style={styles.secondaryButtonText}>
+                              {busyKey === 'upload-birthCertificateFileId' ? 'Uploading...' : 'Upload Birth Certificate'}
+                            </Text>
+                          </Pressable>
+                          <Text style={styles.uploadIdText} numberOfLines={1}>
+                            {familyForm.birthCertificateFileId || 'No file uploaded'}
+                          </Text>
+                        </View>
+                      </>
+                    ) : null}
+                  </>
+                ) : null}
+
+                {familyWizardStep === 4 && familyNeedsMarriageCert ? (
+                  <>
+                    <Text style={styles.fieldLabel}>Marriage Certificate</Text>
                     <View style={styles.uploadRow}>
                       <Pressable
-                        style={[styles.secondaryButton, busyKey === 'upload-birthCertificateFileId' && styles.buttonDisabled]}
-                        onPress={() => void handleUploadFamilyFile('birth-certificate', 'birthCertificateFileId')}
-                        disabled={busyKey === 'upload-birthCertificateFileId'}
+                        style={[styles.secondaryButton, busyKey === 'upload-marriageCertificateFileId' && styles.buttonDisabled]}
+                        onPress={() => void handleUploadFamilyFile('marriage-certificate', 'marriageCertificateFileId')}
+                        disabled={busyKey === 'upload-marriageCertificateFileId'}
                       >
                         <Text style={styles.secondaryButtonText}>
-                          {busyKey === 'upload-birthCertificateFileId' ? 'Uploading...' : 'Upload Birth Certificate'}
+                          {busyKey === 'upload-marriageCertificateFileId' ? 'Uploading...' : 'Upload Marriage Certificate'}
                         </Text>
                       </Pressable>
                       <Text style={styles.uploadIdText} numberOfLines={1}>
-                        {familyForm.birthCertificateFileId || 'No file uploaded'}
+                        {familyForm.marriageCertificateFileId || 'No file uploaded'}
                       </Text>
                     </View>
                   </>
                 ) : null}
 
-                {familyNeedsMarriageCert ? (
-                  <View style={styles.uploadRow}>
-                    <Pressable
-                      style={[styles.secondaryButton, busyKey === 'upload-marriageCertificateFileId' && styles.buttonDisabled]}
-                      onPress={() => void handleUploadFamilyFile('marriage-certificate', 'marriageCertificateFileId')}
-                      disabled={busyKey === 'upload-marriageCertificateFileId'}
-                    >
-                      <Text style={styles.secondaryButtonText}>
-                        {busyKey === 'upload-marriageCertificateFileId' ? 'Uploading...' : 'Upload Marriage Certificate'}
-                      </Text>
-                    </Pressable>
-                    <Text style={styles.uploadIdText} numberOfLines={1}>
-                      {familyForm.marriageCertificateFileId || 'No file uploaded'}
+                {familyWizardStep === 6 ? (
+                  <>
+                    <Text style={styles.fieldLabel}>Family Permissions</Text>
+                    <View style={styles.optionRow}>
+                      {(
+                        [
+                          ['requests', 'Requests'],
+                          ['services', 'Services'],
+                          ['bookings', 'Bookings'],
+                          ['complaints', 'Complaints'],
+                          ['utilityPayment', 'Utility Payment'],
+                          ['violations', 'Violations'],
+                        ] as const
+                      ).map(([key, label]) => {
+                        const active = Boolean(familyForm.permissions[key]);
+                        return (
+                          <Pressable
+                            key={key}
+                            onPress={() =>
+                              setFamilyForm((p) => ({
+                                ...p,
+                                permissions: {
+                                  ...p.permissions,
+                                  [key]: !p.permissions[key],
+                                },
+                              }))
+                            }
+                            style={[
+                              styles.choiceChip,
+                              active && styles.choiceChipActive,
+                              active && {
+                                borderColor: palette.primary,
+                                backgroundColor: palette.primarySoft8,
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.choiceChipText,
+                                active && styles.choiceChipTextActive,
+                                active && { color: palette.primary },
+                              ]}
+                            >
+                              {label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </>
+                ) : null}
+
+                {familyWizardStep === 7 ? (
+                  <View style={styles.noticeBox}>
+                    <Text style={styles.noticeText}>
+                      Review complete. Confirm to {familyIsEditing ? 'save changes' : 'add this family member'}.
+                    </Text>
+                    <Text style={styles.noticeText}>Name: {familyForm.name || '—'}</Text>
+                    <Text style={styles.noticeText}>Phone: {familyForm.phone || '—'}</Text>
+                    <Text style={styles.noticeText}>Relationship: {householdLabel(familyForm.relationship)}</Text>
+                    <Text style={styles.noticeText}>
+                      Nationality: {familyForm.nationality === 'EGYPTIAN' ? 'Egyptian' : 'Foreign'}
                     </Text>
                   </View>
                 ) : null}
 
-                <Text style={styles.fieldLabel}>Family Permissions</Text>
-                <View style={styles.optionRow}>
-                  {(
-                    [
-                      ['requests', 'Requests'],
-                      ['services', 'Services'],
-                      ['bookings', 'Bookings'],
-                      ['complaints', 'Complaints'],
-                      ['utilityPayment', 'Utility Payment'],
-                      ['violations', 'Violations'],
-                    ] as const
-                  ).map(([key, label]) => {
-                    const active = Boolean(familyForm.permissions[key]);
-                    return (
-                      <Pressable
-                        key={key}
-                        onPress={() =>
-                          setFamilyForm((p) => ({
-                            ...p,
-                            permissions: {
-                              ...p.permissions,
-                              [key]: !p.permissions[key],
-                            },
-                          }))
-                        }
-                        style={[
-                          styles.choiceChip,
-                          active && styles.choiceChipActive,
-                          active && {
-                            borderColor: palette.primary,
-                            backgroundColor: palette.primarySoft8,
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.choiceChipText,
-                            active && styles.choiceChipTextActive,
-                            active && { color: palette.primary },
-                          ]}
-                        >
-                          {label}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
+                {familyWizardStepHint(familyWizardStep) ? (
+                  <Text style={styles.errorText}>{familyWizardStepHint(familyWizardStep)}</Text>
+                ) : null}
 
-                <Pressable
-                  style={[styles.primaryButton, { backgroundColor: palette.primary }, busyKey === 'family-add' && styles.buttonDisabled]}
-                  onPress={() => void handleAddFamily()}
-                  disabled={busyKey === 'family-add'}
-                >
-                  <Text style={styles.primaryButtonText}>
-                    {busyKey === 'family-add'
-                      ? editingFamilyUserId
-                        ? 'Saving...'
-                        : 'Adding...'
-                      : editingFamilyUserId
-                        ? 'Save Changes'
-                        : 'Add Family Member'}
-                  </Text>
-                </Pressable>
+                <View style={styles.wizardActionsRow}>
+                  <Pressable
+                    style={[styles.secondaryButton, styles.wizardActionButton, familyWizardStep === 1 && styles.buttonDisabled]}
+                    onPress={goFamilyWizardBack}
+                    disabled={familyWizardStep === 1}
+                  >
+                    <Text style={styles.secondaryButtonText}>Back</Text>
+                  </Pressable>
+
+                  {familyWizardStep < 7 ? (
+                    <Pressable style={[styles.primaryButton, styles.wizardActionButton, { backgroundColor: palette.primary }]} onPress={goFamilyWizardNext}>
+                      <Text style={styles.primaryButtonText}>Next</Text>
+                    </Pressable>
+                  ) : (
+                    <Pressable
+                      style={[styles.primaryButton, styles.wizardActionButton, { backgroundColor: palette.primary }, busyKey === 'family-add' && styles.buttonDisabled]}
+                      onPress={() => void handleAddFamily()}
+                      disabled={busyKey === 'family-add'}
+                    >
+                      <Text style={styles.primaryButtonText}>
+                        {busyKey === 'family-add'
+                          ? editingFamilyUserId
+                            ? 'Saving...'
+                            : 'Adding...'
+                          : editingFamilyUserId
+                            ? 'Save Changes'
+                            : 'Add Family Member'}
+                      </Text>
+                    </Pressable>
+                  )}
+                </View>
               </View>
             ) : null}
 
@@ -2026,6 +2231,51 @@ const styles = StyleSheet.create({
     color: akColors.textMuted,
     fontSize: 11,
     fontWeight: '600',
+  },
+  wizardStepsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 2,
+  },
+  wizardStepChip: {
+    width: 30,
+    height: 30,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    backgroundColor: akColors.surfaceMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  wizardStepChipActive: {
+    borderColor: akColors.primary,
+    backgroundColor: 'rgba(42,62,53,0.08)',
+  },
+  wizardStepChipDone: {
+    borderColor: '#10B981',
+    backgroundColor: 'rgba(16,185,129,0.08)',
+  },
+  wizardStepChipText: {
+    color: akColors.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  wizardStepChipTextDone: {
+    color: '#047857',
+  },
+  wizardStepTitle: {
+    color: akColors.text,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  wizardActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  wizardActionButton: {
+    flex: 1,
   },
   optionRow: {
     flexDirection: 'row',
