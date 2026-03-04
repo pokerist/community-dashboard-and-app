@@ -154,6 +154,7 @@ export function SessionHomeScreen({
   const [editPhone, setEditPhone] = useState('');
   const [editProfilePhotoId, setEditProfilePhotoId] = useState<string | null>(null);
   const [isUploadingProfilePhoto, setIsUploadingProfilePhoto] = useState(false);
+  const [localProfilePreviewUri, setLocalProfilePreviewUri] = useState<string | null>(null);
   const [profilePhotoVersion, setProfilePhotoVersion] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingSecurity, setIsSavingSecurity] = useState(false);
@@ -206,11 +207,11 @@ export function SessionHomeScreen({
   const capabilityChips = useMemo(() => buildCapabilityChips(profile), [profile]);
   const vehicles = useMemo(() => profile?.vehicles ?? [], [profile?.vehicles]);
   const avatarImageUri = profile?.user?.profilePhoto?.id
-    ? `${API_BASE_URL}/files/${profile.user.profilePhoto.id}/stream?t=${profilePhotoVersion}`
+    ? `${API_BASE_URL}/files/public/profile-photo/${profile.user.profilePhoto.id}?t=${profilePhotoVersion}`
     : null;
   const editAvatarImageUri = editProfilePhotoId
-    ? `${API_BASE_URL}/files/${editProfilePhotoId}/stream?t=${profilePhotoVersion}`
-    : null;
+    ? `${API_BASE_URL}/files/public/profile-photo/${editProfilePhotoId}?t=${profilePhotoVersion}`
+    : localProfilePreviewUri;
 
   const handleSaveProfile = async () => {
     const normalizedEmail = editEmail.trim();
@@ -242,6 +243,7 @@ export function SessionHomeScreen({
         setProfile(updated);
         onProfileBootstrapUpdated?.(updated);
         setProfilePhotoVersion((prev) => prev + 1);
+        setLocalProfilePreviewUri(null);
         profileUpdated = true;
       }
 
@@ -273,6 +275,9 @@ export function SessionHomeScreen({
         'profile-photo',
       );
       if (!uploaded) return;
+      if (uploaded.localUri) {
+        setLocalProfilePreviewUri(uploaded.localUri);
+      }
       setEditProfilePhotoId(uploaded.id);
       setProfilePhotoVersion((prev) => prev + 1);
       toast.success('Photo uploaded', 'Tap Save Changes to apply it.');

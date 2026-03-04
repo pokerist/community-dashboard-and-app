@@ -65,6 +65,7 @@ export function useAuthSession(): AuthHookResult {
   const lastForegroundRefreshAtRef = useRef(0);
   const backgroundEnteredAtRef = useRef<number | null>(null);
   const biometricPromptInFlightRef = useRef(false);
+  const lastBiometricPromptAtRef = useRef(0);
 
   useEffect(() => {
     sessionRef.current = session;
@@ -385,18 +386,7 @@ export function useAuthSession(): AuthHookResult {
         }
       },
       onSessionExpired: async () => {
-        if (biometricPromptInFlightRef.current) return;
-        if (biometricAvailable && savedLogin?.email && savedLogin.password) {
-          try {
-            biometricPromptInFlightRef.current = true;
-            await signInWithBiometrics();
-            return;
-          } catch {
-            // Fall through to sign-out when biometric recovery fails.
-          } finally {
-            biometricPromptInFlightRef.current = false;
-          }
-        }
+        // Avoid aggressive biometric loops from background API retries.
         await signOut(null);
       },
     });
@@ -404,10 +394,11 @@ export function useAuthSession(): AuthHookResult {
     return () => {
       configureHttpAuthHandlers(null);
     };
-  }, [biometricAvailable, performRefresh, savedLogin, signInWithBiometrics, signOut]);
+  }, [performRefresh, signOut]);
 
   useEffect(() => {
-    const IDLE_BIOMETRIC_THRESHOLD_MS = 2 * 60 * 1000;
+    const IDLE_BIOMETRIC_THRESHOLD_MS = 15 * 60 * 1000;
+    const BIOMETRIC_COOLDOWN_MS = 3 * 60 * 1000;
 
     const sub = AppState.addEventListener('change', async (nextState) => {
       const prev = appStateRef.current;
@@ -430,6 +421,7 @@ export function useAuthSession(): AuthHookResult {
 
         if (
           idleMs >= IDLE_BIOMETRIC_THRESHOLD_MS &&
+          Date.now() - lastBiometricPromptAtRef.current >= BIOMETRIC_COOLDOWN_MS &&
           biometricAvailable &&
           savedLogin?.email &&
           savedLogin.password &&
@@ -437,6 +429,7 @@ export function useAuthSession(): AuthHookResult {
         ) {
           try {
             biometricPromptInFlightRef.current = true;
+            lastBiometricPromptAtRef.current = Date.now();
             const biometricResult = await LocalAuthentication.authenticateAsync({
               promptMessage: 'Unlock SSS Community',
               fallbackLabel: 'Use passcode',
@@ -461,18 +454,12 @@ export function useAuthSession(): AuthHookResult {
         try {
           await refreshSession();
         } catch {
-          if (biometricAvailable && savedLogin?.email && savedLogin.password) {
-            try {
-              await signInWithBiometrics();
-            } catch {
-              // Keep user in app; network/transient issues should not hard-stop the session.
-            }
-          }
+          // Keep user in app during transient refresh errors.
         }
       }
     });
     return () => sub.remove();
-  }, [biometricAvailable, refreshSession, savedLogin, signInWithBiometrics, signOut]);
+  }, [biometricAvailable, refreshSession, savedLogin, signOut]);
 
   return useMemo(
     () => ({

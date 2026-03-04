@@ -561,4 +561,59 @@ export class FileService {
     const stream = await storageAdapter.getFileStream(file.key, bucket);
     return { file, stream };
   }
+
+  async getPublicDiscoverImageStream(fileId: string): Promise<{
+    file: {
+      id: string;
+      key: string;
+      name: string;
+      mimeType: string | null;
+      size: number | null;
+      category: $Enums.FileCategory;
+    };
+    stream: NodeJS.ReadableStream;
+  }> {
+    const linkedPlace = await this.prisma.discoverPlace.findFirst({
+      where: {
+        imageFileId: fileId,
+        isActive: true,
+      },
+      select: { id: true },
+    });
+    if (!linkedPlace) {
+      throw new NotFoundException('Discover image not found');
+    }
+
+    const file = await this.getFileOrThrow(fileId);
+    const bucket = this.resolveBucket(file.category);
+    const storageAdapter = await this.getStorageAdapter();
+    const stream = await storageAdapter.getFileStream(file.key, bucket);
+    return { file, stream };
+  }
+
+  async getPublicProfilePhotoStream(fileId: string): Promise<{
+    file: {
+      id: string;
+      key: string;
+      name: string;
+      mimeType: string | null;
+      size: number | null;
+      category: $Enums.FileCategory;
+    };
+    stream: NodeJS.ReadableStream;
+  }> {
+    const linkedUser = await this.prisma.user.findFirst({
+      where: { profilePhotoId: fileId },
+      select: { id: true },
+    });
+    if (!linkedUser) {
+      throw new NotFoundException('Profile photo not found');
+    }
+
+    const file = await this.getFileOrThrow(fileId);
+    const bucket = this.resolveBucket(file.category);
+    const storageAdapter = await this.getStorageAdapter();
+    const stream = await storageAdapter.getFileStream(file.key, bucket);
+    return { file, stream };
+  }
 }

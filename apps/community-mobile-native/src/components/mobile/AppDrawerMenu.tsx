@@ -89,7 +89,7 @@ export function AppDrawerMenu({
     profile?.user?.nameAR?.trim() ||
     email.split('@')[0];
   const avatarImageUri = profile?.user?.profilePhoto?.id
-    ? `${API_BASE_URL}/files/${profile.user.profilePhoto.id}/stream`
+    ? `${API_BASE_URL}/files/public/profile-photo/${profile.user.profilePhoto.id}`
     : null;
   const preConstruction = isPreConstructionUnit(selectedUnit);
   const unitAccesses = selectedUnit?.unitAccesses ?? [];

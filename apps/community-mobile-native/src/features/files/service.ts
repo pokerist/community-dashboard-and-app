@@ -6,6 +6,7 @@ export type UploadedAttachment = {
   name: string;
   mimeType?: string | null;
   size?: number | null;
+  localUri?: string;
 };
 
 type FileUploadResponse = {
@@ -152,7 +153,11 @@ export async function pickAndUploadFileByPurpose(
 ) {
   const picked = await pickSingleDocument();
   if (!picked) return null;
-  return uploadFileByPurpose(accessToken, purpose, picked);
+  const uploaded = await uploadFileByPurpose(accessToken, purpose, picked);
+  return {
+    ...uploaded,
+    localUri: picked.uri,
+  };
 }
 
 export async function uploadPublicSignupPhoto(

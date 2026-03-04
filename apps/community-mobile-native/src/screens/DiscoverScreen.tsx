@@ -129,7 +129,7 @@ export function DiscoverScreen({ session }: { session: AuthSession }) {
 
         {visibleRows.map((row) => {
           const link = normalizeUrl(row.mapLink);
-          const imageUrl = row.imageFileId ? `${API_BASE_URL}/files/${row.imageFileId}/stream` : null;
+          const imageUrl = row.imageFileId ? `${API_BASE_URL}/files/public/discover-image/${row.imageFileId}` : null;
           return (
             <Pressable
               key={row.id}

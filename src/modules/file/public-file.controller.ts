@@ -125,4 +125,45 @@ export class PublicFileController {
     res.setHeader('Cache-Control', 'public, max-age=300');
     stream.pipe(res);
   }
+
+  @Get('public/discover-image/:fileId')
+  @ApiOperation({
+    summary: 'Public stream for active discover place images',
+  })
+  async getPublicDiscoverImage(
+    @Param('fileId') fileId: string,
+    @Res() res: Response,
+  ) {
+    const { file, stream } = await this.fileService.getPublicDiscoverImageStream(fileId);
+    const contentType =
+      file.mimeType?.trim() ||
+      inferMimeTypeFromName(file.name) ||
+      inferMimeTypeFromName(file.key) ||
+      'application/octet-stream';
+    res.setHeader('Content-Type', contentType);
+    if (typeof file.size === 'number' && Number.isFinite(file.size) && file.size >= 0) {
+      res.setHeader('Content-Length', String(file.size));
+    }
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    stream.pipe(res);
+  }
+
+  @Get('public/profile-photo/:fileId')
+  @ApiOperation({
+    summary: 'Public stream for resident profile photo',
+  })
+  async getPublicProfilePhoto(@Param('fileId') fileId: string, @Res() res: Response) {
+    const { file, stream } = await this.fileService.getPublicProfilePhotoStream(fileId);
+    const contentType =
+      file.mimeType?.trim() ||
+      inferMimeTypeFromName(file.name) ||
+      inferMimeTypeFromName(file.key) ||
+      'application/octet-stream';
+    res.setHeader('Content-Type', contentType);
+    if (typeof file.size === 'number' && Number.isFinite(file.size) && file.size >= 0) {
+      res.setHeader('Content-Length', String(file.size));
+    }
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    stream.pipe(res);
+  }
 }
