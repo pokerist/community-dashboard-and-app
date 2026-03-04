@@ -89,6 +89,10 @@ Quick server deploy (Ubuntu/Debian, PM2 wrapper):
 ./deploy.sh
 ```
 
+Deployment standard:
+- Always deploy using `./deploy.sh` (do not run scattered manual install/build/restart commands).
+- `deploy.sh` uses `.env.production` and bootstraps it from `.env.production.example` when missing.
+
 ## Smoke Checks
 
 Mobile persona smoke (PowerShell):
