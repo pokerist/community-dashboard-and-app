@@ -497,6 +497,10 @@ else
     npx prisma db push
   fi
 fi
+
+note "Syncing permission keys from @Permissions decorators"
+npm run permissions:sync
+
 npm run build
 
 if [[ "${RUN_DEMO_SEEDS:-false}" == "true" || "${RUN_DASHBOARD_LOAD_SEED:-false}" == "true" ]]; then

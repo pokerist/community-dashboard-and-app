@@ -58,6 +58,8 @@ export function IconPicker({ value, tone = "auto", onChange, onToneChange }: Ico
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [recentIcons, setRecentIcons] = useState<string[]>([]);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(120);
 
   const iconEntries = useMemo(() => {
     return Object.entries(IoIcons)
@@ -80,9 +82,29 @@ export function IconPicker({ value, tone = "auto", onChange, onToneChange }: Ico
 
   const filteredIcons = useMemo(() => {
     const normalized = query.trim().toLowerCase();
-    if (!normalized) return iconEntries.slice(0, 180);
-    return iconEntries.filter((entry) => entry.key.includes(normalized)).slice(0, 260);
+    if (!normalized) return iconEntries;
+    return iconEntries.filter((entry) => entry.key.includes(normalized));
   }, [iconEntries, query]);
+
+  const pageCount = useMemo(
+    () => Math.max(1, Math.ceil(filteredIcons.length / pageSize)),
+    [filteredIcons.length, pageSize],
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [query, pageSize]);
+
+  useEffect(() => {
+    if (page > pageCount) {
+      setPage(pageCount);
+    }
+  }, [page, pageCount]);
+
+  const pagedIcons = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filteredIcons.slice(start, start + pageSize);
+  }, [filteredIcons, page, pageSize]);
 
   const SelectedIcon = value ? iconMap.get(value) : undefined;
 
@@ -121,8 +143,11 @@ export function IconPicker({ value, tone = "auto", onChange, onToneChange }: Ico
         <div className="rounded-lg border border-[#E2E8F0] bg-[#F8FAFC] p-3">
           <div className="space-y-3">
             <p className="text-xs text-[#64748B]">
-              Showing {filteredIcons.length} of {iconEntries.length} icons
-              {query.trim() ? " (filtered)" : " (type in search to narrow down)"}.
+              Showing{" "}
+              {filteredIcons.length === 0 ? 0 : (page - 1) * pageSize + 1}
+              –
+              {Math.min(page * pageSize, filteredIcons.length)} of {filteredIcons.length} matching icons
+              {" "} (total: {iconEntries.length})
             </p>
             <div className="sticky top-0 z-10 bg-[#F8FAFC] pb-1">
               <div className="relative">
@@ -133,6 +158,43 @@ export function IconPicker({ value, tone = "auto", onChange, onToneChange }: Ico
                   className="bg-white pl-9"
                   placeholder="Search icons..."
                 />
+              </div>
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-xs text-[#64748B]">
+                  <span>Page size</span>
+                  <select
+                    value={String(pageSize)}
+                    onChange={(event) => setPageSize(Number(event.target.value))}
+                    className="h-8 rounded-md border border-[#E2E8F0] bg-white px-2 text-xs text-[#334155]"
+                  >
+                    <option value="60">60</option>
+                    <option value="120">120</option>
+                    <option value="240">240</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((current) => Math.max(1, current - 1))}
+                    disabled={page <= 1}
+                  >
+                    Prev
+                  </Button>
+                  <span className="text-xs text-[#64748B]">
+                    Page {page} of {pageCount}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPage((current) => Math.min(pageCount, current + 1))}
+                    disabled={page >= pageCount}
+                  >
+                    Next
+                  </Button>
+                </div>
               </div>
             </div>
             {recentIcons.length > 0 ? (
@@ -159,7 +221,7 @@ export function IconPicker({ value, tone = "auto", onChange, onToneChange }: Ico
             ) : null}
             <div className="max-h-[320px] overflow-y-auto rounded-lg border border-[#E2E8F0] bg-white p-2">
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-                {filteredIcons.map(({ key, IconComponent }) => (
+                {pagedIcons.map(({ key, IconComponent }) => (
                   <button
                     key={key}
                     type="button"
@@ -173,6 +235,11 @@ export function IconPicker({ value, tone = "auto", onChange, onToneChange }: Ico
                     <span className="truncate">{key}</span>
                   </button>
                 ))}
+                {pagedIcons.length === 0 ? (
+                  <div className="col-span-full rounded-md border border-dashed border-[#CBD5E1] px-3 py-6 text-center text-xs text-[#64748B]">
+                    No icons found for this search.
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>

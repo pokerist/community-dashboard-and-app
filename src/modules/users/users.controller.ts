@@ -119,8 +119,22 @@ export class AdminUsersController {
 
   @Get('permissions')
   @Permissions('admin.view')
-  listPermissions() {
-    return this.usersService.listPermissions();
+  @ApiQuery({ name: 'search', type: String, required: false })
+  @ApiQuery({ name: 'groupBy', enum: ['module'], required: false })
+  @ApiQuery({ name: 'page', type: Number, required: false })
+  @ApiQuery({ name: 'limit', type: Number, required: false })
+  listPermissions(
+    @Query('search') search?: string,
+    @Query('groupBy') groupBy?: 'module',
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.usersService.listPermissions({
+      search,
+      groupBy,
+      page: page ? parseInt(page) : undefined,
+      limit: limit ? parseInt(limit) : undefined,
+    });
   }
 
   @Get(':id([0-9a-fA-F-]{36})')

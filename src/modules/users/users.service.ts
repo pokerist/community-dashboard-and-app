@@ -348,8 +348,75 @@ export class UsersService {
     });
   }
 
-  async listPermissions() {
+  async listPermissions(options?: {
+    search?: string;
+    groupBy?: 'module';
+    page?: number;
+    limit?: number;
+  }) {
+    const search = options?.search?.trim();
+    const where = search
+      ? {
+          key: {
+            contains: search,
+            mode: 'insensitive' as const,
+          },
+        }
+      : undefined;
+
+    const groupBy = options?.groupBy;
+    const page = Math.max(1, options?.page ?? 1);
+    const limit = Math.min(500, Math.max(1, options?.limit ?? 100));
+    const skip = (page - 1) * limit;
+
+    if (groupBy === 'module') {
+      const [total, rows] = await Promise.all([
+        this.prisma.permission.count({ where }),
+        this.prisma.permission.findMany({
+          where,
+          orderBy: { key: 'asc' },
+          skip,
+          take: limit,
+        }),
+      ]);
+
+      const groupsMap = new Map<
+        string,
+        Array<{
+          id: string;
+          key: string;
+        }>
+      >();
+
+      for (const row of rows) {
+        const [moduleName] = row.key.split('.');
+        const moduleKey = moduleName || 'misc';
+        const group = groupsMap.get(moduleKey) ?? [];
+        group.push({ id: row.id, key: row.key });
+        groupsMap.set(moduleKey, group);
+      }
+
+      const groups = Array.from(groupsMap.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([module, items]) => ({
+          module,
+          count: items.length,
+          items,
+        }));
+
+      return {
+        groups,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.max(1, Math.ceil(total / limit)),
+        },
+      };
+    }
+
     return this.prisma.permission.findMany({
+      where,
       orderBy: { key: 'asc' },
     });
   }
