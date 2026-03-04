@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { AuthSession } from '../features/auth/types';
+import { BrandedPageHero } from '../components/mobile/BrandedPageHero';
 import { InAppWebViewerModal } from '../components/mobile/InAppWebViewerModal';
 import {
   communityUpdateTitle,
@@ -301,13 +302,11 @@ export function CommunityUpdatesScreen({ onOpenInAppRoute }: CommunityUpdatesScr
 
   return (
     <SafeAreaView style={styles.screen} edges={['bottom']}>
-      <View style={[styles.topWrap, { paddingTop: Math.max(insets.top, 8) + 8 }]}>
-        <View style={styles.headerCard}>
-          <Text style={styles.title}>{t('communityUpdates.title')}</Text>
-          <Text style={styles.subtitle}>
-            {t('communityUpdates.subtitle')}
-          </Text>
-        </View>
+      <View style={[styles.topWrap, { paddingTop: 0 }]}>
+        <BrandedPageHero
+          title={t('communityUpdates.title')}
+          subtitle={t('communityUpdates.subtitle')}
+        />
 
         <View style={styles.filtersRow}>
           <Pressable

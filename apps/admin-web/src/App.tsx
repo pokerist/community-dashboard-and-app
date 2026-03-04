@@ -15,7 +15,6 @@ import { BannerManagement } from "./components/pages/BannerManagement";
 import { NotificationCenter } from "./components/pages/NotificationCenter";
 import { SecurityEmergency } from "./components/pages/SecurityEmergency";
 import { AmenitiesManagement } from "./components/pages/AmenitiesManagement";
-import { SmartHomeIntegration } from "./components/pages/SmartHomeIntegration";
 import { ReportsAnalytics } from "./components/pages/ReportsAnalytics";
 import { SystemSettings } from "./components/pages/SystemSettings";
 import { CommunityDirectory } from "./components/pages/CommunityDirectory";
@@ -49,7 +48,6 @@ const VALID_SECTIONS = new Set([
   "notifications",
   "security",
   "amenities",
-  "smarthome",
   "reports",
   "settings",
   "directory",
@@ -207,8 +205,6 @@ export default function App() {
         return <SecurityEmergency />;
       case "amenities":
         return <AmenitiesManagement />;
-      case "smarthome":
-        return <SmartHomeIntegration />;
       case "reports":
         return <ReportsAnalytics />;
       case "settings":

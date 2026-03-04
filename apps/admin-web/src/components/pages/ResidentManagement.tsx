@@ -163,7 +163,7 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
           params: { userType: "resident", take: 200, skip: 0 },
         }),
         apiClient.get("/units", {
-          params: { page: 1, limit: 100 },
+          params: { page: 1, limit: 100, status: "AVAILABLE" },
         }),
       ]);
 
@@ -513,7 +513,7 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
             {isLoading ? "Refreshing..." : "Refresh"}
           </Button>
           <Button
-            className="rounded-lg gap-2 !bg-[#0F172A] hover:!bg-[#0F172A]/90 !text-white border border-[#0F172A]"
+            className="rounded-lg gap-2 !bg-white hover:!bg-[#F8FAFC] !text-[#0F172A] border border-[#CBD5E1]"
             onClick={() => {
               if (onNavigateToCreate) {
                 onNavigateToCreate();

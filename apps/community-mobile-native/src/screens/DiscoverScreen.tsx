@@ -1,19 +1,25 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { BrandedPageHero } from '../components/mobile/BrandedPageHero';
 import { InAppWebViewerModal } from '../components/mobile/InAppWebViewerModal';
 import type { AuthSession } from '../features/auth/types';
 import { useBranding } from '../features/branding/provider';
 import { getBrandPalette } from '../features/branding/palette';
+import { useBottomNavMetrics } from '../features/layout/BottomNavMetricsContext';
 import { listDiscoverPlaces } from '../features/community/service';
 import type { DiscoverPlace } from '../features/community/types';
+import { API_BASE_URL } from '../config/env';
 import { akColors, akRadius } from '../theme/alkarma';
 
 function normalizeUrl(raw?: string | null): string | null {
@@ -23,10 +29,17 @@ function normalizeUrl(raw?: string | null): string | null {
   return `https://${value}`;
 }
 
+function normalizeCategory(value?: string | null) {
+  return String(value ?? '').trim() || 'Other';
+}
+
 export function DiscoverScreen({ session }: { session: AuthSession }) {
   const { brand } = useBranding();
   const palette = getBrandPalette(brand);
+  const { contentInsetBottom } = useBottomNavMetrics();
   const [rows, setRows] = useState<DiscoverPlace[]>([]);
+  const [search, setSearch] = useState('');
+  const [activeCategory, setActiveCategory] = useState<string>('All');
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [viewerState, setViewerState] = useState<{
@@ -57,48 +70,96 @@ export function DiscoverScreen({ session }: { session: AuthSession }) {
     };
   }, [session.accessToken]);
 
+  const categories = useMemo(() => {
+    const unique = Array.from(new Set(rows.map((row) => normalizeCategory(row.category))));
+    return ['All', ...unique];
+  }, [rows]);
+
+  const visibleRows = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return rows.filter((row) => {
+      const category = normalizeCategory(row.category);
+      const categoryOk = activeCategory === 'All' || category === activeCategory;
+      if (!categoryOk) return false;
+      if (!query) return true;
+      const hay = `${row.name ?? ''} ${row.category ?? ''} ${row.address ?? ''}`.toLowerCase();
+      return hay.includes(query);
+    });
+  }, [activeCategory, rows, search]);
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>Discover</Text>
-        <Text style={styles.subtitle}>Nearby places curated by management.</Text>
+      <ScrollView contentContainerStyle={[styles.container, { paddingBottom: Math.max(110, contentInsetBottom) }]}>
+        <BrandedPageHero title="Discover" subtitle="Places around your community." />
+
+        <View style={styles.searchRow}>
+          <Ionicons name="search-outline" size={18} color={akColors.textMuted} />
+          <TextInput
+            value={search}
+            onChangeText={setSearch}
+            style={styles.searchInput}
+            placeholder="Search by place name"
+            placeholderTextColor={akColors.textSoft}
+          />
+        </View>
+
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryRow}>
+          {categories.map((category) => {
+            const active = category === activeCategory;
+            return (
+              <Pressable
+                key={category}
+                onPress={() => setActiveCategory(category)}
+                style={[styles.categoryChip, active && { borderColor: palette.primary, backgroundColor: palette.primarySoft10 }]}
+              >
+                <Text style={[styles.categoryChipText, active && { color: palette.primary }]}>{category}</Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
 
         {isLoading ? <ActivityIndicator color={palette.primary} /> : null}
         {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
 
-        {!isLoading && rows.length === 0 ? (
+        {!isLoading && visibleRows.length === 0 ? (
           <View style={styles.emptyCard}>
-            <Text style={styles.emptyText}>No places published yet.</Text>
+            <Text style={styles.emptyText}>No places match your filters.</Text>
           </View>
         ) : null}
 
-        {rows.map((row) => {
+        {visibleRows.map((row) => {
           const link = normalizeUrl(row.mapLink);
+          const imageUrl = row.imageFileId ? `${API_BASE_URL}/files/${row.imageFileId}/stream` : null;
           return (
-            <View key={row.id} style={styles.card}>
-              <Text style={styles.cardTitle}>{row.name}</Text>
-              {!!row.category ? (
-                <Text style={[styles.cardSub, { color: palette.primary }]}>{row.category}</Text>
-              ) : null}
-              {!!row.address ? <Text style={styles.cardMeta}>{row.address}</Text> : null}
-              {!!row.workingHours ? (
-                <Text style={styles.cardMeta}>Working Hours: {row.workingHours}</Text>
-              ) : null}
-              {link ? (
-                <Pressable
-                  style={[styles.openBtn, { backgroundColor: palette.primary }]}
-                  onPress={() =>
-                    setViewerState({
-                      visible: true,
-                      url: link,
-                      title: row.name,
-                    })
-                  }
-                >
-                  <Text style={styles.openBtnText}>Open Map</Text>
-                </Pressable>
-              ) : null}
-            </View>
+            <Pressable
+              key={row.id}
+              style={styles.card}
+              onPress={() => {
+                if (!link) return;
+                setViewerState({
+                  visible: true,
+                  url: link,
+                  title: row.name,
+                });
+              }}
+            >
+              {imageUrl ? (
+                <Image source={{ uri: imageUrl }} style={styles.cardImage} resizeMode="cover" />
+              ) : (
+                <View style={[styles.cardImage, styles.placeholderImage]}>
+                  <Ionicons name="image-outline" size={22} color={akColors.textSoft} />
+                  <Text style={styles.placeholderText}>No image</Text>
+                </View>
+              )}
+              <View style={styles.cardBody}>
+                <Text style={styles.cardTitle}>{row.name}</Text>
+                <Text style={[styles.cardSub, { color: palette.primary }]}>{normalizeCategory(row.category)}</Text>
+                {!!row.address ? <Text style={styles.cardMeta}>{row.address}</Text> : null}
+                {!!row.workingHours ? <Text style={styles.cardMeta}>Hours: {row.workingHours}</Text> : null}
+                {!!row.phone ? <Text style={styles.cardMeta}>Phone: {row.phone}</Text> : null}
+                {link ? <Text style={[styles.openHint, { color: palette.primary }]}>Tap card to open link</Text> : null}
+              </View>
+            </Pressable>
           );
         })}
       </ScrollView>
@@ -119,18 +180,43 @@ const styles = StyleSheet.create({
     backgroundColor: akColors.bg,
   },
   container: {
-    padding: 16,
+    paddingHorizontal: 16,
     gap: 12,
-    paddingBottom: 120,
+    paddingTop: 0,
   },
-  title: {
+  searchRow: {
+    borderWidth: 1,
+    borderColor: akColors.border,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    paddingHorizontal: 12,
+    height: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  searchInput: {
+    flex: 1,
     color: akColors.text,
-    fontSize: 24,
-    fontWeight: '800',
-  },
-  subtitle: {
-    color: akColors.textMuted,
     fontSize: 13,
+  },
+  categoryRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingVertical: 2,
+  },
+  categoryChip: {
+    borderWidth: 1,
+    borderColor: akColors.border,
+    borderRadius: 999,
+    backgroundColor: '#fff',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  categoryChipText: {
+    color: akColors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
   },
   error: {
     color: '#DC2626',
@@ -149,11 +235,28 @@ const styles = StyleSheet.create({
   },
   card: {
     borderRadius: akRadius.card,
-    backgroundColor: akColors.surface,
+    backgroundColor: '#fff',
     borderWidth: 1,
     borderColor: akColors.border,
-    padding: 14,
+    overflow: 'hidden',
+  },
+  cardImage: {
+    width: '100%',
+    height: 132,
+    backgroundColor: '#E2E8F0',
+  },
+  placeholderImage: {
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: 6,
+  },
+  placeholderText: {
+    color: akColors.textSoft,
+    fontSize: 11,
+  },
+  cardBody: {
+    padding: 12,
+    gap: 5,
   },
   cardTitle: {
     color: akColors.text,
@@ -161,25 +264,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   cardSub: {
-    color: akColors.textMuted,
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   cardMeta: {
     color: akColors.textMuted,
     fontSize: 12,
   },
-  openBtn: {
-    alignSelf: 'flex-start',
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: akColors.textMuted,
+  openHint: {
     marginTop: 4,
-  },
-  openBtnText: {
-    color: '#fff',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
   },
 });

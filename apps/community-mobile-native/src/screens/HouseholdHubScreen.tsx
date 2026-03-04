@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import {
   ActivityIndicator,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppToast } from '../components/mobile/AppToast';
+import { BrandedPageHero } from '../components/mobile/BrandedPageHero';
 import { UnitPicker } from '../components/mobile/UnitPicker';
 import type { AuthSession } from '../features/auth/types';
 import { useBranding } from '../features/branding/provider';
@@ -114,6 +116,7 @@ export function HouseholdHubScreen({
     jobType: '',
   });
   const [workerQrResult, setWorkerQrResult] = useState<string | null>(null);
+  const [unitPickerOpen, setUnitPickerOpen] = useState(false);
   const [editingFamilyUserId, setEditingFamilyUserId] = useState<string | null>(null);
   const [familyWizardStep, setFamilyWizardStep] = useState<FamilyWizardStep>(1);
   const [editingDelegateAccessId, setEditingDelegateAccessId] = useState<string | null>(null);
@@ -994,36 +997,36 @@ export function HouseholdHubScreen({
       <ScrollView
         contentContainerStyle={[
           styles.content,
-          { paddingTop: Math.max(insets.top, 8) + 6, paddingBottom: 112 },
+          { paddingTop: 0, paddingBottom: 112 },
         ]}
       >
         <View style={styles.headerCard}>
-          <View style={styles.headerTopRow}>
-            <View style={[styles.headerIconWrap, { backgroundColor: palette.primarySoft8 }]}>
-              <Ionicons name="people-outline" size={20} color={palette.primary} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.headerTitle}>Manage Household</Text>
-              <Text style={styles.headerSubtitle}>
-                Manage family members, authorized users, and home staff per unit.
-              </Text>
-            </View>
-            <Pressable onPress={() => void load('refresh')}>
-              <Text style={[styles.linkText, { color: palette.primary }]}>
-                {isRefreshing ? 'Refreshing...' : 'Refresh'}
-              </Text>
-            </Pressable>
-          </View>
+          <BrandedPageHero
+            title="Manage Household"
+            subtitle="Manage family members, authorized users, and home staff per unit."
+            rightSlot={(
+              <Pressable onPress={() => void load('refresh')}>
+                <Text style={styles.heroRefreshText}>
+                  {isRefreshing ? 'Refreshing...' : 'Refresh'}
+                </Text>
+              </Pressable>
+            )}
+          />
 
           {units.length > 1 ? (
-            <UnitPicker
-              units={units}
-              selectedUnitId={selectedUnitId}
-              onSelect={onSelectUnit}
-              onRefresh={() => void onRefreshUnits()}
-              isRefreshing={unitsRefreshing}
-              title="Household Unit"
-            />
+            <View style={styles.unitContextRow}>
+              <Text style={styles.unitContextText}>
+                Currently managing:
+                {' '}
+                {selectedUnit?.unitNumber ?? selectedUnit?.id ?? 'Unit'}
+                {selectedUnit?.block ? ` • Block ${selectedUnit.block}` : ''}
+              </Text>
+              <Pressable onPress={() => setUnitPickerOpen(true)}>
+                <Text style={[styles.unitContextChangeText, { color: palette.primary }]}>
+                  Change
+                </Text>
+              </Pressable>
+            </View>
           ) : null}
 
           {selectedUnit ? (
@@ -2116,6 +2119,29 @@ export function HouseholdHubScreen({
           </>
         ) : null}
       </ScrollView>
+      <Modal
+        visible={unitPickerOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setUnitPickerOpen(false)}
+      >
+        <View style={styles.unitPickerModalRoot}>
+          <Pressable style={styles.unitPickerModalBackdrop} onPress={() => setUnitPickerOpen(false)} />
+          <View style={styles.unitPickerModalCard}>
+            <UnitPicker
+              units={units}
+              selectedUnitId={selectedUnitId}
+              onSelect={(unitId) => {
+                onSelectUnit(unitId);
+                setUnitPickerOpen(false);
+              }}
+              onRefresh={() => void onRefreshUnits()}
+              isRefreshing={unitsRefreshing}
+              title="Select Unit"
+            />
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -2130,13 +2156,50 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   headerCard: {
-    backgroundColor: akColors.surface,
-    borderRadius: akRadius.card,
+    backgroundColor: 'transparent',
+    borderRadius: 0,
+    borderWidth: 0,
+    borderColor: 'transparent',
+    padding: 0,
+    gap: 10,
+  },
+  unitContextRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
     borderWidth: 1,
     borderColor: akColors.border,
-    padding: 16,
-    gap: 10,
-    ...akShadow.soft,
+    borderRadius: 12,
+    backgroundColor: akColors.surface,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  unitContextText: {
+    flex: 1,
+    color: akColors.text,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  unitContextChangeText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  unitPickerModalRoot: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  unitPickerModalBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15,23,42,0.28)',
+  },
+  unitPickerModalCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    backgroundColor: akColors.surface,
+    padding: 14,
   },
   headerTopRow: {
     flexDirection: 'row',
@@ -2167,6 +2230,11 @@ const styles = StyleSheet.create({
   },
   linkText: {
     color: akColors.primary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  heroRefreshText: {
+    color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '700',
   },

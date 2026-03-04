@@ -20,6 +20,7 @@ import { VerifyEmailDto } from './dto/verify-email.dto';
 import { SendPhoneOtpDto } from './dto/send-phone-otp.dto';
 import { VerifyPhoneOtpDto } from './dto/verify-phone-otp.dto';
 import { UpdateMeProfileDto } from './dto/update-me-profile.dto';
+import { UpdateMeProfilePhotoDto } from './dto/update-me-profile-photo.dto';
 import { CompleteActivationDto } from './dto/complete-activation.dto';
 import { UpdateActivationDraftDto } from './dto/update-activation-draft.dto';
 import { VerifyLoginTwoFactorDto } from './dto/verify-login-two-factor.dto';
@@ -132,6 +133,14 @@ export class AuthController {
   @ApiBearerAuth()
   updateMeProfile(@Body() dto: UpdateMeProfileDto, @Request() req: any) {
     return this.authService.updateCurrentUserBasicProfile(req.user.id, dto);
+  }
+
+  @Patch('me/profile-photo')
+  @ApiOperation({ summary: 'Update authenticated user profile photo directly' })
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  updateMeProfilePhoto(@Body() dto: UpdateMeProfilePhotoDto, @Request() req: any) {
+    return this.authService.updateCurrentUserProfilePhoto(req.user.id, dto.profilePhotoId);
   }
 
   @Post('me/profile-change-requests')

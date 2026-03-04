@@ -34,23 +34,23 @@ function variantMeta(variant: ToastVariant) {
     case 'success':
       return {
         icon: 'checkmark-circle' as const,
-        iconColor: '#059669',
-        borderColor: '#A7F3D0',
-        bg: '#ECFDF5',
+        iconColor: akColors.success,
+        borderColor: akColors.successBorder,
+        bg: akColors.successBg,
       };
     case 'error':
       return {
         icon: 'alert-circle' as const,
-        iconColor: '#DC2626',
-        borderColor: '#FECACA',
-        bg: '#FEF2F2',
+        iconColor: akColors.danger,
+        borderColor: akColors.dangerBorder,
+        bg: akColors.dangerBg,
       };
     default:
       return {
         icon: 'information-circle' as const,
-        iconColor: '#2563EB',
-        borderColor: '#BFDBFE',
-        bg: '#EFF6FF',
+        iconColor: akColors.primary,
+        borderColor: akColors.border,
+        bg: akColors.surfaceMuted,
       };
   }
 }
@@ -181,4 +181,3 @@ const styles = StyleSheet.create({
     lineHeight: 15,
   },
 });
-

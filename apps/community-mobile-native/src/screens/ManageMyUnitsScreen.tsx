@@ -8,7 +8,8 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { BrandedPageHero } from '../components/mobile/BrandedPageHero';
 import type { AuthSession } from '../features/auth/types';
 import {
   createRentRequest,
@@ -19,6 +20,7 @@ import { pickAndUploadFileByPurpose } from '../features/files/service';
 import { useBranding } from '../features/branding/provider';
 import { getBrandPalette } from '../features/branding/palette';
 import { useAppToast } from '../components/mobile/AppToast';
+import { useBottomNavMetrics } from '../features/layout/BottomNavMetricsContext';
 import { akColors, akRadius, akShadow } from '../theme/alkarma';
 
 type ManageMyUnitsScreenProps = {
@@ -37,6 +39,8 @@ export function ManageMyUnitsScreen({
   const toast = useAppToast();
   const { brand } = useBranding();
   const palette = getBrandPalette(brand);
+  const insets = useSafeAreaInsets();
+  const { contentInsetBottom } = useBottomNavMetrics();
 
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -121,12 +125,18 @@ export function ManageMyUnitsScreen({
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={[styles.header, { backgroundColor: palette.primary }]}>
-          <Text style={styles.headerTitle}>Manage My Units</Text>
-          <Text style={styles.headerSubtitle}>Create rent requests and track admin review status.</Text>
-        </View>
+    <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: Math.max(30, contentInsetBottom + Math.max(insets.bottom - 4, 0)) },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
+        <BrandedPageHero
+          title="Manage My Units"
+          subtitle="Create rent requests and track admin review status."
+        />
 
         <View style={styles.card}>
           <Text style={styles.sectionTitle}>Your Units</Text>
@@ -256,7 +266,6 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     gap: 12,
-    paddingBottom: 30,
   },
   header: {
     borderRadius: akRadius.lg,

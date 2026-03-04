@@ -73,6 +73,7 @@ type ResidentHomeScreenProps = {
   onOpenComplaints: () => void;
   onOpenQr: () => void;
   onOpenFinance: () => void;
+  onOpenSmartHome: () => void;
   onOpenProfileTab: () => void;
   bootstrapProfile?: AuthBootstrapProfile | null;
 };
@@ -128,6 +129,7 @@ export function ResidentHomeScreen({
   onOpenComplaints,
   onOpenQr,
   onOpenFinance,
+  onOpenSmartHome,
   onOpenProfileTab,
   bootstrapProfile,
 }: ResidentHomeScreenProps) {
@@ -162,7 +164,6 @@ export function ResidentHomeScreen({
   const [activePaymentItem, setActivePaymentItem] = useState<PayableItem | null>(null);
   const [isPaying, setIsPaying] = useState(false);
   const [unitSheetOpen, setUnitSheetOpen] = useState(false);
-  const [smartHomeModalVisible, setSmartHomeModalVisible] = useState(false);
   const [offersModalVisible, setOffersModalVisible] = useState(false);
   const [activeOfferId, setActiveOfferId] = useState<string | null>(null);
   const [webViewerState, setWebViewerState] = useState<{
@@ -315,7 +316,7 @@ export function ResidentHomeScreen({
               activeBanner.id,
             )}`
           : null;
-  const bannerPageWidth = Math.max(0, bannerViewportWidth - 28);
+  const bannerPageWidth = Math.max(0, bannerViewportWidth);
 
   const scrollToBanner = useCallback(
     (index: number) => {
@@ -392,7 +393,7 @@ export function ResidentHomeScreen({
       bg: hexToRgba(brandAccent, 0.10),
       iconColor: brandPrimary,
       icon: <Ionicons name="home-outline" size={20} color={brandPrimary} />,
-      onPress: () => setSmartHomeModalVisible(true),
+      onPress: onOpenSmartHome,
     },
     {
       key: 'finance',
@@ -607,14 +608,10 @@ export function ResidentHomeScreen({
             {(selectedUnit?.projectName ?? brand.companyName?.trim()) || 'SSS Community'}
           </Text>
         </View>
-        <Text style={styles.heroEmail}>
-          {selectedUnit?.block ? `Block ${selectedUnit.block} • ` : ''}
-          {selectedUnit?.unitNumber ?? session.email}
-        </Text>
+        
 
         <View style={styles.heroBannerCard}>
-          <LinearGradient
-            colors={['rgba(255,255,255,0.08)', 'rgba(255,255,255,0.03)']}
+          <View
             style={styles.heroBannerInner}
             onLayout={(event) => {
               const width = Math.round(event.nativeEvent.layout.width);
@@ -666,16 +663,6 @@ export function ResidentHomeScreen({
                           bannerPageWidth > 0 ? { width: bannerPageWidth } : null,
                         ]}
                       >
-                        <View style={styles.heroBannerTopRow}>
-                          <Text style={[styles.heroBannerTag, { color: brandAccent }]}>
-                            {t('home.communityUpdatesTag')}
-                          </Text>
-                          {homeBanners.length > 1 ? (
-                            <Text style={styles.heroBannerCounter}>
-                              {(isCurrent ? bannerIndex : visualIndex) + 1}/{homeBanners.length}
-                            </Text>
-                          ) : null}
-                        </View>
                         {bannerImageUri ? (
                           <View style={styles.heroBannerImageWrap}>
                             {!imageFailed ? (
@@ -738,7 +725,9 @@ export function ResidentHomeScreen({
                                             style={[
                                               styles.heroBannerDot,
                                               idx === bannerIndex && styles.heroBannerDotActive,
-                                              idx === bannerIndex ? { backgroundColor: brandAccent } : null,
+                                              idx === bannerIndex
+                                                ? { backgroundColor: 'rgba(255,255,255,0.96)' }
+                                                : null,
                                             ]}
                                           />
                                         ))}
@@ -773,7 +762,9 @@ export function ResidentHomeScreen({
                                           style={[
                                             styles.heroBannerDot,
                                             idx === bannerIndex && styles.heroBannerDotActive,
-                                            idx === bannerIndex ? { backgroundColor: brandAccent } : null,
+                                            idx === bannerIndex
+                                              ? { backgroundColor: 'rgba(255,255,255,0.96)' }
+                                              : null,
                                           ]}
                                         />
                                       ))}
@@ -831,9 +822,6 @@ export function ResidentHomeScreen({
               </>
             ) : (
               <>
-                <Text style={[styles.heroBannerTag, { color: brandAccent }]}>
-                  {t('home.communityUpdatesTag')}
-                </Text>
                 <Text style={styles.heroBannerTitle}>{t('home.noActiveBanners')}</Text>
                 <Text style={styles.heroBannerText}>
                   {t('home.adminBannersHint')}
@@ -845,7 +833,7 @@ export function ResidentHomeScreen({
                 ) : null}
               </>
             )}
-          </LinearGradient>
+          </View>
         </View>
       </LinearGradient>
 
@@ -869,9 +857,7 @@ export function ResidentHomeScreen({
               key={tile.key}
               style={[
                 styles.homeQuickTile,
-                tile.key === 'access' && styles.homeQuickTileBlue,
-                tile.key === 'services' && styles.homeQuickTileGreen,
-                tile.key === 'requests' && styles.homeQuickTilePurple,
+                { backgroundColor: tile.bg },
               ]}
               onPress={tile.onPress}
             >
@@ -1121,57 +1107,6 @@ export function ResidentHomeScreen({
           })
         }
       />
-      <Modal
-        visible={smartHomeModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setSmartHomeModalVisible(false)}
-      >
-        <View style={styles.comingSoonRoot}>
-          <Pressable
-            style={styles.comingSoonBackdrop}
-            onPress={() => setSmartHomeModalVisible(false)}
-          />
-          <View style={styles.comingSoonCard}>
-            <LinearGradient
-              colors={[brandPrimary, brandPrimaryDark]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.comingSoonHero}
-            >
-              <View style={styles.comingSoonIconWrap}>
-                <Ionicons name="bulb-outline" size={24} color={brandAccent} />
-              </View>
-              <Text style={styles.comingSoonTitle}>{t('home.smartHomeTitle')}</Text>
-              <Text style={styles.comingSoonSubtitle}>
-                {t('home.smartHomeSubtitle')}
-              </Text>
-            </LinearGradient>
-
-            <View style={styles.comingSoonBody}>
-              <Text style={styles.comingSoonBullet}>
-                {t('home.smartHomeBullet1')}
-              </Text>
-              <Text style={styles.comingSoonBullet}>
-                {t('home.smartHomeBullet2')}
-              </Text>
-              <Text style={styles.comingSoonBullet}>
-                {t('home.smartHomeBullet3')}
-              </Text>
-              <Text style={styles.comingSoonHint}>
-                {t('home.smartHomeHint')}
-              </Text>
-            </View>
-
-            <Pressable
-              style={[styles.comingSoonCloseBtn, { backgroundColor: brandPrimary }]}
-              onPress={() => setSmartHomeModalVisible(false)}
-            >
-              <Text style={styles.comingSoonCloseBtnText}>{t('home.smartHomeClose')}</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -1245,14 +1180,14 @@ const styles = StyleSheet.create({
     height: 16,
     borderRadius: 8,
     paddingHorizontal: 3,
-    backgroundColor: '#EF4444',
+    backgroundColor: akColors.danger,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.8)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   heroBellBadgeText: {
-    color: '#fff',
+    color: akColors.white,
     fontSize: 9,
     fontWeight: '800',
   },
@@ -1263,7 +1198,7 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   heroTitle: {
-    color: '#FFFFFF',
+    color: akColors.white,
     fontSize: 18,
     fontWeight: '700',
   },
@@ -1295,11 +1230,10 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   heroBannerInner: {
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 18,
-    padding: 14,
-    gap: 4,
+    borderWidth: 0,
+    borderRadius: 0,
+    padding: 0,
+    gap: 0,
   },
   heroBannerPager: {
     width: '100%',
@@ -1328,8 +1262,6 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 138,
     borderRadius: 12,
-    marginTop: 6,
-    marginBottom: 4,
     backgroundColor: 'rgba(255,255,255,0.04)',
   },
   heroBannerImageWrap: {
@@ -1344,7 +1276,8 @@ const styles = StyleSheet.create({
   heroBannerImageOverlay: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'flex-end',
-    paddingHorizontal: 10,
+    paddingLeft: 48,
+    paddingRight: 48,
     paddingVertical: 10,
     gap: 4,
   },
@@ -1390,7 +1323,7 @@ const styles = StyleSheet.create({
     right: 8,
   },
   heroBannerTitle: {
-    color: '#fff',
+    color: akColors.white,
     fontSize: 14,
     fontWeight: '700',
   },
@@ -1461,10 +1394,10 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   feedCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: akColors.surface,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#EEF2F7',
+    borderColor: akColors.border,
     padding: 14,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1475,7 +1408,7 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     borderRadius: 15,
-    backgroundColor: '#ECFDF5',
+    backgroundColor: akColors.successBg,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1493,10 +1426,10 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   paymentCard: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: akColors.surface,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#EEF2F7',
+    borderColor: akColors.border,
     padding: 14,
     flexDirection: 'row',
     alignItems: 'center',
@@ -1531,7 +1464,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   payNowPill: {
-    backgroundColor: '#166534',
+    backgroundColor: akColors.primary,
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 5,
@@ -1540,7 +1473,7 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   payNowPillText: {
-    color: '#fff',
+    color: akColors.white,
     fontSize: 11,
     fontWeight: '700',
   },
@@ -1584,7 +1517,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(15,23,42,0.26)',
   },
   comingSoonCard: {
-    backgroundColor: '#fff',
+    backgroundColor: akColors.surface,
     borderRadius: 22,
     overflow: 'hidden',
     borderWidth: 1,
@@ -1606,7 +1539,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.10)',
   },
   comingSoonTitle: {
-    color: '#fff',
+    color: akColors.white,
     fontSize: 16,
     fontWeight: '700',
   },
@@ -1641,7 +1574,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   comingSoonCloseBtnText: {
-    color: '#fff',
+    color: akColors.white,
     fontSize: 13,
     fontWeight: '700',
   },
@@ -1652,7 +1585,7 @@ const styles = StyleSheet.create({
   },
   statCard: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: akColors.surface,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: '#E2E8F0',
@@ -1754,8 +1687,8 @@ const styles = StyleSheet.create({
   },
   secondaryButtonWide: {
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    backgroundColor: '#F8FAFC',
+    borderColor: akColors.border,
+    backgroundColor: akColors.surfaceMuted,
     borderRadius: 10,
     paddingVertical: 11,
     alignItems: 'center',
@@ -1866,7 +1799,7 @@ const styles = StyleSheet.create({
     maxWidth: 460,
     borderRadius: 20,
     overflow: 'hidden',
-    backgroundColor: '#fff',
+    backgroundColor: akColors.surface,
     ...akShadow.card,
   },
   offerCloseBtn: {
@@ -1898,7 +1831,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   offerTitle: {
-    color: '#fff',
+    color: akColors.white,
     fontSize: 18,
     fontWeight: '800',
   },
@@ -1938,7 +1871,7 @@ const styles = StyleSheet.create({
     backgroundColor: akColors.primary,
   },
   offerOpenText: {
-    color: '#fff',
+    color: akColors.white,
     fontSize: 12,
     fontWeight: '800',
   },

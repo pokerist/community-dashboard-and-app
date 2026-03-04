@@ -63,6 +63,8 @@ export function useAuthSession(): AuthHookResult {
   const sessionRef = useRef<AuthSession | null>(null);
   const appStateRef = useRef(AppState.currentState);
   const lastForegroundRefreshAtRef = useRef(0);
+  const backgroundEnteredAtRef = useRef<number | null>(null);
+  const biometricPromptInFlightRef = useRef(false);
 
   useEffect(() => {
     sessionRef.current = session;
@@ -382,32 +384,95 @@ export function useAuthSession(): AuthHookResult {
           setIsRefreshing(false);
         }
       },
-      onSessionExpired: () => signOut(null),
+      onSessionExpired: async () => {
+        if (biometricPromptInFlightRef.current) return;
+        if (biometricAvailable && savedLogin?.email && savedLogin.password) {
+          try {
+            biometricPromptInFlightRef.current = true;
+            await signInWithBiometrics();
+            return;
+          } catch {
+            // Fall through to sign-out when biometric recovery fails.
+          } finally {
+            biometricPromptInFlightRef.current = false;
+          }
+        }
+        await signOut(null);
+      },
     });
 
     return () => {
       configureHttpAuthHandlers(null);
     };
-  }, [performRefresh, signOut]);
+  }, [biometricAvailable, performRefresh, savedLogin, signInWithBiometrics, signOut]);
 
   useEffect(() => {
-    const sub = AppState.addEventListener('change', (nextState) => {
+    const IDLE_BIOMETRIC_THRESHOLD_MS = 2 * 60 * 1000;
+
+    const sub = AppState.addEventListener('change', async (nextState) => {
       const prev = appStateRef.current;
       appStateRef.current = nextState;
+
+      if (nextState === 'background' || nextState === 'inactive') {
+        backgroundEnteredAtRef.current = Date.now();
+      }
+
       if (
         (prev === 'background' || prev === 'inactive') &&
         nextState === 'active'
       ) {
         const current = sessionRef.current;
         if (!current?.refreshToken || !current.userId) return;
+
+        const idleMs = backgroundEnteredAtRef.current
+          ? Date.now() - backgroundEnteredAtRef.current
+          : 0;
+
+        if (
+          idleMs >= IDLE_BIOMETRIC_THRESHOLD_MS &&
+          biometricAvailable &&
+          savedLogin?.email &&
+          savedLogin.password &&
+          !biometricPromptInFlightRef.current
+        ) {
+          try {
+            biometricPromptInFlightRef.current = true;
+            const biometricResult = await LocalAuthentication.authenticateAsync({
+              promptMessage: 'Unlock SSS Community',
+              fallbackLabel: 'Use passcode',
+              cancelLabel: 'Cancel',
+              disableDeviceFallback: false,
+            });
+            if (!biometricResult.success) {
+              await signOut(null);
+              return;
+            }
+          } catch {
+            await signOut(null);
+            return;
+          } finally {
+            biometricPromptInFlightRef.current = false;
+          }
+        }
+
         const now = Date.now();
         if (now - lastForegroundRefreshAtRef.current < 8000) return;
         lastForegroundRefreshAtRef.current = now;
-        void refreshSession().catch(() => undefined);
+        try {
+          await refreshSession();
+        } catch {
+          if (biometricAvailable && savedLogin?.email && savedLogin.password) {
+            try {
+              await signInWithBiometrics();
+            } catch {
+              // Keep user in app; network/transient issues should not hard-stop the session.
+            }
+          }
+        }
       }
     });
     return () => sub.remove();
-  }, [refreshSession]);
+  }, [biometricAvailable, refreshSession, savedLogin, signInWithBiometrics, signOut]);
 
   return useMemo(
     () => ({

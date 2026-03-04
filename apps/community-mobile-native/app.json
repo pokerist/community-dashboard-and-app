@@ -15,7 +15,8 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Location is used during emergency alerts when you request help."
+        "NSLocationWhenInUseUsageDescription": "Location is used during emergency alerts when you request help.",
+        "NSMicrophoneUsageDescription": "Microphone access is used to record SOS voice notes for emergency support."
       }
     },
     "android": {
@@ -23,6 +24,8 @@
       "googleServicesFile": "./google-services.json",
       "usesCleartextTraffic": true,
       "permissions": [
+        "POST_NOTIFICATIONS",
+        "RECORD_AUDIO",
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION"
       ],

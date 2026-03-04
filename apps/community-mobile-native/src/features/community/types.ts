@@ -511,6 +511,18 @@ export type FireEvacuationStatus = {
   };
 };
 
+export type CreateSosAlertInput = {
+  unitId?: string;
+  note?: string;
+  voiceAttachmentId?: string;
+  location?: {
+    lat: number;
+    lng: number;
+    accuracy?: number;
+    capturedAt?: string;
+  };
+};
+
 export type HelpCenterEntry = {
   id: string;
   title: string;

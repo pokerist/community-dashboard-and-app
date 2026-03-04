@@ -17,8 +17,8 @@ import {
 } from 'react-native-safe-area-context';
 import { DemoPaymentModal } from '../components/mobile/DemoPaymentModal';
 import { useAppToast } from '../components/mobile/AppToast';
+import { BrandedPageHero } from '../components/mobile/BrandedPageHero';
 import { InlineError, ScreenCard } from '../components/mobile/Primitives';
-import { UnitPicker } from '../components/mobile/UnitPicker';
 import type { AuthSession } from '../features/auth/types';
 import {
   listViolationActions,
@@ -43,6 +43,7 @@ import {
 import { useI18n } from '../features/i18n/provider';
 import { useBranding } from '../features/branding/provider';
 import { getBrandPalette } from '../features/branding/palette';
+import { useBottomNavMetrics } from '../features/layout/BottomNavMetricsContext';
 import { akColors, akRadius, akShadow } from '../theme/alkarma';
 import { formatCurrency, formatDateOnly, formatDateTime } from '../utils/format';
 
@@ -55,6 +56,7 @@ type FinanceScreenProps = {
   unitsRefreshing: boolean;
   unitsLoading: boolean;
   unitsErrorMessage: string | null;
+  onOpenUnitPicker?: () => void;
   deepLinkFocus?: { entityType: 'INVOICE' | 'VIOLATION'; entityId: string } | null;
   onConsumeDeepLinkFocus?: (entityType: 'INVOICE' | 'VIOLATION', entityId: string) => void;
 };
@@ -63,11 +65,12 @@ export function FinanceScreen({
   session,
   units,
   selectedUnitId,
-  onSelectUnit,
-  onRefreshUnits,
+  onSelectUnit: _onSelectUnit,
+  onRefreshUnits: _onRefreshUnits,
   unitsRefreshing,
   unitsLoading,
   unitsErrorMessage,
+  onOpenUnitPicker,
   deepLinkFocus = null,
   onConsumeDeepLinkFocus,
 }: FinanceScreenProps) {
@@ -75,6 +78,7 @@ export function FinanceScreen({
   const { brand } = useBranding();
   const palette = getBrandPalette(brand);
   const insets = useSafeAreaInsets();
+  const { contentInsetBottom } = useBottomNavMetrics();
   const toast = useAppToast();
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [violations, setViolations] = useState<ViolationRow[]>([]);
@@ -303,13 +307,13 @@ export function FinanceScreen({
       <ScrollView
         contentContainerStyle={[
           styles.container,
-          { paddingTop: Math.max(insets.top, 8) + 8 },
+          { paddingTop: 0, paddingBottom: Math.max(110, contentInsetBottom) },
         ]}
       >
-      <View style={styles.headerCard}>
-        <Text style={styles.headerTitle}>{t('drawer.payments')}</Text>
-        <Text style={styles.headerSubtitle}>{t('finance.subtitle')}</Text>
-      </View>
+      <BrandedPageHero
+        title={t('drawer.payments')}
+        subtitle={t('finance.subtitle')}
+      />
 
       <LinearGradient
         colors={[palette.primary, palette.primaryDark]}
@@ -322,23 +326,23 @@ export function FinanceScreen({
         <Text style={styles.heroSubtitle}>
           {t('finance.heroSubtitle')}
         </Text>
-        <Text style={styles.heroHint}>
-          Track invoices by status and category, then open any item for details or actions.
-        </Text>
       </LinearGradient>
 
       <ScreenCard title={t('finance.selectedUnit')}>
         {units.length > 1 ? (
-          <UnitPicker
-            units={units}
-            selectedUnitId={selectedUnitId}
-            onSelect={onSelectUnit}
-            onRefresh={() => void onRefreshUnits()}
-            isRefreshing={unitsRefreshing}
-          />
+          <View style={styles.unitRow}>
+            <Text style={styles.unitRowText}>
+              {units.find((unit) => unit.id === selectedUnitId)?.unitNumber ??
+                units.find((unit) => unit.id === selectedUnitId)?.id ??
+                'Select unit'}
+            </Text>
+            <Pressable style={styles.unitRowChangeBtn} onPress={onOpenUnitPicker}>
+              <Text style={styles.unitRowChangeText}>Change</Text>
+            </Pressable>
+          </View>
         ) : null}
         <InlineError message={unitsErrorMessage} />
-        {unitsLoading ? <ActivityIndicator color={palette.primary} /> : null}
+        {unitsLoading || unitsRefreshing ? <ActivityIndicator color={palette.primary} /> : null}
       </ScreenCard>
 
       <ScreenCard
@@ -783,6 +787,30 @@ const styles = StyleSheet.create({
     marginTop: 4,
     color: akColors.textMuted,
     fontSize: 13,
+  },
+  unitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  unitRowText: {
+    color: akColors.text,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  unitRowChangeBtn: {
+    borderWidth: 1,
+    borderColor: akColors.border,
+    borderRadius: 999,
+    backgroundColor: akColors.surfaceMuted,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  unitRowChangeText: {
+    color: akColors.text,
+    fontSize: 12,
+    fontWeight: '700',
   },
   hero: {
     borderRadius: 24,

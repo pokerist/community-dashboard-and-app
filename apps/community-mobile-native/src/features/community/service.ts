@@ -37,6 +37,7 @@ import type {
   WorkerRow,
   ViolationRow,
   FireEvacuationStatus,
+  CreateSosAlertInput,
   HelpCenterEntry,
   HouseholdRequestsResponse,
   DiscoverPlace,
@@ -499,6 +500,16 @@ export async function requestFireEvacuationHelp(
       headers: authHeaders(accessToken),
     },
   );
+  return response.data;
+}
+
+export async function createSosAlert(
+  accessToken: string,
+  payload: CreateSosAlertInput,
+) {
+  const response = await http.post('/incidents/me/sos', payload, {
+    headers: authHeaders(accessToken),
+  });
   return response.data;
 }
 

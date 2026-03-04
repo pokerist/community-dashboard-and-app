@@ -10,6 +10,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { EmailService } from '../notifications/email.service';
 import * as bcrypt from 'bcrypt';
 import { CreateOwnerWithUnitDto } from './dto/create-owner-with-unit.dto';
+import { AddOwnerUnitsDto } from './dto/add-owner-units.dto';
 import {
   AddFamilyMemberDto,
   RelationshipType,
@@ -507,6 +508,245 @@ export class OwnersService {
     }
 
     return { message: 'Owner created successfully', ...result };
+  }
+
+  async addUnitsToExistingOwner(
+    ownerUserId: string,
+    dto: AddOwnerUnitsDto,
+    createdBy: string,
+  ) {
+    if (!Array.isArray(dto.units) || dto.units.length === 0) {
+      throw new BadRequestException('At least one unit assignment is required');
+    }
+
+    const ownerUser = await this.prisma.user.findUnique({
+      where: { id: ownerUserId },
+      select: { id: true, email: true, nameEN: true },
+    });
+    if (!ownerUser) throw new NotFoundException('Owner user not found');
+
+    await this.prisma.owner.upsert({
+      where: { userId: ownerUserId },
+      update: {},
+      create: { userId: ownerUserId },
+    });
+
+    const resident = await this.prisma.resident.upsert({
+      where: { userId: ownerUserId },
+      update: {},
+      create: { userId: ownerUserId },
+      select: { id: true },
+    });
+
+    const seenUnitIds = new Set<string>();
+    const normalizedAssignments: Array<{
+      unitId: string;
+      paymentMode: OwnerPaymentMode;
+      contractFileId: string | null;
+      contractSignedAt: Date | null;
+      notes: string | null;
+      installments: Array<{
+        sequence: number;
+        dueDate: Date;
+        amount: Prisma.Decimal;
+        referenceFileId: string | null;
+        referencePageIndex: number | null;
+      }>;
+    }> = [];
+
+    for (const assignment of dto.units) {
+      const unitId = String(assignment.unitId || '').trim();
+      if (!unitId) throw new BadRequestException('Each assignment must include unitId');
+      if (seenUnitIds.has(unitId)) {
+        throw new BadRequestException(`Duplicate unit assignment detected (${unitId})`);
+      }
+      seenUnitIds.add(unitId);
+
+      const paymentMode = assignment.paymentMode ?? OwnerPaymentMode.CASH;
+      const unit = await this.prisma.unit.findUnique({
+        where: { id: unitId },
+        select: { id: true, status: true },
+      });
+      if (!unit) throw new BadRequestException(`Unit not found (${unitId})`);
+      if (
+        unit.status !== UnitStatus.AVAILABLE &&
+        unit.status !== UnitStatus.NOT_DELIVERED
+      ) {
+        throw new BadRequestException(`Unit ${unitId} is not available for owner assignment`);
+      }
+
+      const existingContract = await this.prisma.ownerUnitContract.findUnique({
+        where: {
+          ownerUserId_unitId: {
+            ownerUserId,
+            unitId,
+          },
+        },
+        select: { id: true },
+      });
+      if (existingContract) {
+        throw new BadRequestException(`Unit ${unitId} is already assigned to this owner`);
+      }
+
+      const contractFileId = assignment.contractFileId?.trim() || null;
+      if (contractFileId) {
+        const file = await this.prisma.file.findUnique({
+          where: { id: contractFileId },
+          select: { id: true, category: true },
+        });
+        if (!file || file.category !== 'CONTRACT') {
+          throw new BadRequestException(`Invalid contract file for unit ${unitId}`);
+        }
+      }
+
+      const contractSignedAt = assignment.contractSignedAt
+        ? new Date(assignment.contractSignedAt)
+        : null;
+      if (contractSignedAt && Number.isNaN(contractSignedAt.getTime())) {
+        throw new BadRequestException(`Invalid contract date for unit ${unitId}`);
+      }
+
+      const rawInstallments = Array.isArray(assignment.installments)
+        ? assignment.installments
+        : [];
+      if (paymentMode === OwnerPaymentMode.INSTALLMENT && rawInstallments.length === 0) {
+        throw new BadRequestException(`Installments are required for installment payment mode (unit ${unitId})`);
+      }
+      if (paymentMode === OwnerPaymentMode.CASH && rawInstallments.length > 0) {
+        throw new BadRequestException(`Cash mode cannot include installments (unit ${unitId})`);
+      }
+
+      const installments: Array<{
+        sequence: number;
+        dueDate: Date;
+        amount: Prisma.Decimal;
+        referenceFileId: string | null;
+        referencePageIndex: number | null;
+      }> = [];
+      for (let idx = 0; idx < rawInstallments.length; idx++) {
+        const row = rawInstallments[idx];
+        const dueDate = new Date(row.dueDate);
+        if (Number.isNaN(dueDate.getTime())) {
+          throw new BadRequestException(`Invalid due date in installment #${idx + 1} for unit ${unitId}`);
+        }
+        const amount = Number(row.amount);
+        if (!Number.isFinite(amount) || amount <= 0) {
+          throw new BadRequestException(`Invalid amount in installment #${idx + 1} for unit ${unitId}`);
+        }
+        installments.push({
+          sequence: idx + 1,
+          dueDate,
+          amount: new Prisma.Decimal(amount.toFixed(2)),
+          referenceFileId: row.referenceFileId?.trim() || null,
+          referencePageIndex:
+            typeof row.referencePageIndex === 'number' ? row.referencePageIndex : null,
+        });
+      }
+
+      normalizedAssignments.push({
+        unitId,
+        paymentMode,
+        contractFileId,
+        contractSignedAt,
+        notes: assignment.notes?.trim() || null,
+        installments,
+      });
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      const hasPrimary = await tx.residentUnit.findFirst({
+        where: { residentId: resident.id, isPrimary: true },
+        select: { id: true },
+      });
+
+      for (let index = 0; index < normalizedAssignments.length; index++) {
+        const assignment = normalizedAssignments[index];
+
+        await tx.residentUnit.upsert({
+          where: {
+            residentId_unitId: {
+              residentId: resident.id,
+              unitId: assignment.unitId,
+            },
+          },
+          update: {},
+          create: {
+            residentId: resident.id,
+            unitId: assignment.unitId,
+            isPrimary: !hasPrimary && index === 0,
+          },
+        });
+
+        const existingOwnerAccess = await tx.unitAccess.findFirst({
+          where: {
+            unitId: assignment.unitId,
+            userId: ownerUserId,
+            role: 'OWNER',
+            status: 'ACTIVE',
+          },
+          select: { id: true },
+        });
+        if (!existingOwnerAccess) {
+          await tx.unitAccess.create({
+            data: {
+              unitId: assignment.unitId,
+              userId: ownerUserId,
+              role: 'OWNER',
+              startsAt: new Date(),
+              grantedBy: createdBy,
+              status: 'ACTIVE',
+              source: 'ADMIN_ASSIGNMENT',
+              canViewFinancials: true,
+              canReceiveBilling: true,
+              canBookFacilities: true,
+              canGenerateQR: true,
+              canManageWorkers: true,
+            },
+          });
+        }
+
+        await tx.unit.update({
+          where: { id: assignment.unitId },
+          data: { status: UnitStatus.NOT_DELIVERED, isDelivered: false },
+        });
+
+        const contract = await tx.ownerUnitContract.create({
+          data: {
+            ownerUserId,
+            unitId: assignment.unitId,
+            contractFileId: assignment.contractFileId ?? undefined,
+            contractSignedAt: assignment.contractSignedAt ?? undefined,
+            paymentMode: assignment.paymentMode,
+            notes: assignment.notes ?? undefined,
+            createdById: createdBy,
+          },
+        });
+
+        if (assignment.installments.length > 0) {
+          await tx.ownerInstallment.createMany({
+            data: assignment.installments.map((row) => ({
+              ownerUnitContractId: contract.id,
+              sequence: row.sequence,
+              dueDate: row.dueDate,
+              amount: row.amount,
+              referenceFileId: row.referenceFileId ?? undefined,
+              referencePageIndex: row.referencePageIndex ?? undefined,
+              status: OwnerInstallmentStatus.PENDING,
+            })),
+          });
+        }
+      }
+    });
+
+    return {
+      message: 'Owner units added successfully',
+      ownerUserId,
+      assignedUnits: normalizedAssignments.map((row) => ({
+        unitId: row.unitId,
+        paymentMode: row.paymentMode,
+        installments: row.installments.length,
+      })),
+    };
   }
 
   private validateProfileImage(file: Express.Multer.File) {

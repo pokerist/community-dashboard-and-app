@@ -16,6 +16,7 @@ import {
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
 import type { AuthSession } from '../features/auth/types';
+import { BrandedPageHero } from '../components/mobile/BrandedPageHero';
 import { InAppWebViewerModal } from '../components/mobile/InAppWebViewerModal';
 import {
   formatNotificationDateTime,
@@ -50,7 +51,7 @@ function notificationVisual(
   if (key.includes('PAYMENT') || key.includes('INVOICE')) {
     return {
       icon: 'card-outline' as const,
-      iconColor: '#D97706',
+      iconColor: palette.secondary,
       bg: 'rgba(245,158,11,0.10)',
     };
   }
@@ -64,15 +65,15 @@ function notificationVisual(
   if (key.includes('SECURITY') || key.includes('INCIDENT')) {
     return {
       icon: 'shield-checkmark-outline' as const,
-      iconColor: '#DC2626',
-      bg: 'rgba(239,68,68,0.10)',
+      iconColor: akColors.danger,
+      bg: akColors.dangerBg,
     };
   }
   if (key.includes('EVENT') || key.includes('BOOKING')) {
     return {
       icon: 'calendar-outline' as const,
-      iconColor: '#059669',
-      bg: 'rgba(16,185,129,0.10)',
+      iconColor: palette.primary,
+      bg: palette.primarySoft10,
     };
   }
   return {
@@ -109,6 +110,7 @@ function dayBucketLabel(
 
 function NotificationRowItem({
   item,
+  isReadVisual,
   onMarkRead,
   isMarking,
   onOpen,
@@ -116,6 +118,7 @@ function NotificationRowItem({
   language,
 }: {
   item: MobileNotificationRow;
+  isReadVisual: boolean;
   onMarkRead: (id: string) => void;
   isMarking: boolean;
   onOpen: () => void;
@@ -135,8 +138,8 @@ function NotificationRowItem({
       onPress={onOpen}
       style={({ pressed }) => [
         styles.rowCard,
-        item.isRead && styles.rowCardRead,
-        !item.isRead && [
+        isReadVisual && styles.rowCardRead,
+        !isReadVisual && [
           styles.rowCardUnread,
           {
             backgroundColor: palette.primarySoft8,
@@ -152,18 +155,18 @@ function NotificationRowItem({
           <Ionicons name={visual.icon} size={18} color={visual.iconColor} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={[styles.rowTitle, !item.isRead && styles.rowTitleUnread]}>
+          <Text style={[styles.rowTitle, !isReadVisual && styles.rowTitleUnread]}>
             {safeTitle}
           </Text>
           <Text style={styles.rowSubtitle}>
-            {notificationTypeLabel(item)} • {item.isRead ? t('common.seen') : t('common.new')}
+            {notificationTypeLabel(item)} • {isReadVisual ? t('common.seen') : t('common.new')}
           </Text>
         </View>
         <View
           style={[
             styles.readBadge,
-            item.isRead ? styles.readBadgeRead : styles.readBadgeUnread,
-            !item.isRead && {
+            isReadVisual ? styles.readBadgeRead : styles.readBadgeUnread,
+            !isReadVisual && {
               backgroundColor: palette.accentSoft12,
               borderColor: palette.secondary,
             },
@@ -172,11 +175,11 @@ function NotificationRowItem({
           <Text
             style={[
               styles.readBadgeText,
-              item.isRead ? styles.readBadgeTextRead : styles.readBadgeTextUnread,
-              !item.isRead && { color: palette.primary },
+              isReadVisual ? styles.readBadgeTextRead : styles.readBadgeTextUnread,
+              !isReadVisual && { color: palette.primary },
             ]}
           >
-            {item.isRead ? t('common.read') : t('common.unread')}
+            {isReadVisual ? t('common.read') : t('common.unread')}
           </Text>
         </View>
       </View>
@@ -187,7 +190,7 @@ function NotificationRowItem({
         {formatNotificationRelativeTime(item.sentAt || item.createdAt)} • {formatNotificationDateTime(item.sentAt || item.createdAt)}
       </Text>
 
-      {!item.isRead ? (
+      {!isReadVisual ? (
         <Pressable
           style={[
             styles.markReadButton,
@@ -225,6 +228,7 @@ export function NotificationsListScreen({ onOpenInAppRoute }: NotificationsListS
   const notifications = useNotificationRealtime();
   const [filter, setFilter] = useState<FilterMode>('all');
   const [selectedNotification, setSelectedNotification] = useState<MobileNotificationRow | null>(null);
+  const [optimisticReadIds, setOptimisticReadIds] = useState<Set<string>>(new Set());
   const [webViewerState, setWebViewerState] = useState<{
     visible: boolean;
     url: string | null;
@@ -317,13 +321,11 @@ export function NotificationsListScreen({ onOpenInAppRoute }: NotificationsListS
 
   return (
     <SafeAreaView style={styles.screen} edges={['bottom']}>
-      <View style={[styles.topCardWrap, { paddingTop: Math.max(insets.top, 8) + 8 }]}>
-        <View style={styles.headerBlock}>
-          <Text style={styles.screenTitle}>{t('notifications.title')}</Text>
-          <Text style={styles.screenSubtitle}>
-            {t('notifications.subtitle')}
-          </Text>
-        </View>
+      <View style={[styles.topCardWrap, { paddingTop: 0 }]}>
+        <BrandedPageHero
+          title={t('notifications.title')}
+          subtitle={t('notifications.subtitle')}
+        />
         <View style={styles.filtersRow}>
           <Pressable
             style={[
@@ -410,13 +412,42 @@ export function NotificationsListScreen({ onOpenInAppRoute }: NotificationsListS
         renderItem={({ item }) => (
           <NotificationRowItem
             item={item}
-            onMarkRead={(id) => void notifications.markRead(id)}
+            isReadVisual={item.isRead || optimisticReadIds.has(item.id)}
+            onMarkRead={(id) => {
+              setOptimisticReadIds((prev) => {
+                const next = new Set(prev);
+                next.add(id);
+                return next;
+              });
+              void notifications.markRead(id).finally(() => {
+                setOptimisticReadIds((prev) => {
+                  const next = new Set(prev);
+                  next.delete(id);
+                  return next;
+                });
+              });
+            }}
             isMarking={notifications.markingId === item.id}
             palette={palette}
             language={language}
             onOpen={async () => {
               setSelectedNotification(item);
-              if (!item.isRead) await notifications.markRead(item.id);
+              if (!item.isRead) {
+                setOptimisticReadIds((prev) => {
+                  const next = new Set(prev);
+                  next.add(item.id);
+                  return next;
+                });
+                try {
+                  await notifications.markRead(item.id);
+                } finally {
+                  setOptimisticReadIds((prev) => {
+                    const next = new Set(prev);
+                    next.delete(item.id);
+                    return next;
+                  });
+                }
+              }
             }}
           />
         )}
@@ -651,12 +682,12 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   rowCardRead: {
-    backgroundColor: '#FFFFFF',
-    borderColor: '#E5EAF2',
+    backgroundColor: akColors.surface,
+    borderColor: akColors.border,
   },
   rowCardUnread: {
-    backgroundColor: '#FCFEFD',
-    borderColor: '#CFE4DA',
+    backgroundColor: akColors.surface,
+    borderColor: akColors.border,
     borderLeftWidth: 4,
     borderLeftColor: akColors.primary,
   },
@@ -676,7 +707,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   rowTitle: {
-    color: '#0F172A',
+    color: akColors.text,
     fontSize: 15,
     fontWeight: '700',
   },
@@ -686,7 +717,7 @@ const styles = StyleSheet.create({
   },
   rowSubtitle: {
     marginTop: 3,
-    color: '#475569',
+    color: akColors.textMuted,
     fontSize: 12,
     fontWeight: '500',
   },
@@ -698,24 +729,24 @@ const styles = StyleSheet.create({
   },
   readBadgeUnread: {
     backgroundColor: akColors.goldSoft,
-    borderColor: '#e4d4ab',
+    borderColor: akColors.gold,
   },
   readBadgeRead: {
-    backgroundColor: '#F0FDF4',
-    borderColor: '#BBF7D0',
+    backgroundColor: akColors.successBg,
+    borderColor: akColors.successBorder,
   },
   readBadgeText: {
     fontSize: 10,
     fontWeight: '700',
   },
   readBadgeTextUnread: {
-    color: '#8A6A24',
+    color: akColors.text,
   },
   readBadgeTextRead: {
-    color: '#166534',
+    color: akColors.success,
   },
   rowMessage: {
-    color: '#1E293B',
+    color: akColors.text,
     fontSize: 13,
     lineHeight: 20,
   },
@@ -726,8 +757,8 @@ const styles = StyleSheet.create({
   markReadButton: {
     alignSelf: 'flex-start',
     borderWidth: 1,
-    borderColor: '#d6c28a',
-    backgroundColor: '#fff8e6',
+    borderColor: akColors.gold,
+    backgroundColor: akColors.goldSoft,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,

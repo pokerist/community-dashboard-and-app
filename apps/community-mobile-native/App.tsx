@@ -14,6 +14,7 @@ import { LoginScreen } from './src/screens/LoginScreen';
 import { MobileShell } from './src/screens/MobileShell';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
 import { useAuthSession } from './src/features/auth/useAuthSession';
+import { ensureInitialRuntimePermissionsRequested } from './src/features/device/permissions';
 
 type GuestRoute = 'onboarding' | 'login' | 'forgot';
 
@@ -31,6 +32,11 @@ export default function App() {
   useEffect(() => {
     if (!isAppReady) return;
     SplashScreen.hideAsync().catch(() => undefined);
+  }, [isAppReady]);
+
+  useEffect(() => {
+    if (!isAppReady) return;
+    void ensureInitialRuntimePermissionsRequested();
   }, [isAppReady]);
 
   if (!isAppReady) return null;

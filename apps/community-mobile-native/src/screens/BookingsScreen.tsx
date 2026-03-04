@@ -15,10 +15,11 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppToast } from '../components/mobile/AppToast';
+import { BrandedPageHero } from '../components/mobile/BrandedPageHero';
 import { InlineError, ScreenCard } from '../components/mobile/Primitives';
-import { UnitPicker } from '../components/mobile/UnitPicker';
 import { useBranding } from '../features/branding/provider';
 import { getBrandPalette } from '../features/branding/palette';
+import { useBottomNavMetrics } from '../features/layout/BottomNavMetricsContext';
 import type { AuthSession } from '../features/auth/types';
 import {
   cancelBooking,
@@ -42,6 +43,7 @@ type BookingsScreenProps = {
   unitsErrorMessage: string | null;
   onSelectUnit: (unitId: string) => void;
   onRefreshUnits: () => Promise<void>;
+  onOpenUnitPicker?: () => void;
   onOpenFinance?: () => void;
   deepLinkBookingId?: string | null;
   onConsumeDeepLinkBookingId?: (bookingId: string) => void;
@@ -52,17 +54,6 @@ type SlotOption = {
   endTime: string;
   label: string;
 };
-const DATE_PRESETS_DAYS = [0, 1, 2] as const;
-
-function isoDateAfterDays(days: number): string {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() + days);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
 
 function isValidIsoDate(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -185,8 +176,9 @@ export function BookingsScreen({
   unitsLoading,
   unitsRefreshing,
   unitsErrorMessage,
-  onSelectUnit,
-  onRefreshUnits,
+  onSelectUnit: _onSelectUnit,
+  onRefreshUnits: _onRefreshUnits,
+  onOpenUnitPicker,
   onOpenFinance,
   deepLinkBookingId = null,
   onConsumeDeepLinkBookingId,
@@ -194,6 +186,7 @@ export function BookingsScreen({
   const { brand } = useBranding();
   const palette = getBrandPalette(brand);
   const insets = useSafeAreaInsets();
+  const { contentInsetBottom } = useBottomNavMetrics();
   const toast = useAppToast();
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -212,6 +205,7 @@ export function BookingsScreen({
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showStartTimePicker, setShowStartTimePicker] = useState(false);
   const [showEndTimePicker, setShowEndTimePicker] = useState(false);
+  const [bookingFormOpen, setBookingFormOpen] = useState(false);
 
   const loadData = useCallback(
     async (mode: 'initial' | 'refresh' = 'initial') => {
@@ -319,6 +313,7 @@ export function BookingsScreen({
         endTime,
       });
       setSuccessMessage('Booking request submitted.');
+      setBookingFormOpen(false);
       toast.success('Booking submitted', 'Your booking request was submitted successfully.');
       await loadData('refresh');
     } catch (error) {
@@ -349,11 +344,6 @@ export function BookingsScreen({
     [loadData, session.accessToken, toast],
   );
 
-  const applyDatePreset = useCallback((days: number) => {
-    setDate(isoDateAfterDays(days));
-    setSubmitError(null);
-  }, []);
-
   const onDatePicked = useCallback((event: DateTimePickerEvent, picked?: Date) => {
     if (Platform.OS !== 'ios') setShowDatePicker(false);
     if (event.type === 'dismissed' || !picked) return;
@@ -380,13 +370,13 @@ export function BookingsScreen({
       <ScrollView
         contentContainerStyle={[
           styles.container,
-          { paddingTop: Math.max(insets.top, 8) + 8, paddingBottom: 110 },
+          { paddingTop: 0, paddingBottom: Math.max(110, contentInsetBottom) },
         ]}
       >
-      <View style={styles.headerCard}>
-        <Text style={styles.headerTitle}>Bookings</Text>
-        <Text style={styles.headerSubtitle}>Facilities and reservation management</Text>
-      </View>
+      <BrandedPageHero
+        title="Bookings"
+        subtitle="Facilities and reservation management"
+      />
 
       <LinearGradient
         colors={[palette.primary, palette.primaryDark]}
@@ -396,7 +386,7 @@ export function BookingsScreen({
       >
         <View style={styles.heroTopRow}>
           <View style={styles.heroPill}>
-            <Ionicons name="calendar-outline" size={13} color="#fff" />
+            <Ionicons name="calendar-outline" size={13} color={akColors.white} />
             <Text style={styles.heroPillText}>Amenities Booking</Text>
           </View>
           <View style={styles.heroPillMuted}>
@@ -411,24 +401,17 @@ export function BookingsScreen({
 
       <ScreenCard title="Unit Context">
         {units.length > 1 ? (
-          <UnitPicker
-            units={units}
-            selectedUnitId={selectedUnitId}
-            onSelect={onSelectUnit}
-            onRefresh={() => void onRefreshUnits()}
-            isRefreshing={unitsRefreshing}
-          />
-        ) : null}
-        <InlineError message={unitsErrorMessage} />
-        {unitsLoading ? <ActivityIndicator color={palette.primary} /> : null}
-        {selectedUnit ? (
-          <View style={styles.unitHintRow}>
-            <Ionicons name="home-outline" size={14} color={palette.primary} />
-            <Text style={styles.helperText}>
-              Selected unit: {selectedUnit.unitNumber ?? selectedUnit.id} ({selectedUnit.status ?? '—'})
+          <View style={styles.unitRow}>
+            <Text style={styles.unitRowText}>
+              {selectedUnit?.unitNumber ?? selectedUnit?.id ?? 'Select unit'}
             </Text>
+            <Pressable style={styles.unitRowChangeBtn} onPress={onOpenUnitPicker}>
+              <Text style={styles.unitRowChangeText}>Change</Text>
+            </Pressable>
           </View>
         ) : null}
+        <InlineError message={unitsErrorMessage} />
+        {unitsLoading || unitsRefreshing ? <ActivityIndicator color={palette.primary} /> : null}
       </ScreenCard>
 
       <ScreenCard title="Create Booking" actionLabel={isRefreshing ? 'Refreshing...' : 'Reload'} onActionPress={() => void loadData('refresh')}>
@@ -440,14 +423,18 @@ export function BookingsScreen({
           <ActivityIndicator color={palette.primary} />
         ) : (
           <>
-            <Text style={styles.label}>Facility</Text>
+            <Text style={styles.label}>Step 1: Choose Facility</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsRow}>
               {facilities.map((facility) => {
                 const active = facility.id === selectedFacilityId;
                 return (
                   <Pressable
                     key={facility.id}
-                    onPress={() => setSelectedFacilityId(facility.id)}
+                    onPress={() => {
+                      setSelectedFacilityId(facility.id);
+                      setSubmitError(null);
+                      setBookingFormOpen(true);
+                    }}
                     style={[styles.choiceChip, active && styles.choiceChipActive]}
                   >
                     <Text style={[styles.choiceChipTitle, active && styles.choiceChipTitleActive]}>
@@ -460,7 +447,6 @@ export function BookingsScreen({
                 );
               })}
             </ScrollView>
-
             {selectedFacility ? (
               <View style={styles.facilityInfoBox}>
                 <Text style={styles.facilityInfoText}>
@@ -468,120 +454,18 @@ export function BookingsScreen({
                 </Text>
                 <Text style={styles.facilityInfoMeta}>
                   Capacity: {selectedFacility.capacity ?? '—'} • Max/day:{' '}
-                  {selectedFacility.maxReservationsPerDay ?? '—'} • Cooldown:{' '}
-                  {selectedFacility.cooldownMinutes ?? 0}m
+                  {selectedFacility.maxReservationsPerDay ?? '—'}
                 </Text>
-              </View>
-            ) : null}
-
-            <Text style={styles.label}>Date (YYYY-MM-DD)</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.presetDateRow}>
-              {DATE_PRESETS_DAYS.map((days) => (
                 <Pressable
-                  key={days}
-                  onPress={() => applyDatePreset(days)}
-                  style={styles.datePresetChip}
+                  style={[styles.secondaryButton, { alignSelf: 'flex-start' }]}
+                  onPress={() => setBookingFormOpen(true)}
                 >
-                  <Text style={styles.datePresetChipText}>
-                    {days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : `+${days} days`}
-                  </Text>
+                  <Text style={[styles.secondaryButtonText, { color: palette.primary }]}>Step 2: Pick Date & Slot</Text>
                 </Pressable>
-              ))}
-            </ScrollView>
-            <View style={styles.inlinePickersRow}>
-              <Pressable onPress={() => setShowDatePicker((v) => !v)} style={styles.inlineGhostButton}>
-                <Text style={styles.inlineGhostButtonText}>
-                  {showDatePicker ? 'Hide Date Picker' : 'Pick Date'}
-                </Text>
-              </Pressable>
-            </View>
-            {showDatePicker && Platform.OS !== 'web' ? (
-              <DateTimePicker
-                mode="date"
-                value={parseDateOnlyValue(date)}
-                onChange={onDatePicked}
-              />
-            ) : null}
-            <TextInput value={date} onChangeText={setDate} style={styles.input} />
-            {slotOptions.length > 0 ? (
-              <View style={styles.slotSuggestionsBlock}>
-                <Text style={styles.slotSuggestionsLabel}>Available Slots (from facility config)</Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.slotSuggestionsRow}
-                >
-                  {slotOptions.map((slot) => {
-                    const active = slot.startTime === startTime && slot.endTime === endTime;
-                    return (
-                      <Pressable
-                        key={`${slot.startTime}-${slot.endTime}`}
-                        onPress={() => {
-                          setStartTime(slot.startTime);
-                          setEndTime(slot.endTime);
-                        }}
-                        style={[styles.slotChip, active && styles.slotChipActive]}
-                      >
-                        <Text style={[styles.slotChipText, active && styles.slotChipTextActive]}>
-                          {slot.label}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </ScrollView>
               </View>
             ) : (
-              <Text style={styles.slotHintText}>
-                No slot config for selected date. Enter time manually in HH:MM format.
-              </Text>
+              <Text style={styles.slotHintText}>Choose a facility to continue.</Text>
             )}
-            <View style={styles.row}>
-              <View style={styles.flex}>
-                <View style={styles.labelRow}>
-                  <Text style={styles.label}>Start (HH:MM)</Text>
-                  <Pressable onPress={() => setShowStartTimePicker((v) => !v)} style={styles.inlineMiniButton}>
-                    <Text style={styles.inlineMiniButtonText}>{showStartTimePicker ? 'Hide' : 'Pick'}</Text>
-                  </Pressable>
-                </View>
-                {showStartTimePicker && Platform.OS !== 'web' ? (
-                  <DateTimePicker
-                    mode="time"
-                    value={buildDateTimeFromParts(date, startTime, 10)}
-                    onChange={onStartTimePicked}
-                  />
-                ) : null}
-                <TextInput value={startTime} onChangeText={setStartTime} style={styles.input} />
-              </View>
-              <View style={styles.flex}>
-                <View style={styles.labelRow}>
-                  <Text style={styles.label}>End (HH:MM)</Text>
-                  <Pressable onPress={() => setShowEndTimePicker((v) => !v)} style={styles.inlineMiniButton}>
-                    <Text style={styles.inlineMiniButtonText}>{showEndTimePicker ? 'Hide' : 'Pick'}</Text>
-                  </Pressable>
-                </View>
-                {showEndTimePicker && Platform.OS !== 'web' ? (
-                  <DateTimePicker
-                    mode="time"
-                    value={buildDateTimeFromParts(date, endTime, 11)}
-                    onChange={onEndTimePicked}
-                  />
-                ) : null}
-                <TextInput value={endTime} onChangeText={setEndTime} style={styles.input} />
-              </View>
-            </View>
-
-            <Pressable
-              style={[styles.primaryButton, isSubmitting && styles.buttonDisabled]}
-              onPress={() => void submitBooking()}
-              disabled={isSubmitting}
-            >
-              <LinearGradient colors={[palette.primary, palette.primaryDark]} style={styles.primaryButtonInner}>
-                {isSubmitting ? <ActivityIndicator size="small" color="#fff" /> : null}
-                <Text style={styles.primaryButtonText}>
-                  {isSubmitting ? 'Submitting...' : 'Create Booking'}
-                </Text>
-              </LinearGradient>
-            </Pressable>
           </>
         )}
       </ScreenCard>
@@ -648,6 +532,129 @@ export function BookingsScreen({
         )}
       </ScreenCard>
       </ScrollView>
+      <Modal
+        visible={bookingFormOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setBookingFormOpen(false)}
+      >
+        <View style={styles.detailModalRoot}>
+          <Pressable style={styles.detailModalBackdrop} onPress={() => setBookingFormOpen(false)} />
+          <View style={[styles.detailModalSheet, { paddingBottom: Math.max(insets.bottom, 12) + 8 }]}>
+            <View style={styles.detailHandle} />
+            <View style={styles.detailHeader}>
+              <View style={styles.flex}>
+                <Text style={styles.detailTitle}>Step 2: Pick Date & Slot</Text>
+                <Text style={styles.detailSubtitle}>{selectedFacility?.name ?? 'Facility'}</Text>
+              </View>
+              <Pressable style={styles.detailCloseButton} onPress={() => setBookingFormOpen(false)}>
+                <Ionicons name="close" size={18} color={akColors.textMuted} />
+              </Pressable>
+            </View>
+            <ScrollView contentContainerStyle={styles.detailContent}>
+              <InlineError message={submitError} />
+
+              <Text style={styles.label}>Date (YYYY-MM-DD)</Text>
+              <View style={styles.inlinePickersRow}>
+                <Pressable onPress={() => setShowDatePicker((v) => !v)} style={styles.inlineGhostButton}>
+                  <Text style={styles.inlineGhostButtonText}>
+                    {showDatePicker ? 'Hide Date Picker' : 'Pick Date'}
+                  </Text>
+                </Pressable>
+              </View>
+              {showDatePicker && Platform.OS !== 'web' ? (
+                <DateTimePicker
+                  mode="date"
+                  value={parseDateOnlyValue(date)}
+                  onChange={onDatePicked}
+                />
+              ) : null}
+              <TextInput value={date} onChangeText={setDate} style={styles.input} />
+
+              {slotOptions.length > 0 ? (
+                <View style={styles.slotSuggestionsBlock}>
+                  <Text style={styles.slotSuggestionsLabel}>Available Slots</Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.slotSuggestionsRow}
+                  >
+                    {slotOptions.map((slot) => {
+                      const active = slot.startTime === startTime && slot.endTime === endTime;
+                      return (
+                        <Pressable
+                          key={`${slot.startTime}-${slot.endTime}`}
+                          onPress={() => {
+                            setStartTime(slot.startTime);
+                            setEndTime(slot.endTime);
+                          }}
+                          style={[styles.slotChip, active && styles.slotChipActive]}
+                        >
+                          <Text style={[styles.slotChipText, active && styles.slotChipTextActive]}>
+                            {slot.label}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              ) : (
+                <Text style={styles.slotHintText}>
+                  No configured slots for this day. Enter time manually.
+                </Text>
+              )}
+
+              <View style={styles.row}>
+                <View style={styles.flex}>
+                  <View style={styles.labelRow}>
+                    <Text style={styles.label}>Start (HH:MM)</Text>
+                    <Pressable onPress={() => setShowStartTimePicker((v) => !v)} style={styles.inlineMiniButton}>
+                      <Text style={styles.inlineMiniButtonText}>{showStartTimePicker ? 'Hide' : 'Pick'}</Text>
+                    </Pressable>
+                  </View>
+                  {showStartTimePicker && Platform.OS !== 'web' ? (
+                    <DateTimePicker
+                      mode="time"
+                      value={buildDateTimeFromParts(date, startTime, 10)}
+                      onChange={onStartTimePicked}
+                    />
+                  ) : null}
+                  <TextInput value={startTime} onChangeText={setStartTime} style={styles.input} />
+                </View>
+                <View style={styles.flex}>
+                  <View style={styles.labelRow}>
+                    <Text style={styles.label}>End (HH:MM)</Text>
+                    <Pressable onPress={() => setShowEndTimePicker((v) => !v)} style={styles.inlineMiniButton}>
+                      <Text style={styles.inlineMiniButtonText}>{showEndTimePicker ? 'Hide' : 'Pick'}</Text>
+                    </Pressable>
+                  </View>
+                  {showEndTimePicker && Platform.OS !== 'web' ? (
+                    <DateTimePicker
+                      mode="time"
+                      value={buildDateTimeFromParts(date, endTime, 11)}
+                      onChange={onEndTimePicked}
+                    />
+                  ) : null}
+                  <TextInput value={endTime} onChangeText={setEndTime} style={styles.input} />
+                </View>
+              </View>
+
+              <Pressable
+                style={[styles.primaryButton, isSubmitting && styles.buttonDisabled]}
+                onPress={() => void submitBooking()}
+                disabled={isSubmitting}
+              >
+                <LinearGradient colors={[palette.primary, palette.primaryDark]} style={styles.primaryButtonInner}>
+                  {isSubmitting ? <ActivityIndicator size="small" color={akColors.white} /> : null}
+                  <Text style={styles.primaryButtonText}>
+                    {isSubmitting ? 'Submitting...' : 'Confirm Booking'}
+                  </Text>
+                </LinearGradient>
+              </Pressable>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
       <Modal
         visible={Boolean(selectedBooking)}
         transparent
@@ -786,14 +793,14 @@ function statusBadgeStyle(status?: string) {
 function statusBadgeTextStyle(status?: string) {
   switch (String(status).toUpperCase()) {
     case 'APPROVED':
-      return { color: '#059669' };
+      return { color: akColors.success };
     case 'PENDING_PAYMENT':
-      return { color: '#B45309' };
+      return { color: akColors.gold };
     case 'PENDING':
       return { color: akColors.gold };
     case 'CANCELLED':
     case 'REJECTED':
-      return { color: '#B91C1C' };
+      return { color: akColors.danger };
     default:
       return { color: akColors.textMuted };
   }
@@ -868,7 +875,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   heroPillText: {
-    color: '#FFFFFF',
+    color: akColors.white,
     fontSize: 11,
     fontWeight: '700',
   },
@@ -884,13 +891,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   heroBadge: {
-    color: '#93C5FD',
+    color: akColors.gold,
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 1,
   },
   heroTitle: {
-    color: '#FFFFFF',
+    color: akColors.white,
     fontSize: 20,
     fontWeight: '700',
     marginTop: 4,
@@ -900,14 +907,29 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
   },
-  helperText: {
-    color: akColors.textMuted,
-    fontSize: 12,
-  },
-  unitHintRow: {
+  unitRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  unitRowText: {
+    color: akColors.text,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  unitRowChangeBtn: {
+    borderWidth: 1,
+    borderColor: akColors.border,
+    borderRadius: 999,
+    backgroundColor: akColors.surfaceMuted,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  unitRowChangeText: {
+    color: akColors.text,
+    fontSize: 12,
+    fontWeight: '700',
   },
   inlinePickersRow: {
     flexDirection: 'row',
@@ -999,7 +1021,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   primaryButtonText: {
-    color: '#FFFFFF',
+    color: akColors.white,
     fontWeight: '700',
     fontSize: 13,
   },
@@ -1330,7 +1352,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   detailActionPrimaryText: {
-    color: '#0B5FFF',
+    color: akColors.primary,
     fontSize: 12,
     fontWeight: '700',
   },
@@ -1345,7 +1367,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   detailActionDangerText: {
-    color: '#B91C1C',
+    color: akColors.danger,
     fontSize: 12,
     fontWeight: '700',
   },

@@ -47,6 +47,22 @@ export async function updateAuthBootstrapProfile(
   return response.data;
 }
 
+export async function updateMyProfilePhoto(
+  accessToken: string,
+  profilePhotoId: string,
+): Promise<AuthBootstrapProfile> {
+  const response = await http.patch<AuthBootstrapProfile>(
+    '/auth/me/profile-photo',
+    { profilePhotoId },
+    {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    },
+  );
+  return response.data;
+}
+
 export async function createMyProfileChangeRequest(
   accessToken: string,
   input: UpdateMeProfileInput,

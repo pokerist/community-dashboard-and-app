@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import {
+  ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -8,10 +9,9 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { BrandedPageHero } from '../components/mobile/BrandedPageHero';
 import type { AuthSession } from '../features/auth/types';
 import type { ResidentUnit } from '../features/community/types';
-import { UnitPicker } from '../components/mobile/UnitPicker';
 import { useBranding } from '../features/branding/provider';
 import { useI18n } from '../features/i18n/provider';
 import { akColors, akRadius, akShadow } from '../theme/alkarma';
@@ -29,6 +29,7 @@ type UtilityTrackerScreenProps = {
   unitsErrorMessage: string | null;
   onSelectUnit: (unitId: string) => void;
   onRefreshUnits: () => Promise<void>;
+  onOpenUnitPicker?: () => void;
 };
 
 type UtilitySnapshot = {
@@ -99,11 +100,11 @@ export function UtilityTrackerScreen({
   unitsLoading: _unitsLoading,
   unitsRefreshing,
   unitsErrorMessage,
-  onSelectUnit,
-  onRefreshUnits,
+  onSelectUnit: _onSelectUnit,
+  onRefreshUnits: _onRefreshUnits,
+  onOpenUnitPicker,
 }: UtilityTrackerScreenProps) {
   const insets = useSafeAreaInsets();
-  const navigation = useNavigation();
   const { brand } = useBranding();
   const { t } = useI18n();
   const [activeUtility, setActiveUtility] = useState<UtilityKey>('water');
@@ -125,42 +126,22 @@ export function UtilityTrackerScreen({
       <ScrollView
         contentContainerStyle={[
           styles.container,
-          { paddingTop: Math.max(insets.top, 8) + 8 },
+          { paddingTop: 0 },
         ]}
       >
-        <View style={styles.headerRow}>
-          <Pressable
-            onPress={() => {
-              if ((navigation as any).canGoBack?.()) {
-                (navigation as any).goBack();
-                return;
-              }
-              (navigation as any).navigate?.('Home');
-            }}
-            style={styles.backButton}
-          >
-            <Ionicons name="chevron-back" size={18} color={akColors.text} />
-            <Text style={styles.backText}>{t('common.back')}</Text>
-          </Pressable>
-        </View>
-
-        <View style={styles.headerCard}>
-          <Text style={styles.headerTitle}>{t('utility.title')}</Text>
-          <Text style={styles.headerSubtitle}>
-            {t('utility.subtitle')}
-          </Text>
-        </View>
+        <BrandedPageHero title={t('utility.title')} />
 
         {units.length > 1 ? (
-          <UnitPicker
-            units={units}
-            selectedUnitId={selectedUnitId}
-            onSelect={onSelectUnit}
-            onRefresh={() => void onRefreshUnits()}
-            isRefreshing={unitsRefreshing}
-            title={t('utility.unitTitle')}
-          />
+          <View style={styles.unitRow}>
+            <Text style={styles.unitRowText}>
+              {selectedUnit?.unitNumber ?? selectedUnit?.id ?? t('utility.unitTitle')}
+            </Text>
+            <Pressable style={styles.unitRowChangeBtn} onPress={onOpenUnitPicker}>
+              <Text style={styles.unitRowChangeText}>{t('common.change')}</Text>
+            </Pressable>
+          </View>
         ) : null}
+        {unitsRefreshing ? <ActivityIndicator size="small" color={brandPrimary} /> : null}
         {unitsErrorMessage ? <Text style={styles.errorText}>{unitsErrorMessage}</Text> : null}
 
         <View style={styles.tabsRow}>
@@ -276,9 +257,6 @@ export function UtilityTrackerScreen({
               );
             })}
           </View>
-          <Text style={styles.trendHint}>
-            {t('utility.demoHint')}
-          </Text>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -296,22 +274,6 @@ const styles = StyleSheet.create({
     gap: 14,
     backgroundColor: akColors.bg,
   },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  backButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 2,
-    paddingVertical: 4,
-    paddingRight: 8,
-  },
-  backText: {
-    color: akColors.text,
-    fontSize: 14,
-    fontWeight: '600',
-  },
   headerCard: {
     backgroundColor: akColors.surface,
     borderRadius: akRadius.card,
@@ -325,11 +287,35 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700',
   },
-  headerSubtitle: {
-    marginTop: 4,
-    color: akColors.textMuted,
+  unitRow: {
+    backgroundColor: akColors.surface,
+    borderRadius: akRadius.lg,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  unitRowText: {
+    color: akColors.text,
     fontSize: 13,
-    lineHeight: 18,
+    fontWeight: '600',
+  },
+  unitRowChangeBtn: {
+    borderWidth: 1,
+    borderColor: akColors.border,
+    borderRadius: 999,
+    backgroundColor: akColors.surfaceMuted,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  unitRowChangeText: {
+    color: akColors.text,
+    fontSize: 12,
+    fontWeight: '700',
   },
   errorText: {
     color: akColors.danger,

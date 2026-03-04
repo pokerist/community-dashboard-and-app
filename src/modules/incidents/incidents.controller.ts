@@ -6,12 +6,14 @@ import {
   Body,
   Param,
   Query,
+  Request,
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { IncidentsService } from './incidents.service';
 import { CreateIncidentDto } from './dto/create-incident.dto';
 import { IncidentsQueryDto } from './dto/incidents-query.dto';
+import { CreateSosAlertDto } from './dto/create-sos-alert.dto';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
@@ -28,6 +30,14 @@ export class IncidentsController {
   @Permissions('incidents.create')
   create(@Body() createIncidentDto: CreateIncidentDto) {
     return this.incidentsService.create(createIncidentDto);
+  }
+
+  @Post('me/sos')
+  @Permissions('notification.view_own')
+  @ApiOperation({ summary: 'Create SOS emergency alert from resident mobile app' })
+  @ApiResponse({ status: 201, description: 'SOS incident created successfully' })
+  createSos(@Request() req: any, @Body() dto: CreateSosAlertDto) {
+    return this.incidentsService.createSosAlert(req.user.id, dto);
   }
 
   @Get('cards')

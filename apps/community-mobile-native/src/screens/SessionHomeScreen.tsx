@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Feather, Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import {
   ActivityIndicator,
   Image,
@@ -15,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppToast } from '../components/mobile/AppToast';
+import { BrandedPageHero } from '../components/mobile/BrandedPageHero';
 import { useBranding } from '../features/branding/provider';
 import { getBrandPalette } from '../features/branding/palette';
 import type { AuthSession } from '../features/auth/types';
@@ -30,10 +30,12 @@ import {
   listMyResidentVehicles,
   type ResidentVehiclePayload,
   type ResidentVehicleRow,
+  updateMyProfilePhoto,
   updateMyResidentVehicle,
   updateAuthSecuritySettings,
   updateAuthBootstrapProfile,
 } from '../features/auth/profile';
+import { pickAndUploadFileByPurpose } from '../features/files/service';
 import { API_BASE_URL } from '../config/env';
 import { unitStatusDisplayLabel } from '../features/presentation/status';
 import { useI18n } from '../features/i18n/provider';
@@ -46,6 +48,7 @@ type SessionHomeScreenProps = {
   refreshError: string | null;
   onRefreshSession: () => Promise<void>;
   onLogout: () => Promise<void>;
+  onProfileBootstrapUpdated?: (profile: AuthBootstrapProfile) => void;
 };
 
 type CapabilityChip = {
@@ -131,6 +134,7 @@ export function SessionHomeScreen({
   refreshError: _refreshError,
   onRefreshSession: _onRefreshSession,
   onLogout,
+  onProfileBootstrapUpdated,
 }: SessionHomeScreenProps) {
   const insets = useSafeAreaInsets();
   const { brand } = useBranding();
@@ -148,6 +152,9 @@ export function SessionHomeScreen({
   const [editNameAr, setEditNameAr] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editPhone, setEditPhone] = useState('');
+  const [editProfilePhotoId, setEditProfilePhotoId] = useState<string | null>(null);
+  const [isUploadingProfilePhoto, setIsUploadingProfilePhoto] = useState(false);
+  const [profilePhotoVersion, setProfilePhotoVersion] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingSecurity, setIsSavingSecurity] = useState(false);
   const [vehicleModalOpen, setVehicleModalOpen] = useState(false);
@@ -171,11 +178,13 @@ export function SessionHomeScreen({
         listMyProfileChangeRequests(session.accessToken),
       ]);
       setProfile(result);
+      onProfileBootstrapUpdated?.(result);
       setLatestProfileRequest(changeRequests[0] ?? null);
       setEditNameEn(result.user?.nameEN ?? '');
       setEditNameAr(result.user?.nameAR ?? '');
       setEditEmail(result.user?.email ?? '');
       setEditPhone(result.user?.phone ?? '');
+      setEditProfilePhotoId(result.user?.profilePhoto?.id ?? null);
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Failed to load profile';
       setProfileError(msg);
@@ -197,7 +206,10 @@ export function SessionHomeScreen({
   const capabilityChips = useMemo(() => buildCapabilityChips(profile), [profile]);
   const vehicles = useMemo(() => profile?.vehicles ?? [], [profile?.vehicles]);
   const avatarImageUri = profile?.user?.profilePhoto?.id
-    ? `${API_BASE_URL}/files/${profile.user.profilePhoto.id}/stream`
+    ? `${API_BASE_URL}/files/${profile.user.profilePhoto.id}/stream?t=${profilePhotoVersion}`
+    : null;
+  const editAvatarImageUri = editProfilePhotoId
+    ? `${API_BASE_URL}/files/${editProfilePhotoId}/stream?t=${profilePhotoVersion}`
     : null;
 
   const handleSaveProfile = async () => {
@@ -209,25 +221,42 @@ export function SessionHomeScreen({
       email: normalizedEmail || undefined,
       phone: normalizedPhone || undefined,
     };
-    if (!payload.nameEN && !payload.nameAR && !payload.email && !payload.phone) {
+    const hasContactPayload = Boolean(payload.nameEN || payload.nameAR || payload.email || payload.phone);
+    const currentPhotoId = profile?.user?.profilePhoto?.id ?? null;
+    const hasPhotoChange = Boolean(editProfilePhotoId && editProfilePhotoId !== currentPhotoId);
+    if (!hasContactPayload && !hasPhotoChange) {
       toast.error(t('profile.nothingToSave'), t('profile.enterAtLeastOne'));
       return;
     }
 
-    if (normalizedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    if (hasContactPayload && normalizedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
       toast.error(t('profile.invalidEmail'), t('profile.invalidEmailMsg'));
       return;
     }
 
     setIsSaving(true);
     try {
-      const requestRow = await updateAuthBootstrapProfile(session.accessToken, payload);
-      setLatestProfileRequest(requestRow);
+      let profileUpdated = false;
+      if (hasPhotoChange && editProfilePhotoId) {
+        const updated = await updateMyProfilePhoto(session.accessToken, editProfilePhotoId);
+        setProfile(updated);
+        onProfileBootstrapUpdated?.(updated);
+        setProfilePhotoVersion((prev) => prev + 1);
+        profileUpdated = true;
+      }
+
+      if (hasContactPayload) {
+        const requestRow = await updateAuthBootstrapProfile(session.accessToken, payload);
+        setLatestProfileRequest(requestRow);
+      }
       setEditOpen(false);
-      toast.success(
-        t('profile.updated'),
-        'Your profile change request is pending admin approval.',
-      );
+      if (profileUpdated && hasContactPayload) {
+        toast.success(t('profile.updated'), 'Photo updated. Contact changes are pending admin approval.');
+      } else if (profileUpdated) {
+        toast.success(t('profile.updated'), 'Profile photo updated successfully.');
+      } else {
+        toast.success(t('profile.updated'), 'Your profile change request is pending admin approval.');
+      }
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Failed to update profile';
       toast.error(t('profile.updateFailed'), msg);
@@ -235,6 +264,25 @@ export function SessionHomeScreen({
       setIsSaving(false);
     }
   };
+
+  const handleUploadProfilePhoto = useCallback(async () => {
+    setIsUploadingProfilePhoto(true);
+    try {
+      const uploaded = await pickAndUploadFileByPurpose(
+        session.accessToken,
+        'profile-photo',
+      );
+      if (!uploaded) return;
+      setEditProfilePhotoId(uploaded.id);
+      setProfilePhotoVersion((prev) => prev + 1);
+      toast.success('Photo uploaded', 'Tap Save Changes to apply it.');
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Failed to upload profile photo';
+      toast.error('Photo upload failed', msg);
+    } finally {
+      setIsUploadingProfilePhoto(false);
+    }
+  }, [session.accessToken, toast]);
 
   const handleToggleTwoFactor = async (enabled: boolean) => {
     if (!profile || isSavingSecurity) return;
@@ -387,14 +435,13 @@ export function SessionHomeScreen({
       <ScrollView
         contentContainerStyle={[
           styles.content,
-          { paddingTop: Math.max(insets.top, 8) + 8 },
+          { paddingTop: 0 },
         ]}
       >
-        <LinearGradient
-          colors={[palette.primary, palette.primaryDark]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.profileHero}
+        <BrandedPageHero
+          title=""
+          showBack={false}
+          hideHeaderRow
         >
           <View style={styles.profileHeroRow}>
             <View style={styles.avatarWrap}>
@@ -415,11 +462,10 @@ export function SessionHomeScreen({
             </View>
             <View style={styles.heroTextWrap}>
               <Text style={styles.heroName}>{displayName}</Text>
-              <Text style={styles.heroRole}>{roleLabel}</Text>
               <Text style={styles.heroEmail}>{session.email}</Text>
             </View>
             <Pressable style={styles.heroEditButton} onPress={() => setEditOpen(true)}>
-              <Feather name="edit-2" size={16} color={palette.secondary} />
+              <Feather name="edit-2" size={16} color="#FFFFFF" />
             </Pressable>
           </View>
 
@@ -433,7 +479,7 @@ export function SessionHomeScreen({
               <Text style={[styles.heroStatValue, styles.heroStatValueSmall]}>{roleLabel}</Text>
             </View>
           </View>
-        </LinearGradient>
+        </BrandedPageHero>
 
         <View style={styles.card}>
           <View style={styles.cardHeaderRow}>
@@ -607,8 +653,8 @@ export function SessionHomeScreen({
               value={Boolean(profile?.user?.twoFactorEnabled)}
               onValueChange={(value) => void handleToggleTwoFactor(value)}
               disabled={!profile || isSavingSecurity}
-              trackColor={{ false: '#CBD5E1', true: palette.primarySoft22 }}
-              thumbColor={Boolean(profile?.user?.twoFactorEnabled) ? palette.primary : '#F8FAFC'}
+              trackColor={{ false: akColors.border, true: palette.primarySoft22 }}
+              thumbColor={Boolean(profile?.user?.twoFactorEnabled) ? palette.primary : akColors.surfaceMuted}
             />
           </View>
           {isSavingSecurity ? (
@@ -631,6 +677,34 @@ export function SessionHomeScreen({
               <Text style={styles.modalTitle}>Edit Profile</Text>
               <Pressable onPress={() => !isSaving && setEditOpen(false)} style={styles.modalCloseBtn}>
                 <Ionicons name="close" size={18} color={akColors.text} />
+              </Pressable>
+            </View>
+
+            <View style={styles.modalPhotoRow}>
+              <View style={styles.modalAvatarWrap}>
+                {editAvatarImageUri ? (
+                  <Image
+                    source={{ uri: editAvatarImageUri }}
+                    style={styles.modalAvatarImage}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <Text style={styles.modalAvatarText}>{initial}</Text>
+                )}
+              </View>
+              <Pressable
+                style={[styles.modalPhotoButton, isUploadingProfilePhoto && styles.buttonDisabled]}
+                onPress={() => void handleUploadProfilePhoto()}
+                disabled={isUploadingProfilePhoto || isSaving}
+              >
+                {isUploadingProfilePhoto ? (
+                  <View style={styles.buttonRow}>
+                    <ActivityIndicator size="small" color={akColors.white} />
+                    <Text style={styles.primaryButtonText}>Uploading...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.primaryButtonText}>Upload Profile Photo</Text>
+                )}
               </Pressable>
             </View>
 
@@ -692,7 +766,7 @@ export function SessionHomeScreen({
               >
                 {isSaving ? (
                   <View style={styles.buttonRow}>
-                    <ActivityIndicator size="small" color="#fff" />
+                    <ActivityIndicator size="small" color={akColors.white} />
                     <Text style={styles.primaryButtonText}>{t('profile.saving')}</Text>
                   </View>
                 ) : (
@@ -785,7 +859,7 @@ export function SessionHomeScreen({
               disabled={isSavingVehicle}
             >
               <View style={[styles.vehiclePrimaryCheck, vehiclePrimary && styles.vehiclePrimaryCheckActive]}>
-                {vehiclePrimary ? <Ionicons name="checkmark" size={12} color="#fff" /> : null}
+                {vehiclePrimary ? <Ionicons name="checkmark" size={12} color={akColors.white} /> : null}
               </View>
               <Text style={styles.vehiclePrimaryText}>{t('profile.vehicleMakePrimary')}</Text>
             </Pressable>
@@ -805,7 +879,7 @@ export function SessionHomeScreen({
               >
                 {isSavingVehicle ? (
                   <View style={styles.buttonRow}>
-                    <ActivityIndicator size="small" color="#fff" />
+                    <ActivityIndicator size="small" color={akColors.white} />
                     <Text style={styles.primaryButtonText}>{t('profile.vehicleSaving')}</Text>
                   </View>
                 ) : (
@@ -841,8 +915,10 @@ const styles = StyleSheet.create({
   },
   profileHero: {
     borderRadius: 24,
-    padding: 18,
-    gap: 14,
+    minHeight: 230,
+    padding: 22,
+    gap: 18,
+    justifyContent: 'center',
     ...akShadow.card,
   },
   profileHeroRow: {
@@ -866,7 +942,7 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   avatarText: {
-    color: '#fff',
+    color: akColors.white,
     fontSize: 24,
     fontWeight: '700',
   },
@@ -875,7 +951,7 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   heroName: {
-    color: '#fff',
+    color: akColors.white,
     fontSize: 20,
     fontWeight: '700',
   },
@@ -915,7 +991,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   heroStatValue: {
-    color: '#fff',
+    color: akColors.white,
     fontSize: 18,
     fontWeight: '700',
   },
@@ -996,7 +1072,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 6,
-    backgroundColor: '#fff',
+    backgroundColor: akColors.surface,
   },
   languageBtnActive: {
     borderColor: akColors.primary,
@@ -1008,7 +1084,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   languageBtnTextActive: {
-    color: akColors.primary,
+    color: '#FFFFFF',
   },
   linkText: {
     color: akColors.primary,
@@ -1053,7 +1129,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   vehiclePrimaryBadgeText: {
-    color: '#047857',
+    color: akColors.success,
     fontSize: 10,
     fontWeight: '700',
   },
@@ -1085,7 +1161,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   vehicleActionTextDanger: {
-    color: '#B91C1C',
+    color: akColors.danger,
     fontSize: 11,
     fontWeight: '700',
   },
@@ -1117,7 +1193,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   primaryButtonText: {
-    color: '#FFFFFF',
+    color: akColors.white,
     fontWeight: '700',
     fontSize: 14,
   },
@@ -1172,7 +1248,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(15,23,42,0.25)',
   },
   modalCard: {
-    backgroundColor: '#fff',
+    backgroundColor: akColors.surface,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: akColors.border,
@@ -1230,6 +1306,41 @@ const styles = StyleSheet.create({
     backgroundColor: akColors.surfaceMuted,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  modalPhotoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 8,
+  },
+  modalAvatarWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    overflow: 'hidden',
+    backgroundColor: akColors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: akColors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalAvatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  modalAvatarText: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: akColors.text,
+  },
+  modalPhotoButton: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 12,
+    backgroundColor: akColors.text,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
   },
   vehiclePrimaryCheckActive: {
     borderColor: akColors.primary,

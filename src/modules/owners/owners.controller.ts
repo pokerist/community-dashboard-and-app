@@ -15,6 +15,7 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { OwnersService } from './owners.service';
 import { CreateOwnerWithUnitDto } from './dto/create-owner-with-unit.dto';
+import { AddOwnerUnitsDto } from './dto/add-owner-units.dto';
 import { AddFamilyMemberDto } from './dto/add-family-member.dto';
 import {
   UpdateProfileDto,
@@ -35,6 +36,16 @@ export class OwnersController {
   createWithUnit(@Body() dto: CreateOwnerWithUnitDto, @Req() req: any) {
     const createdBy = req.user.id;
     return this.ownersService.createOwnerWithUnit(dto, createdBy);
+  }
+
+  @Post(':ownerUserId/units')
+  @Permissions('owner.update')
+  addUnitsToOwner(
+    @Param('ownerUserId') ownerUserId: string,
+    @Body() dto: AddOwnerUnitsDto,
+    @Req() req: any,
+  ) {
+    return this.ownersService.addUnitsToExistingOwner(ownerUserId, dto, req.user.id);
   }
 
   @Get()

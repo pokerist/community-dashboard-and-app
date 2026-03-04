@@ -15,15 +15,16 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppToast } from '../components/mobile/AppToast';
+import { BrandedPageHero } from '../components/mobile/BrandedPageHero';
 import { GeneratedQrModal } from '../components/mobile/GeneratedQrModal';
 import { InlineError, ScreenCard } from '../components/mobile/Primitives';
-import { UnitPicker } from '../components/mobile/UnitPicker';
 import type { AuthSession } from '../features/auth/types';
 import { createAccessQr, listAccessQrs, revokeAccessQr } from '../features/community/service';
 import type { AccessQrRow, ResidentUnit } from '../features/community/types';
 import { pickAndUploadServiceAttachment } from '../features/files/service';
 import { useBranding } from '../features/branding/provider';
 import { getBrandPalette } from '../features/branding/palette';
+import { useBottomNavMetrics } from '../features/layout/BottomNavMetricsContext';
 import { extractApiErrorMessage } from '../lib/http';
 import { akColors, akShadow } from '../theme/alkarma';
 import { formatDateTime, plusHoursIso } from '../utils/format';
@@ -38,6 +39,7 @@ type AccessQrScreenProps = {
   unitsErrorMessage: string | null;
   onSelectUnit: (unitId: string) => void;
   onRefreshUnits: () => Promise<void>;
+  onOpenUnitPicker?: () => void;
   deepLinkAccessQrId?: string | null;
   onConsumeDeepLinkAccessQrId?: (qrId: string) => void;
 };
@@ -45,8 +47,8 @@ type AccessQrScreenProps = {
 const QR_TYPES = ['VISITOR', 'DELIVERY', 'RIDESHARE', 'WORKER'] as const;
 type QrTypeOption = (typeof QR_TYPES)[number];
 const PRIMARY_TABS: QrTypeOption[] = ['VISITOR', 'DELIVERY', 'RIDESHARE', 'WORKER'];
-const DELIVERY_COMPANIES = ['Talabat', 'Noon Minutes', 'Rabbit', 'Breadfast', 'Mrsool', 'Elmenus', 'InstaShop', 'Jumia Food', 'Chefaa'];
-const RIDE_COMPANIES = ['Uber', 'Careem', 'DIDI', 'InDrive', 'Bolt'] as const;
+const DELIVERY_COMPANIES = ['Talabat', 'Noon Minutes', 'Rabbit', 'Breadfast', 'Mrsool', 'Elmenus', 'InstaShop', 'Jumia Food', 'Chefaa', 'Other'];
+const RIDE_COMPANIES = ['Uber', 'Careem', 'DIDI', 'InDrive', 'Bolt', 'Other'] as const;
 const WORK_TYPES = ['Renovation', 'Electrical', 'Plumbing', 'Painting', 'Other'] as const;
 const WORK_DURATIONS = [
   { value: '1 day', hours: 24 },
@@ -147,21 +149,6 @@ function statusBadgeColors(
   return { bg: palette.accentSoft12, border: palette.primarySoft22, text: palette.secondary };
 }
 
-function typeHint(type: QrTypeOption) {
-  switch (type) {
-    case 'VISITOR':
-      return 'Enter visitor details.';
-    case 'DELIVERY':
-      return 'Select delivery company.';
-    case 'RIDESHARE':
-      return 'Add ride details.';
-    case 'WORKER':
-      return 'Management approval required.';
-    default:
-      return 'Complete required fields.';
-  }
-}
-
 export function AccessQrScreen({
   session,
   units,
@@ -170,12 +157,14 @@ export function AccessQrScreen({
   unitsLoading,
   unitsRefreshing,
   unitsErrorMessage,
-  onSelectUnit,
-  onRefreshUnits,
+  onSelectUnit: _onSelectUnit,
+  onRefreshUnits: _onRefreshUnits,
+  onOpenUnitPicker,
   deepLinkAccessQrId = null,
   onConsumeDeepLinkAccessQrId,
 }: AccessQrScreenProps) {
   const insets = useSafeAreaInsets();
+  const { contentInsetBottom } = useBottomNavMetrics();
   const { brand } = useBranding();
   const palette = getBrandPalette(brand);
   const toast = useAppToast();
@@ -186,7 +175,9 @@ export function AccessQrScreen({
   const [visitorPhone, setVisitorPhone] = useState('');
   const [visitorPurpose, setVisitorPurpose] = useState('');
   const [deliveryCompany, setDeliveryCompany] = useState(DELIVERY_COMPANIES[0]);
+  const [deliveryOtherCompany, setDeliveryOtherCompany] = useState('');
   const [rideCompany, setRideCompany] = useState<(typeof RIDE_COMPANIES)[number]>(RIDE_COMPANIES[0]);
+  const [rideOtherCompany, setRideOtherCompany] = useState('');
   const [driverName, setDriverName] = useState('');
   const [carNumber, setCarNumber] = useState('');
   const [workersCount, setWorkersCount] = useState('1');
@@ -200,7 +191,6 @@ export function AccessQrScreen({
   const [validTo, setValidTo] = useState(plusHoursIso(4));
   const [loadError, setLoadError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [lastCreatedQrId, setLastCreatedQrId] = useState<string | null>(null);
   const [generatedQrRow, setGeneratedQrRow] = useState<AccessQrRow | null>(null);
   const [generatedQrImageBase64, setGeneratedQrImageBase64] = useState<string | null>(null);
@@ -264,6 +254,14 @@ export function AccessQrScreen({
     }
   }, [deepLinkAccessQrId, onConsumeDeepLinkAccessQrId, rows]);
 
+  useEffect(() => {
+    setSubmitError(null);
+    setShowFromDatePicker(false);
+    setShowFromTimePicker(false);
+    setShowToDatePicker(false);
+    setShowToTimePicker(false);
+  }, [type]);
+
   const selectedTypeMeta = typeMeta(type, palette);
   const workerDurationHours = useMemo(
     () => WORK_DURATIONS.find((item) => item.value === workDuration)?.hours ?? 24,
@@ -286,7 +284,6 @@ export function AccessQrScreen({
 
     setIsSubmitting(true);
     setSubmitError(null);
-    setSuccessMessage(null);
     try {
       const now = new Date();
       let payloadVisitorName = visitorName.trim() || undefined;
@@ -311,22 +308,26 @@ export function AccessQrScreen({
       }
 
       if (type === 'DELIVERY') {
-        if (!deliveryCompany.trim()) {
+        const effectiveDeliveryCompany =
+          deliveryCompany === 'Other' ? deliveryOtherCompany.trim() : deliveryCompany.trim();
+        if (!effectiveDeliveryCompany) {
           setSubmitError('Select a delivery company.');
           toast.error('Missing company', 'Select a delivery company first.');
           return;
         }
-        payloadVisitorName = `${deliveryCompany} Courier`;
+        payloadVisitorName = `${effectiveDeliveryCompany} Courier`;
         payloadValidFrom = now.toISOString();
         payloadValidTo = new Date(now.getTime() + 3 * 60 * 60 * 1000).toISOString();
-        noteLines.push(`Delivery Company: ${deliveryCompany}`);
+        noteLines.push(`Delivery Company: ${effectiveDeliveryCompany}`);
       }
 
       if (type === 'RIDESHARE') {
-        payloadVisitorName = driverName.trim() || `${rideCompany} Driver`;
+        const effectiveRideCompany =
+          rideCompany === 'Other' ? rideOtherCompany.trim() : rideCompany;
+        payloadVisitorName = driverName.trim() || `${effectiveRideCompany || 'Ride'} Driver`;
         payloadValidFrom = now.toISOString();
         payloadValidTo = new Date(now.getTime() + 2 * 60 * 60 * 1000).toISOString();
-        noteLines.push(`Ride Company: ${rideCompany}`);
+        noteLines.push(`Ride Company: ${effectiveRideCompany || 'Other'}`);
         if (driverName.trim()) noteLines.push(`Driver Name: ${driverName.trim()}`);
         if (carNumber.trim()) noteLines.push(`Car Number: ${carNumber.trim()}`);
       }
@@ -394,12 +395,10 @@ export function AccessQrScreen({
       });
       setLastCreatedQrId(created.qrCode.qrId ?? created.qrCode.id);
       if (type === 'WORKER' && created.pendingApproval) {
-        setSuccessMessage('Worker permit request submitted for management approval.');
         setGeneratedQrRow(null);
         setGeneratedQrImageBase64(null);
         setQrModalVisible(false);
       } else {
-        setSuccessMessage('Access permit generated successfully.');
         setGeneratedQrRow(created.qrCode);
         setGeneratedQrImageBase64(created.qrImageBase64 ?? null);
         setQrModalVisible(true);
@@ -413,6 +412,10 @@ export function AccessQrScreen({
       if (type === 'RIDESHARE') {
         setDriverName('');
         setCarNumber('');
+        setRideOtherCompany('');
+      }
+      if (type === 'DELIVERY') {
+        setDeliveryOtherCompany('');
       }
       if (type === 'WORKER') {
         setWorkersCount('1');
@@ -435,7 +438,7 @@ export function AccessQrScreen({
     } finally {
       setIsSubmitting(false);
     }
-  }, [carNumber, deliveryCompany, driverName, loadData, selectedUnitId, session.accessToken, toast, type, validFrom, validTo, visitorName, visitorPhone, visitorPurpose, visitorUsageMode, workerIdFiles, workersCount, workDuration, workType, rideCompany]);
+  }, [carNumber, deliveryCompany, deliveryOtherCompany, driverName, loadData, selectedUnitId, session.accessToken, toast, type, validFrom, validTo, visitorName, visitorPhone, visitorPurpose, visitorUsageMode, workerIdFiles, workersCount, workDuration, workType, rideCompany, rideOtherCompany]);
 
   const handleRevoke = useCallback(
     async (id: string) => {
@@ -536,35 +539,27 @@ export function AccessQrScreen({
       <ScrollView
         contentContainerStyle={[
           styles.container,
-          { paddingTop: Math.max(insets.top, 8) + 8, paddingBottom: 32 },
+          { paddingTop: 0, paddingBottom: Math.max(32, contentInsetBottom) },
         ]}
       >
-      <View style={styles.headerCard}>
-        <Text style={styles.headerTitle}>QR Codes</Text>
-        <Text style={styles.headerSubtitle}>Generate and manage access permits</Text>
-      </View>
+      <BrandedPageHero
+        title="QR Codes"
+        subtitle="Generate and manage access permits"
+      />
 
       <ScreenCard title="Selected Unit">
         {units.length > 1 ? (
-          <UnitPicker
-            units={units}
-            selectedUnitId={selectedUnitId}
-            onSelect={onSelectUnit}
-            onRefresh={() => void onRefreshUnits()}
-            isRefreshing={unitsRefreshing}
-            title="Choose Unit"
-          />
-        ) : null}
-        <InlineError message={unitsErrorMessage} />
-        {unitsLoading ? <ActivityIndicator color={palette.primary} /> : null}
-        {selectedUnit ? (
-          <View style={styles.unitHintRow}>
-            <Ionicons name="home-outline" size={14} color={palette.primary} />
-            <Text style={styles.helperText}>
-              Access permits will be issued for unit {selectedUnit.unitNumber ?? selectedUnit.id}
+          <View style={styles.unitRow}>
+            <Text style={styles.unitRowText}>
+              {selectedUnit?.unitNumber ?? selectedUnit?.id ?? 'Select unit'}
             </Text>
+            <Pressable style={styles.unitRowChangeBtn} onPress={onOpenUnitPicker}>
+              <Text style={styles.unitRowChangeText}>Change</Text>
+            </Pressable>
           </View>
         ) : null}
+        <InlineError message={unitsErrorMessage} />
+        {unitsLoading || unitsRefreshing ? <ActivityIndicator color={palette.primary} /> : null}
       </ScreenCard>
 
       <View style={styles.tabsCard}>
@@ -600,31 +595,8 @@ export function AccessQrScreen({
           </View>
           <View style={styles.flex}>
             <Text style={styles.typeBannerTitle}>{selectedTypeMeta.label} Permit</Text>
-            <Text style={styles.typeBannerSubtitle}>{typeHint(type)}</Text>
           </View>
         </View>
-
-        {successMessage ? (
-          <LinearGradient colors={[palette.primarySoft10, palette.accentSoft12]} style={styles.successCard}>
-            <View style={styles.successTopRow}>
-              <View style={styles.successIconWrap}>
-                <Ionicons name="checkmark-circle" size={20} color={akColors.success} />
-              </View>
-              <View style={styles.flex}>
-                <Text style={[styles.successTitle, { color: palette.primary }]}>{successMessage}</Text>
-                {lastCreatedQrId ? <Text style={styles.successCode}>ID: {lastCreatedQrId}</Text> : null}
-              </View>
-            </View>
-            <View style={styles.qrPreviewBox}>
-              <MaterialCommunityIcons name="qrcode" size={46} color={palette.primary} />
-              <Text style={styles.qrPreviewText}>
-                {type === 'WORKER' && !generatedQrRow
-                  ? 'Request sent. QR code will appear after management approval.'
-                  : 'Access permit is ready and listed below.'}
-              </Text>
-            </View>
-          </LinearGradient>
-        ) : null}
 
         {type === 'VISITOR' ? (
           <>
@@ -729,6 +701,21 @@ export function AccessQrScreen({
                 );
               })}
             </View>
+            {deliveryCompany === 'Other' ? (
+              <>
+                <Text style={styles.label}>Company Name</Text>
+                <View style={styles.inputShell}>
+                  <Ionicons name="business-outline" size={18} color={akColors.textMuted} />
+                  <TextInput
+                    value={deliveryOtherCompany}
+                    onChangeText={setDeliveryOtherCompany}
+                    style={styles.input}
+                    placeholder="Enter delivery company"
+                    placeholderTextColor={akColors.textSoft}
+                  />
+                </View>
+              </>
+            ) : null}
           </>
         ) : null}
 
@@ -761,6 +748,21 @@ export function AccessQrScreen({
                 );
               })}
             </View>
+            {rideCompany === 'Other' ? (
+              <>
+                <Text style={styles.label}>Ride Company Name</Text>
+                <View style={styles.inputShell}>
+                  <Ionicons name="business-outline" size={18} color={akColors.textMuted} />
+                  <TextInput
+                    value={rideOtherCompany}
+                    onChangeText={setRideOtherCompany}
+                    style={styles.input}
+                    placeholder="Enter company name"
+                    placeholderTextColor={akColors.textSoft}
+                  />
+                </View>
+              </>
+            ) : null}
 
             <Text style={styles.label}>Driver Name (Optional)</Text>
             <View style={styles.inputShell}>
@@ -897,56 +899,55 @@ export function AccessQrScreen({
           </>
         ) : null}
 
-        <Text style={styles.label}>Valid From</Text>
-        <View style={styles.inlineButtonsWrap}>
-          <Pressable onPress={resetStartNow} style={styles.inlineGhostButton}><Text style={styles.inlineGhostButtonText}>Now</Text></Pressable>
-          <Pressable onPress={() => setShowFromDatePicker((v) => !v)} style={styles.inlineGhostButton}>
-            <Ionicons name="calendar-outline" size={14} color={akColors.textMuted} />
-            <Text style={styles.inlineGhostButtonText}>Date</Text>
-          </Pressable>
-          <Pressable onPress={() => setShowFromTimePicker((v) => !v)} style={styles.inlineGhostButton}>
-            <Ionicons name="time-outline" size={14} color={akColors.textMuted} />
-            <Text style={styles.inlineGhostButtonText}>Time</Text>
-          </Pressable>
-        </View>
-        {showFromDatePicker && Platform.OS !== 'web' ? <DateTimePicker mode="date" value={parseIsoOrNow(validFrom)} onChange={onFromDatePicked} /> : null}
-        {showFromTimePicker && Platform.OS !== 'web' ? <DateTimePicker mode="time" value={parseIsoOrNow(validFrom)} onChange={onFromTimePicked} /> : null}
-        <View style={styles.datePreviewField}>
-          <Ionicons name="time-outline" size={14} color={akColors.textMuted} />
-          <Text style={styles.datePreviewText}>{formatDateTime(validFrom)}</Text>
-        </View>
-
-        {type !== 'WORKER' ? (
+        {type === 'VISITOR' || type === 'WORKER' ? (
           <>
-            <Text style={styles.label}>Valid To</Text>
+            <Text style={styles.label}>Valid From</Text>
             <View style={styles.inlineButtonsWrap}>
-              <Pressable onPress={() => setShowToDatePicker((v) => !v)} style={styles.inlineGhostButton}>
+              <Pressable onPress={resetStartNow} style={styles.inlineGhostButton}><Text style={styles.inlineGhostButtonText}>Now</Text></Pressable>
+              <Pressable onPress={() => setShowFromDatePicker((v) => !v)} style={styles.inlineGhostButton}>
                 <Ionicons name="calendar-outline" size={14} color={akColors.textMuted} />
                 <Text style={styles.inlineGhostButtonText}>Date</Text>
               </Pressable>
-              <Pressable onPress={() => setShowToTimePicker((v) => !v)} style={styles.inlineGhostButton}>
+              <Pressable onPress={() => setShowFromTimePicker((v) => !v)} style={styles.inlineGhostButton}>
                 <Ionicons name="time-outline" size={14} color={akColors.textMuted} />
                 <Text style={styles.inlineGhostButtonText}>Time</Text>
               </Pressable>
             </View>
-            {showToDatePicker && Platform.OS !== 'web' ? <DateTimePicker mode="date" value={parseIsoOrNow(validTo)} onChange={onToDatePicked} /> : null}
-            {showToTimePicker && Platform.OS !== 'web' ? <DateTimePicker mode="time" value={parseIsoOrNow(validTo)} onChange={onToTimePicked} /> : null}
+            {showFromDatePicker && Platform.OS !== 'web' ? <DateTimePicker mode="date" value={parseIsoOrNow(validFrom)} onChange={onFromDatePicked} /> : null}
+            {showFromTimePicker && Platform.OS !== 'web' ? <DateTimePicker mode="time" value={parseIsoOrNow(validFrom)} onChange={onFromTimePicked} /> : null}
             <View style={styles.datePreviewField}>
               <Ionicons name="time-outline" size={14} color={akColors.textMuted} />
-              <Text style={styles.datePreviewText}>{formatDateTime(validTo)}</Text>
+              <Text style={styles.datePreviewText}>{formatDateTime(validFrom)}</Text>
+            </View>
+
+            {type !== 'WORKER' ? (
+              <>
+                <Text style={styles.label}>Valid To</Text>
+                <View style={styles.inlineButtonsWrap}>
+                  <Pressable onPress={() => setShowToDatePicker((v) => !v)} style={styles.inlineGhostButton}>
+                    <Ionicons name="calendar-outline" size={14} color={akColors.textMuted} />
+                    <Text style={styles.inlineGhostButtonText}>Date</Text>
+                  </Pressable>
+                  <Pressable onPress={() => setShowToTimePicker((v) => !v)} style={styles.inlineGhostButton}>
+                    <Ionicons name="time-outline" size={14} color={akColors.textMuted} />
+                    <Text style={styles.inlineGhostButtonText}>Time</Text>
+                  </Pressable>
+                </View>
+                {showToDatePicker && Platform.OS !== 'web' ? <DateTimePicker mode="date" value={parseIsoOrNow(validTo)} onChange={onToDatePicked} /> : null}
+                {showToTimePicker && Platform.OS !== 'web' ? <DateTimePicker mode="time" value={parseIsoOrNow(validTo)} onChange={onToTimePicked} /> : null}
+                <View style={styles.datePreviewField}>
+                  <Ionicons name="time-outline" size={14} color={akColors.textMuted} />
+                  <Text style={styles.datePreviewText}>{formatDateTime(validTo)}</Text>
+                </View>
+              </>
+            ) : null}
+
+            <View style={styles.previewRow}>
+              <Ionicons name="time-outline" size={14} color={palette.primary} />
+              <Text style={styles.previewText}>{formatDateTime(validFrom)} → {formatDateTime(previewValidTo)}</Text>
             </View>
           </>
-        ) : (
-          <View style={styles.helperInline}>
-            <Ionicons name="information-circle-outline" size={14} color={akColors.textMuted} />
-            <Text style={styles.helperText}>End date is auto-calculated from expected duration.</Text>
-          </View>
-        )}
-
-        <View style={styles.previewRow}>
-          <Ionicons name="time-outline" size={14} color={palette.primary} />
-          <Text style={styles.previewText}>{formatDateTime(validFrom)} → {formatDateTime(previewValidTo)}</Text>
-        </View>
+        ) : null}
 
         <Pressable onPress={handlePrimarySubmit} disabled={isSubmitting} style={[styles.submitButton, isSubmitting && styles.buttonDisabled]}>
           <LinearGradient colors={[palette.primary, palette.primaryDark]} style={styles.submitButtonGradient}>
@@ -977,7 +978,6 @@ export function AccessQrScreen({
         <View style={styles.emptyCard}>
           <MaterialCommunityIcons name="qrcode-scan" size={28} color={akColors.textSoft} />
           <Text style={styles.emptyTitle}>No permits yet</Text>
-          <Text style={styles.emptyText}>Generate your first access permit using the form above.</Text>
         </View>
       ) : null}
 
@@ -1171,6 +1171,30 @@ const styles = StyleSheet.create({
   },
   headerTitle: { color: akColors.text, fontSize: 22, fontWeight: '700' },
   headerSubtitle: { marginTop: 4, color: akColors.textMuted, fontSize: 13 },
+  unitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  unitRowText: {
+    color: akColors.text,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  unitRowChangeBtn: {
+    borderWidth: 1,
+    borderColor: akColors.border,
+    borderRadius: 999,
+    backgroundColor: akColors.surfaceMuted,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  unitRowChangeText: {
+    color: akColors.text,
+    fontSize: 12,
+    fontWeight: '700',
+  },
   unitHintRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   helperText: { color: akColors.textMuted, fontSize: 12, lineHeight: 17 },
   tabsCard: {

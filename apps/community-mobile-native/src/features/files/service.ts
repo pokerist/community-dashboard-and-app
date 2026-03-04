@@ -29,6 +29,19 @@ export async function pickSingleDocument() {
   return asset;
 }
 
+export async function pickSingleAudioDocument() {
+  const result = await DocumentPicker.getDocumentAsync({
+    multiple: false,
+    copyToCacheDirectory: true,
+    type: ['audio/*'],
+  });
+
+  if (result.canceled) return null;
+  const asset = result.assets?.[0];
+  if (!asset) return null;
+  return asset;
+}
+
 export async function uploadServiceAttachmentFile(
   accessToken: string,
   asset: {
@@ -66,6 +79,12 @@ export async function uploadServiceAttachmentFile(
 
 export async function pickAndUploadServiceAttachment(accessToken: string) {
   const picked = await pickSingleDocument();
+  if (!picked) return null;
+  return uploadServiceAttachmentFile(accessToken, picked);
+}
+
+export async function pickAndUploadAudioAttachment(accessToken: string) {
+  const picked = await pickSingleAudioDocument();
   if (!picked) return null;
   return uploadServiceAttachmentFile(accessToken, picked);
 }

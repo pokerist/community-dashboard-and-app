@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { BrandedPageHero } from '../components/mobile/BrandedPageHero';
 import type { AuthSession } from '../features/auth/types';
 import { useBranding } from '../features/branding/provider';
 import { getBrandPalette } from '../features/branding/palette';
@@ -48,8 +49,10 @@ export function HelpCenterScreen({ session }: { session: AuthSession }) {
   return (
     <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
       <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>Help Center</Text>
-        <Text style={styles.subtitle}>Direct contacts for support and operations.</Text>
+        <BrandedPageHero
+          title="Help Center"
+          subtitle="Direct contacts for support and operations."
+        />
 
         {isLoading ? <ActivityIndicator color={palette.primary} /> : null}
         {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}

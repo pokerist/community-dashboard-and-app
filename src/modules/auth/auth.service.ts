@@ -1060,6 +1060,35 @@ export class AuthService {
     return this.createCurrentUserProfileChangeRequest(userId, dto);
   }
 
+  async updateCurrentUserProfilePhoto(userId: string, profilePhotoId: string) {
+    await this.assertActivationFileCategory(
+      profilePhotoId,
+      $Enums.FileCategory.PROFILE_PHOTO,
+      'PROFILE_PHOTO_REQUIRED',
+    );
+
+    const conflict = await this.prisma.user.findFirst({
+      where: {
+        id: { not: userId },
+        profilePhotoId,
+      },
+      select: { id: true },
+    });
+    if (conflict) {
+      throw new BadRequestException({
+        message: 'Provided profile photo is already linked to another account',
+        reasonCode: 'PROFILE_PHOTO_REQUIRED',
+      });
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { profilePhotoId },
+    });
+
+    return this.getCurrentUserBootstrap(userId);
+  }
+
   async createCurrentUserProfileChangeRequest(
     userId: string,
     dto: CreateProfileChangeRequestDto,

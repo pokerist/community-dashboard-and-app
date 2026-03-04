@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import {
+  Image,
   Modal,
   Pressable,
   ScrollView,
@@ -16,6 +17,7 @@ import { useBranding } from '../../features/branding/provider';
 import { getBrandPalette } from '../../features/branding/palette';
 import { useI18n } from '../../features/i18n/provider';
 import { akColors } from '../../theme/alkarma';
+import { API_BASE_URL } from '../../config/env';
 
 export type AppDrawerRoute =
   | 'Profile'
@@ -24,13 +26,15 @@ export type AppDrawerRoute =
   | 'Requests'
   | 'Services'
   | 'Complaints'
-  | 'Finance'
+  | 'Payments'
+  | 'InvoicesViolations'
   | 'Notifications'
   | 'Bookings'
   | 'Household'
   | 'Utilities'
   | 'Discover'
-  | 'HelpCenter';
+  | 'HelpCenter'
+  | 'SmartHome';
 
 type DrawerMenuItem = {
   key: string;
@@ -84,6 +88,9 @@ export function AppDrawerMenu({
     profile?.user?.nameEN?.trim() ||
     profile?.user?.nameAR?.trim() ||
     email.split('@')[0];
+  const avatarImageUri = profile?.user?.profilePhoto?.id
+    ? `${API_BASE_URL}/files/${profile.user.profilePhoto.id}/stream`
+    : null;
   const preConstruction = isPreConstructionUnit(selectedUnit);
   const unitAccesses = selectedUnit?.unitAccesses ?? [];
   const canGenerateQr =
@@ -149,8 +156,8 @@ export function AppDrawerMenu({
     ...(allowUtilities
       ? ([{ key: 'utilities', label: t('drawer.trackUtility'), icon: 'speedometer-outline', route: 'Utilities', disabled: false }] as DrawerMenuItem[])
       : []),
-    { key: 'violations', label: t('drawer.violations'), icon: 'flag-outline', route: 'Finance', disabled: preConstruction || !allowFinance },
-    { key: 'payments', label: t('drawer.payments'), icon: 'card-outline', route: 'Finance', disabled: !allowFinance },
+    { key: 'payments', label: t('drawer.payments'), icon: 'card-outline', route: 'Payments', disabled: !allowFinance },
+    { key: 'violations', label: t('drawer.violations'), icon: 'flag-outline', route: 'InvoicesViolations', disabled: preConstruction || !allowFinance },
     ...(allowDiscover
       ? ([{ key: 'discover', label: 'Discover', icon: 'compass-outline', route: 'Discover', disabled: false }] as DrawerMenuItem[])
       : []),
@@ -160,7 +167,7 @@ export function AppDrawerMenu({
     ...(hideUnsupported
       ? []
       : ([
-          { key: 'smart-home', label: 'Smart Home', icon: 'hardware-chip-outline', disabled: true },
+          { key: 'smart-home', label: 'Smart Home', icon: 'hardware-chip-outline', route: 'SmartHome' },
         ] as DrawerMenuItem[])),
   ];
 
@@ -199,7 +206,7 @@ export function AppDrawerMenu({
               style={styles.header}
             >
               <Pressable onPress={onClose} style={styles.closeButton}>
-                <Ionicons name="close" size={18} color="#fff" />
+                <Ionicons name="close" size={18} color={akColors.white} />
               </Pressable>
 
               <View style={styles.userRow}>
@@ -212,7 +219,11 @@ export function AppDrawerMenu({
                     },
                   ]}
                 >
-                  <Text style={styles.avatarText}>{initial}</Text>
+                  {avatarImageUri ? (
+                    <Image source={{ uri: avatarImageUri }} style={styles.avatarImage} resizeMode="cover" />
+                  ) : (
+                    <Text style={styles.avatarText}>{initial}</Text>
+                  )}
                 </View>
                 <View style={styles.userTextWrap}>
                   <Text numberOfLines={1} style={styles.userName}>
@@ -298,7 +309,7 @@ export function AppDrawerMenu({
                 }}
                 style={styles.logoutButton}
               >
-                <Ionicons name="log-out-outline" size={18} color="#EF4444" />
+                <Ionicons name="log-out-outline" size={18} color={akColors.danger} />
                 <Text style={styles.logoutButtonText}>{t('drawer.logout')}</Text>
               </Pressable>
             </View>
@@ -371,9 +382,14 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(201,169,97,0.8)',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
   },
   avatarText: {
-    color: '#fff',
+    color: akColors.white,
     fontWeight: '700',
     fontSize: 20,
   },
@@ -382,7 +398,7 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   userName: {
-    color: '#fff',
+    color: akColors.white,
     fontSize: 14,
     fontWeight: '700',
   },
@@ -420,13 +436,13 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     paddingVertical: 14,
     paddingHorizontal: 14,
-    backgroundColor: '#fff',
+    backgroundColor: akColors.surface,
     borderWidth: 1,
-    borderColor: '#D1D5DB',
+    borderColor: akColors.border,
   },
   unitTileActive: {
-    borderColor: '#9CA3AF',
-    backgroundColor: '#fff',
+    borderColor: akColors.textSoft,
+    backgroundColor: akColors.surface,
   },
   unitTileHeader: {
     flexDirection: 'row',
@@ -495,14 +511,14 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 0,
     borderColor: 'transparent',
-    backgroundColor: '#fff',
+    backgroundColor: akColors.surface,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
   },
   logoutButtonText: {
-    color: '#EF4444',
+    color: akColors.danger,
     fontWeight: '600',
     fontSize: 14,
   },

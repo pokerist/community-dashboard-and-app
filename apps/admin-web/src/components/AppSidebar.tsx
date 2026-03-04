@@ -12,7 +12,6 @@ import {
   Bell,
   Shield,
   Dumbbell,
-  Home,
   Settings,
   BarChart3,
   ClipboardCheck,
@@ -102,11 +101,6 @@ const secondaryItems = [
     title: "Amenities",
     icon: Dumbbell,
     url: "#amenities",
-  },
-  {
-    title: "Smart Home",
-    icon: Home,
-    url: "#smarthome",
   },
 ];
 

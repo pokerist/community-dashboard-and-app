@@ -16,8 +16,8 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppToast } from '../components/mobile/AppToast';
+import { BrandedPageHero } from '../components/mobile/BrandedPageHero';
 import { InlineError, ScreenCard } from '../components/mobile/Primitives';
-import { UnitPicker } from '../components/mobile/UnitPicker';
 import type { AuthSession } from '../features/auth/types';
 import { pickAndUploadServiceAttachment } from '../features/files/service';
 import type { UploadedAttachment } from '../features/files/service';
@@ -47,6 +47,7 @@ import {
 } from '../features/presentation/status';
 import { useBranding } from '../features/branding/provider';
 import { getBrandPalette } from '../features/branding/palette';
+import { useBottomNavMetrics } from '../features/layout/BottomNavMetricsContext';
 import { akColors, akShadow } from '../theme/alkarma';
 import { formatCurrency, formatDateTime } from '../utils/format';
 
@@ -61,6 +62,7 @@ type ServicesRequestsScreenProps = {
   unitsErrorMessage: string | null;
   onSelectUnit: (unitId: string) => void;
   onRefreshUnits: () => Promise<void>;
+  onOpenUnitPicker?: () => void;
   deepLinkTicketId?: string | null;
   onConsumeDeepLinkTicketId?: (requestId: string) => void;
 };
@@ -206,12 +208,14 @@ export function ServicesRequestsScreen({
   unitsLoading,
   unitsRefreshing,
   unitsErrorMessage,
-  onSelectUnit,
-  onRefreshUnits,
+  onSelectUnit: _onSelectUnit,
+  onRefreshUnits: _onRefreshUnits,
+  onOpenUnitPicker,
   deepLinkTicketId = null,
   onConsumeDeepLinkTicketId,
 }: ServicesRequestsScreenProps) {
   const insets = useSafeAreaInsets();
+  const { contentInsetBottom } = useBottomNavMetrics();
   const { brand } = useBranding();
   const palette = getBrandPalette(brand);
   const toast = useAppToast();
@@ -224,7 +228,6 @@ export function ServicesRequestsScreen({
   const [fieldFileDrafts, setFieldFileDrafts] = useState<Record<string, UploadedAttachment>>({});
   const [loadError, setLoadError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -236,6 +239,7 @@ export function ServicesRequestsScreen({
   const [ticketCommentDraft, setTicketCommentDraft] = useState('');
   const [ticketCommentSubmitting, setTicketCommentSubmitting] = useState(false);
   const [ticketCancelling, setTicketCancelling] = useState(false);
+  const [requestFormModalOpen, setRequestFormModalOpen] = useState(false);
   const isRequestsMode = mode === 'requests';
 
   const loadData = useCallback(
@@ -416,7 +420,6 @@ export function ServicesRequestsScreen({
     }
     setIsSubmitting(true);
     setSubmitError(null);
-    setSuccessMessage(null);
     try {
       const fieldValues = buildFieldValues(selectedService.formFields ?? []);
       const payload: CreateServiceRequestInput = {
@@ -430,7 +433,6 @@ export function ServicesRequestsScreen({
         fieldValues,
       };
       await createServiceRequest(session.accessToken, payload);
-      setSuccessMessage(isRequestsMode ? 'Request submitted.' : 'Service ticket submitted.');
       toast.success(
         isRequestsMode ? 'Request submitted' : 'Service ticket submitted',
         'Your request has been sent successfully.',
@@ -438,6 +440,7 @@ export function ServicesRequestsScreen({
       setFieldTextDrafts({});
       setFieldBoolDrafts({});
       setFieldFileDrafts({});
+      setRequestFormModalOpen(false);
       await loadData('refresh');
     } catch (error) {
       const msg = extractApiErrorMessage(error);
@@ -601,21 +604,12 @@ export function ServicesRequestsScreen({
       <ScrollView
         contentContainerStyle={[
           styles.container,
-          { paddingTop: Math.max(insets.top, 8) + 8, paddingBottom: 110 },
+          { paddingTop: 0, paddingBottom: Math.max(110, contentInsetBottom) },
         ]}
       >
-      <View style={styles.headerCard}>
-        <View style={styles.headerTopRow}>
-          <View style={styles.headerBackChip}>
-            <Ionicons name="arrow-back" size={18} color={akColors.text} />
-          </View>
-          <View style={styles.flex}>
-            <Text style={styles.headerTitle}>{isRequestsMode ? 'Requests' : 'Services'}</Text>
-            <Text style={styles.headerSubtitle}>
-              {isRequestsMode ? 'Submit your requests' : 'Submit your service tickets'}
-            </Text>
-          </View>
-        </View>
+      <BrandedPageHero
+        title={isRequestsMode ? 'Requests' : 'Services'}
+      >
         <View style={styles.searchShell}>
           <Ionicons name="search-outline" size={18} color={akColors.textMuted} />
           <TextInput
@@ -626,47 +620,34 @@ export function ServicesRequestsScreen({
             placeholderTextColor={akColors.textSoft}
           />
         </View>
-      </View>
+      </BrandedPageHero>
 
-      <ScreenCard title="Selected Unit">
-        {units.length > 1 ? (
-          <UnitPicker
-            units={units}
-            selectedUnitId={selectedUnitId}
-            onSelect={onSelectUnit}
-            onRefresh={() => void onRefreshUnits()}
-            isRefreshing={unitsRefreshing}
-          />
-        ) : null}
+      {units.length > 1 ? (
+        <ScreenCard title="Current Unit">
+          <View style={styles.unitRow}>
+            <Text style={styles.unitRowText}>
+              {selectedUnit?.unitNumber ?? selectedUnit?.id ?? 'Select unit'}
+            </Text>
+            <Pressable style={styles.unitRowChangeBtn} onPress={onOpenUnitPicker}>
+              <Text style={styles.unitRowChangeText}>Change</Text>
+            </Pressable>
+          </View>
+          <InlineError message={unitsErrorMessage} />
+          {unitsRefreshing ? <ActivityIndicator size="small" color={palette.primary} /> : null}
+        </ScreenCard>
+      ) : null}
+
+      {units.length <= 1 ? (
         <InlineError message={unitsErrorMessage} />
-        {unitsLoading ? <ActivityIndicator color={palette.primary} /> : null}
-        {selectedUnit ? (
-          <Text style={styles.helperText}>
-            New requests will be submitted for unit {selectedUnit.unitNumber ?? selectedUnit.id}.
-          </Text>
-        ) : null}
-      </ScreenCard>
+      ) : null}
+      {unitsLoading ? <ActivityIndicator color={palette.primary} /> : null}
 
       <ScreenCard
-        title={isRequestsMode ? 'Submit New Request' : 'Create Service Ticket'}
+        title={isRequestsMode ? 'Step 1: Choose Request Type' : 'Step 1: Choose Service'}
         actionLabel={isRefreshing ? 'Refreshing...' : 'Refresh'}
         onActionPress={() => void loadData('refresh')}
       >
         <InlineError message={loadError} />
-        {/* submit/upload feedback is shown as toasts */}
-        {successMessage ? <Text style={styles.successText}>{successMessage}</Text> : null}
-        <View
-          style={[
-            styles.guidedHintBox,
-            { borderColor: palette.primarySoft18, backgroundColor: palette.primarySoft8 },
-          ]}
-        >
-          <Ionicons name="information-circle-outline" size={16} color={palette.primary} />
-          <Text style={styles.guidedHintText}>
-            Follow the required steps below. Any approved cost will be added to your invoices.
-          </Text>
-        </View>
-
         {isLoading ? (
           <ActivityIndicator color={palette.primary} />
         ) : (
@@ -688,7 +669,11 @@ export function ServicesRequestsScreen({
                 return (
                   <Pressable
                     key={service.id}
-                    onPress={() => setSelectedServiceId(service.id)}
+                    onPress={() => {
+                      setSelectedServiceId(service.id);
+                      setSubmitError(null);
+                      setRequestFormModalOpen(true);
+                    }}
                     style={[
                       styles.serviceCard,
                       active && styles.serviceCardActive,
@@ -711,9 +696,11 @@ export function ServicesRequestsScreen({
                     <Text style={styles.serviceCardTitle} numberOfLines={2}>
                       {service.name}
                     </Text>
-                    <Text style={styles.serviceCardSubtitle} numberOfLines={2}>
-                      {service.description?.trim() || (isRequestsMode ? 'Submit your request details.' : 'Submit a service ticket.')}
-                    </Text>
+                    {service.description?.trim() ? (
+                      <Text style={styles.serviceCardSubtitle} numberOfLines={2}>
+                        {service.description.trim()}
+                      </Text>
+                    ) : null}
                     <Text style={styles.serviceCardMeta} numberOfLines={1}>
                       {serviceCategoryLabel(service.category)}
                     </Text>
@@ -721,45 +708,64 @@ export function ServicesRequestsScreen({
                 );
               })}
             </View>
+          </>
+        )}
+      </ScreenCard>
 
-            {selectedService ? (
-              <View style={styles.serviceInfo}>
-                <Text style={styles.serviceInfoTitle}>{selectedService.name}</Text>
-                <Text style={styles.serviceInfoBody}>
-                  {selectedService.description || 'No details available.'}
+      <Modal
+        visible={requestFormModalOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setRequestFormModalOpen(false)}
+      >
+        <View style={styles.ticketModalBackdrop}>
+          <Pressable style={styles.ticketModalBackdropTap} onPress={() => setRequestFormModalOpen(false)} />
+          <View style={styles.ticketModalSheet}>
+            <View style={styles.ticketModalHandle} />
+            <View style={styles.ticketModalHeader}>
+              <Pressable
+                style={styles.iconRoundButton}
+                onPress={() => setRequestFormModalOpen(false)}
+              >
+                <Ionicons name="close" size={18} color={akColors.textMuted} />
+              </Pressable>
+              <View style={styles.flex}>
+                <Text style={styles.ticketModalTitle}>
+                  {isRequestsMode ? 'Step 2: Request Details' : 'Step 2: Service Details'}
                 </Text>
-                <Text style={styles.serviceInfoMeta}>
-                  {eligibilityLabel(selectedService.unitEligibility)} • Estimated starting price:{' '}
-                  {formatCurrency(selectedService.startingPrice)}
+                <Text style={styles.ticketModalSubtitle}>
+                  {selectedService?.name ?? (isRequestsMode ? 'Request' : 'Service')}
                 </Text>
               </View>
-            ) : null}
+            </View>
 
-            {(selectedService?.formFields?.length ?? 0) > 0 ? (
-              <View style={styles.dynamicFieldsBlock}>
-                <Text style={styles.dynamicFieldsTitle}>
-                  {isRequestsMode ? 'Request Details' : 'Service Details'}
-                </Text>
-                {(selectedService?.formFields ?? []).map((field) => (
-                  <DynamicFieldInput
-                    key={field.id}
-                    field={field}
-                    textValue={fieldTextDrafts[field.id] ?? ''}
-                    boolValue={fieldBoolDrafts[field.id]}
-                    fileValue={fieldFileDrafts[field.id] ?? null}
-                    isUploadingFile={uploadingFieldId === field.id}
-                    palette={palette}
-                    onTextChange={(value) => setFieldText(field.id, value)}
-                    onBoolChange={(value) => setFieldBool(field.id, value)}
-                    onUploadFile={() => void uploadDynamicFieldFile(field)}
-                    onClearFile={() => setFieldFile(field.id, null)}
-                  />
-                ))}
-                <Text style={styles.dynamicHint}>
-                  Fill only the required fields shown above.
-                </Text>
-              </View>
-            ) : null}
+            <ScrollView contentContainerStyle={styles.ticketCommentsListContent}>
+              <InlineError message={submitError} />
+
+              {(selectedService?.formFields?.length ?? 0) > 0 ? (
+                <View style={styles.dynamicFieldsBlock}>
+                  {(selectedService?.formFields ?? []).map((field) => (
+                    <DynamicFieldInput
+                      key={field.id}
+                      field={field}
+                      textValue={fieldTextDrafts[field.id] ?? ''}
+                      boolValue={fieldBoolDrafts[field.id]}
+                      fileValue={fieldFileDrafts[field.id] ?? null}
+                      isUploadingFile={uploadingFieldId === field.id}
+                      palette={palette}
+                      onTextChange={(value) => setFieldText(field.id, value)}
+                      onBoolChange={(value) => setFieldBool(field.id, value)}
+                      onUploadFile={() => void uploadDynamicFieldFile(field)}
+                      onClearFile={() => setFieldFile(field.id, null)}
+                    />
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.serviceInfo}>
+                  <Text style={styles.serviceInfoBody}>No additional fields required.</Text>
+                </View>
+              )}
+            </ScrollView>
 
             <Pressable
               style={[styles.primaryButton, isSubmitting && styles.buttonDisabled]}
@@ -777,9 +783,9 @@ export function ServicesRequestsScreen({
                 </Text>
               </LinearGradient>
             </Pressable>
-          </>
-        )}
-      </ScreenCard>
+          </View>
+        </View>
+      </Modal>
 
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>
@@ -1217,30 +1223,40 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 12,
   },
-  headerBackChip: {
-    width: 38,
-    height: 38,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: akColors.border,
-    backgroundColor: "#F8FAFC",
-    alignItems: "center",
-    justifyContent: "center",
-  },
   headerTitle: {
     color: akColors.text,
     fontSize: 28,
     fontWeight: '700',
   },
-  headerSubtitle: {
-    color: akColors.textMuted,
-    fontSize: 14,
+  unitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  unitRowText: {
+    color: akColors.text,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  unitRowChangeBtn: {
+    borderWidth: 1,
+    borderColor: akColors.border,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: akColors.surfaceMuted,
+  },
+  unitRowChangeText: {
+    color: akColors.text,
+    fontSize: 12,
+    fontWeight: '700',
   },
   searchShell: {
     borderRadius: 12,
     borderWidth: 1,
     borderColor: akColors.border,
-    backgroundColor: "#F1F5F9",
+    backgroundColor: akColors.surfaceMuted,
     paddingHorizontal: 12,
     paddingVertical: 11,
     flexDirection: 'row',
@@ -1254,31 +1270,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   hero: {
-    backgroundColor: '#0F172A',
+    backgroundColor: akColors.primaryDark,
     borderRadius: 20,
     padding: 16,
     gap: 7,
     ...akShadow.card,
   },
   heroBadge: {
-    color: '#93C5FD',
+    color: akColors.gold,
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 1,
   },
   heroTitle: {
-    color: '#FFFFFF',
+    color: akColors.white,
     fontSize: 22,
     fontWeight: '700',
   },
   heroSubtitle: {
-    color: '#CBD5E1',
+    color: 'rgba(255,255,255,0.78)',
     fontSize: 13,
     lineHeight: 18,
-  },
-  helperText: {
-    color: akColors.textMuted,
-    fontSize: 12,
   },
   label: {
     color: akColors.text,
@@ -1305,31 +1317,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  guidedHintBox: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(42,62,53,0.16)',
-    borderRadius: 12,
-    backgroundColor: 'rgba(42,62,53,0.08)',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  guidedHintText: {
-    flex: 1,
-    color: akColors.textMuted,
-    fontSize: 11,
-    lineHeight: 16,
-  },
   serviceCard: {
     width: '48%',
     borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderColor: akColors.border,
     borderRadius: 18,
     padding: 14,
     gap: 7,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: akColors.surface,
     minHeight: 165,
     shadowColor: '#0F172A',
     shadowOpacity: 0.05,
@@ -1357,20 +1352,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   serviceCardTitle: {
-    color: "#0F172A",
+    color: akColors.text,
     fontWeight: "700",
     fontSize: 15,
     lineHeight: 20,
     marginTop: 2,
   },
   serviceCardSubtitle: {
-    color: "#64748B",
+    color: akColors.textMuted,
     fontSize: 12,
     lineHeight: 17,
     minHeight: 34,
   },
   serviceCardMeta: {
-    color: "#475569",
+    color: akColors.textMuted,
     fontSize: 11,
     fontWeight: "600",
     marginTop: 4,
@@ -1379,7 +1374,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(226,232,240,0.9)',
     borderRadius: 14,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: akColors.surface,
     padding: 12,
     gap: 5,
     ...akShadow.soft,
@@ -1480,7 +1475,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
   },
   removeAttachmentText: {
-    color: '#B91C1C',
+    color: akColors.danger,
     fontSize: 11,
     fontWeight: '700',
   },
@@ -1488,7 +1483,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(226,232,240,0.9)',
     borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.92)',
+    backgroundColor: akColors.surface,
     padding: 12,
     gap: 10,
   },
@@ -1529,7 +1524,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   primaryButtonText: {
-    color: '#FFFFFF',
+    color: akColors.white,
     fontWeight: '700',
     fontSize: 13,
   },
@@ -1572,7 +1567,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 13,
     gap: 6,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: akColors.surface,
     ...akShadow.soft,
   },
   itemHeader: {
@@ -1636,7 +1631,7 @@ const styles = StyleSheet.create({
     width: 46,
     height: 4,
     borderRadius: 999,
-    backgroundColor: '#CBD5E1',
+    backgroundColor: akColors.border,
     alignSelf: 'center',
     marginBottom: 10,
   },
@@ -1738,10 +1733,10 @@ const styles = StyleSheet.create({
     color: akColors.success,
   },
   ticketStatusPillTextDanger: {
-    color: '#B91C1C',
+    color: akColors.danger,
   },
   ticketStatusPillTextWarning: {
-    color: '#B45309',
+    color: akColors.gold,
   },
   ticketCommentsHeader: {
     flexDirection: 'row',
@@ -1842,7 +1837,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   ghostActionButtonDangerText: {
-    color: '#B91C1C',
+    color: akColors.danger,
     fontWeight: '700',
     fontSize: 12,
   },
@@ -1859,7 +1854,7 @@ const styles = StyleSheet.create({
     ...akShadow.soft,
   },
   primarySolidButtonText: {
-    color: '#fff',
+    color: akColors.white,
     fontWeight: '700',
     fontSize: 12,
   },

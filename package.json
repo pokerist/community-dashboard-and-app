@@ -27,6 +27,7 @@
     "guard:ui-contrast": "node scripts/ui-contrast-guard.js",
     "seed:mobile-personas": "ts-node scripts/seed-mobile-personas.ts",
     "seed:dashboard-load": "ts-node scripts/reset-dashboard-data.ts",
+    "seed:professional-demo": "ts-node scripts/reset-professional-demo.ts",
     "smoke:mobile-personas": "powershell -ExecutionPolicy Bypass -File scripts/mobile-persona-smoke.ps1",
     "smoke:admin-stack:linux": "bash scripts/deploy/smoke-admin-stack.sh"
   },

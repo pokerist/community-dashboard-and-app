@@ -13,8 +13,8 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppToast } from '../components/mobile/AppToast';
+import { BrandedPageHero } from '../components/mobile/BrandedPageHero';
 import { InlineError, ScreenCard } from '../components/mobile/Primitives';
-import { UnitPicker } from '../components/mobile/UnitPicker';
 import type { AuthSession } from '../features/auth/types';
 import {
   addComplaintComment,
@@ -26,6 +26,7 @@ import {
 import type { ComplaintCommentRow, ComplaintRow, ResidentUnit } from '../features/community/types';
 import { useBranding } from '../features/branding/provider';
 import { getBrandPalette } from '../features/branding/palette';
+import { useBottomNavMetrics } from '../features/layout/BottomNavMetricsContext';
 import { extractApiErrorMessage } from '../lib/http';
 import { complaintStatusDisplayLabel } from '../features/presentation/status';
 import { akColors, akShadow } from '../theme/alkarma';
@@ -41,6 +42,7 @@ type ComplaintsScreenProps = {
   unitsErrorMessage: string | null;
   onSelectUnit: (unitId: string) => void;
   onRefreshUnits: () => Promise<void>;
+  onOpenUnitPicker?: () => void;
   deepLinkComplaintId?: string | null;
   onConsumeDeepLinkComplaintId?: (complaintId: string) => void;
 };
@@ -53,12 +55,12 @@ function statusBadge(
   switch (normalized) {
     case 'RESOLVED':
     case 'CLOSED':
-      return { bg: 'rgba(16,185,129,0.10)', text: '#059669' };
+      return { bg: akColors.successBg, text: akColors.success };
     case 'UNDER_REVIEW':
     case 'IN_PROGRESS':
     case 'ASSIGNED':
     case 'REVIEWING':
-      return { bg: 'rgba(245,158,11,0.10)', text: '#D97706' };
+      return { bg: 'rgba(201,169,97,0.10)', text: akColors.gold };
     case 'SUBMITTED':
     case 'NEW':
       return { bg: palette.primarySoft10, text: palette.primary };
@@ -79,12 +81,14 @@ export function ComplaintsScreen({
   unitsLoading,
   unitsRefreshing,
   unitsErrorMessage,
-  onSelectUnit,
-  onRefreshUnits,
+  onSelectUnit: _onSelectUnit,
+  onRefreshUnits: _onRefreshUnits,
+  onOpenUnitPicker,
   deepLinkComplaintId = null,
   onConsumeDeepLinkComplaintId,
 }: ComplaintsScreenProps) {
   const insets = useSafeAreaInsets();
+  const { contentInsetBottom } = useBottomNavMetrics();
   const { brand } = useBranding();
   const palette = getBrandPalette(brand);
   const toast = useAppToast();
@@ -253,13 +257,13 @@ export function ComplaintsScreen({
       <ScrollView
         contentContainerStyle={[
           styles.container,
-          { paddingTop: Math.max(insets.top, 8) + 8, paddingBottom: 110 },
+          { paddingTop: 0, paddingBottom: Math.max(110, contentInsetBottom) },
         ]}
       >
-        <View style={styles.headerCard}>
-          <Text style={styles.headerTitle}>Complaints</Text>
-          <Text style={styles.headerSubtitle}>Submit and track your complaints</Text>
-        </View>
+        <BrandedPageHero
+          title="Complaints"
+          subtitle="Submit and track your complaints"
+        />
 
         {successMessage ? (
           <View style={styles.successBanner}>
@@ -268,25 +272,20 @@ export function ComplaintsScreen({
           </View>
         ) : null}
 
-        <ScreenCard title="Unit Filter" actionLabel={isRefreshing ? 'Refreshing...' : 'Reload'} onActionPress={() => void loadData('refresh')}>
+        <ScreenCard title="Unit" actionLabel={isRefreshing ? 'Refreshing...' : 'Reload'} onActionPress={() => void loadData('refresh')}>
           {units.length > 1 ? (
-            <UnitPicker
-              units={units}
-              selectedUnitId={selectedUnitId}
-              onSelect={onSelectUnit}
-              onRefresh={() => void onRefreshUnits()}
-              isRefreshing={unitsRefreshing}
-              title="Filter by Unit"
-            />
+            <View style={styles.unitRow}>
+              <Text style={styles.unitRowText}>
+                {selectedUnit?.unitNumber ?? selectedUnit?.id ?? 'Select unit'}
+              </Text>
+              <Pressable style={styles.unitRowChangeBtn} onPress={onOpenUnitPicker}>
+                <Text style={styles.unitRowChangeText}>Change</Text>
+              </Pressable>
+            </View>
           ) : null}
           <InlineError message={unitsErrorMessage} />
           <InlineError message={loadError} />
-          {unitsLoading ? <ActivityIndicator color={palette.primary} /> : null}
-          {selectedUnit ? (
-            <Text style={styles.helperText}>Showing complaints for unit {selectedUnit.unitNumber ?? selectedUnit.id}</Text>
-          ) : (
-            <Text style={styles.helperText}>Showing complaints across all linked units.</Text>
-          )}
+          {unitsLoading || unitsRefreshing ? <ActivityIndicator color={palette.primary} /> : null}
         </ScreenCard>
 
         <View style={styles.sectionHeader}>
@@ -302,7 +301,6 @@ export function ComplaintsScreen({
           <View style={styles.emptyCard}>
             <Ionicons name="chatbubble-ellipses-outline" size={26} color={akColors.textSoft} />
             <Text style={styles.emptyTitle}>No complaints yet</Text>
-            <Text style={styles.emptyText}>Tap the + button to submit your first complaint.</Text>
           </View>
         ) : null}
 
@@ -341,18 +339,18 @@ export function ComplaintsScreen({
 
               <View style={styles.timelineWrap}>
                 <View style={styles.timelineRow}>
-                  <View style={[styles.timelineDot, { backgroundColor: '#10B981' }]} />
+                  <View style={[styles.timelineDot, { backgroundColor: akColors.success }]} />
                   <Text style={styles.timelineText}>Submitted on {formatDateTime(row.createdAt)}</Text>
                 </View>
                 {(isUnderReview || isResolved) ? (
                   <View style={styles.timelineRow}>
-                    <View style={[styles.timelineDot, { backgroundColor: '#F59E0B' }]} />
+                    <View style={[styles.timelineDot, { backgroundColor: akColors.gold }]} />
                     <Text style={styles.timelineText}>Under review by community team</Text>
                   </View>
                 ) : null}
                 {isResolved ? (
                   <View style={styles.timelineRow}>
-                    <View style={[styles.timelineDot, { backgroundColor: '#10B981' }]} />
+                    <View style={[styles.timelineDot, { backgroundColor: akColors.success }]} />
                     <Text style={styles.timelineText}>Resolved / closed</Text>
                   </View>
                 ) : null}
@@ -371,7 +369,7 @@ export function ComplaintsScreen({
 
       <Pressable onPress={() => { setSubmitError(null); setShowComposer(true); }} style={styles.fab}>
         <LinearGradient colors={[palette.primary, palette.primaryDark]} style={styles.fabInner}>
-          <Ionicons name="add" size={26} color="#fff" />
+          <Ionicons name="add" size={26} color={akColors.white} />
         </LinearGradient>
       </Pressable>
 
@@ -429,7 +427,7 @@ export function ComplaintsScreen({
                 </Pressable>
                 <Pressable onPress={() => void submitComplaint()} disabled={isSubmitting} style={[styles.submitButton, isSubmitting && styles.buttonDisabled]}>
                   <LinearGradient colors={[palette.primary, palette.primaryDark]} style={styles.submitButtonInner}>
-                    {isSubmitting ? <ActivityIndicator size="small" color="#fff" /> : null}
+                    {isSubmitting ? <ActivityIndicator size="small" color={akColors.white} /> : null}
                     <Text style={styles.submitButtonText}>{isSubmitting ? 'Submitting...' : 'Submit'}</Text>
                   </LinearGradient>
                 </Pressable>
@@ -551,7 +549,7 @@ export function ComplaintsScreen({
                       </View>
                     ) : null}
                     {!commentsLoading && complaintComments.length === 0 ? (
-                      <Text style={styles.detailEmptyHint}>No messages yet. You can add a comment for the management team.</Text>
+                      <Text style={styles.detailEmptyHint}>No messages yet.</Text>
                     ) : null}
                     {complaintComments.map((comment) => {
                       const isMine = comment.createdById === session.userId;
@@ -676,6 +674,30 @@ const styles = StyleSheet.create({
   },
   headerTitle: { color: akColors.text, fontSize: 22, fontWeight: '700' },
   headerSubtitle: { marginTop: 4, color: akColors.textMuted, fontSize: 13 },
+  unitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  unitRowText: {
+    color: akColors.text,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  unitRowChangeBtn: {
+    borderWidth: 1,
+    borderColor: akColors.border,
+    borderRadius: 999,
+    backgroundColor: akColors.surfaceMuted,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  unitRowChangeText: {
+    color: akColors.text,
+    fontSize: 12,
+    fontWeight: '700',
+  },
   successBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -752,7 +774,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 7,
   },
-  deleteButtonText: { color: '#B91C1C', fontSize: 11, fontWeight: '700' },
+  deleteButtonText: { color: akColors.danger, fontSize: 11, fontWeight: '700' },
   fab: {
     position: 'absolute',
     right: 18,
@@ -863,7 +885,7 @@ const styles = StyleSheet.create({
   attachmentMain: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
   attachmentName: { color: akColors.text, fontSize: 12, fontWeight: '600' },
   attachmentMeta: { color: akColors.textSoft, fontSize: 10 },
-  removeText: { color: '#B91C1C', fontSize: 11, fontWeight: '700' },
+  removeText: { color: akColors.danger, fontSize: 11, fontWeight: '700' },
   modalActions: { flexDirection: 'row', gap: 10, marginTop: 4, paddingBottom: 6 },
   cancelButton: {
     flex: 1,
@@ -1146,12 +1168,12 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   commentComposerBtnText: {
-    color: '#fff',
+    color: akColors.white,
     fontSize: 12,
     fontWeight: '700',
   },
   detailInlineErrorText: {
-    color: '#B91C1C',
+    color: akColors.danger,
     fontSize: 11,
     lineHeight: 16,
   },
@@ -1180,7 +1202,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   detailDangerButtonText: {
-    color: '#B91C1C',
+    color: akColors.danger,
     fontSize: 12,
     fontWeight: '700',
   },
