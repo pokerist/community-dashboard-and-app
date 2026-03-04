@@ -2,6 +2,7 @@ import {
   LayoutDashboard,
   Users,
   Building2,
+  Building,
   Wrench,
   ClipboardList,
   Inbox,
@@ -55,6 +56,11 @@ const menuItems = [
     title: "Units",
     icon: Building2,
     url: "#units",
+  },
+  {
+    title: "Communities",
+    icon: Building,
+    url: "#communities",
   },
   {
     title: "Services",

@@ -40,6 +40,20 @@ export class AccessControlService {
     return !!admin;
   }
 
+  private async getRequesterSnapshot(userId: string): Promise<{
+    requesterNameSnapshot: string | null;
+    requesterPhoneSnapshot: string | null;
+  }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { nameEN: true, nameAR: true, phone: true },
+    });
+    return {
+      requesterNameSnapshot: user?.nameEN?.trim() || user?.nameAR?.trim() || null,
+      requesterPhoneSnapshot: user?.phone?.trim() || null,
+    };
+  }
+
   private async assertGateOperator(userId: string) {
     const isAdmin = await this.isAdminUser(userId);
     if (isAdmin) return;
@@ -342,6 +356,7 @@ export class AccessControlService {
     const usageMode =
       dto.usageMode === 'MULTI_USE' ? 'MULTI_USE' : 'SINGLE_USE';
     const gates = dto.gates ?? [];
+    const requesterSnapshot = await this.getRequesterSnapshot(userId);
 
     if (this.enforceSingleActivePerTypeUnit) {
       const existing = await this.prisma.accessQRCode.findFirst({
@@ -405,6 +420,9 @@ export class AccessControlService {
             status: AccessStatus.PENDING,
             gates,
             notes: dto.notes,
+            requesterNameSnapshot: requesterSnapshot.requesterNameSnapshot,
+            requesterPhoneSnapshot: requesterSnapshot.requesterPhoneSnapshot,
+            qrImageBase64: null,
           },
         });
 
@@ -421,6 +439,7 @@ export class AccessControlService {
           qrCode,
           qrImageBase64: null,
           pendingApproval: true,
+          hasQrImage: false,
         };
       }
 
@@ -449,10 +468,18 @@ export class AccessControlService {
           status: AccessStatus.ACTIVE,
           gates,
           notes: dto.notes,
+          requesterNameSnapshot: requesterSnapshot.requesterNameSnapshot,
+          requesterPhoneSnapshot: requesterSnapshot.requesterPhoneSnapshot,
+          qrImageBase64: hik.qrImageBase64,
         },
       });
 
-      return { qrCode, qrImageBase64: hik.qrImageBase64 };
+      return {
+        qrCode,
+        qrImageBase64: hik.qrImageBase64,
+        pendingApproval: false,
+        hasQrImage: Boolean(hik.qrImageBase64),
+      };
     } catch (err: unknown) {
       if (accessGrantId) {
         await this.prisma.accessGrant
@@ -517,6 +544,7 @@ export class AccessControlService {
       data: {
         qrId: hik.qrId,
         status: AccessStatus.ACTIVE,
+        qrImageBase64: hik.qrImageBase64,
       },
     });
 
@@ -528,7 +556,12 @@ export class AccessControlService {
       visitorName: qr.visitorName ?? null,
     });
 
-    return { qrCode: updated, qrImageBase64: hik.qrImageBase64 };
+    return {
+      qrCode: updated,
+      qrImageBase64: hik.qrImageBase64,
+      pendingApproval: false,
+      hasQrImage: Boolean(hik.qrImageBase64),
+    };
   }
 
   async rejectWorkerQrCode(actorUserId: string, qrCodeId: string, reason?: string) {
@@ -724,6 +757,38 @@ export class AccessControlService {
       where: { id: qrCodeId },
       data: { status: AccessStatus.REVOKED },
     });
+  }
+
+  async getQrImageForUser(userId: string, qrCodeId: string) {
+    const qr = await this.prisma.accessQRCode.findUnique({
+      where: { id: qrCodeId },
+      select: {
+        id: true,
+        generatedById: true,
+        unitId: true,
+        qrImageBase64: true,
+      },
+    });
+    if (!qr) throw new NotFoundException('QR code not found');
+
+    const isAdmin = await this.isAdminUser(userId);
+    if (!isAdmin && qr.generatedById !== userId) {
+      if (!qr.unitId) {
+        throw new ForbiddenException('You are not allowed to view this QR image');
+      }
+      await this.assertHasActiveUnitAccess(userId, qr.unitId);
+    }
+
+    if (!qr.qrImageBase64) {
+      throw new NotFoundException('QR image is not available yet');
+    }
+
+    return {
+      id: qr.id,
+      contentType: 'image/png',
+      base64: qr.qrImageBase64,
+      dataUrl: `data:image/png;base64,${qr.qrImageBase64}`,
+    };
   }
 
   async getGateFeed(

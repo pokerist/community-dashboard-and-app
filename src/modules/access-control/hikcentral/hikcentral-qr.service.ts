@@ -2,6 +2,7 @@ import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
 import { AccessGrantPermission, QRType } from '@prisma/client';
 import dayjs from 'dayjs';
 import { randomUUID } from 'crypto';
+import QRCode from 'qrcode';
 
 export type HikCentralCreateQrRequest = {
   unitId: string;
@@ -33,9 +34,18 @@ export class HikCentralQrService {
 
     if (mockMode) {
       const fakeQrId = `mock-${randomUUID()}`;
-      const fakeQrBase64 = Buffer.from(
-        `QR:${request.unitId}:${request.type}:${dayjs(request.validTo).toISOString()}`,
-      ).toString('base64');
+      const payload = [
+        `QR:${fakeQrId}`,
+        `UNIT:${request.unitId}`,
+        `TYPE:${request.type}`,
+        `VALID_TO:${dayjs(request.validTo).toISOString()}`,
+      ].join('|');
+      const dataUrl = await QRCode.toDataURL(payload, {
+        errorCorrectionLevel: 'M',
+        margin: 1,
+        width: 512,
+      });
+      const fakeQrBase64 = dataUrl.replace(/^data:image\/png;base64,/, '');
       return { qrId: fakeQrId, qrImageBase64: fakeQrBase64 };
     }
 

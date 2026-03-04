@@ -27,6 +27,12 @@ import {
 import { Label } from "../ui/label";
 import apiClient, { handleApiError, isAuthenticated } from "../../lib/api-client";
 
+type CommunityOption = {
+  id: string;
+  name: string;
+  isActive?: boolean;
+};
+
 export function UnitsManagement() {
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -36,9 +42,11 @@ export function UnitsManagement() {
   const [unitsData, setUnitsData] = useState<any[]>([]);
   const [isLoadingUnits, setIsLoadingUnits] = useState(false);
   const [backendMode, setBackendMode] = useState(false);
+  const [communities, setCommunities] = useState<CommunityOption[]>([]);
   const [unitFormData, setUnitFormData] = useState({
     unitNumber: "",
     projectName: "Al Karma Residence",
+    communityId: "",
     block: "",
     type: "",
     bedrooms: "",
@@ -96,6 +104,7 @@ export function UnitsManagement() {
       statusRaw: unit.status,
       floor: unit.floors ?? "—",
       project: unit.projectName ?? "—",
+      communityId: unit.communityId ?? "",
       building: unit.block ? `Block ${unit.block}` : "—",
       owner:
         Array.isArray(unit.residents) && unit.residents.some((r: any) => r.isPrimary)
@@ -133,8 +142,29 @@ export function UnitsManagement() {
     }
   };
 
+  const loadCommunities = async () => {
+    if (!isAuthenticated()) {
+      setCommunities([]);
+      return;
+    }
+    try {
+      const response = await apiClient.get("/communities");
+      const rows = Array.isArray(response.data) ? response.data : [];
+      setCommunities(
+        rows.map((row: any) => ({
+          id: row.id,
+          name: row.name,
+          isActive: row.isActive !== false,
+        })),
+      );
+    } catch {
+      setCommunities([]);
+    }
+  };
+
   useEffect(() => {
     void loadUnitsFromBackend();
+    void loadCommunities();
 
     const onUnauthorized = () => {
       setBackendMode(false);
@@ -146,10 +176,22 @@ export function UnitsManagement() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!communities.length) return;
+    if (unitFormData.communityId) return;
+    const firstActive = communities.find((community) => community.isActive !== false) ?? communities[0];
+    if (!firstActive) return;
+    setUnitFormData((prev) => ({
+      ...prev,
+      communityId: firstActive.id,
+      projectName: firstActive.name,
+    }));
+  }, [communities, unitFormData.communityId]);
+
   const backendAvailable = useMemo(() => backendMode && isAuthenticated(), [backendMode]);
 
   const handleAddUnit = async () => {
-    if (!unitFormData.unitNumber || !unitFormData.projectName || !unitFormData.type || !unitFormData.size) {
+    if (!unitFormData.unitNumber || !unitFormData.communityId || !unitFormData.type || !unitFormData.size) {
       toast.error("Please fill in all required fields");
       return;
     }
@@ -165,6 +207,7 @@ export function UnitsManagement() {
       await apiClient.post("/units", {
         unitNumber: unitFormData.unitNumber,
         projectName: unitFormData.projectName,
+        communityId: unitFormData.communityId,
         block: unitFormData.block || undefined,
         type: unitFormData.type.toUpperCase(),
         floors: unitFormData.floor ? Number(unitFormData.floor) : undefined,
@@ -178,6 +221,7 @@ export function UnitsManagement() {
       setUnitFormData({
         unitNumber: "",
         projectName: unitFormData.projectName,
+        communityId: unitFormData.communityId,
         block: "",
         type: "",
         bedrooms: "",
@@ -215,6 +259,7 @@ export function UnitsManagement() {
     setUnitFormData({
       unitNumber: unit.unitNumber ?? "",
       projectName: unit.project ?? "Al Karma Residence",
+      communityId: unit.communityId ?? "",
       block: unit.block ?? "",
       type: String(unit.type ?? "").toUpperCase().replace(/ /g, "_"),
       bedrooms: unit.bedrooms && unit.bedrooms !== "—" ? String(unit.bedrooms) : "",
@@ -233,7 +278,7 @@ export function UnitsManagement() {
 
   const handleEditUnit = async () => {
     if (!editingUnitId) return;
-    if (!unitFormData.unitNumber || !unitFormData.projectName || !unitFormData.type || !unitFormData.size) {
+    if (!unitFormData.unitNumber || !unitFormData.communityId || !unitFormData.type || !unitFormData.size) {
       toast.error("Please fill in all required fields");
       return;
     }
@@ -241,6 +286,7 @@ export function UnitsManagement() {
       await apiClient.patch(`/units/${editingUnitId}`, {
         unitNumber: unitFormData.unitNumber,
         projectName: unitFormData.projectName,
+        communityId: unitFormData.communityId,
         block: unitFormData.block || undefined,
         type: unitFormData.type.toUpperCase(),
         floors: unitFormData.floor ? Number(unitFormData.floor) : undefined,
@@ -336,13 +382,29 @@ export function UnitsManagement() {
             </DialogHeader>
             <div className="grid grid-cols-2 gap-4 py-4">
               <div className="space-y-2 col-span-2">
-                <Label htmlFor="projectName">Project Name</Label>
-                <Input
-                  id="projectName"
-                  placeholder="Al Karma Residence"
-                  value={unitFormData.projectName}
-                  onChange={(e) => setUnitFormData({ ...unitFormData, projectName: e.target.value })}
-                />
+                <Label htmlFor="communityId">Community</Label>
+                <Select
+                  value={unitFormData.communityId}
+                  onValueChange={(value) => {
+                    const selected = communities.find((community) => community.id === value);
+                    setUnitFormData({
+                      ...unitFormData,
+                      communityId: value,
+                      projectName: selected?.name ?? unitFormData.projectName,
+                    });
+                  }}
+                >
+                  <SelectTrigger id="communityId">
+                    <SelectValue placeholder="Select community" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {communities.map((community) => (
+                      <SelectItem key={community.id} value={community.id}>
+                        {community.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="block">Block</Label>
@@ -455,8 +517,27 @@ export function UnitsManagement() {
             </DialogHeader>
             <div className="grid grid-cols-2 gap-4 py-4">
               <div className="space-y-2 col-span-2">
-                <Label>Project Name</Label>
-                <Input value={unitFormData.projectName} onChange={(e) => setUnitFormData({ ...unitFormData, projectName: e.target.value })} />
+                <Label>Community</Label>
+                <Select
+                  value={unitFormData.communityId}
+                  onValueChange={(value) => {
+                    const selected = communities.find((community) => community.id === value);
+                    setUnitFormData({
+                      ...unitFormData,
+                      communityId: value,
+                      projectName: selected?.name ?? unitFormData.projectName,
+                    });
+                  }}
+                >
+                  <SelectTrigger><SelectValue placeholder="Select community" /></SelectTrigger>
+                  <SelectContent>
+                    {communities.map((community) => (
+                      <SelectItem key={community.id} value={community.id}>
+                        {community.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label>Block</Label>

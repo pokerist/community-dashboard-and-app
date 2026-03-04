@@ -673,6 +673,7 @@ model RolePermission {
 model Unit {
   id              String           @id @default(uuid())
   projectName     String
+  communityId     String?
   block           String?
   unitNumber      String
   type            UnitType
@@ -687,6 +688,7 @@ model Unit {
   updatedAt       DateTime         @updatedAt
   serviceRequests ServiceRequest[]
   residents       ResidentUnit[]
+  community       Community?       @relation(fields: [communityId], references: [id], onDelete: SetNull)
   leases          Lease[]
   invoices        Invoice[]
   bookings        Booking[]
@@ -708,6 +710,20 @@ model Unit {
   authorizedAccessRequests AuthorizedAccessRequest[]
   homeStaffAccesses HomeStaffAccess[]
   ownershipTransfers UnitOwnershipTransfer[]
+
+  @@index([communityId])
+}
+
+model Community {
+  id           String   @id @default(uuid())
+  name         String   @unique
+  code         String?  @unique
+  isActive     Boolean  @default(true)
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  units Unit[]
 }
 
 // ⚠️ residentUnit is legacy. Do NOT use for permission checks.
@@ -1044,11 +1060,14 @@ model AccessQRCode {
   unitId        String?
   accessGrantId String?
   visitorName   String?
+  requesterNameSnapshot  String?
+  requesterPhoneSnapshot String?
   validFrom     DateTime
   validTo       DateTime
   gates         String[]
   scans         Int          @default(0)
   status        AccessStatus @default(ACTIVE) // ACTIVE | EXPIRED | USED
+  qrImageBase64 String?
   checkedInAt   DateTime?
   checkedOutAt  DateTime?
   gateOperatorId String?

@@ -21,6 +21,8 @@ type GateFeedRow = {
   type: string;
   status: string;
   visitorName?: string | null;
+  requesterNameSnapshot?: string | null;
+  requesterPhoneSnapshot?: string | null;
   createdAt?: string | null;
   checkedInAt?: string | null;
   checkedOutAt?: string | null;
@@ -69,6 +71,8 @@ export function GateLiveFeed() {
         row.forUnit?.unitNumber,
         row.forUnit?.projectName,
         row.forUnit?.block,
+        row.requesterNameSnapshot,
+        row.requesterPhoneSnapshot,
       ]
         .filter(Boolean)
         .join(" ")
@@ -135,6 +139,7 @@ export function GateLiveFeed() {
               <TableHead>QR</TableHead>
               <TableHead>Unit</TableHead>
               <TableHead>Visitor</TableHead>
+              <TableHead>Requester</TableHead>
               <TableHead>Type</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Check-In</TableHead>
@@ -150,6 +155,12 @@ export function GateLiveFeed() {
                   {[row.forUnit?.projectName, row.forUnit?.block, row.forUnit?.unitNumber].filter(Boolean).join(" • ") || "—"}
                 </TableCell>
                 <TableCell className="text-[#334155]">{row.visitorName || "—"}</TableCell>
+                <TableCell className="text-[#334155]">
+                  {row.requesterNameSnapshot || "—"}
+                  {row.requesterPhoneSnapshot ? (
+                    <div className="text-xs text-[#64748B]">{row.requesterPhoneSnapshot}</div>
+                  ) : null}
+                </TableCell>
                 <TableCell>
                   <Badge variant="secondary" className="bg-[#EEF2FF] text-[#3730A3]">
                     {humanizeEnum(row.type)}
@@ -186,7 +197,7 @@ export function GateLiveFeed() {
             ))}
             {!loading && filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-center py-10 text-[#64748B]">
+                <TableCell colSpan={9} className="text-center py-10 text-[#64748B]">
                   No gate feed records found.
                 </TableCell>
               </TableRow>

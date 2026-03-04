@@ -7,6 +7,7 @@ import {
   IsEnum,
   Min,
   IsInt,
+  IsUUID,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { UnitType } from '@prisma/client';
@@ -21,6 +22,11 @@ export class CreateUnitDto {
   @IsNotEmpty()
   @IsString()
   projectName!: string;
+
+  @ApiProperty({ required: false, example: 'community-uuid' })
+  @IsOptional()
+  @IsUUID()
+  communityId?: string;
 
   @ApiProperty({ example: 'Block A', required: false })
   @IsOptional()

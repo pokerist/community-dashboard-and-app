@@ -40,13 +40,14 @@ export class UnitsService {
 
   // CRUD
   async findAll(query: UnitQueryDto) {
-    const { type, status, block, projectName, ...baseQuery } = query;
+    const { type, status, block, projectName, communityId, ...baseQuery } = query;
 
     const filters: Record<string, any> = {
       type,
       status,
       block,
       projectName,
+      communityId,
     };
 
     return paginate(this.prisma.unit, baseQuery, {
@@ -74,13 +75,14 @@ export class UnitsService {
       return this.findAll(query);
     }
 
-    const { type, status, block, projectName, ...baseQuery } = query;
+    const { type, status, block, projectName, communityId, ...baseQuery } = query;
 
     const where: Prisma.UnitWhereInput = {
       ...(type ? { type } : {}),
       ...(status ? { status } : {}),
       ...(block ? { block } : {}),
       ...(projectName ? { projectName } : {}),
+      ...(communityId ? { communityId } : {}),
       OR: [
         {
           unitAccesses: {
@@ -135,12 +137,55 @@ export class UnitsService {
   }
 
   async create(dto: CreateUnitDto) {
-    return this.prisma.unit.create({ data: dto });
+    let resolvedProjectName = dto.projectName;
+    if (dto.communityId) {
+      const community = await this.prisma.community.findUnique({
+        where: { id: dto.communityId },
+        select: { id: true, name: true, isActive: true },
+      });
+      if (!community) {
+        throw new BadRequestException('Selected community does not exist');
+      }
+      if (!community.isActive) {
+        throw new BadRequestException('Selected community is inactive');
+      }
+      resolvedProjectName = community.name;
+    }
+
+    return this.prisma.unit.create({
+      data: {
+        ...dto,
+        projectName: resolvedProjectName,
+      },
+    });
   }
 
   async update(id: string, dto: UpdateUnitDto) {
     await this.findOne(id);
-    return this.prisma.unit.update({ where: { id }, data: dto });
+    let resolvedProjectName = dto.projectName;
+    if (dto.communityId) {
+      const community = await this.prisma.community.findUnique({
+        where: { id: dto.communityId },
+        select: { id: true, name: true, isActive: true },
+      });
+      if (!community) {
+        throw new BadRequestException('Selected community does not exist');
+      }
+      if (!community.isActive) {
+        throw new BadRequestException('Selected community is inactive');
+      }
+      resolvedProjectName = community.name;
+    }
+
+    return this.prisma.unit.update({
+      where: { id },
+      data: {
+        ...dto,
+        ...(resolvedProjectName !== undefined
+          ? { projectName: resolvedProjectName }
+          : {}),
+      },
+    });
   }
 
   async remove(id: string) {

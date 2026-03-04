@@ -4,6 +4,7 @@ import DateTimePicker, { type DateTimePickerEvent } from '@react-native-communit
 import { LinearGradient } from 'expo-linear-gradient';
 import {
   ActivityIndicator,
+  Image,
   Modal,
   Platform,
   Pressable,
@@ -19,7 +20,12 @@ import { BrandedPageHero } from '../components/mobile/BrandedPageHero';
 import { GeneratedQrModal } from '../components/mobile/GeneratedQrModal';
 import { InlineError, ScreenCard } from '../components/mobile/Primitives';
 import type { AuthSession } from '../features/auth/types';
-import { createAccessQr, listAccessQrs, revokeAccessQr } from '../features/community/service';
+import {
+  createAccessQr,
+  getAccessQrImage,
+  listAccessQrs,
+  revokeAccessQr,
+} from '../features/community/service';
 import type { AccessQrRow, ResidentUnit } from '../features/community/types';
 import { pickAndUploadServiceAttachment } from '../features/files/service';
 import { useBranding } from '../features/branding/provider';
@@ -196,6 +202,8 @@ export function AccessQrScreen({
   const [generatedQrImageBase64, setGeneratedQrImageBase64] = useState<string | null>(null);
   const [qrModalVisible, setQrModalVisible] = useState(false);
   const [selectedQr, setSelectedQr] = useState<AccessQrRow | null>(null);
+  const [selectedQrImageBase64, setSelectedQrImageBase64] = useState<string | null>(null);
+  const [isLoadingSelectedQrImage, setIsLoadingSelectedQrImage] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -253,6 +261,35 @@ export function AccessQrScreen({
       onConsumeDeepLinkAccessQrId?.(deepLinkAccessQrId);
     }
   }, [deepLinkAccessQrId, onConsumeDeepLinkAccessQrId, rows]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      if (!selectedQr?.id) {
+        setSelectedQrImageBase64(null);
+        setIsLoadingSelectedQrImage(false);
+        return;
+      }
+      if (selectedQr.qrImageBase64?.trim()) {
+        setSelectedQrImageBase64(selectedQr.qrImageBase64.trim());
+        setIsLoadingSelectedQrImage(false);
+        return;
+      }
+      setIsLoadingSelectedQrImage(true);
+      try {
+        const payload = await getAccessQrImage(session.accessToken, selectedQr.id);
+        if (!cancelled) setSelectedQrImageBase64(payload.base64);
+      } catch {
+        if (!cancelled) setSelectedQrImageBase64(null);
+      } finally {
+        if (!cancelled) setIsLoadingSelectedQrImage(false);
+      }
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedQr?.id, selectedQr?.qrImageBase64, session.accessToken]);
 
   useEffect(() => {
     setSubmitError(null);
@@ -987,7 +1024,13 @@ export function AccessQrScreen({
         const meta = typeMeta(row.type ?? 'QR', palette);
         return (
           <View key={row.id} style={styles.historyCard}>
-            <Pressable style={styles.historyBodyPress} onPress={() => setSelectedQr(row)}>
+            <Pressable
+              style={styles.historyBodyPress}
+              onPress={() => {
+                setSelectedQrImageBase64(null);
+                setSelectedQr(row);
+              }}
+            >
               <View style={styles.historyTopRow}>
                 <View style={[styles.historyIconWrap, { backgroundColor: meta.tintBg }]}>
                   <Ionicons name={meta.icon} size={18} color={meta.tint} />
@@ -1095,6 +1138,19 @@ export function AccessQrScreen({
             </View>
 
             <View style={styles.detailBody}>
+              <View style={styles.qrPreviewBox}>
+                {isLoadingSelectedQrImage ? (
+                  <ActivityIndicator color={palette.primary} />
+                ) : selectedQrImageBase64 ? (
+                  <Image
+                    source={{ uri: `data:image/png;base64,${selectedQrImageBase64}` }}
+                    style={styles.qrPreviewImage}
+                    resizeMode="contain"
+                  />
+                ) : (
+                  <Text style={styles.qrPreviewText}>QR image unavailable</Text>
+                )}
+              </View>
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Type</Text>
                 <Text style={styles.detailValue}>{formatTypeLabel(selectedQr?.type)}</Text>
@@ -1115,6 +1171,13 @@ export function AccessQrScreen({
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Visitor</Text>
                 <Text style={styles.detailValue}>{selectedQr?.visitorName?.trim() || 'Not provided'}</Text>
+              </View>
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>Requested By</Text>
+                <Text style={styles.detailValue}>
+                  {selectedQr?.requesterNameSnapshot?.trim() || 'Unknown'}
+                  {selectedQr?.requesterPhoneSnapshot ? ` • ${selectedQr.requesterPhoneSnapshot}` : ''}
+                </Text>
               </View>
               <View style={styles.detailRow}>
                 <Text style={styles.detailLabel}>Validity</Text>
@@ -1275,6 +1338,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     alignItems: 'center',
     gap: 8,
+  },
+  qrPreviewImage: {
+    width: 150,
+    height: 150,
   },
   qrPreviewText: { color: akColors.textMuted, fontSize: 12, textAlign: 'center' },
   label: { color: akColors.text, fontSize: 12, fontWeight: '600', marginTop: 2 },

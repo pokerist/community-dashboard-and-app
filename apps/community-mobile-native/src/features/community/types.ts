@@ -197,10 +197,13 @@ export type AccessQrRow = {
   usageMode?: 'SINGLE_USE' | 'MULTI_USE' | string;
   scans?: number;
   visitorName?: string | null;
+  requesterNameSnapshot?: string | null;
+  requesterPhoneSnapshot?: string | null;
   validFrom?: string;
   validTo?: string;
   status?: string;
   notes?: string | null;
+  qrImageBase64?: string | null;
   unitId?: string | null;
   createdAt?: string;
 };
@@ -209,6 +212,7 @@ export type CreateAccessQrResponse = {
   qrCode: AccessQrRow;
   qrImageBase64?: string | null;
   pendingApproval?: boolean;
+  hasQrImage?: boolean;
 };
 
 export type InvoiceRow = {

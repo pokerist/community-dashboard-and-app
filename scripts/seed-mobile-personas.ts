@@ -147,6 +147,7 @@ async function ensureDemoUser(config: DemoUserConfig) {
 
 async function ensureUnit(input: {
   projectName: string;
+  communityId?: string;
   block: string;
   unitNumber: string;
   type?: UnitType;
@@ -175,6 +176,7 @@ async function ensureUnit(input: {
       where: { id: existing.id },
       data: {
         status: input.status,
+        communityId: input.communityId,
         isDelivered:
           input.isDelivered ??
           deliveredLikeStatuses.includes(input.status),
@@ -189,6 +191,7 @@ async function ensureUnit(input: {
   return prisma.unit.create({
     data: {
       projectName: input.projectName,
+      communityId: input.communityId,
       block: input.block,
       unitNumber: input.unitNumber,
       type: input.type ?? UnitType.APARTMENT,
@@ -199,6 +202,23 @@ async function ensureUnit(input: {
       bedrooms: input.bedrooms ?? 3,
       bathrooms: input.bathrooms ?? 2,
       sizeSqm: input.sizeSqm ?? 140,
+    },
+  });
+}
+
+async function ensureCommunity(input: { name: string; code?: string; displayOrder?: number }) {
+  return prisma.community.upsert({
+    where: { name: input.name },
+    update: {
+      code: input.code ?? null,
+      displayOrder: input.displayOrder ?? 0,
+      isActive: true,
+    },
+    create: {
+      name: input.name,
+      code: input.code ?? null,
+      displayOrder: input.displayOrder ?? 0,
+      isActive: true,
     },
   });
 }
@@ -577,8 +597,20 @@ async function run() {
     createResident: true,
   });
 
+  const communityGates = await ensureCommunity({
+    name: 'Alkarma Gates',
+    code: 'AKG',
+    displayOrder: 1,
+  });
+  const communityKay = await ensureCommunity({
+    name: 'Alkarma Kay',
+    code: 'AKK',
+    displayOrder: 2,
+  });
+
   const ownerHomeUnit = await ensureUnit({
     projectName: 'Alkarma Gates',
+    communityId: communityGates.id,
     block: 'C',
     unitNumber: '301',
     status: UnitStatus.DELIVERED,
@@ -589,6 +621,7 @@ async function run() {
   });
   const rentedUnit = await ensureUnit({
     projectName: 'Alkarma Gates',
+    communityId: communityGates.id,
     block: 'D',
     unitNumber: '412',
     status: UnitStatus.LEASED,
@@ -599,6 +632,7 @@ async function run() {
   });
   const preDeliveryUnit = await ensureUnit({
     projectName: 'Alkarma Kay',
+    communityId: communityKay.id,
     block: 'A',
     unitNumber: '0907',
     status: UnitStatus.NOT_DELIVERED,

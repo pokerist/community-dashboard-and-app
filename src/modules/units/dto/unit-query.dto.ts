@@ -1,4 +1,4 @@
-import { IsOptional, IsEnum, IsString } from 'class-validator';
+import { IsOptional, IsEnum, IsString, IsUUID } from 'class-validator';
 import { UnitType, UnitStatus } from '@prisma/client';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { BaseQueryDto } from '../../../common/dto/base-query.dto';
@@ -23,4 +23,9 @@ export class UnitQueryDto extends BaseQueryDto {
   @IsOptional()
   @IsString()
   projectName?: string;
+
+  @ApiPropertyOptional({ example: 'community-uuid' })
+  @IsOptional()
+  @IsUUID()
+  communityId?: string;
 }

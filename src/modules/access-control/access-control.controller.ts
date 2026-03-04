@@ -47,6 +47,12 @@ export class AccessControlController {
     return this.accessControlService.revokeQrCode(req.user.id, id);
   }
 
+  @Get(':id/image')
+  @ApiOperation({ summary: 'Get QR image payload for a QR record' })
+  qrImage(@Param('id') id: string, @Req() req: any) {
+    return this.accessControlService.getQrImageForUser(req.user.id, id);
+  }
+
   @Patch(':id/approve')
   @ApiOperation({ summary: 'Approve a pending WORKER permit and generate final QR' })
   approveWorkerQr(@Param('id') id: string, @Req() req: any) {

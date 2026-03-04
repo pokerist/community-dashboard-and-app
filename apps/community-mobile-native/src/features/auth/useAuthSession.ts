@@ -64,10 +64,10 @@ export function useAuthSession(): AuthHookResult {
   const appStateRef = useRef(AppState.currentState);
   const lastForegroundRefreshAtRef = useRef(0);
   const backgroundEnteredAtRef = useRef<number | null>(null);
-  const biometricPromptInFlightRef = useRef(false);
-  const lastBiometricPromptAtRef = useRef(0);
   const hardAuthFailureCountRef = useRef(0);
   const lastHardAuthFailureAtRef = useRef(0);
+  const refreshInFlightRef = useRef<Promise<AuthSession> | null>(null);
+  const signOutInFlightRef = useRef(false);
 
   useEffect(() => {
     sessionRef.current = session;
@@ -298,11 +298,24 @@ export function useAuthSession(): AuthHookResult {
       return;
     }
 
-    setIsRefreshing(true);
-    setRefreshError(null);
+    const runSingleRefresh = async () => {
+      if (!refreshInFlightRef.current) {
+        refreshInFlightRef.current = (async () => {
+          setIsRefreshing(true);
+          setRefreshError(null);
+          try {
+            return await performRefresh(current);
+          } finally {
+            setIsRefreshing(false);
+            refreshInFlightRef.current = null;
+          }
+        })();
+      }
+      return refreshInFlightRef.current;
+    };
 
     try {
-      await performRefresh(current);
+      await runSingleRefresh();
       hardAuthFailureCountRef.current = 0;
       lastHardAuthFailureAtRef.current = 0;
     } catch (error) {
@@ -329,8 +342,6 @@ export function useAuthSession(): AuthHookResult {
         }
       }
       throw error;
-    } finally {
-      setIsRefreshing(false);
     }
   }, [performRefresh]);
 
@@ -386,10 +397,20 @@ export function useAuthSession(): AuthHookResult {
       refreshSession: async () => {
         const current = sessionRef.current;
         if (!current?.refreshToken || !current.userId) return null;
-        setIsRefreshing(true);
-        setRefreshError(null);
         try {
-          const updated = await performRefresh(current);
+          if (!refreshInFlightRef.current) {
+            refreshInFlightRef.current = (async () => {
+              setIsRefreshing(true);
+              setRefreshError(null);
+              try {
+                return await performRefresh(current);
+              } finally {
+                setIsRefreshing(false);
+                refreshInFlightRef.current = null;
+              }
+            })();
+          }
+          const updated = await refreshInFlightRef.current;
           return {
             accessToken: updated.accessToken,
             refreshToken: updated.refreshToken,
@@ -406,27 +427,16 @@ export function useAuthSession(): AuthHookResult {
           // Keep transient refresh failures silent during active usage.
           setRefreshError(null);
           return null;
-        } finally {
-          setIsRefreshing(false);
         }
       },
       onSessionExpired: async () => {
-        // Keep transient 401 retries non-blocking, but force logout on repeated hard auth failures.
-        const now = Date.now();
-        if (now - lastHardAuthFailureAtRef.current > 60_000) {
-          hardAuthFailureCountRef.current = 0;
-        }
-        lastHardAuthFailureAtRef.current = now;
-        hardAuthFailureCountRef.current += 1;
-
-        if (hardAuthFailureCountRef.current >= 3) {
+        if (signOutInFlightRef.current) return;
+        signOutInFlightRef.current = true;
+        try {
           await signOut('Session expired. Please sign in again.');
-          hardAuthFailureCountRef.current = 0;
-          lastHardAuthFailureAtRef.current = 0;
-          return;
+        } finally {
+          signOutInFlightRef.current = false;
         }
-
-        setRefreshError('Session needs refresh. Please retry once.');
       },
     });
 
@@ -436,9 +446,6 @@ export function useAuthSession(): AuthHookResult {
   }, [performRefresh, signOut]);
 
   useEffect(() => {
-    const IDLE_BIOMETRIC_THRESHOLD_MS = 20 * 60 * 1000;
-    const BIOMETRIC_COOLDOWN_MS = 10 * 60 * 1000;
-
     const sub = AppState.addEventListener('change', async (nextState) => {
       const prev = appStateRef.current;
       appStateRef.current = nextState;
@@ -457,35 +464,7 @@ export function useAuthSession(): AuthHookResult {
         const idleMs = backgroundEnteredAtRef.current
           ? Date.now() - backgroundEnteredAtRef.current
           : 0;
-
-        if (
-          idleMs >= IDLE_BIOMETRIC_THRESHOLD_MS &&
-          Date.now() - lastBiometricPromptAtRef.current >= BIOMETRIC_COOLDOWN_MS &&
-          biometricAvailable &&
-          savedLogin?.email &&
-          savedLogin.password &&
-          !biometricPromptInFlightRef.current
-        ) {
-          try {
-            biometricPromptInFlightRef.current = true;
-            lastBiometricPromptAtRef.current = Date.now();
-            const biometricResult = await LocalAuthentication.authenticateAsync({
-              promptMessage: 'Unlock SSS Community',
-              fallbackLabel: 'Use passcode',
-              cancelLabel: 'Cancel',
-              disableDeviceFallback: false,
-            });
-            if (!biometricResult.success) {
-              setRefreshError('App unlock was cancelled.');
-              return;
-            }
-          } catch {
-            setRefreshError('Failed to unlock app session.');
-            return;
-          } finally {
-            biometricPromptInFlightRef.current = false;
-          }
-        }
+        if (idleMs < 1000) return;
 
         const now = Date.now();
         if (now - lastForegroundRefreshAtRef.current < 8000) return;
@@ -498,7 +477,7 @@ export function useAuthSession(): AuthHookResult {
       }
     });
     return () => sub.remove();
-  }, [biometricAvailable, refreshSession, savedLogin, signOut]);
+  }, [refreshSession]);
 
   return useMemo(
     () => ({

@@ -260,6 +260,18 @@ export async function revokeAccessQr(accessToken: string, qrCodeId: string) {
   return response.data;
 }
 
+export async function getAccessQrImage(accessToken: string, qrCodeId: string) {
+  const response = await http.get<{
+    id: string;
+    contentType: string;
+    base64: string;
+    dataUrl: string;
+  }>(`/access-qrcodes/${qrCodeId}/image`, {
+    headers: authHeaders(accessToken),
+  });
+  return response.data;
+}
+
 export async function listMyInvoices(accessToken: string) {
   const response = await http.get<InvoiceRow[]>('/invoices/me', {
     headers: authHeaders(accessToken),

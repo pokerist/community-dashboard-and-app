@@ -6,6 +6,7 @@ import { ResidentManagement } from "./components/pages/ResidentManagement";
 import { DashboardUsersPage } from "./components/pages/DashboardUsersPage";
 import { ResidentCreatePage } from "./components/pages/ResidentCreatePage";
 import { UnitsManagement } from "./components/pages/UnitsManagement";
+import { CommunitiesManagement } from "./components/pages/CommunitiesManagement";
 import { ServiceManagement } from "./components/pages/ServiceManagement";
 import { RequestsManagement } from "./components/pages/RequestsManagement";
 import { TicketsInbox } from "./components/pages/TicketsInbox";
@@ -42,6 +43,7 @@ const VALID_SECTIONS = new Set([
   "dashboard-users",
   "residents-create",
   "units",
+  "communities",
   "services",
   "requests",
   "tickets",
@@ -317,6 +319,8 @@ export default function App() {
         return <ResidentCreatePage onBack={() => navigateToSection("residents")} onCreated={() => navigateToSection("residents")} />;
       case "units":
         return <UnitsManagement />;
+      case "communities":
+        return <CommunitiesManagement />;
       case "services":
         return <ServiceManagement />;
       case "requests":
