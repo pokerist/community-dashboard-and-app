@@ -45,6 +45,10 @@ type HouseholdFamilyRow = {
   unit?: { unitNumber?: string | null; projectName?: string | null } | null;
   owner?: { nameEN?: string | null; email?: string | null } | null;
   rejectionReason?: string | null;
+  credentialsEmailStatus?: string | null;
+  credentialsEmailSentAt?: string | null;
+  credentialsEmailError?: string | null;
+  reviewedAt?: string | null;
   createdAt?: string;
 };
 
@@ -61,6 +65,10 @@ type HouseholdAuthorizedRow = {
   unit?: { unitNumber?: string | null; projectName?: string | null } | null;
   owner?: { nameEN?: string | null; email?: string | null } | null;
   rejectionReason?: string | null;
+  credentialsEmailStatus?: string | null;
+  credentialsEmailSentAt?: string | null;
+  credentialsEmailError?: string | null;
+  reviewedAt?: string | null;
   createdAt?: string;
 };
 
@@ -75,6 +83,19 @@ type HouseholdStaffRow = {
   owner?: { nameEN?: string | null; email?: string | null } | null;
   rejectionReason?: string | null;
   createdAt?: string;
+};
+
+type ApprovalHistoryRow = {
+  id: string;
+  requestType: "FAMILY" | "AUTHORIZED";
+  fullName: string;
+  email?: string | null;
+  unitText: string;
+  ownerText: string;
+  approvedAt?: string | null;
+  credentialsEmailStatus?: string | null;
+  credentialsEmailSentAt?: string | null;
+  credentialsEmailError?: string | null;
 };
 
 type HouseholdRequestsResponse = {
@@ -160,6 +181,44 @@ export function ApprovalsCenter() {
     const homeStaff = householdRows.homeStaff.filter((row) => String(row.status).toUpperCase() === "PENDING").length;
     return { profile, family, authorized, homeStaff };
   }, [householdRows, profileRows]);
+
+  const approvalHistoryRows = useMemo<ApprovalHistoryRow[]>(() => {
+    const family = householdRows.family
+      .filter((row) => String(row.status).toUpperCase() === "APPROVED")
+      .map((row) => ({
+        id: row.id,
+        requestType: "FAMILY" as const,
+        fullName: row.fullName,
+        email: row.email,
+        unitText: unitLabel(row.unit),
+        ownerText: row.owner?.nameEN || row.owner?.email || "—",
+        approvedAt: row.reviewedAt ?? row.createdAt ?? null,
+        credentialsEmailStatus: row.credentialsEmailStatus ?? null,
+        credentialsEmailSentAt: row.credentialsEmailSentAt ?? null,
+        credentialsEmailError: row.credentialsEmailError ?? null,
+      }));
+
+    const authorized = householdRows.authorized
+      .filter((row) => String(row.status).toUpperCase() === "APPROVED")
+      .map((row) => ({
+        id: row.id,
+        requestType: "AUTHORIZED" as const,
+        fullName: row.fullName,
+        email: row.email,
+        unitText: unitLabel(row.unit),
+        ownerText: row.owner?.nameEN || row.owner?.email || "—",
+        approvedAt: row.reviewedAt ?? row.createdAt ?? null,
+        credentialsEmailStatus: row.credentialsEmailStatus ?? null,
+        credentialsEmailSentAt: row.credentialsEmailSentAt ?? null,
+        credentialsEmailError: row.credentialsEmailError ?? null,
+      }));
+
+    return [...family, ...authorized].sort((a, b) => {
+      const ta = a.approvedAt ? new Date(a.approvedAt).getTime() : 0;
+      const tb = b.approvedAt ? new Date(b.approvedAt).getTime() : 0;
+      return tb - ta;
+    });
+  }, [householdRows.authorized, householdRows.family]);
 
   const reviewProfile = async (id: string, action: "approve" | "reject") => {
     setBusyKey(`profile-${id}-${action}`);
@@ -334,6 +393,59 @@ export function ApprovalsCenter() {
 
       <Card className="shadow-card rounded-xl overflow-hidden">
         <div className="p-4 border-b border-[#E5E7EB]">
+          <h3 className="text-[#1E293B]">Approvals History & Credentials Delivery</h3>
+        </div>
+        <Table>
+          <TableHeader>
+            <TableRow className="bg-[#F9FAFB]">
+              <TableHead>Type</TableHead>
+              <TableHead>Request</TableHead>
+              <TableHead>Unit / Owner</TableHead>
+              <TableHead>Email Delivery</TableHead>
+              <TableHead>Email Sent At</TableHead>
+              <TableHead>Error</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {approvalHistoryRows.map((row) => (
+              <TableRow key={`${row.requestType}-${row.id}`} className="hover:bg-[#F9FAFB]">
+                <TableCell>
+                  <Badge className={row.requestType === "FAMILY" ? "bg-[#0B5FFF]/10 text-[#0B5FFF]" : "bg-[#8B5CF6]/10 text-[#8B5CF6]"}>
+                    {humanizeEnum(row.requestType)}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  <p className="text-sm text-[#0F172A]">{row.fullName}</p>
+                  <p className="text-xs text-[#64748B]">{row.email || "—"}</p>
+                </TableCell>
+                <TableCell>
+                  <p className="text-sm text-[#0F172A]">{row.unitText}</p>
+                  <p className="text-xs text-[#64748B]">Owner: {row.ownerText}</p>
+                </TableCell>
+                <TableCell>
+                  <Badge className={statusBadgeClass(row.credentialsEmailStatus || "PENDING")}>
+                    {humanizeEnum(row.credentialsEmailStatus || "PENDING")}
+                  </Badge>
+                </TableCell>
+                <TableCell className="text-[#64748B]">
+                  {row.credentialsEmailSentAt ? formatDateTime(row.credentialsEmailSentAt) : "—"}
+                </TableCell>
+                <TableCell className="text-xs text-[#B91C1C]">{row.credentialsEmailError || "—"}</TableCell>
+              </TableRow>
+            ))}
+            {!isLoading && approvalHistoryRows.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} className="text-center py-10 text-[#64748B]">
+                  No approved household requests yet.
+                </TableCell>
+              </TableRow>
+            ) : null}
+          </TableBody>
+        </Table>
+      </Card>
+
+      <Card className="shadow-card rounded-xl overflow-hidden">
+        <div className="p-4 border-b border-[#E5E7EB]">
           <h3 className="text-[#1E293B]">Household Requests</h3>
         </div>
         <div className="p-4 space-y-4">
@@ -355,6 +467,16 @@ export function ApprovalsCenter() {
                       <Badge className={statusBadgeClass(row.status)}>{humanizeEnum(row.status)}</Badge>
                     </div>
                     {row.rejectionReason ? <p className="text-xs text-[#B91C1C] mt-2">Reason: {row.rejectionReason}</p> : null}
+                    {String(row.status).toUpperCase() === "APPROVED" ? (
+                      <p className="text-xs text-[#334155] mt-2">
+                        Credentials Email:{" "}
+                        <Badge className={statusBadgeClass(row.credentialsEmailStatus || "PENDING")}>
+                          {humanizeEnum(row.credentialsEmailStatus || "PENDING")}
+                        </Badge>
+                        {row.credentialsEmailSentAt ? ` • ${formatDateTime(row.credentialsEmailSentAt)}` : ""}
+                        {row.credentialsEmailError ? ` • ${row.credentialsEmailError}` : ""}
+                      </p>
+                    ) : null}
                     {isPending ? (
                       <div className="flex gap-2 mt-3">
                         <Button size="sm" onClick={() => void reviewHousehold("family", row.id, "APPROVED")}>Approve</Button>
@@ -389,6 +511,16 @@ export function ApprovalsCenter() {
                       <Badge className={statusBadgeClass(row.status)}>{humanizeEnum(row.status)}</Badge>
                     </div>
                     {row.rejectionReason ? <p className="text-xs text-[#B91C1C] mt-2">Reason: {row.rejectionReason}</p> : null}
+                    {String(row.status).toUpperCase() === "APPROVED" ? (
+                      <p className="text-xs text-[#334155] mt-2">
+                        Credentials Email:{" "}
+                        <Badge className={statusBadgeClass(row.credentialsEmailStatus || "PENDING")}>
+                          {humanizeEnum(row.credentialsEmailStatus || "PENDING")}
+                        </Badge>
+                        {row.credentialsEmailSentAt ? ` • ${formatDateTime(row.credentialsEmailSentAt)}` : ""}
+                        {row.credentialsEmailError ? ` • ${row.credentialsEmailError}` : ""}
+                      </p>
+                    ) : null}
                     {isPending ? (
                       <div className="flex gap-2 mt-3">
                         <Button size="sm" onClick={() => void reviewHousehold("authorized", row.id, "APPROVED")}>Approve</Button>
@@ -437,4 +569,3 @@ export function ApprovalsCenter() {
     </div>
   );
 }
-

@@ -1,1 +1,29 @@
-
+{
+  "project_info": {
+    "project_number": "802369850040",
+    "project_id": "sss-community-app",
+    "storage_bucket": "sss-community-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:802369850040:android:9c49e822477feac131424d",
+        "android_client_info": {
+          "package_name": "com.ssscomunity.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA_Lspm4Qn0DjEqyq1et1rA91v6eeHQ6KE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

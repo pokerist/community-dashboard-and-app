@@ -28,6 +28,8 @@ import { UpdateTenantDto } from './dto/update-tenant.dto';
 
 import { CreateAdminDto } from './dto/create-admin.dto';
 import { UpdateAdminDto } from './dto/update-admin.dto';
+import { CreateDashboardUserDto } from './dto/create-dashboard-user.dto';
+import { UpsertDashboardRoleDto } from './dto/upsert-dashboard-role.dto';
 
 import { ApiTags, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -71,6 +73,51 @@ export class AdminUsersController {
       skip ? parseInt(skip) : 0,
       take ? parseInt(take) : 20,
     );
+  }
+
+  @Get('dashboard')
+  @Permissions('admin.view')
+  listDashboardUsers(
+    @Query('skip') skip?: string,
+    @Query('take') take?: string,
+  ) {
+    return this.usersService.findDashboardUsers(
+      skip ? parseInt(skip) : 0,
+      take ? parseInt(take) : 100,
+    );
+  }
+
+  @Post('dashboard')
+  @Permissions('admin.create')
+  createDashboardUser(@Body() dto: CreateDashboardUserDto, @Request() req) {
+    return this.usersService.createDashboardUser(dto, {
+      actorUserId: req.user.id,
+      permissions: req.user.permissions,
+    });
+  }
+
+  @Get('roles')
+  @Permissions('admin.view')
+  listRoles() {
+    return this.usersService.listRolesWithPermissions();
+  }
+
+  @Post('roles')
+  @Permissions('admin.update')
+  createRole(@Body() dto: UpsertDashboardRoleDto) {
+    return this.usersService.createRoleWithPermissions(dto);
+  }
+
+  @Patch('roles/:roleId')
+  @Permissions('admin.update')
+  updateRole(@Param('roleId') roleId: string, @Body() dto: UpsertDashboardRoleDto) {
+    return this.usersService.updateRoleWithPermissions(roleId, dto);
+  }
+
+  @Get('permissions')
+  @Permissions('admin.view')
+  listPermissions() {
+    return this.usersService.listPermissions();
   }
 
   @Get(':id([0-9a-fA-F-]{36})')

@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { Prisma, UserStatusEnum, UnitStatus } from '@prisma/client';
+import { PermissionCacheService } from '../auth/permission-cache.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { CreateResidentDto } from './dto/create-resident.dto';
@@ -60,7 +61,10 @@ type AdminWithUser = Prisma.AdminGetPayload<{
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private permissionCacheService: PermissionCacheService,
+  ) {}
 
   private enforceDirectCreationPolicy(options?: { permissions?: string[] }) {
     if (!options?.permissions?.includes('user.create.direct')) {
@@ -257,6 +261,187 @@ export class UsersService {
         leasesAsOwner: true,
         leasesAsTenant: true,
         invoices: true,
+      },
+    });
+  }
+
+  async findDashboardUsers(skip: number = 0, take: number = 100) {
+    return this.prisma.user.findMany({
+      where: { admin: { isNot: null } },
+      skip,
+      take,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        admin: true,
+        roles: {
+          include: { role: true },
+        },
+      },
+    });
+  }
+
+  async createDashboardUser(
+    data: {
+      email: string;
+      password: string;
+      nameEN: string;
+      phone?: string;
+      roleIds?: string[];
+    },
+    options?: { permissions?: string[]; actorUserId?: string },
+  ) {
+    this.enforceDirectCreationPolicy(options);
+    const email = data.email.trim().toLowerCase();
+
+    const existing = await this.prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      throw new ConflictException('A user with this email already exists');
+    }
+
+    const passwordHash = await bcrypt.hash(data.password, 12);
+
+    const created = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          email,
+          passwordHash,
+          nameEN: data.nameEN.trim(),
+          phone: data.phone?.trim() || null,
+          userStatus: UserStatusEnum.ACTIVE,
+          signupSource: 'dashboard',
+        },
+      });
+
+      await tx.admin.create({
+        data: {
+          userId: user.id,
+          status: UserStatusEnum.ACTIVE,
+        },
+      });
+
+      if (Array.isArray(data.roleIds) && data.roleIds.length > 0) {
+        await tx.userRole.createMany({
+          data: data.roleIds.map((roleId) => ({ userId: user.id, roleId })),
+        });
+      }
+
+      return user;
+    });
+
+    return this.getUserWithRelations(created.id);
+  }
+
+  async listRolesWithPermissions() {
+    return this.prisma.role.findMany({
+      include: {
+        permissions: {
+          include: { permission: true },
+        },
+        users: {
+          select: { userId: true },
+        },
+      },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async listPermissions() {
+    return this.prisma.permission.findMany({
+      orderBy: { key: 'asc' },
+    });
+  }
+
+  async createRoleWithPermissions(input: { name: string; permissionKeys?: string[] }) {
+    const roleName = input.name.trim();
+    if (!roleName) throw new BadRequestException('Role name is required');
+
+    const existing = await this.prisma.role.findUnique({ where: { name: roleName } });
+    if (existing) throw new ConflictException('Role already exists');
+
+    const permissionKeys = Array.from(new Set(input.permissionKeys ?? []));
+    const permissions =
+      permissionKeys.length > 0
+        ? await this.prisma.permission.findMany({
+            where: { key: { in: permissionKeys } },
+            select: { id: true, key: true },
+          })
+        : [];
+    if (permissions.length !== permissionKeys.length) {
+      throw new BadRequestException('One or more permissions are invalid');
+    }
+
+    const role = await this.prisma.$transaction(async (tx) => {
+      const createdRole = await tx.role.create({ data: { name: roleName } });
+      if (permissions.length > 0) {
+        await tx.rolePermission.createMany({
+          data: permissions.map((perm) => ({
+            roleId: createdRole.id,
+            permissionId: perm.id,
+          })),
+        });
+      }
+      return createdRole;
+    });
+
+    await this.permissionCacheService.refresh();
+    return this.prisma.role.findUnique({
+      where: { id: role.id },
+      include: {
+        permissions: { include: { permission: true } },
+      },
+    });
+  }
+
+  async updateRoleWithPermissions(
+    roleId: string,
+    input: { name: string; permissionKeys?: string[] },
+  ) {
+    const role = await this.prisma.role.findUnique({ where: { id: roleId } });
+    if (!role) throw new NotFoundException('Role not found');
+
+    const roleName = input.name.trim();
+    if (!roleName) throw new BadRequestException('Role name is required');
+
+    const duplicate = await this.prisma.role.findFirst({
+      where: { name: roleName, id: { not: roleId } },
+      select: { id: true },
+    });
+    if (duplicate) throw new ConflictException('Another role already uses this name');
+
+    const permissionKeys = Array.from(new Set(input.permissionKeys ?? []));
+    const permissions =
+      permissionKeys.length > 0
+        ? await this.prisma.permission.findMany({
+            where: { key: { in: permissionKeys } },
+            select: { id: true, key: true },
+          })
+        : [];
+    if (permissions.length !== permissionKeys.length) {
+      throw new BadRequestException('One or more permissions are invalid');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.role.update({
+        where: { id: roleId },
+        data: { name: roleName },
+      });
+      await tx.rolePermission.deleteMany({ where: { roleId } });
+      if (permissions.length > 0) {
+        await tx.rolePermission.createMany({
+          data: permissions.map((perm) => ({
+            roleId,
+            permissionId: perm.id,
+          })),
+        });
+      }
+    });
+
+    await this.permissionCacheService.refresh();
+    return this.prisma.role.findUnique({
+      where: { id: roleId },
+      include: {
+        permissions: { include: { permission: true } },
+        users: { select: { userId: true } },
       },
     });
   }

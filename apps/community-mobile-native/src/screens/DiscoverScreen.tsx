@@ -42,6 +42,7 @@ export function DiscoverScreen({ session }: { session: AuthSession }) {
   const [activeCategory, setActiveCategory] = useState<string>('All');
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [brokenImages, setBrokenImages] = useState<Record<string, true>>({});
   const [viewerState, setViewerState] = useState<{
     visible: boolean;
     url: string | null;
@@ -55,7 +56,10 @@ export function DiscoverScreen({ session }: { session: AuthSession }) {
       setErrorMessage(null);
       try {
         const next = await listDiscoverPlaces(session.accessToken);
-        if (!cancelled) setRows(next);
+        if (!cancelled) {
+          setRows(next);
+          setBrokenImages({});
+        }
       } catch (error) {
         if (!cancelled) {
           setErrorMessage(error instanceof Error ? error.message : 'Failed to load discover places');
@@ -129,7 +133,10 @@ export function DiscoverScreen({ session }: { session: AuthSession }) {
 
         {visibleRows.map((row) => {
           const link = normalizeUrl(row.mapLink);
-          const imageUrl = row.imageFileId ? `${API_BASE_URL}/files/public/discover-image/${row.imageFileId}` : null;
+          const imageUrl = row.imageFileId
+            ? `${API_BASE_URL}/files/public/discover-image/${row.imageFileId}`
+            : normalizeUrl(row.imageUrl);
+          const imageBroken = Boolean(brokenImages[row.id]);
           return (
             <Pressable
               key={row.id}
@@ -143,8 +150,15 @@ export function DiscoverScreen({ session }: { session: AuthSession }) {
                 });
               }}
             >
-              {imageUrl ? (
-                <Image source={{ uri: imageUrl }} style={styles.cardImage} resizeMode="cover" />
+              {imageUrl && !imageBroken ? (
+                <Image
+                  source={{ uri: imageUrl }}
+                  style={styles.cardImage}
+                  resizeMode="cover"
+                  onError={() =>
+                    setBrokenImages((prev) => (prev[row.id] ? prev : { ...prev, [row.id]: true }))
+                  }
+                />
               ) : (
                 <View style={[styles.cardImage, styles.placeholderImage]}>
                   <Ionicons name="image-outline" size={22} color={akColors.textSoft} />

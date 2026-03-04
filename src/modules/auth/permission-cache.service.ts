@@ -58,6 +58,10 @@ export class PermissionCacheService implements OnModuleInit {
     return this.cache.get(roleName) || new Set();
   }
 
+  async refresh() {
+    await this.loadWithRetry();
+  }
+
   resolveUserPermissions(roleNames: string[]): Set<string> {
     const permissions = new Set<string>();
     for (const role of roleNames) {

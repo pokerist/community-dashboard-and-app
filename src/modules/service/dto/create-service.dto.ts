@@ -21,6 +21,12 @@ export class CreateServiceDto {
   @IsNotEmpty()
   name!: string; // e.g., "Furniture Permit", "IPTV Installation"
 
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  @Type(() => Number)
+  displayOrder?: number;
+
   @IsEnum(ServiceCategory)
   @IsNotEmpty()
   category!: ServiceCategory; // e.g., MAINTENANCE, ADMIN

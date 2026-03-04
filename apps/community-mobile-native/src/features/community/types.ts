@@ -541,6 +541,7 @@ export type DiscoverPlace = {
   phone?: string | null;
   workingHours?: string | null;
   imageFileId?: string | null;
+  imageUrl?: string | null;
   isActive?: boolean;
 };
 

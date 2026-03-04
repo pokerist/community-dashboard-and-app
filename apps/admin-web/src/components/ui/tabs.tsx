@@ -26,7 +26,7 @@ function TabsList({
     <TabsPrimitive.List
       data-slot="tabs-list"
       className={cn(
-        "bg-[#F1F5F9] text-[#334155] inline-flex h-10 w-fit items-center justify-center rounded-xl p-[3px] flex",
+        "bg-[#F8FAFC] text-[#334155] inline-flex h-10 w-fit items-center justify-center rounded-xl border border-[#E2E8F0] p-[3px] flex",
         className,
       )}
       {...props}
@@ -42,7 +42,7 @@ function TabsTrigger({
     <TabsPrimitive.Trigger
       data-slot="tabs-trigger"
       className={cn(
-        "relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-xl border border-transparent px-2 py-1 text-sm font-medium whitespace-nowrap text-[#334155] transition-[color,box-shadow,background-color,border-color] focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:outline-ring focus-visible:ring-[3px] focus-visible:outline-1 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 data-[state=active]:bg-white data-[state=active]:text-[#0F172A] data-[state=active]:border-[#CBD5E1] data-[state=active]:shadow-sm data-[state=active]:font-semibold data-[state=active]:after:absolute data-[state=active]:after:left-2 data-[state=active]:after:right-2 data-[state=active]:after:bottom-0 data-[state=active]:after:h-[2px] data-[state=active]:after:rounded-full data-[state=active]:after:bg-[#0F172A]",
+        "relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center gap-1.5 rounded-xl border border-transparent px-3 py-1 text-sm font-medium whitespace-nowrap text-[#64748B] transition-[color,box-shadow,background-color,border-color,transform] duration-150 hover:text-[#334155] focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:outline-ring focus-visible:ring-[3px] focus-visible:outline-1 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 data-[state=active]:bg-white data-[state=active]:text-[#0F172A] data-[state=active]:border-[#94A3B8] data-[state=active]:shadow-[0_1px_0_rgba(15,23,42,0.06),0_4px_10px_rgba(15,23,42,0.08)] data-[state=active]:font-semibold data-[state=active]:after:absolute data-[state=active]:after:left-2 data-[state=active]:after:right-2 data-[state=active]:after:bottom-[2px] data-[state=active]:after:h-[3px] data-[state=active]:after:rounded-full data-[state=active]:after:bg-[#0B5FFF] data-[state=active]:after:shadow-[0_0_0_1px_rgba(11,95,255,0.08)]",
         className,
       )}
       {...props}

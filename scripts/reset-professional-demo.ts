@@ -18,19 +18,48 @@ import {
   ServiceRequestStatus,
   UnitStatus,
 } from '@prisma/client';
+import * as fs from 'fs';
+import * as path from 'path';
+
+function loadDatabaseUrlFromEnvFiles() {
+  if (process.env.DATABASE_URL) return;
+  const candidates = ['.env.production', '.env.local', '.env'];
+  for (const fileName of candidates) {
+    const filePath = path.resolve(process.cwd(), fileName);
+    if (!fs.existsSync(filePath)) continue;
+    const content = fs.readFileSync(filePath, 'utf8');
+    for (const rawLine of content.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      const match = line.match(/^(?:export\s+)?DATABASE_URL\s*=\s*(.+)$/);
+      if (!match?.[1]) continue;
+      const value = match[1].trim().replace(/^['"]|['"]$/g, '');
+      if (!value) continue;
+      process.env.DATABASE_URL = value;
+      break;
+    }
+    if (process.env.DATABASE_URL) break;
+  }
+}
+
+loadDatabaseUrlFromEnvFiles();
+
+if (!process.env.DATABASE_URL) {
+  throw new Error(
+    'DATABASE_URL is missing. Set it in environment or .env.production/.env.local/.env before running seed.',
+  );
+}
 
 const prisma = new PrismaClient();
 
 const DEMO_EMAILS = [
   'test@admin.com',
-  'owner.demo@test.com',
-  'tenant.demo@test.com',
-  'preowner.demo@test.com',
-  'family.demo@test.com',
-  'authorized.demo@test.com',
-  'contractor.demo@test.com',
-  'residentA@test.com',
-  'residentB@test.com',
+  'ahmed.hassan.owner@alkarma.demo',
+  'mostafa.ali.tenant@alkarma.demo',
+  'karim.fathy.predelivery@alkarma.demo',
+  'nour.hassan.family@alkarma.demo',
+  'youssef.mahmoud.authorized@alkarma.demo',
+  'mohamed.saber.contractor@alkarma.demo',
 ];
 
 function plusDays(base: Date, days: number) {

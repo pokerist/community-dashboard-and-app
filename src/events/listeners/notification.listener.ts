@@ -306,6 +306,12 @@ export class NotificationListener {
 
   @OnEvent('service_request.created')
   async handleServiceRequestCreated(payload: ServiceRequestCreatedEvent) {
+    const isRequestCategory =
+      payload.serviceCategory === ServiceCategory.REQUESTS ||
+      payload.serviceCategory === ServiceCategory.ADMIN;
+    const mobileRoute = isRequestCategory ? '/requests' : '/services';
+    const webRoute = isRequestCategory ? '#requests' : '#services';
+
     try {
       await this.notificationsService.sendNotification({
         type: NotificationType.MAINTENANCE_ALERT,
@@ -315,11 +321,8 @@ export class NotificationListener {
         targetAudience: Audience.SPECIFIC_RESIDENCES,
         audienceMeta: { userIds: [payload.createdById] },
         payload: {
-          route:
-            payload.serviceCategory === ServiceCategory.REQUESTS ||
-            payload.serviceCategory === ServiceCategory.ADMIN
-              ? '/requests'
-              : '/services',
+          route: mobileRoute,
+          webRoute,
           entityType: 'SERVICE_REQUEST',
           entityId: payload.serviceRequestId,
           eventKey: 'service_request.created',
@@ -341,7 +344,13 @@ export class NotificationListener {
           roles: {
             some: {
               role: {
-                name: { in: ['SUPER_ADMIN', 'MANAGER'] },
+                permissions: {
+                  some: {
+                    permission: {
+                      key: { in: ['service_request.view_all', 'service_request.assign'] },
+                    },
+                  },
+                },
               },
             },
           },
@@ -360,7 +369,8 @@ export class NotificationListener {
           targetAudience: Audience.SPECIFIC_RESIDENCES,
           audienceMeta: { userIds },
           payload: {
-            route: '/services',
+            route: mobileRoute,
+            webRoute,
             entityType: 'SERVICE_REQUEST',
             entityId: payload.serviceRequestId,
             eventKey: 'service_request.created.admin',
@@ -382,6 +392,11 @@ export class NotificationListener {
   @OnEvent('service_request.status_changed')
   async handleServiceRequestStatusChanged(payload: ServiceRequestStatusChangedEvent) {
     if (payload.oldStatus === payload.newStatus) return;
+    const isRequestCategory =
+      payload.serviceCategory === ServiceCategory.REQUESTS ||
+      payload.serviceCategory === ServiceCategory.ADMIN;
+    const mobileRoute = isRequestCategory ? '/requests' : '/services';
+    const webRoute = isRequestCategory ? '#requests' : '#services';
 
     try {
       const statusLabel = String(payload.newStatus).replace(/_/g, ' ').toLowerCase();
@@ -403,11 +418,8 @@ export class NotificationListener {
         targetAudience: Audience.SPECIFIC_RESIDENCES,
         audienceMeta: { userIds: [payload.createdById] },
         payload: {
-          route:
-            payload.serviceCategory === ServiceCategory.REQUESTS ||
-            payload.serviceCategory === ServiceCategory.ADMIN
-              ? '/requests'
-              : '/services',
+          route: mobileRoute,
+          webRoute,
           entityType: 'SERVICE_REQUEST',
           entityId: payload.serviceRequestId,
           eventKey: 'service_request.status_changed',

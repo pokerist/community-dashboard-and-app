@@ -73,12 +73,22 @@ interface ComplaintCommentRow {
   createdBy?: { id?: string; nameEN?: string | null; email?: string | null } | null;
 }
 
+type PendingFocusEntity = {
+  section?: string;
+  entityType?: string | null;
+  entityId?: string | null;
+};
+
+type ComplaintsTab = "complaints" | "violations";
+type ComplaintPreset = "all" | "pending" | "overdue" | "closed";
+
 const COMPLAINT_STATUSES = ["NEW", "IN_PROGRESS", "RESOLVED", "CLOSED"] as const;
 
 export function ComplaintsViolations() {
   const [isCreateComplaintOpen, setIsCreateComplaintOpen] = useState(false);
   const [isCreateViolationOpen, setIsCreateViolationOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [activeTab, setActiveTab] = useState<ComplaintsTab>("complaints");
   const [complaintsData, setComplaintsData] = useState<any[]>([]);
   const [violationsData, setViolationsData] = useState<any[]>([]);
   const [residentOptions, setResidentOptions] = useState<Array<{ id: string; label: string }>>([]);
@@ -88,6 +98,7 @@ export function ComplaintsViolations() {
   const [isSubmittingViolation, setIsSubmittingViolation] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [complaintStatusFilter, setComplaintStatusFilter] = useState<string>("all");
+  const [complaintPreset, setComplaintPreset] = useState<ComplaintPreset>("all");
   const [isComplaintDialogOpen, setIsComplaintDialogOpen] = useState(false);
   const [activeComplaintId, setActiveComplaintId] = useState<string | null>(null);
   const [activeComplaint, setActiveComplaint] = useState<ComplaintListRow | null>(null);
@@ -116,6 +127,63 @@ export function ComplaintsViolations() {
     dueDate: "",
     description: "",
   });
+
+  const resetComplaintsFilters = useCallback((tab: ComplaintsTab = "complaints") => {
+    setActiveTab(tab);
+    setSearchTerm("");
+    setComplaintStatusFilter("all");
+    setComplaintPreset("all");
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.removeItem("admin.complaintsViolations.filters");
+      } catch {
+        // ignore storage failures
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem("admin.complaintsViolations.filters");
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as {
+        tab?: ComplaintsTab;
+        search?: string;
+        complaintStatusFilter?: string;
+        complaintPreset?: ComplaintPreset;
+      };
+      setActiveTab(parsed.tab === "violations" ? "violations" : "complaints");
+      setSearchTerm(String(parsed.search ?? ""));
+      setComplaintStatusFilter(String(parsed.complaintStatusFilter ?? "all"));
+      setComplaintPreset(
+        parsed.complaintPreset === "pending" ||
+          parsed.complaintPreset === "overdue" ||
+          parsed.complaintPreset === "closed"
+          ? parsed.complaintPreset
+          : "all",
+      );
+    } catch {
+      // ignore malformed cache
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(
+        "admin.complaintsViolations.filters",
+        JSON.stringify({
+          tab: activeTab,
+          search: searchTerm,
+          complaintStatusFilter,
+          complaintPreset,
+        }),
+      );
+    } catch {
+      // ignore storage failures
+    }
+  }, [activeTab, complaintPreset, complaintStatusFilter, searchTerm]);
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -270,6 +338,31 @@ export function ComplaintsViolations() {
     await loadComplaintDetail(complaint.id);
   }, [loadComplaintDetail]);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || complaintsData.length === 0) return;
+
+    let parsed: PendingFocusEntity | null = null;
+    try {
+      const raw = window.sessionStorage.getItem("admin.focusEntity");
+      if (!raw) return;
+      parsed = JSON.parse(raw) as PendingFocusEntity;
+    } catch {
+      return;
+    }
+
+    const targetSection = String(parsed?.section ?? "").trim().toLowerCase();
+    const targetId = String(parsed?.entityId ?? "").trim();
+    const targetEntityType = String(parsed?.entityType ?? "").trim().toUpperCase();
+    if (!targetId || targetSection !== "complaints") return;
+    if (targetEntityType && targetEntityType !== "COMPLAINT") return;
+
+    const complaint = complaintsData.find((row: any) => String(row?.id) === targetId);
+    if (!complaint) return;
+
+    window.sessionStorage.removeItem("admin.focusEntity");
+    void openComplaintDialog(complaint as ComplaintListRow);
+  }, [complaintsData, openComplaintDialog]);
+
   const closeComplaintDialog = useCallback(() => {
     setIsComplaintDialogOpen(false);
     setActiveComplaintId(null);
@@ -343,9 +436,24 @@ export function ComplaintsViolations() {
 
   const filteredComplaints = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
+    const now = Date.now();
+    const overdueThresholdMs = 24 * 60 * 60 * 1000;
     return complaintsData.filter((c: any) => {
       const status = String(c.status ?? "").toUpperCase();
       if (complaintStatusFilter !== "all" && status !== complaintStatusFilter) return false;
+      if (complaintPreset === "pending" && !(status === "NEW" || status === "IN_PROGRESS")) {
+        return false;
+      }
+      if (complaintPreset === "closed" && !(status === "RESOLVED" || status === "CLOSED")) {
+        return false;
+      }
+      if (complaintPreset === "overdue") {
+        if (!(status === "NEW" || status === "IN_PROGRESS")) return false;
+        const createdTs = c.createdAt ? new Date(c.createdAt).getTime() : NaN;
+        if (!Number.isFinite(createdTs) || now - createdTs < overdueThresholdMs) {
+          return false;
+        }
+      }
       if (!q) return true;
       return [
         c.complaintNumber,
@@ -363,7 +471,7 @@ export function ComplaintsViolations() {
         .filter(Boolean)
         .some((v) => String(v).toLowerCase().includes(q));
     });
-  }, [complaintsData, complaintStatusFilter, searchTerm]);
+  }, [complaintPreset, complaintsData, complaintStatusFilter, searchTerm]);
 
   const filteredViolations = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
@@ -461,7 +569,7 @@ export function ComplaintsViolations() {
       </div>
 
       <Card className="shadow-card rounded-xl overflow-hidden">
-        <Tabs defaultValue="complaints" className="w-full">
+        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ComplaintsTab)} className="w-full">
           <TabsList className="w-full justify-start border-b border-[#E5E7EB] rounded-none h-12 bg-transparent px-4">
             <TabsTrigger value="complaints" className="rounded-lg">Complaints</TabsTrigger>
             <TabsTrigger value="violations" className="rounded-lg">Violations</TabsTrigger>
@@ -469,6 +577,49 @@ export function ComplaintsViolations() {
 
           <TabsContent value="complaints" className="m-0">
             <div className="p-4 border-b border-[#E5E7EB] flex flex-col gap-4 lg:flex-row">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant={complaintPreset === "all" ? "default" : "outline"}
+                  className={complaintPreset === "all" ? "bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white" : ""}
+                  onClick={() => setComplaintPreset("all")}
+                >
+                  All
+                </Button>
+                <Button
+                  size="sm"
+                  variant={complaintPreset === "pending" ? "default" : "outline"}
+                  className={complaintPreset === "pending" ? "bg-[#F59E0B] hover:bg-[#D97706] text-white" : ""}
+                  onClick={() => {
+                    setComplaintPreset("pending");
+                    setComplaintStatusFilter("all");
+                  }}
+                >
+                  Pending
+                </Button>
+                <Button
+                  size="sm"
+                  variant={complaintPreset === "overdue" ? "default" : "outline"}
+                  className={complaintPreset === "overdue" ? "bg-[#DC2626] hover:bg-[#B91C1C] text-white" : ""}
+                  onClick={() => {
+                    setComplaintPreset("overdue");
+                    setComplaintStatusFilter("all");
+                  }}
+                >
+                  Overdue
+                </Button>
+                <Button
+                  size="sm"
+                  variant={complaintPreset === "closed" ? "default" : "outline"}
+                  className={complaintPreset === "closed" ? "bg-[#10B981] hover:bg-[#059669] text-white" : ""}
+                  onClick={() => {
+                    setComplaintPreset("closed");
+                    setComplaintStatusFilter("all");
+                  }}
+                >
+                  Closed
+                </Button>
+              </div>
               <div className="flex-1 relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#64748B]" />
                 <Input
@@ -494,6 +645,9 @@ export function ComplaintsViolations() {
               <Button variant="outline" onClick={() => void loadData()} disabled={isLoading}>
                 <RefreshCw className="w-4 h-4 mr-2" />
                 Refresh
+              </Button>
+              <Button variant="outline" onClick={() => resetComplaintsFilters("complaints")}>
+                Reset Filters
               </Button>
               <Dialog open={isCreateComplaintOpen} onOpenChange={setIsCreateComplaintOpen}>
                 <DialogTrigger asChild>
@@ -698,6 +852,9 @@ export function ComplaintsViolations() {
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
               </div>
+              <Button variant="outline" onClick={() => resetComplaintsFilters("violations")}>
+                Reset Filters
+              </Button>
               <Dialog open={isCreateViolationOpen} onOpenChange={setIsCreateViolationOpen}>
                 <DialogTrigger asChild>
                   <Button className="bg-[#EF4444] hover:bg-[#EF4444]/90 text-white rounded-lg gap-2">

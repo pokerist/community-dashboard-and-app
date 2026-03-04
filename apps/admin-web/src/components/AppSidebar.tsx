@@ -3,6 +3,7 @@ import {
   Users,
   Building2,
   Wrench,
+  ClipboardList,
   Inbox,
   QrCode,
   FileText,
@@ -16,6 +17,7 @@ import {
   BarChart3,
   ClipboardCheck,
   MapPin,
+  ScanSearch,
   ChevronRight,
 } from "lucide-react";
 import {
@@ -45,6 +47,11 @@ const menuItems = [
     url: "#residents",
   },
   {
+    title: "Dashboard Users",
+    icon: Users,
+    url: "#dashboard-users",
+  },
+  {
     title: "Units",
     icon: Building2,
     url: "#units",
@@ -53,6 +60,11 @@ const menuItems = [
     title: "Services",
     icon: Wrench,
     url: "#services",
+  },
+  {
+    title: "Requests",
+    icon: ClipboardList,
+    url: "#requests",
   },
   {
     title: "Tickets Inbox",
@@ -96,6 +108,11 @@ const secondaryItems = [
     title: "Security",
     icon: Shield,
     url: "#security",
+  },
+  {
+    title: "Gate Live Feed",
+    icon: ScanSearch,
+    url: "#gate-live",
   },
   {
     title: "Amenities",

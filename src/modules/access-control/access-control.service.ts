@@ -40,6 +40,12 @@ export class AccessControlService {
     return !!admin;
   }
 
+  private async assertGateOperator(userId: string) {
+    const isAdmin = await this.isAdminUser(userId);
+    if (isAdmin) return;
+    throw new ForbiddenException('Only gate operators/admin users can perform this action');
+  }
+
   private defaultDurationForType(
     type: QRType,
   ): { value: number; unit: 'm' | 'h' } {
@@ -718,5 +724,213 @@ export class AccessControlService {
       where: { id: qrCodeId },
       data: { status: AccessStatus.REVOKED },
     });
+  }
+
+  async getGateFeed(
+    actorUserId: string,
+    filters?: {
+      unitNumber?: string;
+      type?: string;
+      status?: string;
+      from?: string;
+      to?: string;
+    },
+  ) {
+    await this.assertGateOperator(actorUserId);
+    const from = filters?.from ? new Date(filters.from) : undefined;
+    const to = filters?.to ? new Date(filters.to) : undefined;
+    const requestedAtFilter =
+      from || to
+        ? {
+            ...(from ? { gte: from } : {}),
+            ...(to ? { lte: to } : {}),
+          }
+        : undefined;
+
+    const where: any = {
+      ...(filters?.type ? { type: String(filters.type).toUpperCase() } : {}),
+      ...(filters?.status ? { status: String(filters.status).toUpperCase() } : {}),
+      ...(requestedAtFilter ? { createdAt: requestedAtFilter } : {}),
+      ...(filters?.unitNumber
+        ? {
+            forUnit: {
+              unitNumber: { contains: String(filters.unitNumber), mode: 'insensitive' },
+            },
+          }
+        : {}),
+    };
+
+    return this.prisma.accessQRCode.findMany({
+      where,
+      orderBy: [{ createdAt: 'desc' }],
+      include: {
+        forUnit: {
+          select: { id: true, unitNumber: true, block: true, projectName: true },
+        },
+        generatedBy: {
+          select: { id: true, nameEN: true, email: true, phone: true },
+        },
+        gateOperator: {
+          select: { id: true, nameEN: true, email: true },
+        },
+      },
+      take: 300,
+    });
+  }
+
+  async checkInQr(
+    actorUserId: string,
+    qrCodeId: string,
+    body?: { gateName?: string; notes?: string },
+  ) {
+    await this.assertGateOperator(actorUserId);
+    const qr = await this.prisma.accessQRCode.findUnique({
+      where: { id: qrCodeId },
+      select: {
+        id: true,
+        status: true,
+        generatedById: true,
+        visitorName: true,
+        notes: true,
+        checkedInAt: true,
+      },
+    });
+    if (!qr) throw new NotFoundException('QR code not found');
+    if (
+      qr.status === AccessStatus.CANCELLED ||
+      qr.status === AccessStatus.EXPIRED ||
+      qr.status === AccessStatus.REVOKED
+    ) {
+      throw new BadRequestException('This QR code is not valid for check-in');
+    }
+
+    const now = new Date();
+    const lines = [
+      qr.notes?.trim() || '',
+      body?.notes?.trim() || '',
+      body?.gateName?.trim() ? `Checked in at gate: ${body.gateName.trim()}` : '',
+      `Checked in at ${now.toISOString()}`,
+    ].filter(Boolean);
+
+    const updated = await this.prisma.accessQRCode.update({
+      where: { id: qr.id },
+      data: {
+        checkedInAt: qr.checkedInAt ?? now,
+        checkedOutAt: null,
+        overdueExitAt: new Date(now.getTime() + 60 * 60 * 1000),
+        gateOperatorId: actorUserId,
+        notes: lines.join('\n'),
+        arrivalNotifiedAt: now,
+      },
+    });
+
+    await this.notifyOwnerQrUsedArrival({
+      qrId: updated.id,
+      ownerUserId: qr.generatedById,
+      visitorName: qr.visitorName ?? null,
+      gateName: body?.gateName ?? null,
+      scannedAt: now,
+      actorUserId,
+    });
+
+    return updated;
+  }
+
+  async checkOutQr(
+    actorUserId: string,
+    qrCodeId: string,
+    body?: { notes?: string },
+  ) {
+    await this.assertGateOperator(actorUserId);
+    const qr = await this.prisma.accessQRCode.findUnique({
+      where: { id: qrCodeId },
+      select: { id: true, notes: true },
+    });
+    if (!qr) throw new NotFoundException('QR code not found');
+
+    const now = new Date();
+    const lines = [
+      qr.notes?.trim() || '',
+      body?.notes?.trim() || '',
+      `Checked out at ${now.toISOString()}`,
+    ].filter(Boolean);
+
+    return this.prisma.accessQRCode.update({
+      where: { id: qr.id },
+      data: {
+        checkedOutAt: now,
+        overdueExitAt: null,
+        gateOperatorId: actorUserId,
+        notes: lines.join('\n'),
+      },
+    });
+  }
+
+  async processOverdueExits() {
+    const now = new Date();
+    const overdue = await this.prisma.accessQRCode.findMany({
+      where: {
+        checkedInAt: { not: null },
+        checkedOutAt: null,
+        overdueExitAt: { lte: now },
+      },
+      include: {
+        forUnit: { select: { unitNumber: true, block: true } },
+      },
+      take: 200,
+    });
+    if (overdue.length === 0) return { processed: 0 };
+
+    const admins = await this.prisma.user.findMany({
+      where: {
+        roles: {
+          some: {
+            role: {
+              permissions: {
+                some: {
+                    permission: { key: 'admin.update' },
+                },
+              },
+            },
+          },
+        },
+      },
+      select: { id: true },
+      take: 200,
+    });
+    const adminIds = admins.map((x) => x.id);
+
+    for (const row of overdue) {
+      if (adminIds.length > 0) {
+        await this.notificationsService.sendNotification(
+          {
+            type: NotificationType.EMERGENCY_ALERT,
+            title: 'Gate exit overdue',
+            messageEn: `Visitor ${row.visitorName || 'Unknown'} did not check out within 1 hour.`,
+            channels: [Channel.IN_APP, Channel.PUSH],
+            targetAudience: Audience.SPECIFIC_RESIDENCES,
+            audienceMeta: { userIds: adminIds },
+            payload: {
+              route: '/access',
+              webRoute: '#gate-live',
+              entityType: 'ACCESS_QR',
+              entityId: row.id,
+              eventKey: 'access_qr.exit_overdue',
+              unitNumber: row.forUnit?.unitNumber ?? null,
+            },
+          },
+          undefined,
+        );
+      }
+
+      await this.prisma.accessQRCode.update({
+        where: { id: row.id },
+        data: {
+          overdueExitAt: new Date(now.getTime() + 15 * 60 * 1000),
+        },
+      });
+    }
+
+    return { processed: overdue.length };
   }
 }

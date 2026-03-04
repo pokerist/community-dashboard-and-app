@@ -55,6 +55,7 @@ type AppDrawerMenuProps = {
   onNavigate: (route: AppDrawerRoute) => void;
   onLogout: () => void;
   profile?: AuthBootstrapProfile | null;
+  profileAvatarPreviewUri?: string | null;
   notificationUnreadCount?: number;
 };
 
@@ -72,6 +73,7 @@ export function AppDrawerMenu({
   onNavigate,
   onLogout,
   profile,
+  profileAvatarPreviewUri,
   notificationUnreadCount: _notificationUnreadCount,
 }: AppDrawerMenuProps) {
   const { brand } = useBranding();
@@ -88,9 +90,10 @@ export function AppDrawerMenu({
     profile?.user?.nameEN?.trim() ||
     profile?.user?.nameAR?.trim() ||
     email.split('@')[0];
-  const avatarImageUri = profile?.user?.profilePhoto?.id
+  const serverAvatarImageUri = profile?.user?.profilePhoto?.id
     ? `${API_BASE_URL}/files/public/profile-photo/${profile.user.profilePhoto.id}`
     : null;
+  const avatarImageUri = profileAvatarPreviewUri ?? serverAvatarImageUri;
   const preConstruction = isPreConstructionUnit(selectedUnit);
   const unitAccesses = selectedUnit?.unitAccesses ?? [];
   const canGenerateQr =

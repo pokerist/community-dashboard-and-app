@@ -19,6 +19,12 @@ export class UpdateServiceDto {
   @IsOptional()
   name?: string;
 
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  @Type(() => Number)
+  displayOrder?: number;
+
   @IsEnum(ServiceCategory)
   @IsOptional()
   category?: ServiceCategory;

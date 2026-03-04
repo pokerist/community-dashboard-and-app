@@ -138,6 +138,7 @@ function MobileShellInner(props: MobileShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [unitPickerOpen, setUnitPickerOpen] = useState(false);
   const [bootstrapProfile, setBootstrapProfile] = useState<AuthBootstrapProfile | null>(null);
+  const [profileAvatarPreviewUri, setProfileAvatarPreviewUri] = useState<string | null>(null);
   const [pendingServiceRequestFocus, setPendingServiceRequestFocus] = useState<{
     id: string;
     mode: 'services' | 'requests';
@@ -1101,6 +1102,8 @@ function MobileShellInner(props: MobileShellProps) {
               onRefreshSession={props.onRefreshSession}
               onLogout={props.onLogout}
               onProfileBootstrapUpdated={(next) => setBootstrapProfile(next)}
+              profileAvatarPreviewUri={profileAvatarPreviewUri}
+              onProfileAvatarPreviewUriChange={setProfileAvatarPreviewUri}
             />
           )}
         </Tab.Screen>
@@ -1166,6 +1169,7 @@ function MobileShellInner(props: MobileShellProps) {
         onClose={() => setDrawerOpen(false)}
         email={props.session.email}
         profile={bootstrapProfile}
+        profileAvatarPreviewUri={profileAvatarPreviewUri}
         units={units.units}
         selectedUnitId={units.selectedUnitId}
         onSelectUnit={units.setSelectedUnitId}

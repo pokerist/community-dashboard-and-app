@@ -12,7 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from "../ui/table";
-import { Search, LayoutGrid, List, Plus } from "lucide-react";
+import { Search, LayoutGrid, List, Plus, Pencil, Trash2 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import {
@@ -32,6 +32,7 @@ export function UnitsManagement() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [viewMode, setViewMode] = useState<"grid" | "table">("table");
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [unitsData, setUnitsData] = useState<any[]>([]);
   const [isLoadingUnits, setIsLoadingUnits] = useState(false);
   const [backendMode, setBackendMode] = useState(false);
@@ -46,6 +47,8 @@ export function UnitsManagement() {
     price: "",
     floor: "",
   });
+  const [editingUnitId, setEditingUnitId] = useState<string | null>(null);
+  const [editingStatus, setEditingStatus] = useState<string>("AVAILABLE");
 
   const formatStatusLabel = (status?: string) => {
     if (!status) return "Unknown";
@@ -203,6 +206,56 @@ export function UnitsManagement() {
       });
     } catch (error) {
       toast.error("Failed to delete unit", { description: handleApiError(error) });
+    }
+  };
+
+  const openEditDialog = (unit: any) => {
+    if (typeof unit.id !== "string") return;
+    setEditingUnitId(unit.id);
+    setUnitFormData({
+      unitNumber: unit.unitNumber ?? "",
+      projectName: unit.project ?? "Al Karma Residence",
+      block: unit.block ?? "",
+      type: String(unit.type ?? "").toUpperCase().replace(/ /g, "_"),
+      bedrooms: unit.bedrooms && unit.bedrooms !== "—" ? String(unit.bedrooms) : "",
+      bathrooms: unit.bathrooms && unit.bathrooms !== "—" ? String(unit.bathrooms) : "",
+      size:
+        typeof unit.size === "string" ? unit.size.replace(" m²", "").trim() : "",
+      price:
+        typeof unit.price === "string"
+          ? unit.price.replace("EGP", "").replace(/,/g, "").trim()
+          : "",
+      floor: unit.floor && unit.floor !== "—" ? String(unit.floor) : "",
+    });
+    setEditingStatus(String(unit.statusRaw ?? "AVAILABLE"));
+    setIsEditDialogOpen(true);
+  };
+
+  const handleEditUnit = async () => {
+    if (!editingUnitId) return;
+    if (!unitFormData.unitNumber || !unitFormData.projectName || !unitFormData.type || !unitFormData.size) {
+      toast.error("Please fill in all required fields");
+      return;
+    }
+    try {
+      await apiClient.patch(`/units/${editingUnitId}`, {
+        unitNumber: unitFormData.unitNumber,
+        projectName: unitFormData.projectName,
+        block: unitFormData.block || undefined,
+        type: unitFormData.type.toUpperCase(),
+        floors: unitFormData.floor ? Number(unitFormData.floor) : undefined,
+        bedrooms: unitFormData.bedrooms ? Number(unitFormData.bedrooms) : undefined,
+        bathrooms: unitFormData.bathrooms ? Number(unitFormData.bathrooms) : undefined,
+        sizeSqm: Number(unitFormData.size),
+        price: unitFormData.price ? Number(unitFormData.price) : undefined,
+        status: editingStatus,
+      });
+      toast.success("Unit updated");
+      setIsEditDialogOpen(false);
+      setEditingUnitId(null);
+      await loadUnitsFromBackend();
+    } catch (error) {
+      toast.error("Failed to update unit", { description: handleApiError(error) });
     }
   };
 
@@ -394,6 +447,82 @@ export function UnitsManagement() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Edit Unit</DialogTitle>
+              <DialogDescription>Update unit details and availability status.</DialogDescription>
+            </DialogHeader>
+            <div className="grid grid-cols-2 gap-4 py-4">
+              <div className="space-y-2 col-span-2">
+                <Label>Project Name</Label>
+                <Input value={unitFormData.projectName} onChange={(e) => setUnitFormData({ ...unitFormData, projectName: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Block</Label>
+                <Input value={unitFormData.block} onChange={(e) => setUnitFormData({ ...unitFormData, block: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Unit Number</Label>
+                <Input value={unitFormData.unitNumber} onChange={(e) => setUnitFormData({ ...unitFormData, unitNumber: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Unit Type</Label>
+                <Select value={unitFormData.type} onValueChange={(value) => setUnitFormData({ ...unitFormData, type: value })}>
+                  <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="APARTMENT">Apartment</SelectItem>
+                    <SelectItem value="VILLA">Villa</SelectItem>
+                    <SelectItem value="PENTHOUSE">Penthouse</SelectItem>
+                    <SelectItem value="DUPLEX">Duplex</SelectItem>
+                    <SelectItem value="TOWNHOUSE">Townhouse</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Status</Label>
+                <Select value={editingStatus} onValueChange={setEditingStatus}>
+                  <SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="AVAILABLE">Available</SelectItem>
+                    <SelectItem value="HELD">Held</SelectItem>
+                    <SelectItem value="UNRELEASED">Unreleased</SelectItem>
+                    <SelectItem value="NOT_DELIVERED">Not Delivered</SelectItem>
+                    <SelectItem value="DELIVERED">Delivered</SelectItem>
+                    <SelectItem value="OCCUPIED">Occupied</SelectItem>
+                    <SelectItem value="LEASED">Leased</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Floor</Label>
+                <Input type="number" value={unitFormData.floor} onChange={(e) => setUnitFormData({ ...unitFormData, floor: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Bedrooms</Label>
+                <Input type="number" value={unitFormData.bedrooms} onChange={(e) => setUnitFormData({ ...unitFormData, bedrooms: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Bathrooms</Label>
+                <Input type="number" value={unitFormData.bathrooms} onChange={(e) => setUnitFormData({ ...unitFormData, bathrooms: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Size (m²)</Label>
+                <Input type="number" value={unitFormData.size} onChange={(e) => setUnitFormData({ ...unitFormData, size: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Price (EGP)</Label>
+                <Input type="number" value={unitFormData.price} onChange={(e) => setUnitFormData({ ...unitFormData, price: e.target.value })} />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>Cancel</Button>
+              <Button className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white" onClick={() => void handleEditUnit()}>
+                Save Changes
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
 
       {/* Filters and View Toggle */}
@@ -459,6 +588,7 @@ export function UnitsManagement() {
                 <TableHead>Owner</TableHead>
                 <TableHead>Tenant</TableHead>
                 <TableHead>Last Updated</TableHead>
+                <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -485,6 +615,21 @@ export function UnitsManagement() {
                     {unit.tenant || <span className="text-[#64748B]">—</span>}
                   </TableCell>
                   <TableCell className="text-[#64748B]">{unit.lastUpdated}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <Button variant="ghost" size="sm" onClick={() => openEditDialog(unit)}>
+                        <Pencil className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-[#EF4444] hover:text-[#EF4444] hover:bg-[#EF4444]/10"
+                        onClick={() => void handleDeleteUnit(unit.id, unit.unitNumber)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -541,6 +686,21 @@ export function UnitsManagement() {
                 
                 <div className="pt-3 border-t border-[#E5E7EB] text-xs text-[#64748B]">
                   Updated: {unit.lastUpdated}
+                </div>
+                <div className="pt-2 flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={() => openEditDialog(unit)}>
+                    <Pencil className="w-4 h-4 mr-1" />
+                    Edit
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-[#EF4444] border-[#FECACA] hover:bg-[#FEE2E2]"
+                    onClick={() => void handleDeleteUnit(unit.id, unit.unitNumber)}
+                  >
+                    <Trash2 className="w-4 h-4 mr-1" />
+                    Delete
+                  </Button>
                 </div>
               </div>
             </Card>

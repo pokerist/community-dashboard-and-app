@@ -22,12 +22,12 @@ function Invoke-JsonGet {
 }
 
 $accounts = @(
-  @{ Label = "Owner"; Email = "owner.demo@test.com" },
-  @{ Label = "Tenant"; Email = "tenant.demo@test.com" },
-  @{ Label = "PreOwner"; Email = "preowner.demo@test.com" },
-  @{ Label = "Family Member"; Email = "family.demo@test.com" },
-  @{ Label = "Authorized"; Email = "authorized.demo@test.com" },
-  @{ Label = "Contractor"; Email = "contractor.demo@test.com" }
+  @{ Label = "Owner"; Email = "ahmed.hassan.owner@alkarma.demo" },
+  @{ Label = "Tenant"; Email = "mostafa.ali.tenant@alkarma.demo" },
+  @{ Label = "PreOwner"; Email = "karim.fathy.predelivery@alkarma.demo" },
+  @{ Label = "Family Member"; Email = "nour.hassan.family@alkarma.demo" },
+  @{ Label = "Authorized"; Email = "youssef.mahmoud.authorized@alkarma.demo" },
+  @{ Label = "Contractor"; Email = "mohamed.saber.contractor@alkarma.demo" }
 )
 
 $results = @()

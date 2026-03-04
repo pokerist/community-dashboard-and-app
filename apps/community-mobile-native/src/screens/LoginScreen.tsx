@@ -25,26 +25,24 @@ import { akColors, akRadius, akShadow } from '../theme/alkarma';
 
 const logoImage = require('../../assets/branding/alkarma-logo-dark.png');
 const DEMO_ACCOUNTS = [
-  { label: 'Owner Demo', email: 'owner.demo@test.com', password: 'pass123' },
-  { label: 'Tenant Demo', email: 'tenant.demo@test.com', password: 'pass123' },
+  { label: 'Ahmed Hassan (Owner)', email: 'ahmed.hassan.owner@alkarma.demo', password: 'pass123' },
+  { label: 'Mostafa Ali (Tenant)', email: 'mostafa.ali.tenant@alkarma.demo', password: 'pass123' },
   {
-    label: 'Pre-Delivery Owner',
-    email: 'preowner.demo@test.com',
+    label: 'Karim Fathy (Pre-Delivery)',
+    email: 'karim.fathy.predelivery@alkarma.demo',
     password: 'pass123',
   },
-  { label: 'Family Member Demo', email: 'family.demo@test.com', password: 'pass123' },
+  { label: 'Nour Hassan (Family)', email: 'nour.hassan.family@alkarma.demo', password: 'pass123' },
   {
-    label: 'Authorized (Delegate)',
-    email: 'authorized.demo@test.com',
+    label: 'Youssef Mahmoud (Authorized)',
+    email: 'youssef.mahmoud.authorized@alkarma.demo',
     password: 'pass123',
   },
   {
-    label: 'Contractor Demo',
-    email: 'contractor.demo@test.com',
+    label: 'Mohamed Saber (Contractor)',
+    email: 'mohamed.saber.contractor@alkarma.demo',
     password: 'pass123',
   },
-  { label: 'Resident A', email: 'residentA@test.com', password: 'pass123' },
-  { label: 'Resident B', email: 'residentB@test.com', password: 'pass123' },
 ] as const;
 
 type LoginScreenProps = {
@@ -84,7 +82,7 @@ export function LoginScreen({
   const insets = useSafeAreaInsets();
   const { language, setLanguage, t } = useI18n();
   const { brand } = useBranding();
-  const [email, setEmail] = useState('residentA@test.com');
+  const [email, setEmail] = useState('ahmed.hassan.owner@alkarma.demo');
   const [password, setPassword] = useState('pass123');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);

@@ -12,8 +12,9 @@ import {
   TableHeader,
   TableRow,
 } from "../ui/table";
-import { Search, Plus, Trash2, Edit, GripVertical, X, Eye, Send, RefreshCw } from "lucide-react";
+import { Search, Plus, Trash2, Edit, GripVertical, X, Eye, Send, RefreshCw, ArrowUp, ArrowDown } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -32,6 +33,7 @@ import * as IoIcons from "react-icons/io5";
 import {
   errorMessage,
   formatDateTime,
+  getPriorityColorClass,
   getStatusColorClass,
   humanizeEnum,
 } from "../../lib/live-data";
@@ -53,6 +55,7 @@ interface BackendService {
   id: string;
   name: string;
   category: string;
+  displayOrder?: number | null;
   unitEligibility: string;
   isUrgent?: boolean;
   processingTime?: number | null;
@@ -110,6 +113,15 @@ interface ServiceRequestDetailRow extends ServiceRequestListRow {
   }>;
   comments?: ServiceRequestCommentRow[];
 }
+
+type PendingFocusEntity = {
+  section?: string;
+  entityType?: string | null;
+  entityId?: string | null;
+  serviceCategory?: string | null;
+};
+
+type TicketPreset = "all" | "pending" | "overdue" | "closed";
 
 const SERVICE_REQUEST_STATUSES = ["NEW", "IN_PROGRESS", "RESOLVED", "CLOSED", "CANCELLED"] as const;
 
@@ -208,7 +220,11 @@ function resolveServiceIcon(iconName?: string | null) {
   return icon ?? null;
 }
 
-export function ServiceManagement() {
+type ServiceManagementProps = {
+  mode?: "services" | "requests";
+};
+
+export function ServiceManagement({ mode = "services" }: ServiceManagementProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -218,6 +234,7 @@ export function ServiceManagement() {
   const [editingServiceId, setEditingServiceId] = useState<string | null>(null);
   const [ticketSearchTerm, setTicketSearchTerm] = useState("");
   const [ticketStatusFilter, setTicketStatusFilter] = useState<string>("all");
+  const [ticketPreset, setTicketPreset] = useState<TicketPreset>("all");
   const [isTicketDialogOpen, setIsTicketDialogOpen] = useState(false);
   const [activeTicketId, setActiveTicketId] = useState<string | null>(null);
   const [activeTicket, setActiveTicket] = useState<ServiceRequestDetailRow | null>(null);
@@ -248,6 +265,24 @@ export function ServiceManagement() {
   const [newFieldRequired, setNewFieldRequired] = useState(false);
   const [newFieldPlaceholder, setNewFieldPlaceholder] = useState("");
 
+  const ticketFiltersStorageKey = useMemo(
+    () => `admin.serviceManagement.ticketFilters.${mode}`,
+    [mode],
+  );
+
+  const resetTicketFilters = useCallback(() => {
+    setTicketSearchTerm("");
+    setTicketStatusFilter("all");
+    setTicketPreset("all");
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.removeItem(ticketFiltersStorageKey);
+      } catch {
+        // ignore storage failures
+      }
+    }
+  }, [ticketFiltersStorageKey]);
+
   const loadServices = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -267,6 +302,83 @@ export function ServiceManagement() {
   useEffect(() => {
     void loadServices();
   }, [loadServices]);
+
+  useEffect(() => {
+    if (mode === "requests" && !editingServiceId && !serviceCategory) {
+      setServiceCategory("REQUESTS");
+    }
+  }, [editingServiceId, mode, serviceCategory]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(ticketFiltersStorageKey);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as {
+        search?: string;
+        status?: string;
+        preset?: TicketPreset;
+      };
+      setTicketSearchTerm(String(parsed.search ?? ""));
+      setTicketStatusFilter(String(parsed.status ?? "all"));
+      setTicketPreset(
+        parsed.preset === "pending" ||
+          parsed.preset === "overdue" ||
+          parsed.preset === "closed"
+          ? parsed.preset
+          : "all",
+      );
+    } catch {
+      // ignore malformed local cache
+    }
+  }, [ticketFiltersStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(
+        ticketFiltersStorageKey,
+        JSON.stringify({
+          search: ticketSearchTerm,
+          status: ticketStatusFilter,
+          preset: ticketPreset,
+        }),
+      );
+    } catch {
+      // ignore storage failures
+    }
+  }, [ticketFiltersStorageKey, ticketPreset, ticketSearchTerm, ticketStatusFilter]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || serviceRequestsData.length === 0) return;
+
+    let parsed: PendingFocusEntity | null = null;
+    try {
+      const raw = window.sessionStorage.getItem("admin.focusEntity");
+      if (!raw) return;
+      parsed = JSON.parse(raw) as PendingFocusEntity;
+    } catch {
+      return;
+    }
+
+    const targetSection = mode === "requests" ? "requests" : "services";
+    const targetId = String(parsed?.entityId ?? "").trim();
+    const targetEntityType = String(parsed?.entityType ?? "").trim().toUpperCase();
+
+    if (!targetId || targetEntityType !== "SERVICE_REQUEST") return;
+    if (String(parsed?.section ?? "").trim().toLowerCase() !== targetSection) return;
+
+    const ticket = serviceRequestsData.find((row) => {
+      if (String(row.id) !== targetId) return false;
+      const category = String(row.service?.category ?? "").toUpperCase();
+      const isRequestTicket = category === "REQUESTS" || category === "ADMIN";
+      return mode === "requests" ? isRequestTicket : !isRequestTicket;
+    });
+
+    if (!ticket) return;
+    window.sessionStorage.removeItem("admin.focusEntity");
+    void openTicketDialog(ticket);
+  }, [mode, openTicketDialog, serviceRequestsData]);
 
   const loadTicketDetail = useCallback(async (ticketId: string) => {
     setTicketLoading(true);
@@ -589,9 +701,43 @@ export function ServiceManagement() {
     }
   };
 
+  const modeServices = useMemo(() => {
+    return servicesData.filter((service) => {
+      const isRequestCatalog =
+        String(service.category ?? "").toUpperCase() === "REQUESTS" ||
+        String(service.category ?? "").toUpperCase() === "ADMIN";
+      return mode === "requests" ? isRequestCatalog : !isRequestCatalog;
+    });
+  }, [mode, servicesData]);
+
+  const reorderCatalog = useCallback(
+    async (serviceId: string, direction: "up" | "down") => {
+      const ids = modeServices.map((s) => s.id);
+      const index = ids.indexOf(serviceId);
+      if (index < 0) return;
+      const targetIndex = direction === "up" ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= ids.length) return;
+      const next = [...ids];
+      const [moved] = next.splice(index, 1);
+      next.splice(targetIndex, 0, moved);
+      try {
+        await apiClient.patch("/services/reorder", { ids: next });
+        await loadServices();
+      } catch (error) {
+        toast.error("Failed to reorder catalog", { description: errorMessage(error) });
+      }
+    },
+    [loadServices, modeServices],
+  );
+
   const filteredServices = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
     return servicesData.filter((service) => {
+      const isRequestCatalog =
+        String(service.category ?? "").toUpperCase() === "REQUESTS" ||
+        String(service.category ?? "").toUpperCase() === "ADMIN";
+      if (mode === "services" && isRequestCatalog) return false;
+      if (mode === "requests" && !isRequestCatalog) return false;
       if (!q) return true;
       return (
         service.name.toLowerCase().includes(q) ||
@@ -599,13 +745,36 @@ export function ServiceManagement() {
         (service.description ?? "").toLowerCase().includes(q)
       );
     });
-  }, [servicesData, searchTerm]);
+  }, [mode, servicesData, searchTerm]);
 
   const filteredTickets = useMemo(() => {
     const q = ticketSearchTerm.trim().toLowerCase();
+    const now = Date.now();
+    const overdueThresholdMs = 24 * 60 * 60 * 1000;
     return serviceRequestsData.filter((ticket) => {
+      const category = String(ticket.service?.category ?? "").toUpperCase();
+      const isRequestTicket = category === "REQUESTS" || category === "ADMIN";
+      if (mode === "services" && isRequestTicket) return false;
+      if (mode === "requests" && !isRequestTicket) return false;
       const status = String(ticket.status ?? "").toUpperCase();
       if (ticketStatusFilter !== "all" && status !== ticketStatusFilter) return false;
+      if (ticketPreset === "pending" && !(status === "NEW" || status === "IN_PROGRESS")) {
+        return false;
+      }
+      if (
+        ticketPreset === "closed" &&
+        !(status === "RESOLVED" || status === "CLOSED" || status === "CANCELLED")
+      ) {
+        return false;
+      }
+      if (ticketPreset === "overdue") {
+        if (!(status === "NEW" || status === "IN_PROGRESS")) return false;
+        const createdAt = ticket.requestedAt ?? ticket.updatedAt;
+        const createdTs = createdAt ? new Date(createdAt).getTime() : NaN;
+        if (!Number.isFinite(createdTs) || now - createdTs < overdueThresholdMs) {
+          return false;
+        }
+      }
       if (!q) return true;
       const haystack = [
         ticket.service?.name,
@@ -621,15 +790,37 @@ export function ServiceManagement() {
         .toLowerCase();
       return haystack.includes(q);
     });
-  }, [serviceRequestsData, ticketSearchTerm, ticketStatusFilter]);
+  }, [mode, serviceRequestsData, ticketPreset, ticketSearchTerm, ticketStatusFilter]);
 
-  const openTicketsCount = useMemo(
-    () =>
-      serviceRequestsData.filter((r) =>
-        ["NEW", "IN_PROGRESS"].includes(String(r.status ?? "").toUpperCase()),
-      ).length,
-    [serviceRequestsData],
-  );
+  const openTicketsCount = useMemo(() => filteredTickets.filter((r) =>
+    ["NEW", "IN_PROGRESS"].includes(String(r.status ?? "").toUpperCase()),
+  ).length, [filteredTickets]);
+
+  const ticketVisualMetrics = useMemo(() => {
+    const OVERDUE_MS = 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    let pending = 0;
+    let closed = 0;
+    let overdue = 0;
+
+    for (const ticket of filteredTickets) {
+      const status = String(ticket.status ?? "").toUpperCase();
+      const isPending = status === "NEW" || status === "IN_PROGRESS";
+      const isClosed = status === "RESOLVED" || status === "CLOSED" || status === "CANCELLED";
+
+      if (isPending) {
+        pending += 1;
+        const createdAt = ticket.requestedAt ?? ticket.updatedAt;
+        const createdTs = createdAt ? new Date(createdAt).getTime() : NaN;
+        if (Number.isFinite(createdTs) && now - createdTs > OVERDUE_MS) {
+          overdue += 1;
+        }
+      }
+      if (isClosed) closed += 1;
+    }
+
+    return { pending, closed, overdue };
+  }, [filteredTickets]);
 
   const activeServicesCount = servicesData.filter((s) => s.status).length;
 
@@ -663,8 +854,14 @@ export function ServiceManagement() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-[#1E293B]">Service Management</h1>
-          <p className="text-[#64748B] mt-1">Manage service catalog and dynamic request forms (live backend)</p>
+          <h1 className="text-[#1E293B]">
+            {mode === "requests" ? "Requests Management" : "Service Management"}
+          </h1>
+          <p className="text-[#64748B] mt-1">
+            {mode === "requests"
+              ? "Manage request templates and submitted request tickets."
+              : "Manage service catalog and submitted service tickets."}
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={() => void loadServices()} disabled={isLoading}>
@@ -680,12 +877,20 @@ export function ServiceManagement() {
             <DialogTrigger asChild>
               <Button className="bg-[#00B386] hover:bg-[#00B386]/90 text-white rounded-lg gap-2">
                 <Plus className="w-4 h-4" />
-                Create Service Template
+                {mode === "requests" ? "Add Request Template" : "Create Service Template"}
               </Button>
             </DialogTrigger>
             <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
-                <DialogTitle>{editingServiceId ? "Edit Service Template" : "Create New Service Template"}</DialogTitle>
+                <DialogTitle>
+                  {editingServiceId
+                    ? mode === "requests"
+                      ? "Edit Request Template"
+                      : "Edit Service Template"
+                    : mode === "requests"
+                      ? "Create New Request Template"
+                      : "Create New Service Template"}
+                </DialogTitle>
                 <DialogDescription>
                   {editingServiceId
                     ? "Update service metadata and dynamic fields"
@@ -715,7 +920,10 @@ export function ServiceManagement() {
                           <SelectValue placeholder="Select category" />
                         </SelectTrigger>
                         <SelectContent>
-                          {SERVICE_CATEGORIES.map((cat) => (
+                          {(mode === "requests"
+                            ? SERVICE_CATEGORIES.filter((cat) => cat === "REQUESTS")
+                            : SERVICE_CATEGORIES.filter((cat) => cat !== "REQUESTS")
+                          ).map((cat) => (
                             <SelectItem key={cat} value={cat}>
                               {humanizeEnum(cat)}
                             </SelectItem>
@@ -954,212 +1162,299 @@ export function ServiceManagement() {
         </Card>
       </div>
 
-      <Card className="p-4 shadow-card rounded-xl">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#64748B]" />
-          <Input
-            placeholder="Search services by name or category..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10 rounded-lg"
-          />
-        </div>
-      </Card>
+      <Tabs defaultValue="submitted" className="space-y-4">
+        <TabsList className="grid w-full max-w-[380px] grid-cols-2">
+          <TabsTrigger value="submitted">Submitted Tickets</TabsTrigger>
+          <TabsTrigger value="catalog">{mode === "requests" ? "Request Catalog" : "Service Catalog"}</TabsTrigger>
+        </TabsList>
 
-      <Card className="shadow-card rounded-xl overflow-hidden">
-        <div className="p-4 border-b border-[#E5E7EB]">
-          <h3 className="text-[#1E293B]">Service Templates</h3>
-        </div>
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-[#F9FAFB]">
-              <TableHead>Service Name</TableHead>
-              <TableHead>Category</TableHead>
-              <TableHead>Unit Eligibility</TableHead>
-              <TableHead>Form Fields</TableHead>
-              <TableHead>Processing Time</TableHead>
-              <TableHead>Urgent</TableHead>
-              <TableHead>Total Requests</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredServices.map((service) => {
-              const requestCount = requestCountsByServiceId.get(service.id) ?? Number(service.totalRequests ?? 0);
-              return (
-                <TableRow key={service.id} className="hover:bg-[#F9FAFB]">
-                  <TableCell className="font-medium text-[#1E293B]">
-                    <div className="flex items-center gap-2">
-                      <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-[#F1F5F9] text-[#334155]">
-                        {(() => {
-                          const IconComponent = resolveServiceIcon(service.iconName);
-                          return IconComponent ? <IconComponent className="h-4 w-4" /> : <Eye className="h-4 w-4" />;
-                        })()}
-                      </span>
-                      <span>{service.name}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant="secondary" className="bg-[#F3F4F6] text-[#1E293B]">
-                      {serviceCategoryLabel(service.category)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>{getEligibilityBadge(service.unitEligibility)}</TableCell>
-                  <TableCell className="text-[#64748B]">{service.formFields?.length ?? 0} fields</TableCell>
-                  <TableCell className="text-[#64748B]">
-                    {service.processingTime != null ? `${service.processingTime}h` : "—"}
-                  </TableCell>
-                  <TableCell>
-                    <Badge className={service.isUrgent ? "bg-[#FEE2E2] text-[#B91C1C]" : "bg-[#F1F5F9] text-[#475569]"}>
-                      {service.isUrgent ? "Yes" : "No"}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-[#1E293B]">{requestCount}</TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <Switch checked={Boolean(service.status)} onCheckedChange={() => void handleToggleActive(service)} />
-                      <Badge className={getStatusColorClass(service.status ? "ACTIVE" : "DISABLED")}>
-                        {service.status ? "Active" : "Inactive"}
-                      </Badge>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => fillFormForEdit(service)}
-                        className="text-[#00B386] hover:text-[#00B386] hover:bg-[#00B386]/10"
-                      >
-                        <Edit className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => void handleDeleteService(service.id, service.name)}
-                        className="text-[#EF4444] hover:text-[#EF4444] hover:bg-[#EF4444]/10"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
+        <TabsContent value="submitted">
+          <Card className="shadow-card rounded-xl overflow-hidden">
+            <div className="p-4 border-b border-[#E5E7EB] flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h3 className="text-[#1E293B]">
+                  {mode === "requests" ? "Submitted Request Tickets" : "Submitted Service Tickets"}
+                </h3>
+                <p className="text-sm text-[#64748B] mt-1">
+                  Review resident requests, update status, and reply to ticket conversations.
+                </p>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <Badge className="bg-[#FEF3C7] text-[#92400E]">
+                    Pending: {ticketVisualMetrics.pending}
+                  </Badge>
+                  <Badge className="bg-[#DCFCE7] text-[#166534]">
+                    Closed: {ticketVisualMetrics.closed}
+                  </Badge>
+                  <Badge className="bg-[#FEE2E2] text-[#B91C1C]">
+                    Overdue: {ticketVisualMetrics.overdue}
+                  </Badge>
+                </div>
+              </div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant={ticketPreset === "all" ? "default" : "outline"}
+                    className={ticketPreset === "all" ? "bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white" : ""}
+                    onClick={() => setTicketPreset("all")}
+                  >
+                    All
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={ticketPreset === "pending" ? "default" : "outline"}
+                    className={ticketPreset === "pending" ? "bg-[#F59E0B] hover:bg-[#D97706] text-white" : ""}
+                    onClick={() => {
+                      setTicketPreset("pending");
+                      setTicketStatusFilter("all");
+                    }}
+                  >
+                    Pending
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={ticketPreset === "overdue" ? "default" : "outline"}
+                    className={ticketPreset === "overdue" ? "bg-[#DC2626] hover:bg-[#B91C1C] text-white" : ""}
+                    onClick={() => {
+                      setTicketPreset("overdue");
+                      setTicketStatusFilter("all");
+                    }}
+                  >
+                    Overdue
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={ticketPreset === "closed" ? "default" : "outline"}
+                    className={ticketPreset === "closed" ? "bg-[#10B981] hover:bg-[#059669] text-white" : ""}
+                    onClick={() => {
+                      setTicketPreset("closed");
+                      setTicketStatusFilter("all");
+                    }}
+                  >
+                    Closed
+                  </Button>
+                </div>
+                <div className="relative min-w-[220px]">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#64748B]" />
+                  <Input
+                    placeholder="Search tickets..."
+                    value={ticketSearchTerm}
+                    onChange={(e) => setTicketSearchTerm(e.target.value)}
+                    className="pl-10 rounded-lg"
+                  />
+                </div>
+                <Select value={ticketStatusFilter} onValueChange={setTicketStatusFilter}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Filter by status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All statuses</SelectItem>
+                    {SERVICE_REQUEST_STATUSES.map((status) => (
+                      <SelectItem key={status} value={status}>
+                        {adminTicketStatusLabel("SERVICE", status)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button variant="outline" onClick={() => void loadServices()} disabled={isLoading}>
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Refresh
+                </Button>
+                <Button variant="outline" onClick={resetTicketFilters}>
+                  <X className="w-4 h-4 mr-2" />
+                  Reset Filters
+                </Button>
+              </div>
+            </div>
+
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-[#F9FAFB]">
+                  <TableHead>Ticket</TableHead>
+                  <TableHead>Resident</TableHead>
+                  <TableHead>Unit</TableHead>
+                  <TableHead>Priority</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Updated</TableHead>
+                  <TableHead>Actions</TableHead>
                 </TableRow>
-              );
-            })}
-            {!isLoading && filteredServices.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={9} className="text-center py-10 text-[#64748B]">
-                  No services found. Create the first service template.
-                </TableCell>
-              </TableRow>
-            ) : null}
-          </TableBody>
-        </Table>
-      </Card>
+              </TableHeader>
+              <TableBody>
+                {filteredTickets.map((ticket) => (
+                  <TableRow key={ticket.id} className="hover:bg-[#F9FAFB]">
+                    <TableCell>
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium text-[#1E293B]">
+                          {ticket.service?.name ?? "Service Request"}
+                        </p>
+                        <p className="text-xs text-[#64748B]">
+                          {ticket.id.slice(0, 8)} • {String(ticket.service?.category ?? "").toUpperCase() === "REQUESTS" || String(ticket.service?.category ?? "").toUpperCase() === "ADMIN" ? "Request" : "Service"}
+                        </p>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <div className="space-y-1">
+                        <p className="text-sm text-[#1E293B]">{ticket.createdBy?.nameEN || "—"}</p>
+                        <p className="text-xs text-[#64748B]">{ticket.createdBy?.email || ticket.createdBy?.phone || "—"}</p>
+                      </div>
+                    </TableCell>
+                    <TableCell className="text-[#64748B]">
+                      {ticket.unit?.block ? `${ticket.unit.block} • ` : ""}
+                      {ticket.unit?.unitNumber ?? "—"}
+                    </TableCell>
+                    <TableCell>
+                      <Badge className={getPriorityColorClass(ticket.priority || "MEDIUM")}>
+                        {adminPriorityLabel(ticket.priority || "MEDIUM")}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <Badge className={getStatusColorClass(ticket.status)}>
+                        {adminTicketStatusLabel("SERVICE", ticket.status || "NEW")}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-[#64748B]">{formatDateTime(ticket.updatedAt || ticket.requestedAt)}</TableCell>
+                    <TableCell>
+                      <Button variant="ghost" size="sm" onClick={() => void openTicketDialog(ticket)}>
+                        <Eye className="w-4 h-4 mr-1" />
+                        Open
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+                {!isLoading && filteredTickets.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center py-10 text-[#64748B]">
+                      No tickets match the current filters.
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+              </TableBody>
+            </Table>
+          </Card>
+        </TabsContent>
 
-      <Card className="shadow-card rounded-xl overflow-hidden">
-        <div className="p-4 border-b border-[#E5E7EB] flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h3 className="text-[#1E293B]">Service / Request Tickets Inbox</h3>
-            <p className="text-sm text-[#64748B] mt-1">
-              Review resident requests, update status, and reply to ticket conversations.
-            </p>
-          </div>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <div className="relative min-w-[220px]">
+        <TabsContent value="catalog" className="space-y-4">
+          <Card className="p-4 shadow-card rounded-xl">
+            <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#64748B]" />
               <Input
-                placeholder="Search tickets..."
-                value={ticketSearchTerm}
-                onChange={(e) => setTicketSearchTerm(e.target.value)}
+                placeholder={mode === "requests" ? "Search requests catalog..." : "Search services by name or category..."}
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10 rounded-lg"
               />
             </div>
-            <Select value={ticketStatusFilter} onValueChange={setTicketStatusFilter}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Filter by status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
-                {SERVICE_REQUEST_STATUSES.map((status) => (
-                  <SelectItem key={status} value={status}>
-                    {adminTicketStatusLabel("SERVICE", status)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button variant="outline" onClick={() => void loadServices()} disabled={isLoading}>
-              <RefreshCw className="w-4 h-4 mr-2" />
-              Refresh
-            </Button>
-          </div>
-        </div>
+          </Card>
 
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-[#F9FAFB]">
-              <TableHead>Ticket</TableHead>
-              <TableHead>Resident</TableHead>
-              <TableHead>Unit</TableHead>
-              <TableHead>Priority</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Updated</TableHead>
-              <TableHead>Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredTickets.map((ticket) => (
-              <TableRow key={ticket.id} className="hover:bg-[#F9FAFB]">
-                <TableCell>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#1E293B]">
-                      {ticket.service?.name ?? "Service Request"}
-                    </p>
-                    <p className="text-xs text-[#64748B]">
-                      {ticket.id.slice(0, 8)} • {String(ticket.service?.category ?? "").toUpperCase() === "REQUESTS" || String(ticket.service?.category ?? "").toUpperCase() === "ADMIN" ? "Request" : "Service"}
-                    </p>
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <div className="space-y-1">
-                    <p className="text-sm text-[#1E293B]">{ticket.createdBy?.nameEN || "—"}</p>
-                    <p className="text-xs text-[#64748B]">{ticket.createdBy?.email || ticket.createdBy?.phone || "—"}</p>
-                  </div>
-                </TableCell>
-                <TableCell className="text-[#64748B]">
-                  {ticket.unit?.block ? `${ticket.unit.block} • ` : ""}
-                  {ticket.unit?.unitNumber ?? "—"}
-                </TableCell>
-                <TableCell>
-                  <Badge className={getStatusColorClass(ticket.priority || "MEDIUM")}>
-                    {adminPriorityLabel(ticket.priority || "MEDIUM")}
-                  </Badge>
-                </TableCell>
-                <TableCell>
-                  <Badge className={getStatusColorClass(ticket.status)}>
-                    {adminTicketStatusLabel("SERVICE", ticket.status || "NEW")}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-[#64748B]">{formatDateTime(ticket.updatedAt || ticket.requestedAt)}</TableCell>
-                <TableCell>
-                  <Button variant="ghost" size="sm" onClick={() => void openTicketDialog(ticket)}>
-                    <Eye className="w-4 h-4 mr-1" />
-                    Open
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-            {!isLoading && filteredTickets.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center py-10 text-[#64748B]">
-                  No tickets match the current filters.
-                </TableCell>
-              </TableRow>
-            ) : null}
-          </TableBody>
-        </Table>
-      </Card>
+          <Card className="shadow-card rounded-xl overflow-hidden">
+            <div className="p-4 border-b border-[#E5E7EB]">
+              <h3 className="text-[#1E293B]">{mode === "requests" ? "Request Templates" : "Service Templates"}</h3>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-[#F9FAFB]">
+                  <TableHead>Service Name</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Unit Eligibility</TableHead>
+                  <TableHead>Form Fields</TableHead>
+                  <TableHead>Processing Time</TableHead>
+                  <TableHead>Urgent</TableHead>
+                  <TableHead>Total Requests</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredServices.map((service) => {
+                  const requestCount = requestCountsByServiceId.get(service.id) ?? Number(service.totalRequests ?? 0);
+                  return (
+                    <TableRow key={service.id} className="hover:bg-[#F9FAFB]">
+                      <TableCell className="font-medium text-[#1E293B]">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-[#F1F5F9] text-[#334155]">
+                            {(() => {
+                              const IconComponent = resolveServiceIcon(service.iconName);
+                              return IconComponent ? <IconComponent className="h-4 w-4" /> : <Eye className="h-4 w-4" />;
+                            })()}
+                          </span>
+                          <span>{service.name}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary" className="bg-[#F3F4F6] text-[#1E293B]">
+                          {serviceCategoryLabel(service.category)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>{getEligibilityBadge(service.unitEligibility)}</TableCell>
+                      <TableCell className="text-[#64748B]">{service.formFields?.length ?? 0} fields</TableCell>
+                      <TableCell className="text-[#64748B]">
+                        {service.processingTime != null ? `${service.processingTime}h` : "—"}
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={service.isUrgent ? "bg-[#FEE2E2] text-[#B91C1C]" : "bg-[#F1F5F9] text-[#475569]"}>
+                          {service.isUrgent ? "Yes" : "No"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-[#1E293B]">{requestCount}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <Switch checked={Boolean(service.status)} onCheckedChange={() => void handleToggleActive(service)} />
+                          <Badge className={getStatusColorClass(service.status ? "ACTIVE" : "DISABLED")}>
+                            {service.status ? "Active" : "Inactive"}
+                          </Badge>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => void reorderCatalog(service.id, "up")}
+                            title="Move up"
+                          >
+                            <ArrowUp className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => void reorderCatalog(service.id, "down")}
+                            title="Move down"
+                          >
+                            <ArrowDown className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => fillFormForEdit(service)}
+                            className="text-[#00B386] hover:text-[#00B386] hover:bg-[#00B386]/10"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => void handleDeleteService(service.id, service.name)}
+                            className="text-[#EF4444] hover:text-[#EF4444] hover:bg-[#EF4444]/10"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {!isLoading && filteredServices.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={9} className="text-center py-10 text-[#64748B]">
+                      No services found. Create the first service template.
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+              </TableBody>
+            </Table>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       <Dialog
         open={isTicketDialogOpen}

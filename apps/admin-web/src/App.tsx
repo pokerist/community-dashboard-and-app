@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SidebarProvider, SidebarInset } from "./components/ui/sidebar";
 import { AppSidebar } from "./components/AppSidebar";
 import { DashboardOverview } from "./components/pages/DashboardOverview";
 import { ResidentManagement } from "./components/pages/ResidentManagement";
+import { DashboardUsersPage } from "./components/pages/DashboardUsersPage";
 import { ResidentCreatePage } from "./components/pages/ResidentCreatePage";
 import { UnitsManagement } from "./components/pages/UnitsManagement";
 import { ServiceManagement } from "./components/pages/ServiceManagement";
+import { RequestsManagement } from "./components/pages/RequestsManagement";
 import { TicketsInbox } from "./components/pages/TicketsInbox";
 import { AccessControl } from "./components/pages/AccessControl";
 import { LeaseManagement } from "./components/pages/LeaseManagement";
@@ -14,6 +16,7 @@ import { BillingPayments } from "./components/pages/BillingPayments";
 import { BannerManagement } from "./components/pages/BannerManagement";
 import { NotificationCenter } from "./components/pages/NotificationCenter";
 import { SecurityEmergency } from "./components/pages/SecurityEmergency";
+import { GateLiveFeed } from "./components/pages/GateLiveFeed";
 import { AmenitiesManagement } from "./components/pages/AmenitiesManagement";
 import { ReportsAnalytics } from "./components/pages/ReportsAnalytics";
 import { SystemSettings } from "./components/pages/SystemSettings";
@@ -36,9 +39,11 @@ type FooterPanel = "documentation" | "support" | "privacy" | null;
 const VALID_SECTIONS = new Set([
   "dashboard",
   "residents",
+  "dashboard-users",
   "residents-create",
   "units",
   "services",
+  "requests",
   "tickets",
   "access",
   "lease",
@@ -47,6 +52,7 @@ const VALID_SECTIONS = new Set([
   "banners",
   "notifications",
   "security",
+  "gate-live",
   "amenities",
   "reports",
   "settings",
@@ -67,10 +73,44 @@ function getSectionFromHash(): string {
   return normalizeSection(window.location.hash);
 }
 
+function extractRows(payload: any): any[] {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.data)) return payload.data;
+  return [];
+}
+
+function mapNotificationRouteToSection(routeRaw?: string | null): string | null {
+  const route = String(routeRaw ?? "").trim().toLowerCase();
+  if (!route) return null;
+  if (route.startsWith("#")) {
+    const direct = normalizeSection(route);
+    return direct === "dashboard" ? null : direct;
+  }
+  if (route.includes("gate-live")) return "gate-live";
+  if (route.includes("requests")) return "requests";
+  if (route.includes("services")) return "services";
+  if (route.includes("complaints")) return "complaints";
+  if (route.includes("tickets")) return "tickets";
+  if (route.includes("access") || route.includes("qr")) return "access";
+  if (route.includes("billing") || route.includes("payment") || route.includes("invoice")) return "billing";
+  if (route.includes("security")) return "security";
+  if (route.includes("gate")) return "gate-live";
+  return null;
+}
+
+type PendingFocusEntity = {
+  section: string;
+  entityType?: string | null;
+  entityId?: string | null;
+  serviceCategory?: string | null;
+};
+
 export default function App() {
   const [activeSection, setActiveSection] = useState<string>(() => getSectionFromHash());
   const [authenticated, setAuthenticated] = useState<boolean>(() => isAuthenticated());
   const [footerPanel, setFooterPanel] = useState<FooterPanel>(null);
+  const [unseenAdminNotifications, setUnseenAdminNotifications] = useState(0);
+  const seenNotificationIdsRef = useRef<Set<string>>(new Set());
 
   const navigateToSection = useCallback((section: string) => {
     const next = normalizeSection(section);
@@ -112,6 +152,96 @@ export default function App() {
     return () =>
       window.removeEventListener("auth:unauthorized", onUnauthorized as EventListener);
   }, []);
+
+  useEffect(() => {
+    if (!authenticated) {
+      seenNotificationIdsRef.current = new Set();
+      setUnseenAdminNotifications(0);
+      return;
+    }
+
+    let mounted = true;
+
+    const pollNotifications = async (isInitial = false) => {
+      try {
+        const response = await apiClient.get("/notifications/admin/all", {
+          params: { page: 1, limit: 25 },
+        });
+        if (!mounted) return;
+        const rows = extractRows(response.data);
+        const nextIds = new Set<string>();
+        const newlyArrived: any[] = [];
+
+        for (const row of rows) {
+          const id = String(row?.id ?? "").trim();
+          if (!id) continue;
+          nextIds.add(id);
+          if (!isInitial && !seenNotificationIdsRef.current.has(id)) {
+            newlyArrived.push(row);
+          }
+        }
+
+        seenNotificationIdsRef.current = nextIds;
+
+        if (newlyArrived.length > 0) {
+          setUnseenAdminNotifications((prev) => prev + newlyArrived.length);
+          newlyArrived.slice(0, 2).forEach((row) => {
+            const section =
+              mapNotificationRouteToSection(String(row?.payload?.webRoute ?? "")) ||
+              mapNotificationRouteToSection(String(row?.payload?.route ?? ""));
+            const title = String(row?.title ?? "New dashboard notification");
+            const description = section
+              ? `New item routed to ${section}.`
+              : "Open Notifications for details.";
+            toast.message(title, section ? {
+              description,
+              action: {
+                label: "Open",
+                onClick: () => {
+                  try {
+                    const focusEntity: PendingFocusEntity = {
+                      section,
+                      entityType: String(row?.payload?.entityType ?? "").trim() || null,
+                      entityId: String(row?.payload?.entityId ?? "").trim() || null,
+                      serviceCategory:
+                        String(row?.payload?.serviceCategory ?? "").trim() || null,
+                    };
+                    if (focusEntity.entityId) {
+                      window.sessionStorage.setItem(
+                        "admin.focusEntity",
+                        JSON.stringify(focusEntity),
+                      );
+                    }
+                  } catch {
+                    // ignore focus hint storage failures
+                  }
+                  navigateToSection(section);
+                },
+              },
+            } : { description });
+          });
+        }
+      } catch {
+        // Keep silent; notification poll should not break dashboard UX.
+      }
+    };
+
+    void pollNotifications(true);
+    const timer = window.setInterval(() => {
+      void pollNotifications(false);
+    }, 15000);
+
+    return () => {
+      mounted = false;
+      window.clearInterval(timer);
+    };
+  }, [authenticated, navigateToSection]);
+
+  useEffect(() => {
+    if (activeSection === "notifications") {
+      setUnseenAdminNotifications(0);
+    }
+  }, [activeSection]);
 
   const currentDateLabel = useMemo(() => {
     try {
@@ -181,12 +311,16 @@ export default function App() {
         return <DashboardOverview onNavigate={navigateToSection} />;
       case "residents":
         return <ResidentManagement onNavigateToCreate={() => navigateToSection("residents-create")} />;
+      case "dashboard-users":
+        return <DashboardUsersPage />;
       case "residents-create":
         return <ResidentCreatePage onBack={() => navigateToSection("residents")} onCreated={() => navigateToSection("residents")} />;
       case "units":
         return <UnitsManagement />;
       case "services":
         return <ServiceManagement />;
+      case "requests":
+        return <RequestsManagement />;
       case "tickets":
         return <TicketsInbox />;
       case "access":
@@ -203,6 +337,8 @@ export default function App() {
         return <NotificationCenter />;
       case "security":
         return <SecurityEmergency />;
+      case "gate-live":
+        return <GateLiveFeed />;
       case "amenities":
         return <AmenitiesManagement />;
       case "reports":
@@ -249,7 +385,10 @@ export default function App() {
                   <div className="relative">
                     <div 
                       className="w-8 h-8 rounded-full bg-[#F3F4F6] flex items-center justify-center cursor-pointer hover:bg-[#E5E7EB] transition-colors"
-                      onClick={() => navigateToSection("notifications")}
+                      onClick={() => {
+                        setUnseenAdminNotifications(0);
+                        navigateToSection("notifications");
+                      }}
                     >
                       <svg
                         className="w-5 h-5 text-[#64748B]"
@@ -265,6 +404,11 @@ export default function App() {
                         />
                       </svg>
                     </div>
+                    {unseenAdminNotifications > 0 ? (
+                      <span className="absolute -right-1 -top-1 min-w-[18px] h-[18px] rounded-full bg-[#EF4444] px-1 text-[10px] leading-[18px] text-white text-center font-semibold">
+                        {unseenAdminNotifications > 99 ? "99+" : unseenAdminNotifications}
+                      </span>
+                    ) : null}
                   </div>
                   <button
                     type="button"

@@ -23,6 +23,13 @@ import { errorMessage, extractRows, formatDateTime, getPriorityColorClass, getSt
 import { adminPriorityLabel, adminTicketStatusLabel } from "../../lib/status-labels";
 
 type TicketTab = "all" | "services" | "requests" | "complaints";
+type TicketPreset = "all" | "pending" | "overdue" | "closed";
+type PendingFocusEntity = {
+  section?: string;
+  entityType?: string | null;
+  entityId?: string | null;
+  serviceCategory?: string | null;
+};
 
 const SERVICE_STATUSES = ["NEW", "IN_PROGRESS", "RESOLVED", "CLOSED", "CANCELLED"] as const;
 const COMPLAINT_STATUSES = ["NEW", "IN_PROGRESS", "RESOLVED", "CLOSED"] as const;
@@ -44,6 +51,7 @@ export function TicketsInbox() {
   const [tab, setTab] = useState<TicketTab>("all");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [ticketPreset, setTicketPreset] = useState<TicketPreset>("all");
   const [unitFilter, setUnitFilter] = useState<string>("all");
   const [residentFilter, setResidentFilter] = useState<string>("all");
   const [fromDate, setFromDate] = useState("");
@@ -60,6 +68,74 @@ export function TicketsInbox() {
   const [replyInternal, setReplyInternal] = useState(false);
   const [replySubmitting, setReplySubmitting] = useState(false);
   const [statusSubmitting, setStatusSubmitting] = useState(false);
+
+  const resetInboxFilters = useCallback(() => {
+    setTab("all");
+    setTicketPreset("all");
+    setSearch("");
+    setStatusFilter("all");
+    setUnitFilter("all");
+    setResidentFilter("all");
+    setFromDate("");
+    setToDate("");
+    setUrgentOnly(false);
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.removeItem("admin.ticketsInbox.filters");
+      } catch {
+        // ignore storage failures
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem("admin.ticketsInbox.filters");
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as {
+        search?: string;
+        statusFilter?: string;
+        tab?: TicketTab;
+        preset?: TicketPreset;
+      };
+      setSearch(String(parsed.search ?? ""));
+      setStatusFilter(String(parsed.statusFilter ?? "all"));
+      setTab(
+        parsed.tab === "services" ||
+          parsed.tab === "requests" ||
+          parsed.tab === "complaints"
+          ? parsed.tab
+          : "all",
+      );
+      setTicketPreset(
+        parsed.preset === "pending" ||
+          parsed.preset === "overdue" ||
+          parsed.preset === "closed"
+          ? parsed.preset
+          : "all",
+      );
+    } catch {
+      // ignore malformed local cache
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(
+        "admin.ticketsInbox.filters",
+        JSON.stringify({
+          search,
+          statusFilter,
+          tab,
+          preset: ticketPreset,
+        }),
+      );
+    } catch {
+      // ignore storage errors
+    }
+  }, [search, statusFilter, tab, ticketPreset]);
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -160,11 +236,29 @@ export function TicketsInbox() {
     const q = search.trim().toLowerCase();
     const fromTs = fromDate ? new Date(`${fromDate}T00:00:00`).getTime() : null;
     const toTs = toDate ? new Date(`${toDate}T23:59:59.999`).getTime() : null;
+    const now = Date.now();
+    const overdueThresholdMs = 24 * 60 * 60 * 1000;
     return rows.filter((r) => {
       if (tab === "services" && r.kind !== "SERVICE") return false;
       if (tab === "requests" && r.kind !== "REQUEST") return false;
       if (tab === "complaints" && r.kind !== "COMPLAINT") return false;
       if (statusFilter !== "all" && r.status !== statusFilter) return false;
+      if (ticketPreset === "pending" && !(r.status === "NEW" || r.status === "IN_PROGRESS")) {
+        return false;
+      }
+      if (
+        ticketPreset === "closed" &&
+        !(r.status === "RESOLVED" || r.status === "CLOSED" || r.status === "CANCELLED")
+      ) {
+        return false;
+      }
+      if (ticketPreset === "overdue") {
+        if (!(r.status === "NEW" || r.status === "IN_PROGRESS")) return false;
+        const createdTs = r.createdAt ? new Date(r.createdAt).getTime() : NaN;
+        if (!Number.isFinite(createdTs) || now - createdTs < overdueThresholdMs) {
+          return false;
+        }
+      }
       if (unitFilter !== "all" && String(r.unitId || "") !== unitFilter) return false;
       if (residentFilter !== "all" && String(r.residentId || "") !== residentFilter) return false;
       if (urgentOnly) {
@@ -183,7 +277,7 @@ export function TicketsInbox() {
       }
       return true;
     });
-  }, [rows, search, tab, statusFilter, unitFilter, residentFilter, fromDate, toDate, urgentOnly]);
+  }, [rows, search, tab, statusFilter, ticketPreset, unitFilter, residentFilter, fromDate, toDate, urgentOnly]);
 
   const loadTicketDetail = useCallback(async (row: any) => {
     const base = {
@@ -231,6 +325,40 @@ export function TicketsInbox() {
       setActive((prev: any) => (prev ? { ...prev, loading: false } : prev));
     }
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || rows.length === 0) return;
+
+    let parsed: PendingFocusEntity | null = null;
+    try {
+      const raw = window.sessionStorage.getItem("admin.focusEntity");
+      if (!raw) return;
+      parsed = JSON.parse(raw) as PendingFocusEntity;
+    } catch {
+      return;
+    }
+
+    const targetSection = String(parsed?.section ?? "").trim().toLowerCase();
+    const targetId = String(parsed?.entityId ?? "").trim();
+    const targetEntityType = String(parsed?.entityType ?? "").trim().toUpperCase();
+    if (!targetId || targetSection !== "tickets") return;
+
+    const targetRow = rows.find((row) => {
+      if (String(row.id) !== targetId) return false;
+      if (targetEntityType === "COMPLAINT") return row.kind === "COMPLAINT";
+      if (targetEntityType === "SERVICE_REQUEST") return row.kind === "SERVICE" || row.kind === "REQUEST";
+      return true;
+    });
+
+    if (!targetRow) return;
+
+    if (targetRow.kind === "COMPLAINT") setTab("complaints");
+    else if (targetRow.kind === "REQUEST") setTab("requests");
+    else if (targetRow.kind === "SERVICE") setTab("services");
+
+    window.sessionStorage.removeItem("admin.focusEntity");
+    void loadTicketDetail(targetRow);
+  }, [loadTicketDetail, rows]);
 
   const refreshActive = useCallback(async () => {
     if (!active) return;
@@ -337,6 +465,9 @@ export function TicketsInbox() {
           <RefreshCw className="w-4 h-4 mr-2" />
           {loading ? "Refreshing..." : "Refresh"}
         </Button>
+        <Button variant="outline" onClick={resetInboxFilters}>
+          Reset Filters
+        </Button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
@@ -361,6 +492,50 @@ export function TicketsInbox() {
           <TabsTrigger value="complaints">Complaints</TabsTrigger>
         </TabsList>
       </Tabs>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          size="sm"
+          variant={ticketPreset === "all" ? "default" : "outline"}
+          className={ticketPreset === "all" ? "bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white" : ""}
+          onClick={() => setTicketPreset("all")}
+        >
+          All
+        </Button>
+        <Button
+          size="sm"
+          variant={ticketPreset === "pending" ? "default" : "outline"}
+          className={ticketPreset === "pending" ? "bg-[#F59E0B] hover:bg-[#D97706] text-white" : ""}
+          onClick={() => {
+            setTicketPreset("pending");
+            setStatusFilter("all");
+          }}
+        >
+          Pending
+        </Button>
+        <Button
+          size="sm"
+          variant={ticketPreset === "overdue" ? "default" : "outline"}
+          className={ticketPreset === "overdue" ? "bg-[#DC2626] hover:bg-[#B91C1C] text-white" : ""}
+          onClick={() => {
+            setTicketPreset("overdue");
+            setStatusFilter("all");
+          }}
+        >
+          Overdue
+        </Button>
+        <Button
+          size="sm"
+          variant={ticketPreset === "closed" ? "default" : "outline"}
+          className={ticketPreset === "closed" ? "bg-[#10B981] hover:bg-[#059669] text-white" : ""}
+          onClick={() => {
+            setTicketPreset("closed");
+            setStatusFilter("all");
+          }}
+        >
+          Closed
+        </Button>
+      </div>
 
       <Card className="shadow-card rounded-xl overflow-hidden">
         <div className="p-4 border-b border-[#E5E7EB] grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">

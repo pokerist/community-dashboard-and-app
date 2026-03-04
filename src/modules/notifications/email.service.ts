@@ -97,10 +97,7 @@ export class EmailService {
     recipient: string,
     content: string,
   ) {
-    const fromEmail =
-      (process.env.RESEND_FROM_EMAIL ?? '').trim() ||
-      (process.env.FROM_EMAIL ?? '').trim() ||
-      'onboarding@resend.dev';
+    const fromEmail = this.resolveResendFromAddress();
 
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -135,5 +132,47 @@ export class EmailService {
     this.logger.log(
       `[RESEND] Email sent to ${recipient} | id=${String(parsed?.id ?? 'n/a')}`,
     );
+  }
+
+  private resolveResendFromAddress(): string {
+    const configuredFrom =
+      (process.env.RESEND_FROM_EMAIL ?? '').trim() ||
+      (process.env.FROM_EMAIL ?? '').trim();
+
+    if (!configuredFrom) {
+      throw new Error(
+        'RESEND_FROM_EMAIL is required when RESEND_API_KEY is set. Example: no-reply@hpd-lc.com',
+      );
+    }
+
+    const extracted = this.extractEmailAddress(configuredFrom);
+    if (!extracted) {
+      throw new Error(
+        `Invalid RESEND_FROM_EMAIL format: "${configuredFrom}". Use "no-reply@hpd-lc.com" or "Alkarma <no-reply@hpd-lc.com>"`,
+      );
+    }
+
+    if (extracted.toLowerCase().endsWith('@resend.dev')) {
+      throw new Error(
+        'RESEND_FROM_EMAIL cannot use resend.dev in production. Use a verified domain sender like no-reply@hpd-lc.com',
+      );
+    }
+
+    const fromName =
+      (process.env.RESEND_FROM_NAME ?? '').trim() ||
+      (process.env.FROM_NAME ?? '').trim();
+
+    if (fromName && !configuredFrom.includes('<')) {
+      return `${fromName} <${extracted}>`;
+    }
+
+    return configuredFrom;
+  }
+
+  private extractEmailAddress(input: string): string | null {
+    const bracketMatch = input.match(/<([^>]+)>/);
+    const candidate = (bracketMatch?.[1] ?? input).trim().toLowerCase();
+    const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(candidate);
+    return valid ? candidate : null;
   }
 }

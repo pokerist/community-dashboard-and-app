@@ -487,12 +487,22 @@ export class OwnersService {
       { timeout: 30000 },
     );
 
+    let credentialsEmailStatus: 'NOT_SENT' | 'SENT' | 'FAILED' = 'NOT_SENT';
+    let credentialsEmailError: string | null = null;
+
     if (result.userEmail && result.userName && result.randomPassword) {
-      await this.sendWelcomeEmail(
-        result.userEmail,
-        result.userName,
-        result.randomPassword,
-      );
+      try {
+        await this.sendWelcomeEmail(
+          result.userEmail,
+          result.userName,
+          result.randomPassword,
+        );
+        credentialsEmailStatus = 'SENT';
+      } catch (error: unknown) {
+        credentialsEmailStatus = 'FAILED';
+        credentialsEmailError =
+          error instanceof Error ? error.message : 'Failed to send welcome email';
+      }
     } else if (result.userEmail && result.userName) {
       try {
         const subject = `Alkarma Community - Unit ownership assignment updated`;
@@ -502,12 +512,20 @@ export class OwnersService {
         <p>You can sign in with your existing credentials.</p>
       `;
         await this.emailService.sendEmail(subject, result.userEmail, content);
-      } catch {
-        // best effort
+        credentialsEmailStatus = 'SENT';
+      } catch (error: unknown) {
+        credentialsEmailStatus = 'FAILED';
+        credentialsEmailError =
+          error instanceof Error ? error.message : 'Failed to send assignment update email';
       }
     }
 
-    return { message: 'Owner created successfully', ...result };
+    return {
+      message: 'Owner created successfully',
+      ...result,
+      credentialsEmailStatus,
+      credentialsEmailError,
+    };
   }
 
   async addUnitsToExistingOwner(

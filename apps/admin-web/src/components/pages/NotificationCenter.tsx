@@ -62,6 +62,7 @@ type NotificationRow = {
   audienceMeta?: any;
   messageEn: string;
   messageAr?: string | null;
+  payload?: Record<string, unknown> | null;
   sentAt?: string | null;
   createdAt?: string | null;
   logs: Array<{
@@ -181,6 +182,25 @@ function isCommunityUpdateType(type?: string | null): boolean {
   );
 }
 
+function mapNotificationRouteToSection(routeRaw?: string | null): string | null {
+  const route = String(routeRaw ?? "").trim().toLowerCase();
+  if (!route) return null;
+  if (route.startsWith("#")) {
+    const section = route.replace(/^#/, "").trim();
+    return section || null;
+  }
+  if (route.includes("gate-live")) return "gate-live";
+  if (route.includes("requests")) return "requests";
+  if (route.includes("services")) return "services";
+  if (route.includes("complaints")) return "complaints";
+  if (route.includes("tickets")) return "tickets";
+  if (route.includes("access") || route.includes("qr")) return "access";
+  if (route.includes("billing") || route.includes("payment") || route.includes("invoice")) return "billing";
+  if (route.includes("security")) return "security";
+  if (route.includes("notifications")) return "notifications";
+  return null;
+}
+
 export function NotificationCenter() {
   const [rows, setRows] = useState<NotificationRow[]>([]);
   const [residentOptions, setResidentOptions] = useState<Option[]>([]);
@@ -223,6 +243,7 @@ export function NotificationCenter() {
         audienceMeta: n.audienceMeta,
         messageEn: String(n.messageEn ?? ""),
         messageAr: n.messageAr ?? null,
+        payload: n.payload && typeof n.payload === "object" ? n.payload : null,
         sentAt: n.sentAt ?? null,
         createdAt: n.createdAt ?? null,
         logs: Array.isArray(n.logs)
@@ -532,6 +553,39 @@ export function NotificationCenter() {
 
   const failedLogsCount = (row: NotificationRow) =>
     row.logs.filter((l) => String(l.status).toUpperCase() === "FAILED").length;
+
+  const handleOpenTarget = (row: NotificationRow) => {
+    const payload = row.payload ?? {};
+    const webRoute = String((payload as any).webRoute ?? "").trim();
+    const route = String((payload as any).route ?? "").trim();
+    const section =
+      mapNotificationRouteToSection(webRoute) ||
+      mapNotificationRouteToSection(route);
+    if (!section) {
+      toast.error("No target route found for this notification");
+      return;
+    }
+
+    const entityId = String((payload as any).entityId ?? "").trim();
+    const entityType = String((payload as any).entityType ?? "").trim();
+    const serviceCategory = String((payload as any).serviceCategory ?? "").trim();
+    if (entityId) {
+      try {
+        window.sessionStorage.setItem(
+          "admin.focusEntity",
+          JSON.stringify({
+            section,
+            entityId,
+            entityType: entityType || null,
+            serviceCategory: serviceCategory || null,
+          }),
+        );
+      } catch {
+        // ignore storage errors
+      }
+    }
+    window.location.hash = `#${section}`;
+  };
 
   const providerBadgeMeta = useMemo(() => {
     const entries = [
@@ -1098,6 +1152,17 @@ export function NotificationCenter() {
                       <Button
                         variant="outline"
                         size="sm"
+                        onClick={() => handleOpenTarget(row)}
+                        disabled={
+                          !mapNotificationRouteToSection(String((row.payload as any)?.webRoute ?? "")) &&
+                          !mapNotificationRouteToSection(String((row.payload as any)?.route ?? ""))
+                        }
+                      >
+                        Open Target
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
                         disabled={failedCount === 0 || resendingId === row.id}
                         onClick={() => void handleResend(row)}
                       >
@@ -1131,7 +1196,7 @@ export function NotificationCenter() {
           </DialogHeader>
           {detailsRow ? (
             <div className="space-y-4">
-              <Card className="p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Card className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div>
                   <div className="text-xs text-[#64748B]">Title</div>
                   <div className="text-sm font-medium mt-1">{detailsRow.title}</div>
@@ -1143,6 +1208,36 @@ export function NotificationCenter() {
                 <div>
                   <div className="text-xs text-[#64748B]">Status</div>
                   <div className="mt-1"><Badge className={getStatusColorClass(detailsRow.status)}>{humanizeEnum(detailsRow.status)}</Badge></div>
+                </div>
+                <div className="space-y-2">
+                  <div>
+                    <div className="text-xs text-[#64748B]">Target Route</div>
+                    <div className="text-xs font-mono mt-1 break-all text-[#1E293B]">
+                      {String((detailsRow.payload as any)?.webRoute ?? "").trim() ||
+                        String((detailsRow.payload as any)?.route ?? "").trim() ||
+                        "—"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-[#64748B]">Entity</div>
+                    <div className="text-xs font-mono mt-1 break-all text-[#1E293B]">
+                      {String((detailsRow.payload as any)?.entityType ?? "").trim() || "—"}
+                      {String((detailsRow.payload as any)?.entityId ?? "").trim()
+                        ? ` • ${String((detailsRow.payload as any)?.entityId ?? "").trim()}`
+                        : ""}
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleOpenTarget(detailsRow)}
+                    disabled={
+                      !mapNotificationRouteToSection(String((detailsRow.payload as any)?.webRoute ?? "")) &&
+                      !mapNotificationRouteToSection(String((detailsRow.payload as any)?.route ?? ""))
+                    }
+                  >
+                    Open Target
+                  </Button>
                 </div>
               </Card>
               <Card className="p-4 grid grid-cols-1 lg:grid-cols-2 gap-4">

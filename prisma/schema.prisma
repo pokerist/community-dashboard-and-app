@@ -261,6 +261,13 @@ enum HouseholdRequestStatus {
   CANCELLED
 }
 
+enum ApprovalDeliveryStatus {
+  PENDING
+  SENT
+  FAILED
+  RETRYING
+}
+
 enum FamilyRelationType {
   SON_DAUGHTER
   MOTHER_FATHER
@@ -491,6 +498,7 @@ model User {
 
   // Access QRCodes
   qrCodesGenerated AccessQRCode[] @relation("generated_by")
+  qrGateOperations AccessQRCode[] @relation("gate_operator")
 
   // Bookings
   bookings Booking[]
@@ -902,6 +910,7 @@ model Service {
   id              String           @id @default(uuid())
   name            String
   category        ServiceCategory
+  displayOrder    Int              @default(0)
   iconName        String?
   iconTone        String           @default("auto")
   unitEligibility EligibilityType  @default(ALL)
@@ -1007,11 +1016,19 @@ model AccessQRCode {
   gates         String[]
   scans         Int          @default(0)
   status        AccessStatus @default(ACTIVE) // ACTIVE | EXPIRED | USED
+  checkedInAt   DateTime?
+  checkedOutAt  DateTime?
+  gateOperatorId String?
+  gateOperator  User?        @relation("gate_operator", fields: [gateOperatorId], references: [id])
+  overdueExitAt DateTime?
+  arrivalNotifiedAt DateTime?
   notes         String?
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
 
   @@index([createdAt])
+  @@index([unitId, status, createdAt])
+  @@index([checkedInAt, checkedOutAt])
 }
 
 model Lease {
@@ -1462,6 +1479,9 @@ model FamilyAccessRequest {
   featurePermissions       Json?
   reviewedById             String?
   reviewedAt               DateTime?
+  credentialsEmailStatus   ApprovalDeliveryStatus   @default(PENDING)
+  credentialsEmailSentAt   DateTime?
+  credentialsEmailError    String?
   rejectionReason          String?
   activatedUserId          String?
   createdAt                DateTime               @default(now())
@@ -1500,6 +1520,9 @@ model AuthorizedAccessRequest {
   activationInvoiceId   String?
   reviewedById          String?
   reviewedAt            DateTime?
+  credentialsEmailStatus ApprovalDeliveryStatus   @default(PENDING)
+  credentialsEmailSentAt DateTime?
+  credentialsEmailError  String?
   rejectionReason       String?
   activatedUserId       String?
   createdAt             DateTime               @default(now())

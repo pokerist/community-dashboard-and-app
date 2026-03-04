@@ -15,6 +15,7 @@ import { ApiOperation, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
 import { ServiceService } from './service.service';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
+import { ReorderServicesDto } from './dto/reorder-services.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
@@ -49,6 +50,7 @@ export class ServiceController {
   findAll(
     @Query('status') status?: string,
     @Query('urgent') urgent?: string,
+    @Query('category') category?: string,
   ) {
     let filter: boolean | undefined;
     let urgentFilter: boolean | undefined;
@@ -61,7 +63,18 @@ export class ServiceController {
     else if (urgent === 'false') urgentFilter = false;
     else urgentFilter = undefined;
 
-    return this.serviceService.findAll(filter, urgentFilter);
+    return this.serviceService.findAll(filter, urgentFilter, category);
+  }
+
+  @Patch('reorder')
+  @ApiOperation({
+    summary: 'Reorder service catalog items',
+    description:
+      'Saves ordered service IDs to displayOrder so app/dashboard can render predictable ordering.',
+  })
+  @Permissions('service.update')
+  reorder(@Body() dto: ReorderServicesDto) {
+    return this.serviceService.reorder(dto.ids);
   }
 
   // GET /services/:id (Admin: View details)

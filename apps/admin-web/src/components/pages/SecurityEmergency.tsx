@@ -319,7 +319,10 @@ export function SecurityEmergency() {
           <div className="flex flex-wrap gap-2">
             <Dialog open={isFireDialogOpen} onOpenChange={setIsFireDialogOpen}>
               <DialogTrigger asChild>
-                <Button variant="dangerSolid" className="rounded-lg gap-2">
+                <Button
+                  variant="dangerSolid"
+                  className="rounded-lg gap-2 bg-[#B91C1C] text-white hover:bg-[#991B1B]"
+                >
                   <Flame className="w-4 h-4" />
                   Trigger Fire Alarm
                 </Button>
@@ -357,6 +360,7 @@ export function SecurityEmergency() {
                   </Button>
                   <Button
                     variant="dangerSolid"
+                    className="bg-[#B91C1C] text-white hover:bg-[#991B1B]"
                     onClick={() => void handleTriggerFireEvacuation()}
                     disabled={isFireTriggering}
                   >

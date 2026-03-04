@@ -12,6 +12,7 @@ import {
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { Permissions } from '../auth/decorators/permissions.decorator';
 import { AccessControlService } from './access-control.service';
 import { CreateAccessQrCodeDto } from './dto/create-access-qr-code.dto';
 import { ListAccessQrCodesDto } from './dto/list-access-qr-codes.dto';
@@ -77,6 +78,48 @@ export class AccessControlController {
     @Req() req: any,
   ) {
     return this.accessControlService.markQrCodeUsed(req.user.id, id, dto);
+  }
+
+  @Get('gate-feed/live')
+  @ApiOperation({ summary: 'Live gate feed for security operations' })
+  @Permissions('admin.view')
+  gateFeed(
+    @Req() req: any,
+    @Query('unitNumber') unitNumber?: string,
+    @Query('type') type?: string,
+    @Query('status') status?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    return this.accessControlService.getGateFeed(req.user.id, {
+      unitNumber,
+      type,
+      status,
+      from,
+      to,
+    });
+  }
+
+  @Patch(':id/check-in')
+  @ApiOperation({ summary: 'Mark QR visitor as checked in at gate' })
+  @Permissions('admin.update')
+  checkIn(
+    @Param('id') id: string,
+    @Req() req: any,
+    @Body() body?: { gateName?: string; notes?: string },
+  ) {
+    return this.accessControlService.checkInQr(req.user.id, id, body);
+  }
+
+  @Patch(':id/check-out')
+  @ApiOperation({ summary: 'Mark QR visitor as checked out from gate' })
+  @Permissions('admin.update')
+  checkOut(
+    @Param('id') id: string,
+    @Req() req: any,
+    @Body() body?: { notes?: string },
+  ) {
+    return this.accessControlService.checkOutQr(req.user.id, id, body);
   }
 }
 

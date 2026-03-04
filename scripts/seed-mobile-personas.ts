@@ -9,9 +9,44 @@ import {
   UserStatusEnum,
 } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import * as fs from 'fs';
+import * as path from 'path';
+
+function loadDatabaseUrlFromEnvFiles() {
+  if (process.env.DATABASE_URL) return;
+  const candidates = ['.env.production', '.env.local', '.env'];
+  for (const fileName of candidates) {
+    const filePath = path.resolve(process.cwd(), fileName);
+    if (!fs.existsSync(filePath)) continue;
+    const content = fs.readFileSync(filePath, 'utf8');
+    for (const rawLine of content.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      const match = line.match(/^(?:export\s+)?DATABASE_URL\s*=\s*(.+)$/);
+      if (!match?.[1]) continue;
+      const value = match[1].trim().replace(/^['"]|['"]$/g, '');
+      if (!value) continue;
+      process.env.DATABASE_URL = value;
+      break;
+    }
+    if (process.env.DATABASE_URL) break;
+  }
+}
+
+loadDatabaseUrlFromEnvFiles();
 
 const prisma = new PrismaClient();
 const DEMO_PASSWORD = 'pass123';
+const LEGACY_DEMO_EMAILS = [
+  'owner.demo@test.com',
+  'tenant.demo@test.com',
+  'preowner.demo@test.com',
+  'family.demo@test.com',
+  'authorized.demo@test.com',
+  'contractor.demo@test.com',
+  'residentA@test.com',
+  'residentB@test.com',
+];
 
 type DemoUserConfig = {
   email: string;
@@ -482,50 +517,61 @@ async function cleanupAssistantDemoArtifacts() {
   });
 }
 
+async function deactivateLegacyDemoUsers() {
+  await prisma.user.updateMany({
+    where: {
+      email: { in: LEGACY_DEMO_EMAILS },
+    },
+    data: {
+      userStatus: UserStatusEnum.DISABLED,
+    },
+  });
+}
+
 async function run() {
   console.log('Seeding mobile demo personas...');
 
   const ownerDemo = await ensureDemoUser({
-    email: 'owner.demo@test.com',
-    nameEN: 'Owner Demo',
+    email: 'ahmed.hassan.owner@alkarma.demo',
+    nameEN: 'Ahmed Hassan',
     phone: '+201100000001',
     nationalId: '29901010000001',
     createResident: true,
     createOwner: true,
   });
   const tenantDemo = await ensureDemoUser({
-    email: 'tenant.demo@test.com',
-    nameEN: 'Tenant Demo',
+    email: 'mostafa.ali.tenant@alkarma.demo',
+    nameEN: 'Mostafa Ali',
     phone: '+201100000002',
     nationalId: '29901010000002',
     createResident: true,
     createTenant: true,
   });
   const preOwnerDemo = await ensureDemoUser({
-    email: 'preowner.demo@test.com',
-    nameEN: 'Pre-Delivery Owner Demo',
+    email: 'karim.fathy.predelivery@alkarma.demo',
+    nameEN: 'Karim Fathy',
     phone: '+201100000003',
     nationalId: '29901010000003',
     createResident: true,
     createOwner: true,
   });
   const familyDemo = await ensureDemoUser({
-    email: 'family.demo@test.com',
-    nameEN: 'Family Member Demo',
+    email: 'nour.hassan.family@alkarma.demo',
+    nameEN: 'Nour Hassan',
     phone: '+201100000004',
     nationalId: '29901010000004',
     createResident: true,
   });
   const authorizedDemo = await ensureDemoUser({
-    email: 'authorized.demo@test.com',
-    nameEN: 'Authorized Demo',
+    email: 'youssef.mahmoud.authorized@alkarma.demo',
+    nameEN: 'Youssef Mahmoud',
     phone: '+201100000005',
     nationalId: '29901010000005',
     createResident: true,
   });
   const contractorDemo = await ensureDemoUser({
-    email: 'contractor.demo@test.com',
-    nameEN: 'Contractor Demo',
+    email: 'mohamed.saber.contractor@alkarma.demo',
+    nameEN: 'Mohamed Saber',
     phone: '+201100000006',
     nationalId: '29901010000006',
     createResident: true,
@@ -698,14 +744,15 @@ async function run() {
   });
 
   await cleanupAssistantDemoArtifacts();
+  await deactivateLegacyDemoUsers();
 
   console.log('✅ Mobile demo personas ready');
-  console.log('Owner: owner.demo@test.com / pass123');
-  console.log('Tenant: tenant.demo@test.com / pass123');
-  console.log('Pre-Delivery Owner: preowner.demo@test.com / pass123');
-  console.log('Family Member: family.demo@test.com / pass123');
-  console.log('Authorized (Delegate): authorized.demo@test.com / pass123');
-  console.log('Contractor: contractor.demo@test.com / pass123');
+  console.log('Owner: ahmed.hassan.owner@alkarma.demo / pass123');
+  console.log('Tenant: mostafa.ali.tenant@alkarma.demo / pass123');
+  console.log('Pre-Delivery Owner: karim.fathy.predelivery@alkarma.demo / pass123');
+  console.log('Family Member: nour.hassan.family@alkarma.demo / pass123');
+  console.log('Authorized (Delegate): youssef.mahmoud.authorized@alkarma.demo / pass123');
+  console.log('Contractor: mohamed.saber.contractor@alkarma.demo / pass123');
 }
 
 run()

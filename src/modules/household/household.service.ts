@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import {
+  ApprovalDeliveryStatus,
   AuthorizedFeeMode,
   FamilyRelationType,
   HouseholdRequestStatus,
@@ -160,8 +161,10 @@ export class HouseholdService {
     password: string;
     accountType: 'family' | 'authorized';
     requiresPayment?: boolean;
-  }) {
-    if (!params.email) return;
+  }): Promise<{ status: ApprovalDeliveryStatus; sentAt: Date | null; error: string | null }> {
+    if (!params.email) {
+      return { status: ApprovalDeliveryStatus.PENDING, sentAt: null, error: 'No recipient email provided' };
+    }
     const loginUrl = `${process.env.FRONTEND_URL || 'https://app.alkarma.com'}/login`;
     const typeLabel = params.accountType === 'family' ? 'Family Member' : 'Authorized User';
     const paymentHint = params.requiresPayment
@@ -180,8 +183,11 @@ export class HouseholdService {
     `;
     try {
       await this.emailService.sendEmail(subject, params.email, html);
-    } catch {
-      // Email failures must not break approval transaction.
+      return { status: ApprovalDeliveryStatus.SENT, sentAt: new Date(), error: null };
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : 'Credentials email delivery failed';
+      return { status: ApprovalDeliveryStatus.FAILED, sentAt: null, error: message };
     }
   }
 
@@ -531,11 +537,20 @@ export class HouseholdService {
       return { updated, password, email: createdUser.email, fullName: createdUser.nameEN ?? current.fullName };
     });
 
-    await this.sendCredentialsEmail({
+    const delivery = await this.sendCredentialsEmail({
       email: provisioned.email,
       fullName: provisioned.fullName,
       password: provisioned.password,
       accountType: 'family',
+    });
+
+    await this.prisma.familyAccessRequest.update({
+      where: { id: provisioned.updated.id },
+      data: {
+        credentialsEmailStatus: delivery.status,
+        credentialsEmailSentAt: delivery.sentAt,
+        credentialsEmailError: delivery.error,
+      },
     });
 
     return provisioned.updated;
@@ -667,12 +682,21 @@ export class HouseholdService {
       };
     });
 
-    await this.sendCredentialsEmail({
+    const delivery = await this.sendCredentialsEmail({
       email: provisioned.email,
       fullName: provisioned.fullName,
       password: provisioned.password,
       accountType: 'authorized',
       requiresPayment: provisioned.requiresFee,
+    });
+
+    await this.prisma.authorizedAccessRequest.update({
+      where: { id: provisioned.updated.id },
+      data: {
+        credentialsEmailStatus: delivery.status,
+        credentialsEmailSentAt: delivery.sentAt,
+        credentialsEmailError: delivery.error,
+      },
     });
 
     return provisioned.updated;

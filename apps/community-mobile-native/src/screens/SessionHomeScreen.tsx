@@ -49,6 +49,8 @@ type SessionHomeScreenProps = {
   onRefreshSession: () => Promise<void>;
   onLogout: () => Promise<void>;
   onProfileBootstrapUpdated?: (profile: AuthBootstrapProfile) => void;
+  profileAvatarPreviewUri?: string | null;
+  onProfileAvatarPreviewUriChange?: (uri: string | null) => void;
 };
 
 type CapabilityChip = {
@@ -135,6 +137,8 @@ export function SessionHomeScreen({
   onRefreshSession: _onRefreshSession,
   onLogout,
   onProfileBootstrapUpdated,
+  profileAvatarPreviewUri = null,
+  onProfileAvatarPreviewUriChange,
 }: SessionHomeScreenProps) {
   const insets = useSafeAreaInsets();
   const { brand } = useBranding();
@@ -206,12 +210,13 @@ export function SessionHomeScreen({
   const initial = String(displayName).trim().charAt(0).toUpperCase() || 'R';
   const capabilityChips = useMemo(() => buildCapabilityChips(profile), [profile]);
   const vehicles = useMemo(() => profile?.vehicles ?? [], [profile?.vehicles]);
-  const avatarImageUri = profile?.user?.profilePhoto?.id
+  const serverAvatarImageUri = profile?.user?.profilePhoto?.id
     ? `${API_BASE_URL}/files/public/profile-photo/${profile.user.profilePhoto.id}?t=${profilePhotoVersion}`
     : null;
+  const avatarImageUri = profileAvatarPreviewUri ?? serverAvatarImageUri;
   const editAvatarImageUri = editProfilePhotoId
     ? `${API_BASE_URL}/files/public/profile-photo/${editProfilePhotoId}?t=${profilePhotoVersion}`
-    : localProfilePreviewUri;
+    : localProfilePreviewUri ?? profileAvatarPreviewUri;
 
   const handleSaveProfile = async () => {
     const normalizedEmail = editEmail.trim();
@@ -243,7 +248,6 @@ export function SessionHomeScreen({
         setProfile(updated);
         onProfileBootstrapUpdated?.(updated);
         setProfilePhotoVersion((prev) => prev + 1);
-        setLocalProfilePreviewUri(null);
         profileUpdated = true;
       }
 
@@ -277,6 +281,7 @@ export function SessionHomeScreen({
       if (!uploaded) return;
       if (uploaded.localUri) {
         setLocalProfilePreviewUri(uploaded.localUri);
+        onProfileAvatarPreviewUriChange?.(uploaded.localUri);
       }
       setEditProfilePhotoId(uploaded.id);
       setProfilePhotoVersion((prev) => prev + 1);
@@ -287,7 +292,7 @@ export function SessionHomeScreen({
     } finally {
       setIsUploadingProfilePhoto(false);
     }
-  }, [session.accessToken, toast]);
+  }, [onProfileAvatarPreviewUriChange, session.accessToken, toast]);
 
   const handleToggleTwoFactor = async (enabled: boolean) => {
     if (!profile || isSavingSecurity) return;
@@ -452,12 +457,7 @@ export function SessionHomeScreen({
             <View style={styles.avatarWrap}>
               {avatarImageUri ? (
                 <Image
-                  source={{
-                    uri: avatarImageUri,
-                    headers: {
-                      Authorization: `Bearer ${session.accessToken}`,
-                    },
-                  }}
+                  source={{ uri: avatarImageUri }}
                   style={styles.avatarImage}
                   resizeMode="cover"
                 />

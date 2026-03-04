@@ -22,6 +22,31 @@ import {
   UnitType,
   ViolationStatus,
 } from '@prisma/client';
+import * as fs from 'fs';
+import * as path from 'path';
+
+function loadDatabaseUrlFromEnvFiles() {
+  if (process.env.DATABASE_URL) return;
+  const candidates = ['.env.production', '.env.local', '.env'];
+  for (const fileName of candidates) {
+    const filePath = path.resolve(process.cwd(), fileName);
+    if (!fs.existsSync(filePath)) continue;
+    const content = fs.readFileSync(filePath, 'utf8');
+    for (const rawLine of content.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      const match = line.match(/^(?:export\s+)?DATABASE_URL\s*=\s*(.+)$/);
+      if (!match?.[1]) continue;
+      const value = match[1].trim().replace(/^['"]|['"]$/g, '');
+      if (!value) continue;
+      process.env.DATABASE_URL = value;
+      break;
+    }
+    if (process.env.DATABASE_URL) break;
+  }
+}
+
+loadDatabaseUrlFromEnvFiles();
 
 const prisma = new PrismaClient();
 let s = 20260225;
@@ -36,14 +61,12 @@ const seq = (p: string, i: number) => `${p}-${String(i).padStart(5, '0')}`;
 
 const DEMO_EMAILS = [
   'test@admin.com',
-  'owner.demo@test.com',
-  'tenant.demo@test.com',
-  'preowner.demo@test.com',
-  'family.demo@test.com',
-  'authorized.demo@test.com',
-  'contractor.demo@test.com',
-  'residentA@test.com',
-  'residentB@test.com',
+  'ahmed.hassan.owner@alkarma.demo',
+  'mostafa.ali.tenant@alkarma.demo',
+  'karim.fathy.predelivery@alkarma.demo',
+  'nour.hassan.family@alkarma.demo',
+  'youssef.mahmoud.authorized@alkarma.demo',
+  'mohamed.saber.contractor@alkarma.demo',
 ];
 
 async function ensureUnits() {
@@ -156,7 +179,7 @@ async function seedLoad() {
       unitAccesses: { where: { status: AccessStatus.ACTIVE }, select: { unitId: true } },
     },
   });
-  if (!users.some((u) => u.email === 'owner.demo@test.com')) throw new Error('Run npm run seed:mobile-personas first');
+  if (!users.some((u) => u.email === 'ahmed.hassan.owner@alkarma.demo')) throw new Error('Run npm run seed:mobile-personas first');
   const residents = users.filter((u) => u.resident && u.unitAccesses.length > 0);
   const admin = users.find((u) => u.email === 'test@admin.com') ?? users[0];
   const services = await prisma.service.findMany({ where: { status: true }, select: { id: true, name: true, category: true } });

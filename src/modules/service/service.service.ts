@@ -18,9 +18,17 @@ export class ServiceService {
    * Admin: Creates a new Service Type (e.g., Furniture Permit).
    */
   async create(createServiceDto: CreateServiceDto) {
+    let displayOrder = createServiceDto.displayOrder;
+    if (displayOrder === undefined || displayOrder === null) {
+      const maxOrder = await this.prisma.service.aggregate({
+        _max: { displayOrder: true },
+      });
+      displayOrder = (maxOrder._max.displayOrder ?? 0) + 1;
+    }
     return this.prisma.service.create({
       data: {
         ...createServiceDto,
+        displayOrder,
         // Ensure startingPrice is stored as Decimal
         startingPrice: createServiceDto.startingPrice
           ? parseFloat(createServiceDto.startingPrice)
@@ -36,10 +44,12 @@ export class ServiceService {
   async findAll(
     status: boolean | undefined,
     isUrgent: boolean | undefined = undefined,
+    category?: string,
   ) {
     const whereCondition: Record<string, unknown> = {};
     if (status !== undefined) whereCondition.status = status;
     if (isUrgent !== undefined) whereCondition.isUrgent = isUrgent;
+    if (category) whereCondition.category = String(category).toUpperCase();
 
     return this.prisma.service.findMany({
       where: whereCondition,
@@ -49,7 +59,7 @@ export class ServiceService {
           orderBy: { order: 'asc' },
         },
       },
-      orderBy: { name: 'asc' },
+      orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }],
     });
   }
 
@@ -109,5 +119,31 @@ export class ServiceService {
     }
 
     return this.prisma.service.delete({ where: { id } });
+  }
+
+  async reorder(ids: string[]) {
+    const uniqueIds = Array.from(new Set(ids));
+    if (uniqueIds.length !== ids.length) {
+      throw new BadRequestException('Duplicate IDs are not allowed in reorder payload.');
+    }
+
+    const existing = await this.prisma.service.findMany({
+      where: { id: { in: uniqueIds } },
+      select: { id: true },
+    });
+    if (existing.length !== uniqueIds.length) {
+      throw new NotFoundException('One or more service IDs do not exist.');
+    }
+
+    await this.prisma.$transaction(
+      uniqueIds.map((id, index) =>
+        this.prisma.service.update({
+          where: { id },
+          data: { displayOrder: index + 1 },
+        }),
+      ),
+    );
+
+    return { success: true, updated: uniqueIds.length };
   }
 }

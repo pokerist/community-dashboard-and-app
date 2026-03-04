@@ -66,6 +66,8 @@ export function useAuthSession(): AuthHookResult {
   const backgroundEnteredAtRef = useRef<number | null>(null);
   const biometricPromptInFlightRef = useRef(false);
   const lastBiometricPromptAtRef = useRef(0);
+  const hardAuthFailureCountRef = useRef(0);
+  const lastHardAuthFailureAtRef = useRef(0);
 
   useEffect(() => {
     sessionRef.current = session;
@@ -301,8 +303,31 @@ export function useAuthSession(): AuthHookResult {
 
     try {
       await performRefresh(current);
+      hardAuthFailureCountRef.current = 0;
+      lastHardAuthFailureAtRef.current = 0;
     } catch (error) {
       setRefreshError(extractApiErrorMessage(error));
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        if (status === 401 || status === 403) {
+          const now = Date.now();
+          if (now - lastHardAuthFailureAtRef.current > 60_000) {
+            hardAuthFailureCountRef.current = 0;
+          }
+          lastHardAuthFailureAtRef.current = now;
+          hardAuthFailureCountRef.current += 1;
+          if (hardAuthFailureCountRef.current >= 2) {
+            await clearAuthSession();
+            setSession(null);
+            sessionRef.current = null;
+            setPendingTwoFactorChallenge(null);
+            setErrorMessage('Session expired. Please sign in again.');
+            setRefreshError('Session expired. Please sign in again.');
+            hardAuthFailureCountRef.current = 0;
+            lastHardAuthFailureAtRef.current = 0;
+          }
+        }
+      }
       throw error;
     } finally {
       setIsRefreshing(false);
@@ -386,8 +411,22 @@ export function useAuthSession(): AuthHookResult {
         }
       },
       onSessionExpired: async () => {
-        // Avoid aggressive biometric loops from background API retries.
-        await signOut(null);
+        // Keep transient 401 retries non-blocking, but force logout on repeated hard auth failures.
+        const now = Date.now();
+        if (now - lastHardAuthFailureAtRef.current > 60_000) {
+          hardAuthFailureCountRef.current = 0;
+        }
+        lastHardAuthFailureAtRef.current = now;
+        hardAuthFailureCountRef.current += 1;
+
+        if (hardAuthFailureCountRef.current >= 3) {
+          await signOut('Session expired. Please sign in again.');
+          hardAuthFailureCountRef.current = 0;
+          lastHardAuthFailureAtRef.current = 0;
+          return;
+        }
+
+        setRefreshError('Session needs refresh. Please retry once.');
       },
     });
 
@@ -397,19 +436,19 @@ export function useAuthSession(): AuthHookResult {
   }, [performRefresh, signOut]);
 
   useEffect(() => {
-    const IDLE_BIOMETRIC_THRESHOLD_MS = 15 * 60 * 1000;
-    const BIOMETRIC_COOLDOWN_MS = 3 * 60 * 1000;
+    const IDLE_BIOMETRIC_THRESHOLD_MS = 20 * 60 * 1000;
+    const BIOMETRIC_COOLDOWN_MS = 10 * 60 * 1000;
 
     const sub = AppState.addEventListener('change', async (nextState) => {
       const prev = appStateRef.current;
       appStateRef.current = nextState;
 
-      if (nextState === 'background' || nextState === 'inactive') {
+      if (nextState === 'background') {
         backgroundEnteredAtRef.current = Date.now();
       }
 
       if (
-        (prev === 'background' || prev === 'inactive') &&
+        prev === 'background' &&
         nextState === 'active'
       ) {
         const current = sessionRef.current;
@@ -437,11 +476,11 @@ export function useAuthSession(): AuthHookResult {
               disableDeviceFallback: false,
             });
             if (!biometricResult.success) {
-              await signOut(null);
+              setRefreshError('App unlock was cancelled.');
               return;
             }
           } catch {
-            await signOut(null);
+            setRefreshError('Failed to unlock app session.');
             return;
           } finally {
             biometricPromptInFlightRef.current = false;
