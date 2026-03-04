@@ -519,6 +519,10 @@ fi
 if [[ "${RUN_PROFESSIONAL_DEMO_SEED:-true}" == "true" ]]; then
   note "Seeding professional demo dataset (fresh reset + Egyptian personas)"
   source_env_file "$ROOT_ENV_PROD"
+  if [[ "${NODE_ENV:-}" == "production" && "${ALLOW_DEMO_RESET:-false}" != "true" ]]; then
+    echo "ERROR: Refusing demo reset on NODE_ENV=production without ALLOW_DEMO_RESET=true" >&2
+    exit 1
+  fi
   npm run seed:mobile-personas
   npm run seed:professional-demo
 fi

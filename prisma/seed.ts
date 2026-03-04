@@ -30,6 +30,10 @@ const PERMISSIONS = [
   'resident.create',
   'resident.update',
   'resident.delete',
+  'resident.view_full_profile',
+  'resident.update_full_profile',
+  'resident.view_documents',
+  'resident.view_household_tree',
 
   // Owners
   'owner.create',
@@ -61,6 +65,7 @@ const PERMISSIONS = [
   'unit.view_assigned_residents',
   'unit.update_status',
   'unit.view_leases',
+  'unit.transfer_ownership',
 
   // Projects
   'project.view',
@@ -177,6 +182,10 @@ const ROLES = {
     'resident.view',
     'resident.create',
     'resident.update',
+    'resident.view_full_profile',
+    'resident.update_full_profile',
+    'resident.view_documents',
+    'resident.view_household_tree',
 
     'owner.create',
     'owner.view',
@@ -195,6 +204,7 @@ const ROLES = {
     'unit.view_assigned_residents',
     'unit.update_status',
     'unit.view_leases',
+    'unit.transfer_ownership',
 
     'project.view',
     'project.manage',

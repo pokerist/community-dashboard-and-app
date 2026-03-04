@@ -896,7 +896,7 @@ export function SystemSettings() {
   }, [draft.offers.banners]);
 
   const settingsTabTriggerClass =
-    "gap-2 border border-transparent text-[#475569] data-[state=active]:border-[#0F172A] data-[state=active]:bg-[#0F172A] data-[state=active]:text-white data-[state=active]:shadow-sm";
+    "gap-2 border border-transparent text-[#475569] data-[state=active]:border-[#0F172A] data-[state=active]:bg-[#0F172A] data-[state=active]:text-white data-[state=active]:shadow-sm data-[state=active]:font-semibold data-[state=active]:after:bg-white data-[state=active]:after:h-[3px]";
 
   return (
     <div className="space-y-6">

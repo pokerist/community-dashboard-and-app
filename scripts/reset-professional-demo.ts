@@ -20,6 +20,7 @@ import {
 } from '@prisma/client';
 import * as fs from 'fs';
 import * as path from 'path';
+import { execSync } from 'child_process';
 
 function loadDatabaseUrlFromEnvFiles() {
   if (process.env.DATABASE_URL) return;
@@ -303,7 +304,7 @@ async function seedDiscoverAndHelp() {
 }
 
 async function seedOperationalDataset() {
-  const users = await prisma.user.findMany({
+  let users = await prisma.user.findMany({
     where: { email: { in: DEMO_EMAILS } },
     select: {
       id: true,
@@ -319,9 +320,32 @@ async function seedOperationalDataset() {
   const admin = users.find((row) => row.email === 'test@admin.com');
   if (!admin) throw new Error('Missing admin demo account test@admin.com');
 
-  const residentUsers = users.filter((row) => row.resident && row.unitAccesses.length > 0);
+  let residentUsers = users.filter((row) => row.resident && row.unitAccesses.length > 0);
   if (residentUsers.length === 0) {
-    throw new Error('No resident demo users found. Run npm run seed:mobile-personas first.');
+    console.log('No resident demo users found. Bootstrapping mobile personas...');
+    execSync('npm run seed:mobile-personas', {
+      stdio: 'inherit',
+      cwd: process.cwd(),
+      env: process.env,
+    });
+
+    users = await prisma.user.findMany({
+      where: { email: { in: DEMO_EMAILS } },
+      select: {
+        id: true,
+        email: true,
+        resident: { select: { id: true } },
+        unitAccesses: {
+          where: { status: AccessStatus.ACTIVE },
+          select: { unitId: true, role: true },
+        },
+      },
+    });
+
+    residentUsers = users.filter((row) => row.resident && row.unitAccesses.length > 0);
+    if (residentUsers.length === 0) {
+      throw new Error('No resident demo users found after auto-seeding mobile personas.');
+    }
   }
 
   const serviceCatalog = await prisma.service.findMany({ where: { status: true } });

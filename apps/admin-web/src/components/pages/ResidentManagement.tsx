@@ -25,6 +25,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Search, Plus, Trash2, Ban, User } from "lucide-react";
 import { Avatar, AvatarFallback } from "../ui/avatar";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../ui/sheet";
 import apiClient from "../../lib/api-client";
 import {
   errorMessage,
@@ -34,6 +35,8 @@ import {
   maskNationalId,
   toInitials,
 } from "../../lib/live-data";
+import { ResidentDetailsPanel } from "./ResidentDetailsPanel";
+import type { ResidentOverview } from "./resident-360.types";
 
 type ResidentRow = {
   id: string;
@@ -145,8 +148,12 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
   const [isCreatingResident, setIsCreatingResident] = useState(false);
   const [isCreatingOwner, setIsCreatingOwner] = useState(false);
   const [rows, setRows] = useState<ResidentRow[]>([]);
+  const [residentOptions, setResidentOptions] = useState<Array<{ id: string; label: string }>>([]);
   const [unitOptions, setUnitOptions] = useState<UnitOption[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [selectedResidentId, setSelectedResidentId] = useState<string | null>(null);
+  const [selectedOverview, setSelectedOverview] = useState<ResidentOverview | null>(null);
+  const [isOverviewLoading, setIsOverviewLoading] = useState(false);
   const [createResidentForm, setCreateResidentForm] = useState<CreateResidentForm>(
     defaultCreateResidentForm,
   );
@@ -193,6 +200,15 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
       });
 
       setRows(mapped);
+      setResidentOptions(
+        users.map((user: any) => ({
+          id: String(user.id),
+          label:
+            [user.nameEN, user.email, user.phone]
+              .filter(Boolean)
+              .join(" • ") || String(user.id),
+        })),
+      );
       const rawUnits = Array.isArray(unitsResponse.data?.data)
         ? unitsResponse.data.data
         : Array.isArray(unitsResponse.data)
@@ -217,6 +233,33 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
       setIsLoading(false);
     }
   }, []);
+
+  const loadResidentOverview = useCallback(async (userId: string) => {
+    setSelectedResidentId(userId);
+    setIsOverviewLoading(true);
+    try {
+      const response = await apiClient.get(`/admin/users/residents/${userId}/overview`);
+      setSelectedOverview(response.data as ResidentOverview);
+    } catch (error) {
+      toast.error("Failed to load resident details", { description: errorMessage(error) });
+      setSelectedOverview(null);
+    } finally {
+      setIsOverviewLoading(false);
+    }
+  }, []);
+
+  const closeResidentOverview = () => {
+    setSelectedResidentId(null);
+    setSelectedOverview(null);
+    setIsOverviewLoading(false);
+  };
+
+  const refreshResidentOverview = useCallback(async () => {
+    await loadResidents();
+    if (selectedResidentId) {
+      await loadResidentOverview(selectedResidentId);
+    }
+  }, [loadResidents, loadResidentOverview, selectedResidentId]);
 
   useEffect(() => {
     void loadResidents();
@@ -1093,6 +1136,14 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
                       </Button>
                     ) : null}
                     <Button
+                      variant="outline"
+                      size="sm"
+                      className="!text-[#0F172A] !border-[#CBD5E1] !bg-white hover:!bg-[#F8FAFC]"
+                      onClick={() => void loadResidentOverview(resident.id)}
+                    >
+                      Open 360
+                    </Button>
+                    <Button
                       size="sm"
                       className="!bg-[#7F1D1D] hover:!bg-[#7F1D1D]/90 !text-white"
                       onClick={() => void handleHardDeleteResident(resident.id, resident.name)}
@@ -1114,6 +1165,35 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
           </TableBody>
         </Table>
       </Card>
+
+      <Sheet open={!!selectedResidentId} onOpenChange={(open) => (!open ? closeResidentOverview() : undefined)}>
+        <SheetContent side="right" className="w-[92vw] sm:max-w-[980px] overflow-y-auto">
+          <SheetHeader>
+            <SheetTitle>Resident 360</SheetTitle>
+            <SheetDescription>
+              Full resident profile, units, ownership records, household tree, and documents.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="mt-4">
+            {isOverviewLoading ? (
+              <Card className="p-6 rounded-xl">
+                <p className="text-sm text-[#64748B]">Loading resident details...</p>
+              </Card>
+            ) : selectedOverview ? (
+              <ResidentDetailsPanel
+                overview={selectedOverview}
+                unitOptions={unitOptions}
+                residentOptions={residentOptions}
+                onRefresh={refreshResidentOverview}
+              />
+            ) : (
+              <Card className="p-6 rounded-xl">
+                <p className="text-sm text-[#64748B]">No resident details loaded.</p>
+              </Card>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

@@ -12,6 +12,9 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { CreateResidentDto } from './dto/create-resident.dto';
 import { UpdateResidentDto } from './dto/update-resident.dto';
+import { UpdateResidentProfileAdminDto } from './dto/update-resident-profile-admin.dto';
+import { AssignResidentUnitDto } from './dto/assign-resident-unit.dto';
+import { TransferOwnershipDto } from './dto/transfer-ownership.dto';
 import { CreateOwnerDto } from './dto/create-owner.dto';
 import { UpdateOwnerDto } from './dto/update-owner.dto';
 import { CreateTenantDto } from './dto/create-tenant.dto';
@@ -865,6 +868,874 @@ export class UsersService {
     });
 
     return resident;
+  }
+
+  async getResidentOverview(userId: string) {
+    const resident = await this.prisma.resident.findUnique({
+      where: { userId },
+      include: {
+        user: {
+          include: {
+            roles: { include: { role: true } },
+            unitAccesses: {
+              where: { status: 'ACTIVE' },
+              include: {
+                unit: {
+                  select: {
+                    id: true,
+                    projectName: true,
+                    block: true,
+                    unitNumber: true,
+                    status: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        residentUnits: {
+          include: {
+            unit: {
+              select: {
+                id: true,
+                projectName: true,
+                block: true,
+                unitNumber: true,
+                status: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!resident) {
+      throw new NotFoundException(`Resident profile not found for user ${userId}`);
+    }
+
+    const residentUnitIds = Array.from(
+      new Set(
+        resident.residentUnits
+          .map((row) => row.unitId)
+          .concat(resident.user.unitAccesses.map((row) => row.unitId)),
+      ),
+    );
+
+    const contracts = residentUnitIds.length
+      ? await this.prisma.ownerUnitContract.findMany({
+          where: {
+            unitId: { in: residentUnitIds },
+          },
+          include: {
+            unit: {
+              select: {
+                id: true,
+                projectName: true,
+                block: true,
+                unitNumber: true,
+                status: true,
+              },
+            },
+            ownerUser: {
+              select: {
+                id: true,
+                nameEN: true,
+                email: true,
+                phone: true,
+              },
+            },
+            contractFile: {
+              select: {
+                id: true,
+                name: true,
+                mimeType: true,
+                category: true,
+                createdAt: true,
+              },
+            },
+            installments: {
+              orderBy: { sequence: 'asc' },
+              include: {
+                referenceFile: {
+                  select: {
+                    id: true,
+                    name: true,
+                    mimeType: true,
+                    category: true,
+                    createdAt: true,
+                  },
+                },
+              },
+            },
+          },
+          orderBy: [{ createdAt: 'desc' }],
+        })
+      : [];
+
+    const [householdTree, documents] = await Promise.all([
+      this.getResidentHouseholdTree(userId),
+      this.getResidentDocuments(userId),
+    ]);
+
+    return {
+      resident: {
+        id: resident.id,
+        nationalId: resident.nationalId,
+        dateOfBirth: resident.dateOfBirth,
+        user: resident.user,
+      },
+      units: {
+        residentUnits: resident.residentUnits,
+        unitAccesses: resident.user.unitAccesses,
+      },
+      ownership: contracts,
+      household: householdTree,
+      documents,
+    };
+  }
+
+  async updateResidentFullProfile(
+    userId: string,
+    data: UpdateResidentProfileAdminDto,
+  ) {
+    const resident = await this.prisma.resident.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+    if (!resident) {
+      throw new NotFoundException(`Resident profile not found for user ${userId}`);
+    }
+
+    const { dateOfBirth, nationalId, ...userFields } = data;
+    await this.prisma.$transaction(async (tx) => {
+      if (Object.keys(userFields).length > 0) {
+        await tx.user.update({
+          where: { id: userId },
+          data: userFields,
+        });
+      }
+      if (dateOfBirth !== undefined || nationalId !== undefined) {
+        await tx.resident.update({
+          where: { userId },
+          data: {
+            ...(dateOfBirth !== undefined
+              ? { dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null }
+              : {}),
+            ...(nationalId !== undefined ? { nationalId: nationalId || null } : {}),
+          },
+        });
+      }
+    });
+
+    return this.getResidentOverview(userId);
+  }
+
+  async assignUnitToResidentUser(userId: string, dto: AssignResidentUnitDto) {
+    const resident = await this.prisma.resident.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+    if (!resident) {
+      throw new NotFoundException(`Resident profile not found for user ${userId}`);
+    }
+
+    const unit = await this.prisma.unit.findUnique({
+      where: { id: dto.unitId },
+      select: { id: true, status: true },
+    });
+    if (!unit) {
+      throw new NotFoundException(`Unit with ID ${dto.unitId} not found`);
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const residentUnit = await tx.residentUnit.upsert({
+        where: {
+          residentId_unitId: {
+            residentId: resident.id,
+            unitId: dto.unitId,
+          },
+        },
+        update: {
+          isPrimary: dto.role === 'OWNER',
+        },
+        create: {
+          residentId: resident.id,
+          unitId: dto.unitId,
+          isPrimary: dto.role === 'OWNER',
+        },
+        include: { unit: true },
+      });
+
+      const now = new Date();
+      const existingAccess = await tx.unitAccess.findFirst({
+        where: {
+          unitId: dto.unitId,
+          userId,
+          role: dto.role,
+        },
+        select: { id: true },
+      });
+      if (existingAccess) {
+        await tx.unitAccess.update({
+          where: { id: existingAccess.id },
+          data: {
+            status: 'ACTIVE',
+            startsAt: now,
+            endsAt: null,
+            source: 'ADMIN_ASSIGNMENT',
+            canViewFinancials: dto.role === 'OWNER',
+            canReceiveBilling: dto.role === 'OWNER',
+            canBookFacilities: true,
+            canGenerateQR: dto.role !== 'FAMILY',
+            canManageWorkers: dto.role === 'OWNER',
+          },
+        });
+      } else {
+        await tx.unitAccess.create({
+          data: {
+            unitId: dto.unitId,
+            userId,
+            role: dto.role,
+            status: 'ACTIVE',
+            startsAt: now,
+            source: 'ADMIN_ASSIGNMENT',
+            grantedBy: userId,
+            canViewFinancials: dto.role === 'OWNER',
+            canReceiveBilling: dto.role === 'OWNER',
+            canBookFacilities: true,
+            canGenerateQR: dto.role !== 'FAMILY',
+            canManageWorkers: dto.role === 'OWNER',
+          },
+        });
+      }
+
+      return residentUnit;
+    });
+  }
+
+  async removeUnitFromResidentUser(userId: string, unitId: string) {
+    const resident = await this.prisma.resident.findUnique({
+      where: { userId },
+      select: { id: true },
+    });
+    if (!resident) {
+      throw new NotFoundException(`Resident profile not found for user ${userId}`);
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.residentUnit.deleteMany({
+        where: {
+          residentId: resident.id,
+          unitId,
+        },
+      });
+
+      await tx.unitAccess.updateMany({
+        where: {
+          unitId,
+          userId,
+          status: 'ACTIVE',
+        },
+        data: {
+          status: 'REVOKED',
+          endsAt: new Date(),
+        },
+      });
+
+      return { success: true };
+    });
+  }
+
+  async transferUnitOwnership(
+    unitId: string,
+    dto: TransferOwnershipDto,
+    actorUserId: string,
+  ) {
+    if (dto.mode === 'CREATE_NEW_PLAN' && !dto.newPlan) {
+      throw new BadRequestException(
+        'newPlan payload is required for CREATE_NEW_PLAN mode',
+      );
+    }
+    if (dto.fromUserId === dto.toUserId) {
+      throw new BadRequestException('fromUserId and toUserId cannot be the same');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const [unit, fromResident, toResident] = await Promise.all([
+        tx.unit.findUnique({ where: { id: unitId }, select: { id: true } }),
+        tx.resident.findUnique({
+          where: { userId: dto.fromUserId },
+          select: { id: true },
+        }),
+        tx.resident.findUnique({
+          where: { userId: dto.toUserId },
+          select: { id: true },
+        }),
+      ]);
+
+      if (!unit) throw new NotFoundException('Unit not found');
+      if (!fromResident) throw new NotFoundException('Source resident not found');
+      if (!toResident) throw new NotFoundException('Target resident not found');
+
+      const sourceResidentUnit = await tx.residentUnit.findUnique({
+        where: {
+          residentId_unitId: {
+            residentId: fromResident.id,
+            unitId,
+          },
+        },
+      });
+      if (!sourceResidentUnit) {
+        throw new BadRequestException('Source user is not linked to this unit');
+      }
+
+      await tx.owner.upsert({
+        where: { userId: dto.toUserId },
+        create: { userId: dto.toUserId },
+        update: {},
+      });
+
+      const now = new Date();
+      await tx.unitAccess.updateMany({
+        where: {
+          unitId,
+          userId: dto.fromUserId,
+          role: 'OWNER',
+          status: 'ACTIVE',
+        },
+        data: {
+          status: 'REVOKED',
+          endsAt: now,
+        },
+      });
+
+      await tx.residentUnit.update({
+        where: {
+          residentId_unitId: {
+            residentId: fromResident.id,
+            unitId,
+          },
+        },
+        data: { isPrimary: false },
+      });
+
+      await tx.residentUnit.upsert({
+        where: {
+          residentId_unitId: {
+            residentId: toResident.id,
+            unitId,
+          },
+        },
+        create: {
+          residentId: toResident.id,
+          unitId,
+          isPrimary: true,
+        },
+        update: {
+          isPrimary: true,
+        },
+      });
+
+      const targetOwnerAccess = await tx.unitAccess.findFirst({
+        where: {
+          unitId,
+          userId: dto.toUserId,
+          role: 'OWNER',
+        },
+        select: { id: true },
+      });
+      if (targetOwnerAccess) {
+        await tx.unitAccess.update({
+          where: { id: targetOwnerAccess.id },
+          data: {
+            status: 'ACTIVE',
+            startsAt: now,
+            endsAt: null,
+            source: 'ADMIN_ASSIGNMENT',
+            grantedBy: actorUserId,
+            canViewFinancials: true,
+            canReceiveBilling: true,
+            canBookFacilities: true,
+            canGenerateQR: true,
+            canManageWorkers: true,
+          },
+        });
+      } else {
+        await tx.unitAccess.create({
+          data: {
+            unitId,
+            userId: dto.toUserId,
+            role: 'OWNER',
+            status: 'ACTIVE',
+            startsAt: now,
+            source: 'ADMIN_ASSIGNMENT',
+            grantedBy: actorUserId,
+            canViewFinancials: true,
+            canReceiveBilling: true,
+            canBookFacilities: true,
+            canGenerateQR: true,
+            canManageWorkers: true,
+          },
+        });
+      }
+
+      let movedContractId: string | null = null;
+      let createdContractId: string | null = null;
+      let transferredInstallmentsCount = 0;
+
+      const sourceContract = await tx.ownerUnitContract.findFirst({
+        where: {
+          ownerUserId: dto.fromUserId,
+          unitId,
+          archivedAt: null,
+        },
+        include: {
+          installments: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      if (dto.mode === 'MOVE_EXISTING_PLAN') {
+        if (!sourceContract) {
+          throw new BadRequestException(
+            'No existing active owner contract found to move',
+          );
+        }
+
+        const moved = await tx.ownerUnitContract.update({
+          where: { id: sourceContract.id },
+          data: {
+            ownerUserId: dto.toUserId,
+          },
+        });
+        movedContractId = moved.id;
+        transferredInstallmentsCount = sourceContract.installments.length;
+      } else {
+        const newPlan = dto.newPlan!;
+        if (sourceContract) {
+          await tx.ownerUnitContract.update({
+            where: { id: sourceContract.id },
+            data: { archivedAt: now },
+          });
+        }
+
+        const createdContract = await tx.ownerUnitContract.create({
+          data: {
+            ownerUserId: dto.toUserId,
+            unitId,
+            paymentMode: newPlan.paymentMode,
+            contractFileId: newPlan.contractFileId,
+            contractSignedAt: newPlan.contractSignedAt
+              ? new Date(newPlan.contractSignedAt)
+              : null,
+            notes: newPlan.notes?.trim() || null,
+            createdById: actorUserId,
+          },
+        });
+        createdContractId = createdContract.id;
+
+        if (newPlan.installments?.length) {
+          await tx.ownerInstallment.createMany({
+            data: newPlan.installments.map((item, index) => ({
+              ownerUnitContractId: createdContract.id,
+              sequence: index + 1,
+              dueDate: new Date(item.dueDate),
+              amount: item.amount,
+              referenceFileId: item.referenceFileId,
+              referencePageIndex: item.referencePageIndex,
+            })),
+          });
+          transferredInstallmentsCount = newPlan.installments.length;
+        }
+      }
+
+      const transfer = await tx.unitOwnershipTransfer.create({
+        data: {
+          unitId,
+          fromUserId: dto.fromUserId,
+          toUserId: dto.toUserId,
+          transferMode: dto.mode,
+          movedContractId,
+          createdContractId,
+          transferredInstallmentsCount,
+          transferredById: actorUserId,
+          notes: dto.notes?.trim() || null,
+        },
+      });
+
+      return {
+        success: true,
+        transfer,
+      };
+    });
+  }
+
+  async getResidentHouseholdTree(userId: string, unitId?: string) {
+    const resident = await this.prisma.resident.findUnique({
+      where: { userId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            nameEN: true,
+            email: true,
+            phone: true,
+            userStatus: true,
+          },
+        },
+        residentUnits: {
+          include: {
+            unit: {
+              select: {
+                id: true,
+                projectName: true,
+                block: true,
+                unitNumber: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!resident) {
+      throw new NotFoundException(`Resident profile not found for user ${userId}`);
+    }
+
+    const unitFilter = unitId ? { unitId } : {};
+    const [familyRequests, authorizedRequests, homeStaffRequests] =
+      await Promise.all([
+        this.prisma.familyAccessRequest.findMany({
+          where: { ownerUserId: userId, ...unitFilter },
+          include: {
+            unit: { select: { id: true, projectName: true, block: true, unitNumber: true } },
+            activatedUser: {
+              select: {
+                id: true,
+                nameEN: true,
+                email: true,
+                phone: true,
+                userStatus: true,
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+        this.prisma.authorizedAccessRequest.findMany({
+          where: { ownerUserId: userId, ...unitFilter },
+          include: {
+            unit: { select: { id: true, projectName: true, block: true, unitNumber: true } },
+            activatedUser: {
+              select: {
+                id: true,
+                nameEN: true,
+                email: true,
+                phone: true,
+                userStatus: true,
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+        this.prisma.homeStaffAccess.findMany({
+          where: { ownerUserId: userId, ...unitFilter },
+          include: {
+            unit: { select: { id: true, projectName: true, block: true, unitNumber: true } },
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+      ]);
+
+    return {
+      root: {
+        type: 'RESIDENT',
+        residentId: resident.id,
+        user: resident.user,
+        units: resident.residentUnits.map((row) => ({
+          unitId: row.unitId,
+          isPrimary: row.isPrimary,
+          assignedAt: row.assignedAt,
+          unit: row.unit,
+        })),
+      },
+      children: {
+        family: familyRequests.map((row) => ({
+          type: 'FAMILY',
+          id: row.id,
+          status: row.status,
+          relationship: row.relationship,
+          fullName: row.fullName,
+          phone: row.phone,
+          email: row.email,
+          unit: row.unit,
+          activatedUser: row.activatedUser,
+          createdAt: row.createdAt,
+          reviewedAt: row.reviewedAt,
+        })),
+        authorized: authorizedRequests.map((row) => ({
+          type: 'AUTHORIZED',
+          id: row.id,
+          status: row.status,
+          fullName: row.fullName,
+          phone: row.phone,
+          email: row.email,
+          unit: row.unit,
+          validFrom: row.validFrom,
+          validTo: row.validTo,
+          activatedUser: row.activatedUser,
+          createdAt: row.createdAt,
+          reviewedAt: row.reviewedAt,
+        })),
+        homeStaff: homeStaffRequests.map((row) => ({
+          type: 'HOME_STAFF',
+          id: row.id,
+          status: row.status,
+          fullName: row.fullName,
+          phone: row.phone,
+          staffType: row.staffType,
+          unit: row.unit,
+          accessValidFrom: row.accessValidFrom,
+          accessValidTo: row.accessValidTo,
+          createdAt: row.createdAt,
+          reviewedAt: row.reviewedAt,
+        })),
+      },
+    };
+  }
+
+  async getResidentDocuments(userId: string) {
+    const resident = await this.prisma.resident.findUnique({
+      where: { userId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            profilePhotoId: true,
+            nationalIdFileId: true,
+          },
+        },
+        residentUnits: {
+          select: {
+            unitId: true,
+          },
+        },
+        documents: {
+          include: {
+            file: true,
+          },
+        },
+      },
+    });
+    if (!resident) {
+      throw new NotFoundException(`Resident profile not found for user ${userId}`);
+    }
+
+    const unitIds = resident.residentUnits.map((row) => row.unitId);
+    const [contracts, family, authorized, staff] = await Promise.all([
+      this.prisma.ownerUnitContract.findMany({
+        where: {
+          OR: [{ ownerUserId: userId }, ...(unitIds.length ? [{ unitId: { in: unitIds } }] : [])],
+        },
+        include: {
+          contractFile: true,
+          installments: {
+            include: {
+              referenceFile: true,
+            },
+          },
+          unit: {
+            select: {
+              id: true,
+              projectName: true,
+              block: true,
+              unitNumber: true,
+            },
+          },
+        },
+      }),
+      this.prisma.familyAccessRequest.findMany({
+        where: { ownerUserId: userId },
+        select: {
+          id: true,
+          unitId: true,
+          personalPhotoFileId: true,
+          nationalIdFileId: true,
+          passportFileId: true,
+          birthCertificateFileId: true,
+          marriageCertificateFileId: true,
+          unit: { select: { id: true, projectName: true, block: true, unitNumber: true } },
+        },
+      }),
+      this.prisma.authorizedAccessRequest.findMany({
+        where: { ownerUserId: userId },
+        select: {
+          id: true,
+          unitId: true,
+          idOrPassportFileId: true,
+          powerOfAttorneyFileId: true,
+          personalPhotoFileId: true,
+          unit: { select: { id: true, projectName: true, block: true, unitNumber: true } },
+        },
+      }),
+      this.prisma.homeStaffAccess.findMany({
+        where: { ownerUserId: userId },
+        select: {
+          id: true,
+          unitId: true,
+          idOrPassportFileId: true,
+          personalPhotoFileId: true,
+          unit: { select: { id: true, projectName: true, block: true, unitNumber: true } },
+        },
+      }),
+    ]);
+
+    const documents: Array<{
+      category: string;
+      source: string;
+      unit?: unknown;
+      file: unknown;
+      extra?: unknown;
+      uploadedAt: Date | string;
+    }> = [];
+
+    const pushFile = (
+      file: Prisma.FileGetPayload<{}> | null | undefined,
+      input: {
+        category: string;
+        source: string;
+        unit?: unknown;
+        extra?: unknown;
+      },
+    ) => {
+      if (!file) return;
+      documents.push({
+        category: input.category,
+        source: input.source,
+        unit: input.unit,
+        file: {
+          id: file.id,
+          name: file.name,
+          key: file.key,
+          mimeType: file.mimeType,
+          size: file.size,
+          category: file.category,
+        },
+        extra: input.extra,
+        uploadedAt: file.createdAt,
+      });
+    };
+
+    if (resident.user.profilePhotoId) {
+      const file = await this.prisma.file.findUnique({
+        where: { id: resident.user.profilePhotoId },
+      });
+      pushFile(file, {
+        category: 'PROFILE_PHOTO',
+        source: 'USER_PROFILE',
+      });
+    }
+
+    if (resident.user.nationalIdFileId) {
+      const file = await this.prisma.file.findUnique({
+        where: { id: resident.user.nationalIdFileId },
+      });
+      pushFile(file, {
+        category: 'NATIONAL_ID',
+        source: 'USER_PROFILE',
+      });
+    }
+
+    for (const residentDoc of resident.documents) {
+      pushFile(residentDoc.file, {
+        category: residentDoc.type,
+        source: 'RESIDENT_DOCUMENT',
+      });
+    }
+
+    for (const contract of contracts) {
+      pushFile(contract.contractFile, {
+        category: 'CONTRACT',
+        source: 'OWNER_CONTRACT',
+        unit: contract.unit,
+        extra: {
+          contractId: contract.id,
+          paymentMode: contract.paymentMode,
+          signedAt: contract.contractSignedAt,
+        },
+      });
+      for (const installment of contract.installments) {
+        pushFile(installment.referenceFile, {
+          category: 'INSTALLMENT_REFERENCE',
+          source: 'OWNER_INSTALLMENT',
+          unit: contract.unit,
+          extra: {
+            contractId: contract.id,
+            installmentId: installment.id,
+            sequence: installment.sequence,
+            dueDate: installment.dueDate,
+            status: installment.status,
+          },
+        });
+      }
+    }
+
+    for (const familyRequest of family) {
+      const fileIds = [
+        familyRequest.personalPhotoFileId,
+        familyRequest.nationalIdFileId,
+        familyRequest.passportFileId,
+        familyRequest.birthCertificateFileId,
+        familyRequest.marriageCertificateFileId,
+      ].filter(Boolean) as string[];
+      for (const fileId of fileIds) {
+        const file = await this.prisma.file.findUnique({ where: { id: fileId } });
+        pushFile(file, {
+          category: 'FAMILY_REQUEST_DOCUMENT',
+          source: 'FAMILY_REQUEST',
+          unit: familyRequest.unit,
+          extra: { requestId: familyRequest.id },
+        });
+      }
+    }
+
+    for (const authorizedRequest of authorized) {
+      const fileIds = [
+        authorizedRequest.idOrPassportFileId,
+        authorizedRequest.powerOfAttorneyFileId,
+        authorizedRequest.personalPhotoFileId,
+      ].filter(Boolean) as string[];
+      for (const fileId of fileIds) {
+        const file = await this.prisma.file.findUnique({ where: { id: fileId } });
+        pushFile(file, {
+          category: 'AUTHORIZED_REQUEST_DOCUMENT',
+          source: 'AUTHORIZED_REQUEST',
+          unit: authorizedRequest.unit,
+          extra: { requestId: authorizedRequest.id },
+        });
+      }
+    }
+
+    for (const staffRequest of staff) {
+      const fileIds = [staffRequest.idOrPassportFileId, staffRequest.personalPhotoFileId].filter(
+        Boolean,
+      ) as string[];
+      for (const fileId of fileIds) {
+        const file = await this.prisma.file.findUnique({ where: { id: fileId } });
+        pushFile(file, {
+          category: 'HOME_STAFF_DOCUMENT',
+          source: 'HOME_STAFF',
+          unit: staffRequest.unit,
+          extra: { requestId: staffRequest.id },
+        });
+      }
+    }
+
+    documents.sort(
+      (a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime(),
+    );
+
+    return {
+      total: documents.length,
+      documents,
+    };
   }
 
   // ===== OWNER MANAGEMENT =====

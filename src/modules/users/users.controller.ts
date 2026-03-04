@@ -30,6 +30,9 @@ import { CreateAdminDto } from './dto/create-admin.dto';
 import { UpdateAdminDto } from './dto/update-admin.dto';
 import { CreateDashboardUserDto } from './dto/create-dashboard-user.dto';
 import { UpsertDashboardRoleDto } from './dto/upsert-dashboard-role.dto';
+import { UpdateResidentProfileAdminDto } from './dto/update-resident-profile-admin.dto';
+import { AssignResidentUnitDto } from './dto/assign-resident-unit.dto';
+import { TransferOwnershipDto } from './dto/transfer-ownership.dto';
 
 import { ApiTags, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -191,6 +194,61 @@ export class AdminUsersController {
   @Permissions('resident.delete')
   deleteResident(@Param('id') id: string) {
     return this.usersService.deleteResident(id);
+  }
+
+  @Get('residents/:userId/overview')
+  @Permissions('resident.view_full_profile')
+  getResidentOverview(@Param('userId') userId: string) {
+    return this.usersService.getResidentOverview(userId);
+  }
+
+  @Patch('residents/:userId/profile')
+  @Permissions('resident.update_full_profile')
+  updateResidentProfile(
+    @Param('userId') userId: string,
+    @Body() dto: UpdateResidentProfileAdminDto,
+  ) {
+    return this.usersService.updateResidentFullProfile(userId, dto);
+  }
+
+  @Post('residents/:userId/units/assign')
+  @Permissions('unit.assign_resident')
+  assignResidentUnit(
+    @Param('userId') userId: string,
+    @Body() dto: AssignResidentUnitDto,
+  ) {
+    return this.usersService.assignUnitToResidentUser(userId, dto);
+  }
+
+  @Delete('residents/:userId/units/:unitId')
+  @Permissions('unit.remove_resident_from_unit')
+  removeResidentUnit(@Param('userId') userId: string, @Param('unitId') unitId: string) {
+    return this.usersService.removeUnitFromResidentUser(userId, unitId);
+  }
+
+  @Post('residents/units/:unitId/transfer-ownership')
+  @Permissions('unit.transfer_ownership')
+  transferOwnership(
+    @Param('unitId') unitId: string,
+    @Body() dto: TransferOwnershipDto,
+    @Request() req: any,
+  ) {
+    return this.usersService.transferUnitOwnership(unitId, dto, req.user.id);
+  }
+
+  @Get('residents/:userId/household-tree')
+  @Permissions('resident.view_household_tree')
+  getResidentHouseholdTree(
+    @Param('userId') userId: string,
+    @Query('unitId') unitId?: string,
+  ) {
+    return this.usersService.getResidentHouseholdTree(userId, unitId);
+  }
+
+  @Get('residents/:userId/documents')
+  @Permissions('resident.view_documents')
+  getResidentDocuments(@Param('userId') userId: string) {
+    return this.usersService.getResidentDocuments(userId);
   }
 
   // ============================================

@@ -398,6 +398,11 @@ enum OwnerInstallmentStatus {
   CANCELLED
 }
 
+enum OwnershipTransferMode {
+  MOVE_EXISTING_PLAN
+  CREATE_NEW_PLAN
+}
+
 enum ContractorRoleEnum {
   ADMIN
   SUPERVISOR
@@ -547,6 +552,9 @@ model User {
   homeStaffRequestsReviewed HomeStaffAccess[] @relation("home_staff_request_reviewer")
   violationActionRequests ViolationActionRequest[] @relation("violation_action_request_user")
   violationActionReviewed ViolationActionRequest[] @relation("violation_action_request_reviewer")
+  ownershipTransfersFrom  UnitOwnershipTransfer[] @relation("ownership_transfer_from_user")
+  ownershipTransfersTo    UnitOwnershipTransfer[] @relation("ownership_transfer_to_user")
+  ownershipTransfersBy    UnitOwnershipTransfer[] @relation("ownership_transfer_by_user")
 
   @@index([email])
   @@index([phone])
@@ -699,6 +707,7 @@ model Unit {
   familyAccessRequests FamilyAccessRequest[]
   authorizedAccessRequests AuthorizedAccessRequest[]
   homeStaffAccesses HomeStaffAccess[]
+  ownershipTransfers UnitOwnershipTransfer[]
 }
 
 // ⚠️ residentUnit is legacy. Do NOT use for permission checks.
@@ -834,6 +843,7 @@ model OwnerUnitContract {
   contractSignedAt DateTime?
   paymentMode    OwnerPaymentMode @default(CASH)
   notes          String?
+  archivedAt     DateTime?
   createdById    String?
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
@@ -847,6 +857,29 @@ model OwnerUnitContract {
   @@unique([ownerUserId, unitId])
   @@index([unitId])
   @@index([paymentMode])
+}
+
+model UnitOwnershipTransfer {
+  id                         String                @id @default(uuid())
+  unitId                     String
+  fromUserId                 String
+  toUserId                   String
+  transferMode               OwnershipTransferMode
+  movedContractId            String?
+  createdContractId          String?
+  transferredInstallmentsCount Int                 @default(0)
+  transferredById            String
+  notes                      String?
+  createdAt                  DateTime              @default(now())
+
+  unit             Unit               @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  fromUser         User               @relation("ownership_transfer_from_user", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser           User               @relation("ownership_transfer_to_user", fields: [toUserId], references: [id], onDelete: Cascade)
+  transferredByUser User              @relation("ownership_transfer_by_user", fields: [transferredById], references: [id], onDelete: Cascade)
+
+  @@index([unitId, createdAt])
+  @@index([fromUserId, createdAt])
+  @@index([toUserId, createdAt])
 }
 
 model OwnerInstallment {
