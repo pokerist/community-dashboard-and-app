@@ -5,6 +5,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -49,8 +50,8 @@ export class ServiceRequestController {
       "Returns the authenticated user's service requests ordered by most recent first.",
   })
   @Permissions('service_request.view_own')
-  findByUser(@Req() req: any) {
-    return this.serviceRequestService.findByUser(req.user.id);
+  findByUser(@Req() req: any, @Query('kind') kind?: 'services' | 'requests' | 'all') {
+    return this.serviceRequestService.findByUser(req.user.id, kind);
   }
 
   /** GET /service-requests
@@ -62,8 +63,8 @@ export class ServiceRequestController {
     description: 'Returns all service requests for dashboard/staff workflows.',
   })
   @Permissions('service_request.view_all')
-  findAll() {
-    return this.serviceRequestService.findAll();
+  findAll(@Query('kind') kind?: 'services' | 'requests' | 'all') {
+    return this.serviceRequestService.findAll(kind);
   }
 
   /** GET /service-requests/:id */

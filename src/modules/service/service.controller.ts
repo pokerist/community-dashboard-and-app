@@ -51,6 +51,7 @@ export class ServiceController {
     @Query('status') status?: string,
     @Query('urgent') urgent?: string,
     @Query('category') category?: string,
+    @Query('kind') kind?: 'services' | 'requests' | 'all',
   ) {
     let filter: boolean | undefined;
     let urgentFilter: boolean | undefined;
@@ -63,7 +64,7 @@ export class ServiceController {
     else if (urgent === 'false') urgentFilter = false;
     else urgentFilter = undefined;
 
-    return this.serviceService.findAll(filter, urgentFilter, category);
+    return this.serviceService.findAll(filter, urgentFilter, category, kind);
   }
 
   @Patch('reorder')

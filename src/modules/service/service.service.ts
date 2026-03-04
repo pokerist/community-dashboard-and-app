@@ -45,11 +45,18 @@ export class ServiceService {
     status: boolean | undefined,
     isUrgent: boolean | undefined = undefined,
     category?: string,
+    kind: 'services' | 'requests' | 'all' = 'all',
   ) {
-    const whereCondition: Record<string, unknown> = {};
+    const whereCondition: Prisma.ServiceWhereInput = {};
     if (status !== undefined) whereCondition.status = status;
     if (isUrgent !== undefined) whereCondition.isUrgent = isUrgent;
-    if (category) whereCondition.category = String(category).toUpperCase();
+    if (category) {
+      whereCondition.category = String(category).toUpperCase() as any;
+    } else if (kind === 'requests') {
+      whereCondition.category = { in: ['REQUESTS', 'ADMIN'] as any };
+    } else if (kind === 'services') {
+      whereCondition.category = { notIn: ['REQUESTS', 'ADMIN'] as any };
+    }
 
     return this.prisma.service.findMany({
       where: whereCondition,

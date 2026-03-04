@@ -286,9 +286,10 @@ export function ServiceManagement({ mode = "services" }: ServiceManagementProps)
   const loadServices = useCallback(async () => {
     setIsLoading(true);
     try {
+      const kind = mode === "requests" ? "requests" : "services";
       const [servicesRes, requestsRes] = await Promise.all([
-        apiClient.get("/services", { params: { status: "all" } }),
-        apiClient.get("/service-requests"),
+        apiClient.get("/services", { params: { status: "all", kind } }),
+        apiClient.get("/service-requests", { params: { kind } }),
       ]);
       setServicesData(Array.isArray(servicesRes.data) ? servicesRes.data : []);
       setServiceRequestsData(Array.isArray(requestsRes.data) ? requestsRes.data : []);
@@ -297,7 +298,7 @@ export function ServiceManagement({ mode = "services" }: ServiceManagementProps)
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [mode]);
 
   useEffect(() => {
     void loadServices();

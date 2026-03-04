@@ -54,6 +54,16 @@ export class ServiceRequestService {
     private eventEmitter: EventEmitter2,
   ) {}
 
+  private kindToServiceCategoryFilter(kind?: 'services' | 'requests' | 'all') {
+    if (kind === 'requests') {
+      return { in: [ServiceCategory.REQUESTS, ServiceCategory.ADMIN] as const };
+    }
+    if (kind === 'services') {
+      return { notIn: [ServiceCategory.REQUESTS, ServiceCategory.ADMIN] as const };
+    }
+    return undefined;
+  }
+
   /**
    * Creates a new Service Request, including attachments and dynamic field values,
    * all within a single transaction.
@@ -331,13 +341,15 @@ export class ServiceRequestService {
   /**
    * Dashboard/Admin view.
    */
-  async findAll() {
+  async findAll(kind: 'services' | 'requests' | 'all' = 'all') {
+    const categoryFilter = this.kindToServiceCategoryFilter(kind);
     return this.prisma.serviceRequest.findMany({
+      where: categoryFilter ? { service: { category: categoryFilter as any } } : undefined,
       orderBy: { requestedAt: 'desc' },
       include: {
         unit: { select: { unitNumber: true, block: true } },
-        createdBy: { select: { nameEN: true, phone: true } },
-        service: { select: { name: true } },
+        createdBy: { select: { id: true, nameEN: true, email: true, phone: true } },
+        service: { select: { id: true, name: true, category: true, isUrgent: true } },
       },
     });
   }
@@ -345,12 +357,19 @@ export class ServiceRequestService {
   /**
    * Community App "My requests".
    */
-  async findByUser(userId: string) {
+  async findByUser(
+    userId: string,
+    kind: 'services' | 'requests' | 'all' = 'all',
+  ) {
+    const categoryFilter = this.kindToServiceCategoryFilter(kind);
     return this.prisma.serviceRequest.findMany({
-      where: { createdById: userId },
+      where: {
+        createdById: userId,
+        ...(categoryFilter ? { service: { category: categoryFilter as any } } : {}),
+      },
       orderBy: { requestedAt: 'desc' },
       include: {
-        service: { select: { name: true } },
+        service: { select: { id: true, name: true, category: true, isUrgent: true } },
         comments: {
           where: { isInternal: false },
           orderBy: { createdAt: 'desc' },
@@ -668,4 +687,3 @@ export class ServiceRequestService {
     return result;
   }
 }
-
