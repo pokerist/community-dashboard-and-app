@@ -895,6 +895,9 @@ export function SystemSettings() {
       .sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0))[0] ?? null;
   }, [draft.offers.banners]);
 
+  const settingsTabTriggerClass =
+    "gap-2 border border-transparent text-[#475569] data-[state=active]:border-[#0F172A] data-[state=active]:bg-[#0F172A] data-[state=active]:text-white data-[state=active]:shadow-sm";
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -955,16 +958,16 @@ export function SystemSettings() {
 
       <Tabs defaultValue="general" className="w-full">
         <TabsList className="w-full justify-start border rounded-lg p-1 bg-white overflow-x-auto">
-          <TabsTrigger value="general" className="gap-2"><Settings className="w-4 h-4" />General</TabsTrigger>
-          <TabsTrigger value="notifications" className="gap-2"><Bell className="w-4 h-4" />Notifications</TabsTrigger>
-          <TabsTrigger value="integrations" className="gap-2"><Plug className="w-4 h-4" />Integrations</TabsTrigger>
-          <TabsTrigger value="brand" className="gap-2"><Palette className="w-4 h-4" />Brand</TabsTrigger>
-          <TabsTrigger value="onboarding" className="gap-2"><ImageIcon className="w-4 h-4" />Onboarding</TabsTrigger>
-          <TabsTrigger value="offers" className="gap-2"><ImageIcon className="w-4 h-4" />Offers</TabsTrigger>
-          <TabsTrigger value="mobile-access" className="gap-2"><Shield className="w-4 h-4" />Mobile Access</TabsTrigger>
-          <TabsTrigger value="security" className="gap-2"><Shield className="w-4 h-4" />Security</TabsTrigger>
-          <TabsTrigger value="backup" className="gap-2"><Database className="w-4 h-4" />Backup</TabsTrigger>
-          <TabsTrigger value="crm" className="gap-2"><LinkIcon className="w-4 h-4" />CRM</TabsTrigger>
+          <TabsTrigger value="general" className={settingsTabTriggerClass}><Settings className="w-4 h-4" />General</TabsTrigger>
+          <TabsTrigger value="notifications" className={settingsTabTriggerClass}><Bell className="w-4 h-4" />Notifications</TabsTrigger>
+          <TabsTrigger value="integrations" className={settingsTabTriggerClass}><Plug className="w-4 h-4" />Integrations</TabsTrigger>
+          <TabsTrigger value="brand" className={settingsTabTriggerClass}><Palette className="w-4 h-4" />Brand</TabsTrigger>
+          <TabsTrigger value="onboarding" className={settingsTabTriggerClass}><ImageIcon className="w-4 h-4" />Onboarding</TabsTrigger>
+          <TabsTrigger value="offers" className={settingsTabTriggerClass}><ImageIcon className="w-4 h-4" />Offers</TabsTrigger>
+          <TabsTrigger value="mobile-access" className={settingsTabTriggerClass}><Shield className="w-4 h-4" />Mobile Access</TabsTrigger>
+          <TabsTrigger value="security" className={settingsTabTriggerClass}><Shield className="w-4 h-4" />Security</TabsTrigger>
+          <TabsTrigger value="backup" className={settingsTabTriggerClass}><Database className="w-4 h-4" />Backup</TabsTrigger>
+          <TabsTrigger value="crm" className={settingsTabTriggerClass}><LinkIcon className="w-4 h-4" />CRM</TabsTrigger>
         </TabsList>
 
         <TabsContent value="general" className="mt-4">

@@ -349,37 +349,6 @@ export function ServiceManagement({ mode = "services" }: ServiceManagementProps)
     }
   }, [ticketFiltersStorageKey, ticketPreset, ticketSearchTerm, ticketStatusFilter]);
 
-  useEffect(() => {
-    if (typeof window === "undefined" || serviceRequestsData.length === 0) return;
-
-    let parsed: PendingFocusEntity | null = null;
-    try {
-      const raw = window.sessionStorage.getItem("admin.focusEntity");
-      if (!raw) return;
-      parsed = JSON.parse(raw) as PendingFocusEntity;
-    } catch {
-      return;
-    }
-
-    const targetSection = mode === "requests" ? "requests" : "services";
-    const targetId = String(parsed?.entityId ?? "").trim();
-    const targetEntityType = String(parsed?.entityType ?? "").trim().toUpperCase();
-
-    if (!targetId || targetEntityType !== "SERVICE_REQUEST") return;
-    if (String(parsed?.section ?? "").trim().toLowerCase() !== targetSection) return;
-
-    const ticket = serviceRequestsData.find((row) => {
-      if (String(row.id) !== targetId) return false;
-      const category = String(row.service?.category ?? "").toUpperCase();
-      const isRequestTicket = category === "REQUESTS" || category === "ADMIN";
-      return mode === "requests" ? isRequestTicket : !isRequestTicket;
-    });
-
-    if (!ticket) return;
-    window.sessionStorage.removeItem("admin.focusEntity");
-    void openTicketDialog(ticket);
-  }, [mode, openTicketDialog, serviceRequestsData]);
-
   const loadTicketDetail = useCallback(async (ticketId: string) => {
     setTicketLoading(true);
     try {
@@ -413,6 +382,37 @@ export function ServiceManagement({ mode = "services" }: ServiceManagementProps)
     setTicketStatusDraft(String(ticket.status ?? "NEW").toUpperCase());
     await loadTicketDetail(ticket.id);
   }, [loadTicketDetail]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || serviceRequestsData.length === 0) return;
+
+    let parsed: PendingFocusEntity | null = null;
+    try {
+      const raw = window.sessionStorage.getItem("admin.focusEntity");
+      if (!raw) return;
+      parsed = JSON.parse(raw) as PendingFocusEntity;
+    } catch {
+      return;
+    }
+
+    const targetSection = mode === "requests" ? "requests" : "services";
+    const targetId = String(parsed?.entityId ?? "").trim();
+    const targetEntityType = String(parsed?.entityType ?? "").trim().toUpperCase();
+
+    if (!targetId || targetEntityType !== "SERVICE_REQUEST") return;
+    if (String(parsed?.section ?? "").trim().toLowerCase() !== targetSection) return;
+
+    const ticket = serviceRequestsData.find((row) => {
+      if (String(row.id) !== targetId) return false;
+      const category = String(row.service?.category ?? "").toUpperCase();
+      const isRequestTicket = category === "REQUESTS" || category === "ADMIN";
+      return mode === "requests" ? isRequestTicket : !isRequestTicket;
+    });
+
+    if (!ticket) return;
+    window.sessionStorage.removeItem("admin.focusEntity");
+    void openTicketDialog(ticket);
+  }, [mode, openTicketDialog, serviceRequestsData]);
 
   const closeTicketDialog = useCallback(() => {
     setIsTicketDialogOpen(false);

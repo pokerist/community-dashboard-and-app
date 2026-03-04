@@ -26,6 +26,7 @@ API_HEALTH_PATH="${API_HEALTH_PATH:-/api}"
 NODE_MAJOR="${NODE_MAJOR:-20}"
 PRISMA_SCHEMA_SYNC_MODE="${PRISMA_SCHEMA_SYNC_MODE:-dbpush}"
 PRISMA_DB_FORCE_RESET="${PRISMA_DB_FORCE_RESET:-false}"
+RUN_PROFESSIONAL_DEMO_SEED="${RUN_PROFESSIONAL_DEMO_SEED:-true}"
 DEFAULT_DB_HOST="${DEFAULT_DB_HOST:-127.0.0.1}"
 DEFAULT_DB_PORT="${DEFAULT_DB_PORT:-5432}"
 DEFAULT_DB_NAME="${DEFAULT_DB_NAME:-community_dashboard}"
@@ -513,6 +514,13 @@ if [[ "${RUN_DASHBOARD_LOAD_SEED:-false}" == "true" ]]; then
   note "Seeding realistic dashboard load data"
   source_env_file "$ROOT_ENV_PROD"
   npm run seed:dashboard-load
+fi
+
+if [[ "${RUN_PROFESSIONAL_DEMO_SEED:-true}" == "true" ]]; then
+  note "Seeding professional demo dataset (fresh reset + Egyptian personas)"
+  source_env_file "$ROOT_ENV_PROD"
+  npm run seed:mobile-personas
+  npm run seed:professional-demo
 fi
 
 note "Installing admin-web dependencies"
