@@ -43,6 +43,16 @@ const menuItems = [
     active: true,
   },
   {
+    title: "Communities",
+    icon: Building,
+    url: "#communities",
+  },
+  {
+    title: "Units",
+    icon: Building2,
+    url: "#units",
+  },
+  {
     title: "Residents",
     icon: Users,
     url: "#residents",
@@ -51,16 +61,6 @@ const menuItems = [
     title: "Dashboard Users",
     icon: Users,
     url: "#dashboard-users",
-  },
-  {
-    title: "Units",
-    icon: Building2,
-    url: "#units",
-  },
-  {
-    title: "Communities",
-    icon: Building,
-    url: "#communities",
   },
   {
     title: "Services",
