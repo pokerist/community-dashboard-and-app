@@ -517,7 +517,9 @@ fi
 
 note "Installing admin-web dependencies"
 cd "$ROOT_DIR/apps/admin-web"
-npm ci
+# Admin preview runs through Vite, which is a devDependency.
+# Force-install dev dependencies regardless of NODE_ENV on the host.
+npm ci --include=dev
 
 note "Building admin-web (API: $API_URL)"
 source_env_file "$ADMIN_ENV_PROD"
