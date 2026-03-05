@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import * as LocalAuthentication from 'expo-local-authentication';
 import axios from 'axios';
-import { configureHttpAuthHandlers, extractApiErrorMessage } from '../../lib/http';
+import {
+  configureHttpAuthHandlers,
+  extractApiErrorMessage,
+  isCurrentlyOnline,
+  isNetworkError,
+} from '../../lib/http';
 import { extractUserIdFromAccessToken } from './jwt';
 import { loginRequest, refreshRequest, verifyLoginTwoFactorRequest } from './service';
 import {
@@ -297,6 +302,11 @@ export function useAuthSession(): AuthHookResult {
       );
       return;
     }
+    if (!isCurrentlyOnline()) {
+      console.log('[AUTH] refresh skipped (offline)');
+      setRefreshError(null);
+      return;
+    }
 
     const runSingleRefresh = async () => {
       if (!refreshInFlightRef.current) {
@@ -319,6 +329,10 @@ export function useAuthSession(): AuthHookResult {
       hardAuthFailureCountRef.current = 0;
       lastHardAuthFailureAtRef.current = 0;
     } catch (error) {
+      if (isNetworkError(error)) {
+        setRefreshError(null);
+        throw error;
+      }
       setRefreshError(extractApiErrorMessage(error));
       if (axios.isAxiosError(error)) {
         const status = error.response?.status;
@@ -397,6 +411,10 @@ export function useAuthSession(): AuthHookResult {
       refreshSession: async () => {
         const current = sessionRef.current;
         if (!current?.refreshToken || !current.userId) return null;
+        if (!isCurrentlyOnline()) {
+          console.log('[AUTH] refresh skipped (offline)');
+          return null;
+        }
         try {
           if (!refreshInFlightRef.current) {
             refreshInFlightRef.current = (async () => {
@@ -417,6 +435,10 @@ export function useAuthSession(): AuthHookResult {
             userId: updated.userId,
           };
         } catch (error) {
+          if (isNetworkError(error)) {
+            setRefreshError(null);
+            return null;
+          }
           if (axios.isAxiosError(error)) {
             const status = error.response?.status;
             const url = String(error.config?.url ?? '').toLowerCase();
@@ -460,6 +482,7 @@ export function useAuthSession(): AuthHookResult {
       ) {
         const current = sessionRef.current;
         if (!current?.refreshToken || !current.userId) return;
+        if (!isCurrentlyOnline()) return;
 
         const idleMs = backgroundEnteredAtRef.current
           ? Date.now() - backgroundEnteredAtRef.current

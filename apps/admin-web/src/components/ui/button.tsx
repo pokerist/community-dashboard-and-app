@@ -4,6 +4,18 @@ import { cva, type VariantProps } from "class-variance-authority@0.7.1";
 
 import { cn } from "./utils";
 
+const WHITE_TEXT_TOKEN_REGEX =
+  /(?:^|\s)[^\s]*text-(?:white(?:\/\d+)?|\[#(?:fff|ffffff)\]|\[white\]|\[rgb\(255(?:\s|,)*255(?:\s|,)*255\)\])(?=\s|$)/i;
+const WHITE_BG_TOKEN_REGEX =
+  /(?:^|\s)[^\s]*bg-(?:white(?:\/\d+)?|\[#(?:fff|ffffff)\](?:\/\d+)?|\[white\](?:\/\d+)?|\[rgb\(255(?:\s|,)*255(?:\s|,)*255\)\](?:\/\d+)?)(?=\s|$)/i;
+
+function enforceButtonContrast(classNames: string): string {
+  if (!WHITE_TEXT_TOKEN_REGEX.test(classNames) || !WHITE_BG_TOKEN_REGEX.test(classNames)) {
+    return classNames;
+  }
+  return cn(classNames, "!text-[#0F172A]");
+}
+
 const buttonVariants = cva(
   "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive",
   {
@@ -45,11 +57,12 @@ const Button = React.forwardRef<
     }
 >(({ className, variant, size, asChild = false, ...props }, ref) => {
   const Comp = asChild ? Slot : "button";
+  const mergedClassName = buttonVariants({ variant, size, className });
 
   return (
     <Comp
       data-slot="button"
-      className={cn(buttonVariants({ variant, size, className }))}
+      className={enforceButtonContrast(mergedClassName)}
       ref={ref}
       {...props}
     />

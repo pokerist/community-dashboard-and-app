@@ -20,6 +20,7 @@ import { InlineError, ScreenCard } from '../components/mobile/Primitives';
 import { useBranding } from '../features/branding/provider';
 import { getBrandPalette } from '../features/branding/palette';
 import { useBottomNavMetrics } from '../features/layout/BottomNavMetricsContext';
+import { useNetworkStatus } from '../features/network/useNetworkStatus';
 import type { AuthSession } from '../features/auth/types';
 import {
   cancelBooking,
@@ -188,6 +189,7 @@ export function BookingsScreen({
   const insets = useSafeAreaInsets();
   const { contentInsetBottom } = useBottomNavMetrics();
   const toast = useAppToast();
+  const network = useNetworkStatus();
   const [facilities, setFacilities] = useState<Facility[]>([]);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [selectedFacilityId, setSelectedFacilityId] = useState<string | null>(null);
@@ -273,6 +275,11 @@ export function BookingsScreen({
   }, [bookings, deepLinkBookingId, onConsumeDeepLinkBookingId]);
 
   const submitBooking = useCallback(async () => {
+    if (!network.isOnline) {
+      setSubmitError('Connect to internet to continue.');
+      toast.info('Offline', 'Connect to internet to continue.');
+      return;
+    }
     if (!selectedUnitId) {
       setSubmitError('Select a unit first.');
       toast.error('Missing unit', 'Select a unit before creating a booking.');
@@ -323,10 +330,14 @@ export function BookingsScreen({
     } finally {
       setIsSubmitting(false);
     }
-  }, [date, endTime, loadData, selectedFacilityId, selectedUnitId, session.accessToken, startTime, toast]);
+  }, [date, endTime, loadData, network.isOnline, selectedFacilityId, selectedUnitId, session.accessToken, startTime, toast]);
 
   const handleCancel = useCallback(
     async (bookingId: string) => {
+      if (!network.isOnline) {
+        toast.info('Offline', 'Connect to internet to continue.');
+        return;
+      }
       setCancellingId(bookingId);
       setSubmitError(null);
       try {
@@ -341,7 +352,7 @@ export function BookingsScreen({
         setCancellingId(null);
       }
     },
-    [loadData, session.accessToken, toast],
+    [loadData, network.isOnline, session.accessToken, toast],
   );
 
   const onDatePicked = useCallback((event: DateTimePickerEvent, picked?: Date) => {
@@ -459,6 +470,7 @@ export function BookingsScreen({
                 <Pressable
                   style={[styles.secondaryButton, { alignSelf: 'flex-start' }]}
                   onPress={() => setBookingFormOpen(true)}
+                  disabled={!network.isOnline}
                 >
                   <Text style={[styles.secondaryButtonText, { color: palette.primary }]}>Step 2: Pick Date & Slot</Text>
                 </Pressable>
@@ -518,8 +530,8 @@ export function BookingsScreen({
                 {cancellable ? (
                   <Pressable
                     onPress={() => void handleCancel(booking.id)}
-                    style={[styles.secondaryButton, cancellingId === booking.id && styles.buttonDisabled]}
-                    disabled={cancellingId === booking.id}
+                    style={[styles.secondaryButton, (cancellingId === booking.id || !network.isOnline) && styles.buttonDisabled]}
+                    disabled={cancellingId === booking.id || !network.isOnline}
                   >
                     <Text style={[styles.secondaryButtonText, { color: palette.primary }]}>
                       {cancellingId === booking.id ? 'Cancelling...' : 'Cancel Booking'}
@@ -640,9 +652,9 @@ export function BookingsScreen({
               </View>
 
               <Pressable
-                style={[styles.primaryButton, isSubmitting && styles.buttonDisabled]}
+                style={[styles.primaryButton, (isSubmitting || !network.isOnline) && styles.buttonDisabled]}
                 onPress={() => void submitBooking()}
-                disabled={isSubmitting}
+                disabled={isSubmitting || !network.isOnline}
               >
                 <LinearGradient colors={[palette.primary, palette.primaryDark]} style={styles.primaryButtonInner}>
                   {isSubmitting ? <ActivityIndicator size="small" color={akColors.white} /> : null}

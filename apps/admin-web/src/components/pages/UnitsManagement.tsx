@@ -633,20 +633,38 @@ export function UnitsManagement() {
               <SelectItem value="LEASED">Rented</SelectItem>
             </SelectContent>
           </Select>
-          <div className="flex gap-2 border border-[#E5E7EB] rounded-lg p-1">
+          <div className="flex gap-2 border border-[#E5E7EB] rounded-lg p-1" role="tablist" aria-label="Units layout view">
             <Button
               variant={viewMode === "table" ? "default" : "ghost"}
               size="sm"
+              role="tab"
+              aria-label="Table view"
+              aria-selected={viewMode === "table"}
+              aria-pressed={viewMode === "table"}
+              title="Table view"
               onClick={() => setViewMode("table")}
-              className={viewMode === "table" ? "bg-[#0B5FFF] text-white" : ""}
+              className={
+                viewMode === "table"
+                  ? "bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white border border-[#0B5FFF] shadow-sm"
+                  : "text-[#64748B] hover:text-[#334155] hover:bg-[#F8FAFC]"
+              }
             >
               <List className="w-4 h-4" />
             </Button>
             <Button
               variant={viewMode === "grid" ? "default" : "ghost"}
               size="sm"
+              role="tab"
+              aria-label="Grid view"
+              aria-selected={viewMode === "grid"}
+              aria-pressed={viewMode === "grid"}
+              title="Grid view"
               onClick={() => setViewMode("grid")}
-              className={viewMode === "grid" ? "bg-[#0B5FFF] text-white" : ""}
+              className={
+                viewMode === "grid"
+                  ? "bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white border border-[#0B5FFF] shadow-sm"
+                  : "text-[#64748B] hover:text-[#334155] hover:bg-[#F8FAFC]"
+              }
             >
               <LayoutGrid className="w-4 h-4" />
             </Button>

@@ -1047,11 +1047,51 @@ export function NotificationCenter() {
       </div>
 
       <Card className="p-4 space-y-3">
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant={viewMode === "send" ? "default" : "outline"} onClick={() => setViewMode("send")}>Send</Button>
-          <Button size="sm" variant={viewMode === "scheduled" ? "default" : "outline"} onClick={() => setViewMode("scheduled")}>Scheduled</Button>
-          <Button size="sm" variant={viewMode === "failed" ? "default" : "outline"} onClick={() => setViewMode("failed")}>Failed</Button>
-          <Button size="sm" variant={viewMode === "all" ? "default" : "outline"} onClick={() => setViewMode("all")}>All</Button>
+        <div className="flex flex-wrap gap-2" role="tablist" aria-label="Notification views">
+          <Button
+            size="sm"
+            variant={viewMode === "send" ? "default" : "outline"}
+            role="tab"
+            aria-selected={viewMode === "send"}
+            aria-pressed={viewMode === "send"}
+            className={viewMode === "send" ? "bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white border-[#0B5FFF] shadow-sm" : "bg-white text-[#334155] border-[#CBD5E1] hover:bg-[#F8FAFC]"}
+            onClick={() => setViewMode("send")}
+          >
+            Send
+          </Button>
+          <Button
+            size="sm"
+            variant={viewMode === "scheduled" ? "default" : "outline"}
+            role="tab"
+            aria-selected={viewMode === "scheduled"}
+            aria-pressed={viewMode === "scheduled"}
+            className={viewMode === "scheduled" ? "bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white border-[#0B5FFF] shadow-sm" : "bg-white text-[#334155] border-[#CBD5E1] hover:bg-[#F8FAFC]"}
+            onClick={() => setViewMode("scheduled")}
+          >
+            Scheduled
+          </Button>
+          <Button
+            size="sm"
+            variant={viewMode === "failed" ? "default" : "outline"}
+            role="tab"
+            aria-selected={viewMode === "failed"}
+            aria-pressed={viewMode === "failed"}
+            className={viewMode === "failed" ? "bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white border-[#0B5FFF] shadow-sm" : "bg-white text-[#334155] border-[#CBD5E1] hover:bg-[#F8FAFC]"}
+            onClick={() => setViewMode("failed")}
+          >
+            Failed
+          </Button>
+          <Button
+            size="sm"
+            variant={viewMode === "all" ? "default" : "outline"}
+            role="tab"
+            aria-selected={viewMode === "all"}
+            aria-pressed={viewMode === "all"}
+            className={viewMode === "all" ? "bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white border-[#0B5FFF] shadow-sm" : "bg-white text-[#334155] border-[#CBD5E1] hover:bg-[#F8FAFC]"}
+            onClick={() => setViewMode("all")}
+          >
+            All
+          </Button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">
           <div className="xl:col-span-2 relative">

@@ -48,6 +48,7 @@ import {
 import { useBranding } from '../features/branding/provider';
 import { getBrandPalette } from '../features/branding/palette';
 import { useBottomNavMetrics } from '../features/layout/BottomNavMetricsContext';
+import { useNetworkStatus } from '../features/network/useNetworkStatus';
 import { akColors, akShadow } from '../theme/alkarma';
 import { formatCurrency, formatDateTime } from '../utils/format';
 
@@ -219,6 +220,7 @@ export function ServicesRequestsScreen({
   const { brand } = useBranding();
   const palette = getBrandPalette(brand);
   const toast = useAppToast();
+  const network = useNetworkStatus();
   const [services, setServices] = useState<CommunityService[]>([]);
   const [requests, setRequests] = useState<ServiceRequestRow[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -405,6 +407,11 @@ export function ServicesRequestsScreen({
   );
 
   const submitRequest = useCallback(async () => {
+    if (!network.isOnline) {
+      setSubmitError('Connect to internet to continue.');
+      toast.info('Offline', 'Connect to internet to continue.');
+      return;
+    }
     if (!selectedUnitId) {
       setSubmitError('Select a unit first.');
       toast.error('Missing unit', 'Select a unit before submitting your request.');
@@ -457,11 +464,16 @@ export function ServicesRequestsScreen({
     selectedUnitId,
     session.accessToken,
     isRequestsMode,
+    network.isOnline,
     toast,
   ]);
 
   const uploadDynamicFieldFile = useCallback(
     async (field: ServiceField) => {
+      if (!network.isOnline) {
+        toast.info('Offline', 'Connect to internet to continue.');
+        return;
+      }
       setSubmitError(null);
       setUploadingFieldId(field.id);
       try {
@@ -477,7 +489,7 @@ export function ServicesRequestsScreen({
         setUploadingFieldId((current) => (current === field.id ? null : current));
       }
     },
-    [session.accessToken, setFieldFile, toast],
+    [network.isOnline, session.accessToken, setFieldFile, toast],
   );
 
   const loadTicketDetails = useCallback(
@@ -537,6 +549,10 @@ export function ServicesRequestsScreen({
   }, [deepLinkTicketId, loadTicketDetails, onConsumeDeepLinkTicketId]);
 
   const submitTicketComment = useCallback(async () => {
+    if (!network.isOnline) {
+      toast.info('Offline', 'Connect to internet to continue.');
+      return;
+    }
     if (!activeTicket) return;
     const body = ticketCommentDraft.trim();
     if (!body) {
@@ -564,9 +580,14 @@ export function ServicesRequestsScreen({
     toast,
     session.accessToken,
     loadData,
+    network.isOnline,
   ]);
 
   const cancelActiveTicket = useCallback(async () => {
+    if (!network.isOnline) {
+      toast.info('Offline', 'Connect to internet to continue.');
+      return;
+    }
     if (!activeTicket) return;
     if (!canUserCancelTicket(activeTicket.status)) {
       toast.info(
@@ -596,6 +617,7 @@ export function ServicesRequestsScreen({
     loadData,
     loadTicketDetails,
     session.accessToken,
+    network.isOnline,
     toast,
   ]);
 
@@ -768,9 +790,9 @@ export function ServicesRequestsScreen({
             </ScrollView>
 
             <Pressable
-              style={[styles.primaryButton, isSubmitting && styles.buttonDisabled]}
+              style={[styles.primaryButton, (isSubmitting || !network.isOnline) && styles.buttonDisabled]}
               onPress={() => void submitRequest()}
-              disabled={isSubmitting}
+              disabled={isSubmitting || !network.isOnline}
             >
               <LinearGradient colors={[palette.primary, palette.primaryDark]} style={styles.primaryButtonInner}>
                 {isSubmitting ? <ActivityIndicator size="small" color="#fff" /> : null}
@@ -957,9 +979,9 @@ export function ServicesRequestsScreen({
                     <Pressable
                       style={[
                         styles.ghostActionButton,
-                        (!canUserCancelTicket(activeTicket.status) || ticketCancelling) && styles.buttonDisabled,
+                        (!canUserCancelTicket(activeTicket.status) || ticketCancelling || !network.isOnline) && styles.buttonDisabled,
                       ]}
-                      disabled={!canUserCancelTicket(activeTicket.status) || ticketCancelling}
+                      disabled={!canUserCancelTicket(activeTicket.status) || ticketCancelling || !network.isOnline}
                       onPress={() => void cancelActiveTicket()}
                     >
                       <Text style={styles.ghostActionButtonDangerText}>
@@ -970,9 +992,9 @@ export function ServicesRequestsScreen({
                       style={[
                         styles.primarySolidButton,
                         { backgroundColor: palette.primary },
-                        ticketCommentSubmitting && styles.buttonDisabled,
+                        (ticketCommentSubmitting || !network.isOnline) && styles.buttonDisabled,
                       ]}
-                      disabled={ticketCommentSubmitting}
+                      disabled={ticketCommentSubmitting || !network.isOnline}
                       onPress={() => void submitTicketComment()}
                     >
                       {ticketCommentSubmitting ? (

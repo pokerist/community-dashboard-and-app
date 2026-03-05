@@ -183,18 +183,22 @@ export function CommunityDirectory() {
           </button>
         </div>
 
-        <div className="mt-4 inline-flex rounded-xl border border-[#E2E8F0] overflow-hidden">
+        <div className="mt-4 inline-flex rounded-xl border border-[#E2E8F0] overflow-hidden" role="tablist" aria-label="Directory tabs">
           <button
             type="button"
             onClick={() => setTab('help')}
-            className={`px-4 py-2 text-sm font-medium ${tab === 'help' ? 'bg-[#00B386] text-white' : 'bg-white text-[#334155]'}`}
+            role="tab"
+            aria-selected={tab === 'help'}
+            className={`px-4 py-2 text-sm font-medium transition-colors ${tab === 'help' ? 'bg-[#00B386] text-white shadow-sm' : 'bg-white text-[#334155] hover:bg-[#F8FAFC]'}`}
           >
             Help Center
           </button>
           <button
             type="button"
             onClick={() => setTab('discover')}
-            className={`px-4 py-2 text-sm font-medium ${tab === 'discover' ? 'bg-[#00B386] text-white' : 'bg-white text-[#334155]'}`}
+            role="tab"
+            aria-selected={tab === 'discover'}
+            className={`px-4 py-2 text-sm font-medium transition-colors ${tab === 'discover' ? 'bg-[#00B386] text-white shadow-sm' : 'bg-white text-[#334155] hover:bg-[#F8FAFC]'}`}
           >
             Discover
           </button>

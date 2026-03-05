@@ -18,7 +18,9 @@ import { SystemSettingsModule } from '../system-settings/system-settings.module'
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.register({
       secret: process.env.JWT_ACCESS_SECRET || 'defaultSecretKey',
-      signOptions: { expiresIn: '15m' },
+      signOptions: {
+        expiresIn: (process.env.JWT_ACCESS_EXPIRES_IN || '12h') as any,
+      },
     }),
     forwardRef(() => ReferralsModule),
     forwardRef(() => NotificationsModule),

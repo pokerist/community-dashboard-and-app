@@ -37,6 +37,7 @@ import {
 } from '../features/auth/profile';
 import { pickAndUploadFileByPurpose } from '../features/files/service';
 import { API_BASE_URL } from '../config/env';
+import { useNetworkStatus } from '../features/network/useNetworkStatus';
 import { unitStatusDisplayLabel } from '../features/presentation/status';
 import { useI18n } from '../features/i18n/provider';
 import { akColors, akRadius, akShadow } from '../theme/alkarma';
@@ -209,6 +210,7 @@ export function SessionHomeScreen({
   const roleLabel = humanizePersona(profile?.personaHints);
   const initial = String(displayName).trim().charAt(0).toUpperCase() || 'R';
   const capabilityChips = useMemo(() => buildCapabilityChips(profile), [profile]);
+  const network = useNetworkStatus();
   const vehicles = useMemo(() => profile?.vehicles ?? [], [profile?.vehicles]);
   const serverAvatarImageUri = profile?.user?.profilePhoto?.id
     ? `${API_BASE_URL}/files/public/profile-photo/${profile.user.profilePhoto.id}?t=${profilePhotoVersion}`
@@ -219,6 +221,10 @@ export function SessionHomeScreen({
     : localProfilePreviewUri ?? profileAvatarPreviewUri;
 
   const handleSaveProfile = async () => {
+    if (!network.isOnline) {
+      toast.info('Offline', 'Connect to internet to continue.');
+      return;
+    }
     const normalizedEmail = editEmail.trim();
     const normalizedPhone = editPhone.trim();
     const payload = {
@@ -272,6 +278,10 @@ export function SessionHomeScreen({
   };
 
   const handleUploadProfilePhoto = useCallback(async () => {
+    if (!network.isOnline) {
+      toast.info('Offline', 'Connect to internet to continue.');
+      return;
+    }
     setIsUploadingProfilePhoto(true);
     try {
       const uploaded = await pickAndUploadFileByPurpose(
@@ -292,9 +302,13 @@ export function SessionHomeScreen({
     } finally {
       setIsUploadingProfilePhoto(false);
     }
-  }, [onProfileAvatarPreviewUriChange, session.accessToken, toast]);
+  }, [network.isOnline, onProfileAvatarPreviewUriChange, session.accessToken, toast]);
 
   const handleToggleTwoFactor = async (enabled: boolean) => {
+    if (!network.isOnline) {
+      toast.info('Offline', 'Connect to internet to continue.');
+      return;
+    }
     if (!profile || isSavingSecurity) return;
     const previous = Boolean(profile.user?.twoFactorEnabled);
     if (previous === enabled) return;
@@ -377,6 +391,10 @@ export function SessionHomeScreen({
   }, []);
 
   const saveVehicle = useCallback(async () => {
+    if (!network.isOnline) {
+      toast.info('Offline', 'Connect to internet to continue.');
+      return;
+    }
     const payload: ResidentVehiclePayload = {
       vehicleType: vehicleType.trim(),
       model: vehicleModel.trim(),
@@ -414,6 +432,7 @@ export function SessionHomeScreen({
     session.accessToken,
     t,
     toast,
+    network.isOnline,
     vehicleColor,
     vehicleEditingId,
     vehicleModel,
@@ -425,6 +444,10 @@ export function SessionHomeScreen({
 
   const removeVehicle = useCallback(
     async (vehicleId: string) => {
+      if (!network.isOnline) {
+        toast.info('Offline', 'Connect to internet to continue.');
+        return;
+      }
       setDeletingVehicleId(vehicleId);
       try {
         await deleteMyResidentVehicle(session.accessToken, vehicleId);
@@ -437,7 +460,7 @@ export function SessionHomeScreen({
         setDeletingVehicleId(null);
       }
     },
-    [reloadVehicles, session.accessToken, t, toast],
+    [reloadVehicles, network.isOnline, session.accessToken, t, toast],
   );
 
   return (
@@ -606,7 +629,7 @@ export function SessionHomeScreen({
                   <Pressable
                     style={[styles.vehicleActionBtnDanger, deletingVehicleId === vehicle.id && styles.buttonDisabled]}
                     onPress={() => void removeVehicle(vehicle.id)}
-                    disabled={deletingVehicleId === vehicle.id}
+                    disabled={deletingVehicleId === vehicle.id || !network.isOnline}
                   >
                     <Text style={styles.vehicleActionTextDanger}>
                       {deletingVehicleId === vehicle.id ? t('common.updating') : t('profile.vehicleDelete')}
@@ -698,9 +721,9 @@ export function SessionHomeScreen({
                 )}
               </View>
               <Pressable
-                style={[styles.modalPhotoButton, isUploadingProfilePhoto && styles.buttonDisabled]}
+                style={[styles.modalPhotoButton, (isUploadingProfilePhoto || !network.isOnline) && styles.buttonDisabled]}
                 onPress={() => void handleUploadProfilePhoto()}
-                disabled={isUploadingProfilePhoto || isSaving}
+                disabled={isUploadingProfilePhoto || isSaving || !network.isOnline}
               >
                 {isUploadingProfilePhoto ? (
                   <View style={styles.buttonRow}>
@@ -765,9 +788,9 @@ export function SessionHomeScreen({
                 <Text style={styles.secondaryButtonText}>{t('common.cancel')}</Text>
               </Pressable>
               <Pressable
-                style={[styles.primaryButton, isSaving && styles.buttonDisabled]}
+                style={[styles.primaryButton, (isSaving || !network.isOnline) && styles.buttonDisabled]}
                 onPress={() => void handleSaveProfile()}
-                disabled={isSaving}
+                disabled={isSaving || !network.isOnline}
               >
                 {isSaving ? (
                   <View style={styles.buttonRow}>
@@ -878,9 +901,9 @@ export function SessionHomeScreen({
                 <Text style={styles.secondaryButtonText}>{t('common.cancel')}</Text>
               </Pressable>
               <Pressable
-                style={[styles.primaryButton, isSavingVehicle && styles.buttonDisabled]}
+                style={[styles.primaryButton, (isSavingVehicle || !network.isOnline) && styles.buttonDisabled]}
                 onPress={() => void saveVehicle()}
-                disabled={isSavingVehicle}
+                disabled={isSavingVehicle || !network.isOnline}
               >
                 {isSavingVehicle ? (
                   <View style={styles.buttonRow}>

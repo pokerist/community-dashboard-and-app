@@ -31,6 +31,7 @@ import { pickAndUploadServiceAttachment } from '../features/files/service';
 import { useBranding } from '../features/branding/provider';
 import { getBrandPalette } from '../features/branding/palette';
 import { useBottomNavMetrics } from '../features/layout/BottomNavMetricsContext';
+import { useNetworkStatus } from '../features/network/useNetworkStatus';
 import { extractApiErrorMessage } from '../lib/http';
 import { akColors, akShadow } from '../theme/alkarma';
 import { formatDateTime, plusHoursIso } from '../utils/format';
@@ -174,6 +175,7 @@ export function AccessQrScreen({
   const { brand } = useBranding();
   const palette = getBrandPalette(brand);
   const toast = useAppToast();
+  const network = useNetworkStatus();
   const [rows, setRows] = useState<AccessQrRow[]>([]);
   const [type, setType] = useState<QrTypeOption>('VISITOR');
   const [visitorUsageMode, setVisitorUsageMode] = useState<'SINGLE_USE' | 'MULTI_USE'>('SINGLE_USE');
@@ -313,6 +315,11 @@ export function AccessQrScreen({
   }, [type, validFrom, validTo, workerDurationHours]);
 
   const submitQr = useCallback(async () => {
+    if (!network.isOnline) {
+      setSubmitError('Connect to internet to continue.');
+      toast.info('Offline', 'Connect to internet to continue.');
+      return;
+    }
     if (!selectedUnitId) {
       setSubmitError('Select a unit first.');
       toast.error('Missing unit', 'Select a unit before generating an access permit.');
@@ -475,10 +482,14 @@ export function AccessQrScreen({
     } finally {
       setIsSubmitting(false);
     }
-  }, [carNumber, deliveryCompany, deliveryOtherCompany, driverName, loadData, selectedUnitId, session.accessToken, toast, type, validFrom, validTo, visitorName, visitorPhone, visitorPurpose, visitorUsageMode, workerIdFiles, workersCount, workDuration, workType, rideCompany, rideOtherCompany]);
+  }, [carNumber, deliveryCompany, deliveryOtherCompany, driverName, loadData, network.isOnline, selectedUnitId, session.accessToken, toast, type, validFrom, validTo, visitorName, visitorPhone, visitorPurpose, visitorUsageMode, workerIdFiles, workersCount, workDuration, workType, rideCompany, rideOtherCompany]);
 
   const handleRevoke = useCallback(
     async (id: string) => {
+      if (!network.isOnline) {
+        toast.info('Offline', 'Connect to internet to continue.');
+        return;
+      }
       setRevokingId(id);
       setSubmitError(null);
       try {
@@ -493,7 +504,7 @@ export function AccessQrScreen({
         setRevokingId(null);
       }
     },
-    [loadData, session.accessToken, toast],
+    [loadData, network.isOnline, session.accessToken, toast],
   );
 
   const resetStartNow = useCallback(() => {
@@ -530,6 +541,10 @@ export function AccessQrScreen({
   }, []);
 
   const handleUploadWorkerId = useCallback(async () => {
+    if (!network.isOnline) {
+      toast.info('Offline', 'Connect to internet to continue.');
+      return;
+    }
     setIsUploadingWorkerId(true);
     try {
       const uploaded = await pickAndUploadServiceAttachment(session.accessToken);
@@ -546,13 +561,18 @@ export function AccessQrScreen({
     } finally {
       setIsUploadingWorkerId(false);
     }
-  }, [session.accessToken, toast]);
+  }, [network.isOnline, session.accessToken, toast]);
 
   const removeWorkerIdFile = useCallback((fileId: string) => {
     setWorkerIdFiles((prev) => prev.filter((file) => file.id !== fileId));
   }, []);
 
   const handlePrimarySubmit = useCallback(() => {
+    if (!network.isOnline) {
+      setSubmitError('Connect to internet to continue.');
+      toast.info('Offline', 'Connect to internet to continue.');
+      return;
+    }
     if (type === 'WORKER') {
       const workers = Number(workersCount);
       if (!Number.isFinite(workers) || workers < 1) {
@@ -569,7 +589,7 @@ export function AccessQrScreen({
       return;
     }
     void submitQr();
-  }, [submitQr, toast, type, workerIdFiles.length, workersCount]);
+  }, [network.isOnline, submitQr, toast, type, workerIdFiles.length, workersCount]);
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom']}>
@@ -902,8 +922,8 @@ export function AccessQrScreen({
             <Text style={styles.label}>Worker ID Images</Text>
             <Pressable
               onPress={() => void handleUploadWorkerId()}
-              disabled={isUploadingWorkerId}
-              style={[styles.uploadDocButton, isUploadingWorkerId && styles.buttonDisabled]}
+              disabled={isUploadingWorkerId || !network.isOnline}
+              style={[styles.uploadDocButton, (isUploadingWorkerId || !network.isOnline) && styles.buttonDisabled]}
             >
               {isUploadingWorkerId ? (
                 <ActivityIndicator size="small" color={palette.primary} />
@@ -986,7 +1006,7 @@ export function AccessQrScreen({
           </>
         ) : null}
 
-        <Pressable onPress={handlePrimarySubmit} disabled={isSubmitting} style={[styles.submitButton, isSubmitting && styles.buttonDisabled]}>
+        <Pressable onPress={handlePrimarySubmit} disabled={isSubmitting || !network.isOnline} style={[styles.submitButton, (isSubmitting || !network.isOnline) && styles.buttonDisabled]}>
           <LinearGradient colors={[palette.primary, palette.primaryDark]} style={styles.submitButtonGradient}>
             {isSubmitting ? <ActivityIndicator size="small" color="#fff" /> : null}
             <Text style={styles.submitButtonText}>
@@ -1053,7 +1073,7 @@ export function AccessQrScreen({
             <View style={styles.historyFooter}>
               <Text style={styles.historyCreated}>Created on {formatDateTime(row.createdAt)}</Text>
               {isActive ? (
-                <Pressable onPress={() => void handleRevoke(row.id)} disabled={revokingId === row.id} style={[styles.revokeButton, revokingId === row.id && styles.buttonDisabled]}>
+                <Pressable onPress={() => void handleRevoke(row.id)} disabled={revokingId === row.id || !network.isOnline} style={[styles.revokeButton, (revokingId === row.id || !network.isOnline) && styles.buttonDisabled]}>
                   <Text style={styles.revokeButtonText}>{revokingId === row.id ? 'Revoking...' : 'Revoke'}</Text>
                 </Pressable>
               ) : null}
@@ -1090,6 +1110,10 @@ export function AccessQrScreen({
             </Pressable>
             <Pressable
               onPress={() => {
+                if (!network.isOnline) {
+                  toast.info('Offline', 'Connect to internet to continue.');
+                  return;
+                }
                 if (!acceptedRegulations) {
                   toast.error('Confirmation required', 'Please accept the regulations before submitting.');
                   return;
@@ -1097,7 +1121,8 @@ export function AccessQrScreen({
                 setShowRegulationsModal(false);
                 void submitQr();
               }}
-              style={[styles.regulationsSubmit, { backgroundColor: palette.primary }]}
+              style={[styles.regulationsSubmit, { backgroundColor: palette.primary }, !network.isOnline && styles.buttonDisabled]}
+              disabled={!network.isOnline}
             >
               <Text style={styles.regulationsSubmitText}>Submit Worker Permit</Text>
             </Pressable>

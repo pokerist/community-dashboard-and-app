@@ -22,6 +22,7 @@ import {
 import { buildPayables, filterPayablesByUnit } from '../features/community/payables';
 import type { InvoiceRow, PayableItem, ResidentUnit, ViolationRow } from '../features/community/types';
 import { extractApiErrorMessage } from '../lib/http';
+import { useNetworkStatus } from '../features/network/useNetworkStatus';
 import { useBranding } from '../features/branding/provider';
 import { getBrandPalette } from '../features/branding/palette';
 import { formatCurrency, formatDateOnly } from '../utils/format';
@@ -52,6 +53,7 @@ export function PaymentsScreen({
   const toast = useAppToast();
   const { brand } = useBranding();
   const palette = getBrandPalette(brand);
+  const network = useNetworkStatus();
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [violations, setViolations] = useState<ViolationRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -128,6 +130,10 @@ export function PaymentsScreen({
   }, [visiblePayables]);
 
   const completePayment = useCallback(async (payload: { paymentMethod: string; cardLast4?: string; notes?: string; }) => {
+    if (!network.isOnline) {
+      toast.info('Offline', 'Connect to internet to continue.');
+      return;
+    }
     if (!activePaymentItem?.invoiceId) {
       toast.info('Payment unavailable', 'This amount is linked to a pending invoice sync.');
       return;
@@ -143,7 +149,7 @@ export function PaymentsScreen({
     } finally {
       setIsPaying(false);
     }
-  }, [activePaymentItem?.invoiceId, loadData, session.accessToken, toast]);
+  }, [activePaymentItem?.invoiceId, loadData, network.isOnline, session.accessToken, toast]);
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['left', 'right', 'bottom']}>
@@ -203,6 +209,7 @@ export function PaymentsScreen({
               {String(item.status ?? '').toUpperCase() !== 'PAID' ? (
                 <Pressable
                   onPress={() => setActivePaymentItem(item)}
+                  disabled={!network.isOnline}
                   style={[styles.payButton, { backgroundColor: palette.secondary }]}
                 >
                   <Text style={styles.payButtonText}>Pay Now</Text>

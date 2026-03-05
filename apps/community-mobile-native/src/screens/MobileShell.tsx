@@ -57,6 +57,7 @@ import { Audio } from 'expo-av';
 import { useAppToast } from '../components/mobile/AppToast';
 import { BottomNavMetricsProvider } from '../features/layout/BottomNavMetricsContext';
 import { FireEvacuationAlertModal } from '../components/mobile/FireEvacuationAlertModal';
+import { useNetworkStatus } from '../features/network/useNetworkStatus';
 import {
   type UploadedAttachment,
   uploadServiceAttachmentFile,
@@ -176,6 +177,9 @@ function MobileShellInner(props: MobileShellProps) {
   const units = useResidentUnits(props.session.accessToken, props.session.userId);
   const realtime = useNotificationRealtime();
   const toast = useAppToast();
+  const network = useNetworkStatus();
+  const [showReconnectedBanner, setShowReconnectedBanner] = useState(false);
+  const prevOnlineRef = useRef<boolean>(network.isOnline);
   const lastFireAlertAtRef = useRef<string | null>(null);
   const fireActiveRef = useRef(false);
   const fireReconnectToastAtRef = useRef(0);
@@ -217,6 +221,20 @@ function MobileShellInner(props: MobileShellProps) {
         !fireStatus?.acknowledged &&
         !fireStatus?.needsHelp),
   );
+
+  useEffect(() => {
+    const prev = prevOnlineRef.current;
+    if (!prev && network.isOnline) {
+      setShowReconnectedBanner(true);
+      const timer = setTimeout(() => setShowReconnectedBanner(false), 2500);
+      return () => clearTimeout(timer);
+    }
+    if (!network.isOnline) {
+      setShowReconnectedBanner(false);
+    }
+    prevOnlineRef.current = network.isOnline;
+    return undefined;
+  }, [network.isOnline]);
 
   useEffect(() => {
     fireActiveRef.current = Boolean(fireStatus?.active && fireStatus?.targeted);
@@ -1132,6 +1150,19 @@ function MobileShellInner(props: MobileShellProps) {
           <Ionicons name="close" size={16} color="#475569" />
         </Pressable>
       ) : null}
+      {!network.isOnline ? (
+        <View style={shellStyles.networkBannerOffline}>
+          <Ionicons name="cloud-offline-outline" size={16} color="#991B1B" />
+          <Text style={shellStyles.networkBannerText}>
+            No internet connection. Retrying...
+          </Text>
+        </View>
+      ) : showReconnectedBanner ? (
+        <View style={shellStyles.networkBannerOnline}>
+          <Ionicons name="wifi" size={16} color="#065F46" />
+          <Text style={shellStyles.networkBannerText}>Connection restored.</Text>
+        </View>
+      ) : null}
       <FireEvacuationAlertModal
         visible={fireModalVisible}
         status={fireStatus}
@@ -1389,6 +1420,43 @@ const shellStyles = StyleSheet.create({
     color: '#475569',
     fontSize: 11,
     marginTop: 1,
+  },
+  networkBannerOffline: {
+    position: 'absolute',
+    top: 46,
+    left: 12,
+    right: 12,
+    zIndex: 1000,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    backgroundColor: '#FEE2E2',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  networkBannerOnline: {
+    position: 'absolute',
+    top: 46,
+    left: 12,
+    right: 12,
+    zIndex: 1000,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    backgroundColor: '#ECFDF5',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  networkBannerText: {
+    color: '#0F172A',
+    fontSize: 12,
+    fontWeight: '700',
   },
   toastTitle: {
     fontSize: 13,

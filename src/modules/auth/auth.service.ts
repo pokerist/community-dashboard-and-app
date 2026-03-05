@@ -48,6 +48,12 @@ import { getAuth, type Auth as FirebaseAuth } from 'firebase-admin/auth';
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
   private firebaseAuthApp: FirebaseApp | null = null;
+  private readonly accessTokenExpiresIn = (process.env.JWT_ACCESS_EXPIRES_IN ||
+    '12h') as any;
+  private readonly refreshTokenExpiresInDays = Math.max(
+    1,
+    Number.parseInt(process.env.JWT_REFRESH_EXPIRES_IN_DAYS || '30', 10) || 30,
+  );
 
   constructor(
     private prisma: PrismaService,
@@ -1648,7 +1654,9 @@ export class AuthService {
       permissions: Array.from(permissions), // convert Set to array for JWT
     };
 
-    const accessToken = this.jwtService.sign(payload, { expiresIn: '15m' });
+    const accessToken = this.jwtService.sign(payload, {
+      expiresIn: this.accessTokenExpiresIn,
+    });
 
     // Refresh token
     const rawRefreshToken = crypto.randomUUID();
@@ -1659,7 +1667,9 @@ export class AuthService {
       data: {
         userId: user.id,
         tokenHash,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+        expiresAt: new Date(
+          Date.now() + this.refreshTokenExpiresInDays * 24 * 60 * 60 * 1000,
+        ),
       },
     });
 
