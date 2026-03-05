@@ -24,26 +24,6 @@ import { useI18n } from '../features/i18n/provider';
 import { akColors, akRadius, akShadow } from '../theme/alkarma';
 
 const logoImage = require('../../assets/branding/alkarma-logo-dark.png');
-const DEMO_ACCOUNTS = [
-  { label: 'Ahmed Hassan (Owner)', email: 'ahmed.hassan.owner@alkarma.demo', password: 'pass123' },
-  { label: 'Mostafa Ali (Tenant)', email: 'mostafa.ali.tenant@alkarma.demo', password: 'pass123' },
-  {
-    label: 'Karim Fathy (Pre-Delivery)',
-    email: 'karim.fathy.predelivery@alkarma.demo',
-    password: 'pass123',
-  },
-  { label: 'Nour Hassan (Family)', email: 'nour.hassan.family@alkarma.demo', password: 'pass123' },
-  {
-    label: 'Youssef Mahmoud (Authorized)',
-    email: 'youssef.mahmoud.authorized@alkarma.demo',
-    password: 'pass123',
-  },
-  {
-    label: 'Mohamed Saber (Contractor)',
-    email: 'mohamed.saber.contractor@alkarma.demo',
-    password: 'pass123',
-  },
-] as const;
 
 type LoginScreenProps = {
   isSubmitting: boolean;
@@ -82,13 +62,12 @@ export function LoginScreen({
   const insets = useSafeAreaInsets();
   const { language, setLanguage, t } = useI18n();
   const { brand } = useBranding();
-  const [email, setEmail] = useState('ahmed.hassan.owner@alkarma.demo');
-  const [password, setPassword] = useState('pass123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [isBiometricSubmitting, setIsBiometricSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
-  const [showCredentials, setShowCredentials] = useState(true);
   const [twoFactorOtp, setTwoFactorOtp] = useState('');
 
   const combinedError = errorMessage || localError;
@@ -133,12 +112,6 @@ export function LoginScreen({
     } finally {
       setIsBiometricSubmitting(false);
     }
-  };
-
-  const fillDemo = (demo: (typeof DEMO_ACCOUNTS)[number]) => {
-    setEmail(demo.email);
-    setPassword(demo.password);
-    setLocalError(null);
   };
 
   const handleSubmitTwoFactor = async () => {
@@ -421,35 +394,6 @@ export function LoginScreen({
               </Text>
             </View>
 
-            {!pendingTwoFactorChallenge && showCredentials ? (
-              <LinearGradient
-                colors={['rgba(201,169,97,0.12)', 'rgba(42,62,53,0.05)']}
-                style={styles.demoCredentialsCard}
-              >
-                <View style={styles.rowBetween}>
-                  <Text style={styles.demoCredTitle}>{t('login.demoCredentials')}</Text>
-                  <Pressable onPress={() => setShowCredentials(false)}>
-                    <Text style={styles.demoHideText}>{t('login.hideDemo')}</Text>
-                  </Pressable>
-                </View>
-
-                {DEMO_ACCOUNTS.map((demo) => (
-                  <Pressable
-                    key={demo.email}
-                    style={styles.demoUserTile}
-                    onPress={() => fillDemo(demo)}
-                  >
-                    <Text style={styles.demoUserName}>{demo.label}</Text>
-                    <Text style={styles.demoUserEmail}>{demo.email}</Text>
-                  </Pressable>
-                ))}
-              </LinearGradient>
-            ) : !pendingTwoFactorChallenge ? (
-              <Pressable onPress={() => setShowCredentials(true)} style={styles.showDemoButton}>
-                <Text style={styles.showDemoText}>{t('login.showDemo')}</Text>
-              </Pressable>
-            ) : null}
-
             <View style={styles.poweredWrap}>
               <Text style={styles.poweredText}>
                 Powered by <Text style={[styles.poweredAccent, { color: brandAccent }]}>
@@ -723,49 +667,6 @@ const styles = StyleSheet.create({
     color: akColors.textSoft,
     fontSize: 11,
     textAlign: 'center',
-  },
-  demoCredentialsCard: {
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(201,169,97,0.22)',
-    padding: 14,
-    gap: 10,
-  },
-  demoCredTitle: {
-    color: akColors.text,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  demoHideText: {
-    color: akColors.textMuted,
-    fontSize: 11,
-  },
-  demoUserTile: {
-    backgroundColor: akColors.surface,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: akColors.border,
-    padding: 12,
-    gap: 2,
-  },
-  demoUserName: {
-    color: akColors.text,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  demoUserEmail: {
-    color: akColors.textMuted,
-    fontSize: 11,
-  },
-  showDemoButton: {
-    alignSelf: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-  },
-  showDemoText: {
-    color: akColors.primary,
-    fontSize: 12,
-    fontWeight: '600',
   },
   poweredWrap: {
     alignItems: 'center',
