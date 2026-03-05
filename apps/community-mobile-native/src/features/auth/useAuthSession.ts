@@ -253,7 +253,7 @@ export function useAuthSession(): AuthHookResult {
     }
 
     const result = await LocalAuthentication.authenticateAsync({
-      promptMessage: 'Sign in to SSS Community',
+      promptMessage: 'Sign in to MG Community',
       fallbackLabel: 'Use passcode',
       cancelLabel: 'Cancel',
       disableDeviceFallback: false,

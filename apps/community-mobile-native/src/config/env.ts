@@ -15,4 +15,4 @@ export const API_BASE_URL = (explicitBaseUrl || defaultBaseUrl()).replace(
   '',
 );
 
-export const APP_NAME = 'SSS Community';
+export const APP_NAME = 'MG Community';

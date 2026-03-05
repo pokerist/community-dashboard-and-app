@@ -10,8 +10,8 @@ import type {
 const BRAND_CACHE_KEY = 'mobile_brand_config_v1';
 
 export const defaultBrand: BrandConfig = {
-  companyName: 'SSS Community',
-  appDisplayName: 'SSS Community',
+  companyName: 'MG Community',
+  appDisplayName: 'MG Community',
   primaryColor: '#2A3E35',
   secondaryColor: '#C9A961',
   accentColor: '#0B5FFF',
@@ -27,7 +27,7 @@ export const defaultOnboarding: OnboardingConfig = {
   enabled: true,
   slides: [
     {
-      title: 'Welcome to SSS Community',
+      title: 'Welcome to MG Community',
       subtitle: 'SMART LIVING',
       description:
         'Experience premium living with services, payments, visitors, and community updates in one place.',

@@ -605,7 +605,7 @@ export function ResidentHomeScreen({
         <View style={styles.heroWelcomeRow}>
           <Text style={styles.heroSubtitle}>{t('home.welcomeTo')} </Text>
           <Text style={styles.heroBrand}>
-            {(selectedUnit?.projectName ?? brand.companyName?.trim()) || 'SSS Community'}
+            {(selectedUnit?.projectName ?? brand.companyName?.trim()) || 'MG Community'}
           </Text>
         </View>
         

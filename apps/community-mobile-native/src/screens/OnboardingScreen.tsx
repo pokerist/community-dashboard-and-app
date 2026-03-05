@@ -88,7 +88,7 @@ export function OnboardingScreen({ onComplete }: OnboardingScreenProps) {
   }, [onboarding]);
   const runtimeSlides = useMemo(() => {
     const company = brand.companyName || 'Al Karma';
-    const appName = brand.appDisplayName || 'Community App';
+    const appName = brand.appDisplayName || 'MG Community';
     const tagline = (brand.tagline || 'SMART LIVING').toUpperCase();
     const sourceSlides = configuredSlides.length > 0 ? configuredSlides : slides;
     return sourceSlides.map((s, i) =>

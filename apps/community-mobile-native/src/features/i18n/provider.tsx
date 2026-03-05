@@ -42,7 +42,7 @@ const dictionary: Record<AppLanguage, Record<string, string>> = {
 
     'login.title': 'Community Access',
     'login.subtitle':
-      'SSS Community connected to the live backend for real booking, services and QR flows.',
+      'MG Community connected to the live backend for real booking, services and QR flows.',
     'login.emailLabel': 'Email or Phone',
     'login.passwordLabel': 'Password',
     'login.rememberMe': 'Remember me',
@@ -292,7 +292,7 @@ const dictionary: Record<AppLanguage, Record<string, string>> = {
 
     'login.title': 'دخول المجتمع',
     'login.subtitle':
-      'تطبيق SSS Community متصل بالباك إند الفعلي للحجوزات والخدمات وQR.',
+      'تطبيق MG Community متصل بالباك إند الفعلي للحجوزات والخدمات وQR.',
     'login.emailLabel': 'البريد الإلكتروني أو الهاتف',
     'login.passwordLabel': 'كلمة المرور',
     'login.rememberMe': 'تذكرني',
