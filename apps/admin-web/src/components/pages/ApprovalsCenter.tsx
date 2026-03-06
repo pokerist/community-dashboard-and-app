@@ -1,571 +1,895 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import { Input } from "../ui/input";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../ui/table";
-import apiClient from "../../lib/api-client";
-import { errorMessage, formatDateTime, humanizeEnum } from "../../lib/live-data";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "../ui/dialog";
+import { Input } from "../ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
+import { Textarea } from "../ui/textarea";
+import { DataTable, DataTableColumn } from "../DataTable";
+import { DrawerForm } from "../DrawerForm";
+import { EmptyState } from "../EmptyState";
+import { PageHeader } from "../PageHeader";
+import { SkeletonTable } from "../SkeletonTable";
+import { StatCard } from "../StatCard";
+import { StatusBadge } from "../StatusBadge";
+import approvalsService, {
+  ApprovalBaseItem,
+  ApprovalStats,
+  DelegateApprovalItem,
+  DelegateFeeMode,
+  FamilyApprovalItem,
+  FamilyRelationship,
+  HomeStaffApprovalItem,
+  HomeStaffType,
+  OwnerApprovalItem,
+  OwnerOption,
+  UnitOption,
+} from "../../lib/approvals-service";
+import {
+  errorMessage,
+  formatCurrencyEGP,
+  formatDate,
+  formatDateTime,
+  humanizeEnum,
+  toInitials,
+} from "../../lib/live-data";
 
-type ReviewStatus = "ALL" | "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED";
+type TabKey = "owners" | "family" | "delegates" | "home-staff";
+type StatusFilter = "PENDING" | "PROCESSING" | "ALL";
+type PreRegistrationMode = "OWNER" | "FAMILY";
+type PreRegistrationStep = 1 | 2;
 
-type ProfileChangeRequestRow = {
-  id: string;
-  userId: string;
-  status: string;
-  requestedFields?: Record<string, unknown> | null;
-  previousSnapshot?: Record<string, unknown> | null;
-  rejectionReason?: string | null;
-  reviewedAt?: string | null;
-  createdAt?: string;
-  user?: {
-    id?: string;
-    nameEN?: string | null;
-    email?: string | null;
-    phone?: string | null;
-  } | null;
+type SelectedItem =
+  | { tab: "owners"; item: OwnerApprovalItem }
+  | { tab: "family"; item: FamilyApprovalItem }
+  | { tab: "delegates"; item: DelegateApprovalItem }
+  | { tab: "home-staff"; item: HomeStaffApprovalItem };
+
+type PreviewState = {
+  loading: boolean;
+  objectUrl: string | null;
+  mimeType: string | null;
+  error: string | null;
 };
 
-type HouseholdFamilyRow = {
-  id: string;
-  status: string;
-  fullName: string;
-  relationship?: string | null;
-  email?: string | null;
-  phone?: string | null;
-  nationality?: string | null;
-  unit?: { unitNumber?: string | null; projectName?: string | null } | null;
-  owner?: { nameEN?: string | null; email?: string | null } | null;
-  rejectionReason?: string | null;
-  credentialsEmailStatus?: string | null;
-  credentialsEmailSentAt?: string | null;
-  credentialsEmailError?: string | null;
-  reviewedAt?: string | null;
-  createdAt?: string;
-};
-
-type HouseholdAuthorizedRow = {
-  id: string;
-  status: string;
-  fullName: string;
-  email?: string | null;
-  phone?: string | null;
-  validFrom?: string | null;
-  validTo?: string | null;
-  feeMode?: string | null;
-  feeAmount?: string | number | null;
-  unit?: { unitNumber?: string | null; projectName?: string | null } | null;
-  owner?: { nameEN?: string | null; email?: string | null } | null;
-  rejectionReason?: string | null;
-  credentialsEmailStatus?: string | null;
-  credentialsEmailSentAt?: string | null;
-  credentialsEmailError?: string | null;
-  reviewedAt?: string | null;
-  createdAt?: string;
-};
-
-type HouseholdStaffRow = {
-  id: string;
-  status: string;
-  fullName: string;
-  phone?: string | null;
-  staffType?: string | null;
-  isLiveIn?: boolean;
-  unit?: { unitNumber?: string | null; projectName?: string | null } | null;
-  owner?: { nameEN?: string | null; email?: string | null } | null;
-  rejectionReason?: string | null;
-  createdAt?: string;
-};
-
-type ApprovalHistoryRow = {
-  id: string;
-  requestType: "FAMILY" | "AUTHORIZED";
-  fullName: string;
-  email?: string | null;
-  unitText: string;
-  ownerText: string;
-  approvedAt?: string | null;
-  credentialsEmailStatus?: string | null;
-  credentialsEmailSentAt?: string | null;
-  credentialsEmailError?: string | null;
-};
-
-type HouseholdRequestsResponse = {
-  family: HouseholdFamilyRow[];
-  authorized: HouseholdAuthorizedRow[];
-  homeStaff: HouseholdStaffRow[];
-};
-
-function statusBadgeClass(status?: string | null) {
-  const normalized = String(status ?? "").toUpperCase();
-  if (normalized === "APPROVED" || normalized === "ACTIVE") return "bg-[#DCFCE7] text-[#166534]";
-  if (normalized === "REJECTED" || normalized === "CANCELLED") return "bg-[#FEE2E2] text-[#B91C1C]";
-  if (normalized === "PENDING") return "bg-[#FEF9C3] text-[#A16207]";
-  return "bg-[#E2E8F0] text-[#334155]";
+function buildUnitLabel(projectName: string, unitNumber: string | null): string {
+  return unitNumber ? `${projectName} - ${unitNumber}` : projectName;
 }
 
-function unitLabel(unit?: { unitNumber?: string | null; projectName?: string | null } | null) {
-  if (!unit) return "—";
-  return [unit.projectName, unit.unitNumber].filter(Boolean).join(" • ") || "—";
+function collectDocumentUrls(item: ApprovalBaseItem | null): string[] {
+  if (!item) return [];
+  const urls: string[] = [];
+  if (item.documents.photo) urls.push(item.documents.photo);
+  if (item.documents.nationalId) urls.push(item.documents.nationalId);
+  if (item.documents.passport) urls.push(item.documents.passport);
+  item.documents.other.forEach((row) => urls.push(row.url));
+  return urls;
 }
 
-function jsonDiffLabel(previous?: Record<string, unknown> | null, next?: Record<string, unknown> | null) {
-  const prev = previous ?? {};
-  const nxt = next ?? {};
-  const keys = Array.from(new Set([...Object.keys(prev), ...Object.keys(nxt)]));
-  if (keys.length === 0) return "No field changes";
-  return keys
-    .map((key) => {
-      const oldValue = prev[key] == null ? "—" : String(prev[key]);
-      const newValue = nxt[key] == null ? "—" : String(nxt[key]);
-      if (oldValue === newValue) return null;
-      return `${key}: ${oldValue} → ${newValue}`;
-    })
-    .filter(Boolean)
-    .join(" | ");
-}
+const RELATIONSHIP_OPTIONS: FamilyRelationship[] = ["SON_DAUGHTER", "MOTHER_FATHER", "SPOUSE"];
+const HOME_STAFF_TYPES: HomeStaffType[] = ["DRIVER", "NANNY", "SERVANT", "GARDENER", "OTHER"];
+const DELEGATE_FEE_MODES: DelegateFeeMode[] = ["NO_FEE", "FEE_REQUIRED"];
 
 export function ApprovalsCenter() {
-  const [statusFilter, setStatusFilter] = useState<ReviewStatus>("PENDING");
-  const [isLoading, setIsLoading] = useState(false);
-  const [profileRows, setProfileRows] = useState<ProfileChangeRequestRow[]>([]);
-  const [householdRows, setHouseholdRows] = useState<HouseholdRequestsResponse>({
-    family: [],
-    authorized: [],
-    homeStaff: [],
+  const [activeTab, setActiveTab] = useState<TabKey>("owners");
+  const [stats, setStats] = useState<ApprovalStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(true);
+
+  const [owners, setOwners] = useState<OwnerApprovalItem[]>([]);
+  const [family, setFamily] = useState<FamilyApprovalItem[]>([]);
+  const [delegates, setDelegates] = useState<DelegateApprovalItem[]>([]);
+  const [homeStaff, setHomeStaff] = useState<HomeStaffApprovalItem[]>([]);
+
+  const [ownersLoading, setOwnersLoading] = useState(false);
+  const [familyLoading, setFamilyLoading] = useState(false);
+  const [delegatesLoading, setDelegatesLoading] = useState(false);
+  const [homeStaffLoading, setHomeStaffLoading] = useState(false);
+
+  const [ownerStatus, setOwnerStatus] = useState<StatusFilter>("ALL");
+  const [ownerSearch, setOwnerSearch] = useState("");
+  const [ownerDateFrom, setOwnerDateFrom] = useState("");
+  const [ownerDateTo, setOwnerDateTo] = useState("");
+  const [ownerRegistrationType, setOwnerRegistrationType] = useState<"ALL" | "SELF" | "PRE_REG">("ALL");
+
+  const [familyStatus, setFamilyStatus] = useState<StatusFilter>("PENDING");
+  const [familySearch, setFamilySearch] = useState("");
+  const [familyDateFrom, setFamilyDateFrom] = useState("");
+  const [familyDateTo, setFamilyDateTo] = useState("");
+  const [familyRelationship, setFamilyRelationship] = useState<"ALL" | FamilyRelationship>("ALL");
+
+  const [delegateStatus, setDelegateStatus] = useState<StatusFilter>("PENDING");
+  const [delegateSearch, setDelegateSearch] = useState("");
+  const [delegateDateFrom, setDelegateDateFrom] = useState("");
+  const [delegateDateTo, setDelegateDateTo] = useState("");
+  const [delegateFeeMode, setDelegateFeeMode] = useState<"ALL" | DelegateFeeMode>("ALL");
+
+  const [homeStaffStatus, setHomeStaffStatus] = useState<StatusFilter>("PENDING");
+  const [homeStaffSearch, setHomeStaffSearch] = useState("");
+  const [homeStaffDateFrom, setHomeStaffDateFrom] = useState("");
+  const [homeStaffDateTo, setHomeStaffDateTo] = useState("");
+  const [homeStaffType, setHomeStaffType] = useState<"ALL" | HomeStaffType>("ALL");
+
+  const [selectedItem, setSelectedItem] = useState<SelectedItem | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [rejectMode, setRejectMode] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+
+  const [preRegisterOpen, setPreRegisterOpen] = useState(false);
+  const [preRegisterMode, setPreRegisterMode] = useState<PreRegistrationMode>("OWNER");
+  const [preRegisterStep, setPreRegisterStep] = useState<PreRegistrationStep>(1);
+  const [preRegisterBusy, setPreRegisterBusy] = useState(false);
+
+  const [ownerForm, setOwnerForm] = useState({
+    nameEN: "",
+    email: "",
+    phone: "",
+    nationalId: "",
+    unitId: "",
+    notes: "",
   });
-  const [busyKey, setBusyKey] = useState<string | null>(null);
-  const [rejectionReason, setRejectionReason] = useState("");
 
-  const loadData = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const [profileRes, householdRes] = await Promise.all([
-        apiClient.get<ProfileChangeRequestRow[]>("/auth/admin/profile-change-requests", {
-          params: { status: statusFilter },
-        }),
-        apiClient.get<HouseholdRequestsResponse>("/household/admin/requests", {
-          params: { status: statusFilter },
-        }),
-      ]);
+  const [familyForm, setFamilyForm] = useState({
+    ownerUserId: "",
+    unitId: "",
+    fullName: "",
+    phone: "",
+    relationship: "SON_DAUGHTER" as FamilyRelationship,
+    email: "",
+    nationalIdOrPassport: "",
+    notes: "",
+  });
 
-      setProfileRows(Array.isArray(profileRes.data) ? profileRes.data : []);
-      setHouseholdRows({
-        family: Array.isArray(householdRes.data?.family) ? householdRes.data.family : [],
-        authorized: Array.isArray(householdRes.data?.authorized) ? householdRes.data.authorized : [],
-        homeStaff: Array.isArray(householdRes.data?.homeStaff) ? householdRes.data.homeStaff : [],
-      });
-    } catch (error) {
-      toast.error("Failed to load approvals", { description: errorMessage(error) });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [statusFilter]);
+  const [ownerOptions, setOwnerOptions] = useState<OwnerOption[]>([]);
+  const [unitOptions, setUnitOptions] = useState<UnitOption[]>([]);
+  const [optionsLoading, setOptionsLoading] = useState(false);
+
+  const [previewByUrl, setPreviewByUrl] = useState<Record<string, PreviewState>>({});
+  const previewByUrlRef = useRef<Record<string, PreviewState>>({});
+  const createdObjectUrls = useRef<string[]>([]);
 
   useEffect(() => {
-    void loadData();
-  }, [loadData]);
+    previewByUrlRef.current = previewByUrl;
+  }, [previewByUrl]);
 
-  const pendingCounts = useMemo(() => {
-    const profile = profileRows.filter((row) => String(row.status).toUpperCase() === "PENDING").length;
-    const family = householdRows.family.filter((row) => String(row.status).toUpperCase() === "PENDING").length;
-    const authorized = householdRows.authorized.filter((row) => String(row.status).toUpperCase() === "PENDING").length;
-    const homeStaff = householdRows.homeStaff.filter((row) => String(row.status).toUpperCase() === "PENDING").length;
-    return { profile, family, authorized, homeStaff };
-  }, [householdRows, profileRows]);
+  useEffect(() => {
+    return () => {
+      createdObjectUrls.current.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, []);
 
-  const approvalHistoryRows = useMemo<ApprovalHistoryRow[]>(() => {
-    const family = householdRows.family
-      .filter((row) => String(row.status).toUpperCase() === "APPROVED")
-      .map((row) => ({
-        id: row.id,
-        requestType: "FAMILY" as const,
-        fullName: row.fullName,
-        email: row.email,
-        unitText: unitLabel(row.unit),
-        ownerText: row.owner?.nameEN || row.owner?.email || "—",
-        approvedAt: row.reviewedAt ?? row.createdAt ?? null,
-        credentialsEmailStatus: row.credentialsEmailStatus ?? null,
-        credentialsEmailSentAt: row.credentialsEmailSentAt ?? null,
-        credentialsEmailError: row.credentialsEmailError ?? null,
-      }));
-
-    const authorized = householdRows.authorized
-      .filter((row) => String(row.status).toUpperCase() === "APPROVED")
-      .map((row) => ({
-        id: row.id,
-        requestType: "AUTHORIZED" as const,
-        fullName: row.fullName,
-        email: row.email,
-        unitText: unitLabel(row.unit),
-        ownerText: row.owner?.nameEN || row.owner?.email || "—",
-        approvedAt: row.reviewedAt ?? row.createdAt ?? null,
-        credentialsEmailStatus: row.credentialsEmailStatus ?? null,
-        credentialsEmailSentAt: row.credentialsEmailSentAt ?? null,
-        credentialsEmailError: row.credentialsEmailError ?? null,
-      }));
-
-    return [...family, ...authorized].sort((a, b) => {
-      const ta = a.approvedAt ? new Date(a.approvedAt).getTime() : 0;
-      const tb = b.approvedAt ? new Date(b.approvedAt).getTime() : 0;
-      return tb - ta;
-    });
-  }, [householdRows.authorized, householdRows.family]);
-
-  const reviewProfile = async (id: string, action: "approve" | "reject") => {
-    setBusyKey(`profile-${id}-${action}`);
+  const loadStats = useCallback(async () => {
+    setStatsLoading(true);
     try {
-      if (action === "approve") {
-        await apiClient.patch(`/auth/admin/profile-change-requests/${id}/approve`, {});
+      const response = await approvalsService.getStats();
+      setStats(response);
+    } catch (error) {
+      toast.error("Failed to load approval stats", { description: errorMessage(error) });
+    } finally {
+      setStatsLoading(false);
+    }
+  }, []);
+
+  const loadOwners = useCallback(async () => {
+    setOwnersLoading(true);
+    try {
+      const rows = await approvalsService.listOwners({
+        search: ownerSearch || undefined,
+        status: ownerStatus,
+        dateFrom: ownerDateFrom || undefined,
+        dateTo: ownerDateTo || undefined,
+        registrationType: ownerRegistrationType === "ALL" ? undefined : ownerRegistrationType,
+      });
+      setOwners(rows);
+    } catch (error) {
+      toast.error("Failed to load owners approvals", { description: errorMessage(error) });
+    } finally {
+      setOwnersLoading(false);
+    }
+  }, [ownerDateFrom, ownerDateTo, ownerRegistrationType, ownerSearch, ownerStatus]);
+
+  const loadFamily = useCallback(async () => {
+    setFamilyLoading(true);
+    try {
+      const rows = await approvalsService.listFamilyMembers({
+        search: familySearch || undefined,
+        status: familyStatus === "ALL" || familyStatus === "PROCESSING" ? undefined : familyStatus,
+        dateFrom: familyDateFrom || undefined,
+        dateTo: familyDateTo || undefined,
+        relationship: familyRelationship === "ALL" ? undefined : familyRelationship,
+      });
+      setFamily(rows);
+    } catch (error) {
+      toast.error("Failed to load family approvals", { description: errorMessage(error) });
+    } finally {
+      setFamilyLoading(false);
+    }
+  }, [familyDateFrom, familyDateTo, familyRelationship, familySearch, familyStatus]);
+
+  const loadDelegates = useCallback(async () => {
+    setDelegatesLoading(true);
+    try {
+      const rows = await approvalsService.listDelegates({
+        search: delegateSearch || undefined,
+        status: delegateStatus === "ALL" || delegateStatus === "PROCESSING" ? undefined : delegateStatus,
+        dateFrom: delegateDateFrom || undefined,
+        dateTo: delegateDateTo || undefined,
+        feeMode: delegateFeeMode === "ALL" ? undefined : delegateFeeMode,
+      });
+      setDelegates(rows);
+    } catch (error) {
+      toast.error("Failed to load delegates approvals", { description: errorMessage(error) });
+    } finally {
+      setDelegatesLoading(false);
+    }
+  }, [delegateDateFrom, delegateDateTo, delegateFeeMode, delegateSearch, delegateStatus]);
+
+  const loadHomeStaff = useCallback(async () => {
+    setHomeStaffLoading(true);
+    try {
+      const rows = await approvalsService.listHomeStaff({
+        search: homeStaffSearch || undefined,
+        status: homeStaffStatus === "ALL" || homeStaffStatus === "PROCESSING" ? undefined : homeStaffStatus,
+        dateFrom: homeStaffDateFrom || undefined,
+        dateTo: homeStaffDateTo || undefined,
+        staffType: homeStaffType === "ALL" ? undefined : homeStaffType,
+      });
+      setHomeStaff(rows);
+    } catch (error) {
+      toast.error("Failed to load home staff approvals", { description: errorMessage(error) });
+    } finally {
+      setHomeStaffLoading(false);
+    }
+  }, [homeStaffDateFrom, homeStaffDateTo, homeStaffSearch, homeStaffStatus, homeStaffType]);
+
+  useEffect(() => {
+    void loadStats();
+  }, [loadStats]);
+
+  useEffect(() => {
+    if (activeTab === "owners") void loadOwners();
+    if (activeTab === "family") void loadFamily();
+    if (activeTab === "delegates") void loadDelegates();
+    if (activeTab === "home-staff") void loadHomeStaff();
+  }, [activeTab, loadDelegates, loadFamily, loadHomeStaff, loadOwners]);
+
+  useEffect(() => {
+    if (!preRegisterOpen) return;
+    setOptionsLoading(true);
+    Promise.all([approvalsService.listOwnerOptions(), approvalsService.listUnitOptions()])
+      .then(([ownerRows, unitRows]) => {
+        setOwnerOptions(ownerRows);
+        setUnitOptions(unitRows);
+      })
+      .catch((error) => {
+        toast.error("Failed to load pre-registration options", { description: errorMessage(error) });
+      })
+      .finally(() => setOptionsLoading(false));
+  }, [preRegisterOpen]);
+
+  const selectedBaseItem = selectedItem?.item ?? null;
+
+  const ensurePreview = useCallback(async (url: string) => {
+    if (!url) return;
+    const current = previewByUrlRef.current[url];
+    if (current?.loading || current?.objectUrl || current?.error) return;
+
+    setPreviewByUrl((prev) => {
+      const existing = prev[url];
+      if (existing?.loading || existing?.objectUrl || existing?.error) return prev;
+      const next = {
+        ...prev,
+        [url]: { loading: true, objectUrl: null, mimeType: null, error: null },
+      };
+      previewByUrlRef.current = next;
+      return next;
+    });
+
+    try {
+      const blob = await approvalsService.fetchDocumentBlob(url);
+      const objectUrl = URL.createObjectURL(blob);
+      createdObjectUrls.current.push(objectUrl);
+      setPreviewByUrl((prev) => {
+        const next = {
+          ...prev,
+          [url]: {
+            loading: false,
+            objectUrl,
+            mimeType: blob.type || null,
+            error: null,
+          },
+        };
+        previewByUrlRef.current = next;
+        return next;
+      });
+    } catch (error) {
+      setPreviewByUrl((prev) => {
+        const next = {
+          ...prev,
+          [url]: {
+            loading: false,
+            objectUrl: null,
+            mimeType: null,
+            error: errorMessage(error),
+          },
+        };
+        previewByUrlRef.current = next;
+        return next;
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    collectDocumentUrls(selectedBaseItem).forEach((url) => {
+      void ensurePreview(url);
+    });
+  }, [ensurePreview, selectedBaseItem]);
+
+  const openDocument = useCallback(async (url: string) => {
+    const preview = previewByUrl[url];
+    if (preview?.objectUrl) {
+      window.open(preview.objectUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
+
+    try {
+      const blob = await approvalsService.fetchDocumentBlob(url);
+      const objectUrl = URL.createObjectURL(blob);
+      createdObjectUrls.current.push(objectUrl);
+      window.open(objectUrl, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      toast.error("Failed to open document", { description: errorMessage(error) });
+    }
+  }, [previewByUrl]);
+
+  const removeOptimistically = useCallback((tab: TabKey, id: string) => {
+    let ownerRow: OwnerApprovalItem | null = null;
+    let familyRow: FamilyApprovalItem | null = null;
+    let delegateRow: DelegateApprovalItem | null = null;
+    let staffRow: HomeStaffApprovalItem | null = null;
+
+    if (tab === "owners") {
+      setOwners((prev) => {
+        ownerRow = prev.find((row) => row.id === id) ?? null;
+        return prev.filter((row) => row.id !== id);
+      });
+    }
+    if (tab === "family") {
+      setFamily((prev) => {
+        familyRow = prev.find((row) => row.id === id) ?? null;
+        return prev.filter((row) => row.id !== id);
+      });
+    }
+    if (tab === "delegates") {
+      setDelegates((prev) => {
+        delegateRow = prev.find((row) => row.id === id) ?? null;
+        return prev.filter((row) => row.id !== id);
+      });
+    }
+    if (tab === "home-staff") {
+      setHomeStaff((prev) => {
+        staffRow = prev.find((row) => row.id === id) ?? null;
+        return prev.filter((row) => row.id !== id);
+      });
+    }
+
+    setStats((prev) => {
+      if (!prev) return prev;
+      if (tab === "owners") return { ...prev, pendingOwners: Math.max(0, prev.pendingOwners - 1), totalPending: Math.max(0, prev.totalPending - 1) };
+      if (tab === "family") return { ...prev, pendingFamilyMembers: Math.max(0, prev.pendingFamilyMembers - 1), totalPending: Math.max(0, prev.totalPending - 1) };
+      if (tab === "delegates") return { ...prev, pendingDelegates: Math.max(0, prev.pendingDelegates - 1), totalPending: Math.max(0, prev.totalPending - 1) };
+      return { ...prev, pendingHomeStaff: Math.max(0, prev.pendingHomeStaff - 1), totalPending: Math.max(0, prev.totalPending - 1) };
+    });
+
+    return () => {
+      if (tab === "owners" && ownerRow) setOwners((prev) => [ownerRow as OwnerApprovalItem, ...prev]);
+      if (tab === "family" && familyRow) setFamily((prev) => [familyRow as FamilyApprovalItem, ...prev]);
+      if (tab === "delegates" && delegateRow) setDelegates((prev) => [delegateRow as DelegateApprovalItem, ...prev]);
+      if (tab === "home-staff" && staffRow) setHomeStaff((prev) => [staffRow as HomeStaffApprovalItem, ...prev]);
+
+      setStats((prev) => {
+        if (!prev) return prev;
+        if (tab === "owners") return { ...prev, pendingOwners: prev.pendingOwners + 1, totalPending: prev.totalPending + 1 };
+        if (tab === "family") return { ...prev, pendingFamilyMembers: prev.pendingFamilyMembers + 1, totalPending: prev.totalPending + 1 };
+        if (tab === "delegates") return { ...prev, pendingDelegates: prev.pendingDelegates + 1, totalPending: prev.totalPending + 1 };
+        return { ...prev, pendingHomeStaff: prev.pendingHomeStaff + 1, totalPending: prev.totalPending + 1 };
+      });
+    };
+  }, []);
+
+  const handleApprove = useCallback(async () => {
+    if (!selectedItem) return;
+    if (!window.confirm("Approve and send credentials?")) return;
+
+    setActionBusy(true);
+    const rollback = removeOptimistically(selectedItem.tab, selectedItem.item.id);
+    try {
+      if (selectedItem.tab === "owners") await approvalsService.approveOwner(selectedItem.item.id);
+      if (selectedItem.tab === "family") await approvalsService.approveFamilyMember(selectedItem.item.id);
+      if (selectedItem.tab === "delegates") await approvalsService.approveDelegate(selectedItem.item.id);
+      if (selectedItem.tab === "home-staff") await approvalsService.approveHomeStaff(selectedItem.item.id);
+      toast.success("Approval completed");
+      setDrawerOpen(false);
+      setSelectedItem(null);
+      setRejectMode(false);
+      setRejectReason("");
+    } catch (error) {
+      rollback();
+      toast.error("Approval failed", { description: errorMessage(error) });
+    } finally {
+      setActionBusy(false);
+    }
+  }, [removeOptimistically, selectedItem]);
+
+  const handleReject = useCallback(async () => {
+    if (!selectedItem) return;
+    if (!rejectReason.trim()) {
+      toast.error("Rejection reason is required");
+      return;
+    }
+
+    setActionBusy(true);
+    const rollback = removeOptimistically(selectedItem.tab, selectedItem.item.id);
+    try {
+      if (selectedItem.tab === "owners") await approvalsService.rejectOwner(selectedItem.item.id, rejectReason.trim());
+      if (selectedItem.tab === "family") await approvalsService.rejectFamilyMember(selectedItem.item.id, rejectReason.trim());
+      if (selectedItem.tab === "delegates") await approvalsService.rejectDelegate(selectedItem.item.id, rejectReason.trim());
+      if (selectedItem.tab === "home-staff") await approvalsService.rejectHomeStaff(selectedItem.item.id, rejectReason.trim());
+      toast.success("Request rejected");
+      setDrawerOpen(false);
+      setSelectedItem(null);
+      setRejectMode(false);
+      setRejectReason("");
+    } catch (error) {
+      rollback();
+      toast.error("Rejection failed", { description: errorMessage(error) });
+    } finally {
+      setActionBusy(false);
+    }
+  }, [rejectReason, removeOptimistically, selectedItem]);
+
+  const openReview = useCallback((item: SelectedItem) => {
+    setSelectedItem(item);
+    setDrawerOpen(true);
+    setRejectMode(false);
+    setRejectReason("");
+  }, []);
+
+  const ownerColumns = useMemo<DataTableColumn<OwnerApprovalItem>[]>(() => [
+    { key: "name", header: "Name", render: (row) => row.name || "Unknown" },
+    { key: "phone", header: "Phone", render: (row) => row.phone },
+    { key: "nationalId", header: "National ID", render: (row) => row.nationalId },
+    { key: "submitted", header: "Submitted", render: (row) => formatDateTime(row.submittedAt) },
+    { key: "type", header: "Type", render: (row) => <Badge>{row.isPreRegistration ? "Pre-reg" : "Self"}</Badge> },
+    { key: "status", header: "Status", render: (row) => <StatusBadge value={row.status} /> },
+    { key: "actions", header: "Actions", render: (row) => <Button size="sm" onClick={() => openReview({ tab: "owners", item: row })}>Review</Button> },
+  ], [openReview]);
+
+  const familyColumns = useMemo<DataTableColumn<FamilyApprovalItem>[]>(() => [
+    { key: "name", header: "Name", render: (row) => row.fullName },
+    { key: "phone", header: "Phone", render: (row) => row.phone },
+    { key: "relationship", header: "Relationship", render: (row) => <Badge>{humanizeEnum(row.relationship)}</Badge> },
+    { key: "owner", header: "Owner", render: (row) => row.ownerName },
+    { key: "unit", header: "Unit", render: (row) => buildUnitLabel(row.projectName, row.unitNumber) },
+    { key: "submitted", header: "Submitted", render: (row) => formatDateTime(row.submittedAt) },
+    { key: "status", header: "Status", render: (row) => <StatusBadge value={row.status} /> },
+    { key: "actions", header: "Actions", render: (row) => <Button size="sm" onClick={() => openReview({ tab: "family", item: row })}>Review</Button> },
+  ], [openReview]);
+
+  const delegateColumns = useMemo<DataTableColumn<DelegateApprovalItem>[]>(() => [
+    { key: "name", header: "Name", render: (row) => row.fullName },
+    { key: "phone", header: "Phone", render: (row) => row.phone },
+    { key: "owner", header: "Owner", render: (row) => row.ownerName },
+    { key: "unit", header: "Unit", render: (row) => buildUnitLabel(row.projectName, row.unitNumber) },
+    { key: "period", header: "Valid Period", render: (row) => `${formatDate(row.validFrom)} - ${formatDate(row.validTo)}` },
+    { key: "fee", header: "Fee Mode", render: (row) => <Badge>{humanizeEnum(row.feeMode)}</Badge> },
+    { key: "status", header: "Status", render: (row) => <StatusBadge value={row.status} /> },
+    { key: "actions", header: "Actions", render: (row) => <Button size="sm" onClick={() => openReview({ tab: "delegates", item: row })}>Review</Button> },
+  ], [openReview]);
+
+  const homeStaffColumns = useMemo<DataTableColumn<HomeStaffApprovalItem>[]>(() => [
+    { key: "name", header: "Name", render: (row) => row.fullName },
+    { key: "type", header: "Staff Type", render: (row) => <Badge>{humanizeEnum(row.staffType)}</Badge> },
+    { key: "phone", header: "Phone", render: (row) => row.phone },
+    { key: "owner", header: "Owner", render: (row) => row.ownerName },
+    { key: "unit", header: "Unit", render: (row) => buildUnitLabel(row.projectName, row.unitNumber) },
+    { key: "period", header: "Access Period", render: (row) => `${formatDate(row.accessValidFrom)} - ${formatDate(row.accessValidTo)}` },
+    { key: "liveIn", header: "Live-In", render: (row) => <Badge>{row.isLiveIn ? "Live-In" : "Non Live-In"}</Badge> },
+    { key: "status", header: "Status", render: (row) => <StatusBadge value={row.status} /> },
+    { key: "actions", header: "Actions", render: (row) => <Button size="sm" onClick={() => openReview({ tab: "home-staff", item: row })}>Review</Button> },
+  ], [openReview]);
+
+  const preRegisterNext = () => {
+    if (preRegisterMode === "OWNER") {
+      if (!ownerForm.nameEN || !ownerForm.email || !ownerForm.phone || !ownerForm.nationalId) {
+        toast.error("Owner pre-registration form is incomplete");
+        return;
+      }
+    }
+    if (preRegisterMode === "FAMILY") {
+      if (!familyForm.ownerUserId || !familyForm.unitId || !familyForm.fullName || !familyForm.phone) {
+        toast.error("Family pre-registration form is incomplete");
+        return;
+      }
+    }
+    setPreRegisterStep(2);
+  };
+
+  const confirmPreRegistration = async () => {
+    setPreRegisterBusy(true);
+    try {
+      if (preRegisterMode === "OWNER") {
+        await approvalsService.preRegisterOwner({
+          nameEN: ownerForm.nameEN,
+          email: ownerForm.email,
+          phone: ownerForm.phone,
+          nationalId: ownerForm.nationalId,
+          unitId: ownerForm.unitId || undefined,
+          notes: ownerForm.notes || undefined,
+        });
       } else {
-        await apiClient.patch(`/auth/admin/profile-change-requests/${id}/reject`, {
-          rejectionReason: rejectionReason.trim() || undefined,
+        await approvalsService.preRegisterFamilyMember({
+          ownerUserId: familyForm.ownerUserId,
+          unitId: familyForm.unitId,
+          fullName: familyForm.fullName,
+          phone: familyForm.phone,
+          relationship: familyForm.relationship,
+          email: familyForm.email || undefined,
+          nationalIdOrPassport: familyForm.nationalIdOrPassport || undefined,
+          notes: familyForm.notes || undefined,
         });
       }
-      toast.success(`Profile request ${action}d`);
-      setRejectionReason("");
-      await loadData();
+      toast.success("Pre-registration completed");
+      setPreRegisterOpen(false);
+      setPreRegisterStep(1);
+      await loadStats();
+      if (activeTab === "owners") await loadOwners();
+      if (activeTab === "family") await loadFamily();
     } catch (error) {
-      toast.error(`Failed to ${action} profile request`, { description: errorMessage(error) });
+      toast.error("Pre-registration failed", { description: errorMessage(error) });
     } finally {
-      setBusyKey(null);
+      setPreRegisterBusy(false);
     }
   };
 
-  const reviewHousehold = async (
-    type: "family" | "authorized" | "home-staff",
-    id: string,
-    status: "APPROVED" | "REJECTED",
-  ) => {
-    setBusyKey(`household-${type}-${id}-${status}`);
-    try {
-      const endpoint =
-        type === "family"
-          ? `/household/admin/family-requests/${id}/review`
-          : type === "authorized"
-            ? `/household/admin/authorized-requests/${id}/review`
-            : `/household/admin/home-staff/${id}/review`;
+  const renderDocumentCard = (label: string, url: string | null) => {
+    const preview = url ? previewByUrl[url] : null;
+    const isImage = Boolean(preview?.mimeType?.startsWith("image/"));
 
-      await apiClient.patch(endpoint, {
-        status,
-        rejectionReason: status === "REJECTED" ? rejectionReason.trim() || undefined : undefined,
-      });
-      toast.success(`Request ${status === "APPROVED" ? "approved" : "rejected"}`);
-      setRejectionReason("");
-      await loadData();
-    } catch (error) {
-      toast.error("Failed to review request", { description: errorMessage(error) });
-    } finally {
-      setBusyKey(null);
-    }
+    return (
+      <div key={`${label}-${url ?? "none"}`} className="rounded-lg border border-[#E2E8F0] p-3">
+        <p className="mb-2 text-xs text-[#64748B]">{label}</p>
+        {!url ? (
+          <p className="text-sm text-[#94A3B8]">Not provided</p>
+        ) : preview?.loading ? (
+          <p className="text-sm text-[#64748B]">Loading preview...</p>
+        ) : preview?.objectUrl && isImage ? (
+          <button type="button" className="w-full" onClick={() => void openDocument(url)}>
+            <img src={preview.objectUrl} alt={label} className="h-28 w-full rounded-md object-cover" />
+          </button>
+        ) : (
+          <Button size="sm" variant="outline" onClick={() => void openDocument(url)}>
+            Open Document
+          </Button>
+        )}
+      </div>
+    );
   };
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl text-[#1E293B]">Approvals Center</h1>
-          <p className="text-sm text-[#64748B] mt-1">
-            Review profile updates and household access requests from one queue.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {(["ALL", "PENDING", "APPROVED", "REJECTED", "CANCELLED"] as ReviewStatus[]).map((status) => (
-            <Button
-              key={status}
-              variant={statusFilter === status ? "default" : "outline"}
-              size="sm"
-              onClick={() => setStatusFilter(status)}
-            >
-              {humanizeEnum(status)}
-            </Button>
-          ))}
-          <Button variant="outline" size="sm" onClick={() => void loadData()} disabled={isLoading}>
-            {isLoading ? "Refreshing..." : "Refresh"}
-          </Button>
-        </div>
+      <PageHeader
+        title="Approvals"
+        description="Unified queue for owner registrations, family members, delegates, and home staff."
+        actions={<Button onClick={() => setPreRegisterOpen(true)}>Pre-Register</Button>}
+      />
+
+      <div className="grid gap-3 md:grid-cols-4">
+        <StatCard title="Pending Owners" value={statsLoading ? "..." : String(stats?.pendingOwners ?? 0)} icon="active-users" onClick={() => setActiveTab("owners")} />
+        <StatCard title="Pending Family Members" value={statsLoading ? "..." : String(stats?.pendingFamilyMembers ?? 0)} icon="visitors" onClick={() => setActiveTab("family")} />
+        <StatCard title="Pending Delegates" value={statsLoading ? "..." : String(stats?.pendingDelegates ?? 0)} icon="tickets" onClick={() => setActiveTab("delegates")} />
+        <StatCard title="Pending Home Staff" value={statsLoading ? "..." : String(stats?.pendingHomeStaff ?? 0)} icon="workers" onClick={() => setActiveTab("home-staff")} />
       </div>
 
-      <Card className="p-4 border border-[#E2E8F0]">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="rounded-lg border border-[#E2E8F0] p-3 bg-white">
-            <p className="text-xs text-[#64748B]">Profile Pending</p>
-            <p className="text-xl text-[#0F172A] mt-1">{pendingCounts.profile}</p>
-          </div>
-          <div className="rounded-lg border border-[#E2E8F0] p-3 bg-white">
-            <p className="text-xs text-[#64748B]">Family Pending</p>
-            <p className="text-xl text-[#0F172A] mt-1">{pendingCounts.family}</p>
-          </div>
-          <div className="rounded-lg border border-[#E2E8F0] p-3 bg-white">
-            <p className="text-xs text-[#64748B]">Authorized Pending</p>
-            <p className="text-xl text-[#0F172A] mt-1">{pendingCounts.authorized}</p>
-          </div>
-          <div className="rounded-lg border border-[#E2E8F0] p-3 bg-white">
-            <p className="text-xs text-[#64748B]">Home Staff Pending</p>
-            <p className="text-xl text-[#0F172A] mt-1">{pendingCounts.homeStaff}</p>
-          </div>
-        </div>
-      </Card>
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabKey)}>
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="owners">Owners</TabsTrigger>
+          <TabsTrigger value="family">Family Members</TabsTrigger>
+          <TabsTrigger value="delegates">Delegates</TabsTrigger>
+          <TabsTrigger value="home-staff">Home Staff</TabsTrigger>
+        </TabsList>
 
-      <Card className="shadow-card rounded-xl overflow-hidden">
-        <div className="p-4 border-b border-[#E5E7EB] flex items-center justify-between">
-          <h3 className="text-[#1E293B]">Profile Change Requests</h3>
-          <Input
-            value={rejectionReason}
-            onChange={(e) => setRejectionReason(e.target.value)}
-            placeholder="Optional rejection reason"
-            className="max-w-sm"
-          />
-        </div>
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-[#F9FAFB]">
-              <TableHead>User</TableHead>
-              <TableHead>Requested Changes</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Created</TableHead>
-              <TableHead>Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {profileRows.map((row) => {
-              const isPending = String(row.status).toUpperCase() === "PENDING";
-              return (
-                <TableRow key={row.id} className="hover:bg-[#F9FAFB]">
-                  <TableCell>
-                    <p className="font-medium text-[#1E293B]">{row.user?.nameEN || row.user?.email || row.userId}</p>
-                    <p className="text-xs text-[#64748B]">{row.user?.phone || "—"}</p>
-                  </TableCell>
-                  <TableCell className="text-[#334155] text-xs">
-                    {jsonDiffLabel(row.previousSnapshot, row.requestedFields)}
-                    {row.rejectionReason ? (
-                      <p className="text-[#B91C1C] mt-1">Reason: {row.rejectionReason}</p>
-                    ) : null}
-                  </TableCell>
-                  <TableCell>
-                    <Badge className={statusBadgeClass(row.status)}>{humanizeEnum(row.status)}</Badge>
-                  </TableCell>
-                  <TableCell className="text-[#64748B]">{formatDateTime(row.createdAt)}</TableCell>
-                  <TableCell>
-                    {isPending ? (
-                      <div className="flex items-center gap-2">
-                        <Button
-                          size="sm"
-                          onClick={() => void reviewProfile(row.id, "approve")}
-                          disabled={busyKey === `profile-${row.id}-approve`}
-                        >
-                          Approve
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => void reviewProfile(row.id, "reject")}
-                          disabled={busyKey === `profile-${row.id}-reject`}
-                        >
-                          Reject
-                        </Button>
-                      </div>
-                    ) : (
-                      <span className="text-xs text-[#64748B]">Reviewed</span>
-                    )}
-                  </TableCell>
-                </TableRow>
-              );
-            })}
-            {!isLoading && profileRows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={5} className="text-center py-10 text-[#64748B]">
-                  No profile change requests found.
-                </TableCell>
-              </TableRow>
+        <TabsContent value="owners" className="space-y-3">
+          <div className="grid gap-3 rounded-xl border border-[#E2E8F0] bg-white p-3 md:grid-cols-5">
+            <Input placeholder="Search name or phone" value={ownerSearch} onChange={(event) => setOwnerSearch(event.target.value)} />
+            <Input type="date" value={ownerDateFrom} onChange={(event) => setOwnerDateFrom(event.target.value)} />
+            <Input type="date" value={ownerDateTo} onChange={(event) => setOwnerDateTo(event.target.value)} />
+            <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={ownerStatus} onChange={(event) => setOwnerStatus(event.target.value as StatusFilter)}>
+              <option value="PENDING">Pending</option>
+              <option value="PROCESSING">Processing</option>
+              <option value="ALL">All</option>
+            </select>
+            <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={ownerRegistrationType} onChange={(event) => setOwnerRegistrationType(event.target.value as "ALL" | "SELF" | "PRE_REG")}>
+              <option value="ALL">All Types</option>
+              <option value="SELF">Self</option>
+              <option value="PRE_REG">Pre-reg</option>
+            </select>
+          </div>
+          {ownersLoading ? <SkeletonTable columns={7} /> : <DataTable columns={ownerColumns} rows={owners} rowKey={(row) => row.id} emptyTitle="No owner approvals" emptyDescription="No owner registration matches current filters." />}
+        </TabsContent>
+
+        <TabsContent value="family" className="space-y-3">
+          <div className="grid gap-3 rounded-xl border border-[#E2E8F0] bg-white p-3 md:grid-cols-5">
+            <Input placeholder="Search name or phone" value={familySearch} onChange={(event) => setFamilySearch(event.target.value)} />
+            <Input type="date" value={familyDateFrom} onChange={(event) => setFamilyDateFrom(event.target.value)} />
+            <Input type="date" value={familyDateTo} onChange={(event) => setFamilyDateTo(event.target.value)} />
+            <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={familyStatus} onChange={(event) => setFamilyStatus(event.target.value as StatusFilter)}>
+              <option value="PENDING">Pending</option>
+              <option value="PROCESSING">Processing</option>
+              <option value="ALL">All</option>
+            </select>
+            <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={familyRelationship} onChange={(event) => setFamilyRelationship(event.target.value as "ALL" | FamilyRelationship)}>
+              <option value="ALL">All Relationships</option>
+              {RELATIONSHIP_OPTIONS.map((value) => (
+                <option key={value} value={value}>{humanizeEnum(value)}</option>
+              ))}
+            </select>
+          </div>
+          {familyLoading ? <SkeletonTable columns={8} /> : <DataTable columns={familyColumns} rows={family} rowKey={(row) => row.id} emptyTitle="No family approvals" emptyDescription="No family request matches current filters." />}
+        </TabsContent>
+
+        <TabsContent value="delegates" className="space-y-3">
+          <div className="grid gap-3 rounded-xl border border-[#E2E8F0] bg-white p-3 md:grid-cols-5">
+            <Input placeholder="Search name or phone" value={delegateSearch} onChange={(event) => setDelegateSearch(event.target.value)} />
+            <Input type="date" value={delegateDateFrom} onChange={(event) => setDelegateDateFrom(event.target.value)} />
+            <Input type="date" value={delegateDateTo} onChange={(event) => setDelegateDateTo(event.target.value)} />
+            <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={delegateStatus} onChange={(event) => setDelegateStatus(event.target.value as StatusFilter)}>
+              <option value="PENDING">Pending</option>
+              <option value="PROCESSING">Processing</option>
+              <option value="ALL">All</option>
+            </select>
+            <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={delegateFeeMode} onChange={(event) => setDelegateFeeMode(event.target.value as "ALL" | DelegateFeeMode)}>
+              <option value="ALL">All Fee Modes</option>
+              {DELEGATE_FEE_MODES.map((value) => (
+                <option key={value} value={value}>{humanizeEnum(value)}</option>
+              ))}
+            </select>
+          </div>
+          {delegatesLoading ? <SkeletonTable columns={8} /> : <DataTable columns={delegateColumns} rows={delegates} rowKey={(row) => row.id} emptyTitle="No delegate approvals" emptyDescription="No delegate request matches current filters." />}
+        </TabsContent>
+
+        <TabsContent value="home-staff" className="space-y-3">
+          <div className="grid gap-3 rounded-xl border border-[#E2E8F0] bg-white p-3 md:grid-cols-5">
+            <Input placeholder="Search name or phone" value={homeStaffSearch} onChange={(event) => setHomeStaffSearch(event.target.value)} />
+            <Input type="date" value={homeStaffDateFrom} onChange={(event) => setHomeStaffDateFrom(event.target.value)} />
+            <Input type="date" value={homeStaffDateTo} onChange={(event) => setHomeStaffDateTo(event.target.value)} />
+            <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={homeStaffStatus} onChange={(event) => setHomeStaffStatus(event.target.value as StatusFilter)}>
+              <option value="PENDING">Pending</option>
+              <option value="PROCESSING">Processing</option>
+              <option value="ALL">All</option>
+            </select>
+            <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={homeStaffType} onChange={(event) => setHomeStaffType(event.target.value as "ALL" | HomeStaffType)}>
+              <option value="ALL">All Staff Types</option>
+              {HOME_STAFF_TYPES.map((value) => (
+                <option key={value} value={value}>{humanizeEnum(value)}</option>
+              ))}
+            </select>
+          </div>
+          {homeStaffLoading ? <SkeletonTable columns={9} /> : <DataTable columns={homeStaffColumns} rows={homeStaff} rowKey={(row) => row.id} emptyTitle="No home staff approvals" emptyDescription="No home staff request matches current filters." />}
+        </TabsContent>
+      </Tabs>
+
+      <DrawerForm
+        open={drawerOpen}
+        onOpenChange={(open) => {
+          setDrawerOpen(open);
+          if (!open) {
+            setRejectMode(false);
+            setRejectReason("");
+          }
+        }}
+        title="Review Request"
+        description="Review applicant details, documents, and action request."
+        widthClassName="w-full sm:max-w-[560px]"
+        footer={
+          <div className="w-full space-y-3">
+            {rejectMode ? (
+              <Textarea value={rejectReason} onChange={(event) => setRejectReason(event.target.value)} placeholder="Enter rejection reason" />
             ) : null}
-          </TableBody>
-        </Table>
-      </Card>
-
-      <Card className="shadow-card rounded-xl overflow-hidden">
-        <div className="p-4 border-b border-[#E5E7EB]">
-          <h3 className="text-[#1E293B]">Approvals History & Credentials Delivery</h3>
-        </div>
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-[#F9FAFB]">
-              <TableHead>Type</TableHead>
-              <TableHead>Request</TableHead>
-              <TableHead>Unit / Owner</TableHead>
-              <TableHead>Email Delivery</TableHead>
-              <TableHead>Email Sent At</TableHead>
-              <TableHead>Error</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {approvalHistoryRows.map((row) => (
-              <TableRow key={`${row.requestType}-${row.id}`} className="hover:bg-[#F9FAFB]">
-                <TableCell>
-                  <Badge className={row.requestType === "FAMILY" ? "bg-[#0B5FFF]/10 text-[#0B5FFF]" : "bg-[#8B5CF6]/10 text-[#8B5CF6]"}>
-                    {humanizeEnum(row.requestType)}
-                  </Badge>
-                </TableCell>
-                <TableCell>
-                  <p className="text-sm text-[#0F172A]">{row.fullName}</p>
-                  <p className="text-xs text-[#64748B]">{row.email || "—"}</p>
-                </TableCell>
-                <TableCell>
-                  <p className="text-sm text-[#0F172A]">{row.unitText}</p>
-                  <p className="text-xs text-[#64748B]">Owner: {row.ownerText}</p>
-                </TableCell>
-                <TableCell>
-                  <Badge className={statusBadgeClass(row.credentialsEmailStatus || "PENDING")}>
-                    {humanizeEnum(row.credentialsEmailStatus || "PENDING")}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-[#64748B]">
-                  {row.credentialsEmailSentAt ? formatDateTime(row.credentialsEmailSentAt) : "—"}
-                </TableCell>
-                <TableCell className="text-xs text-[#B91C1C]">{row.credentialsEmailError || "—"}</TableCell>
-              </TableRow>
-            ))}
-            {!isLoading && approvalHistoryRows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center py-10 text-[#64748B]">
-                  No approved household requests yet.
-                </TableCell>
-              </TableRow>
-            ) : null}
-          </TableBody>
-        </Table>
-      </Card>
-
-      <Card className="shadow-card rounded-xl overflow-hidden">
-        <div className="p-4 border-b border-[#E5E7EB]">
-          <h3 className="text-[#1E293B]">Household Requests</h3>
-        </div>
-        <div className="p-4 space-y-4">
-          <div>
-            <h4 className="text-sm text-[#0F172A] mb-2">Family</h4>
-            <div className="space-y-2">
-              {householdRows.family.map((row) => {
-                const isPending = String(row.status).toUpperCase() === "PENDING";
-                return (
-                  <div key={row.id} className="rounded-lg border border-[#E2E8F0] p-3 bg-white">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm text-[#0F172A]">{row.fullName}</p>
-                        <p className="text-xs text-[#64748B]">
-                          {humanizeEnum(row.relationship || "FAMILY")} • {unitLabel(row.unit)} • Owner: {row.owner?.nameEN || row.owner?.email || "—"}
-                        </p>
-                        <p className="text-xs text-[#64748B]">{row.email || "—"} • {row.phone || "—"}</p>
-                      </div>
-                      <Badge className={statusBadgeClass(row.status)}>{humanizeEnum(row.status)}</Badge>
-                    </div>
-                    {row.rejectionReason ? <p className="text-xs text-[#B91C1C] mt-2">Reason: {row.rejectionReason}</p> : null}
-                    {String(row.status).toUpperCase() === "APPROVED" ? (
-                      <p className="text-xs text-[#334155] mt-2">
-                        Credentials Email:{" "}
-                        <Badge className={statusBadgeClass(row.credentialsEmailStatus || "PENDING")}>
-                          {humanizeEnum(row.credentialsEmailStatus || "PENDING")}
-                        </Badge>
-                        {row.credentialsEmailSentAt ? ` • ${formatDateTime(row.credentialsEmailSentAt)}` : ""}
-                        {row.credentialsEmailError ? ` • ${row.credentialsEmailError}` : ""}
-                      </p>
-                    ) : null}
-                    {isPending ? (
-                      <div className="flex gap-2 mt-3">
-                        <Button size="sm" onClick={() => void reviewHousehold("family", row.id, "APPROVED")}>Approve</Button>
-                        <Button size="sm" variant="outline" onClick={() => void reviewHousehold("family", row.id, "REJECTED")}>Reject</Button>
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-              {householdRows.family.length === 0 ? <p className="text-xs text-[#64748B]">No family requests.</p> : null}
+            <div className="flex justify-end gap-2">
+              {rejectMode ? (
+                <>
+                  <Button variant="outline" onClick={() => setRejectMode(false)} disabled={actionBusy}>Cancel</Button>
+                  <Button variant="destructive" onClick={() => void handleReject()} disabled={actionBusy}>Confirm Reject</Button>
+                </>
+              ) : (
+                <>
+                  <Button variant="destructive" onClick={() => setRejectMode(true)} disabled={actionBusy}>Reject</Button>
+                  <Button onClick={() => void handleApprove()} disabled={actionBusy}>Approve</Button>
+                </>
+              )}
             </div>
           </div>
+        }
+      >
+        {selectedItem ? (
+          <div className="space-y-4">
+            <div className="rounded-xl border border-[#E2E8F0] p-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#E2E8F0] text-sm font-semibold text-[#334155]">
+                  {selectedItem.tab === "owners"
+                    ? toInitials(selectedItem.item.name || "Owner")
+                    : toInitials((selectedItem.item as FamilyApprovalItem | DelegateApprovalItem | HomeStaffApprovalItem).fullName)}
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-[#0F172A]">
+                    {selectedItem.tab === "owners"
+                      ? selectedItem.item.name || "Owner"
+                      : (selectedItem.item as FamilyApprovalItem | DelegateApprovalItem | HomeStaffApprovalItem).fullName}
+                  </p>
+                  <p className="text-xs text-[#64748B]">
+                    {(selectedItem.item as OwnerApprovalItem | FamilyApprovalItem | DelegateApprovalItem | HomeStaffApprovalItem).phone}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2 text-xs text-[#64748B]">
+                <span>Submitted: {formatDateTime(selectedItem.item.submittedAt)}</span>
+                <Badge>{selectedItem.item.isPreRegistration ? "Pre-Registered" : "Self-Registered"}</Badge>
+              </div>
+            </div>
 
-          <div>
-            <h4 className="text-sm text-[#0F172A] mb-2">Authorized</h4>
-            <div className="space-y-2">
-              {householdRows.authorized.map((row) => {
-                const isPending = String(row.status).toUpperCase() === "PENDING";
-                return (
-                  <div key={row.id} className="rounded-lg border border-[#E2E8F0] p-3 bg-white">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm text-[#0F172A]">{row.fullName}</p>
-                        <p className="text-xs text-[#64748B]">
-                          {unitLabel(row.unit)} • Owner: {row.owner?.nameEN || row.owner?.email || "—"}
-                        </p>
-                        <p className="text-xs text-[#64748B]">
-                          {formatDateTime(row.validFrom)} → {formatDateTime(row.validTo)} • Fee: {humanizeEnum(row.feeMode || "NO_FEE")}
-                          {row.feeAmount ? ` (${row.feeAmount})` : ""}
-                        </p>
-                      </div>
-                      <Badge className={statusBadgeClass(row.status)}>{humanizeEnum(row.status)}</Badge>
-                    </div>
-                    {row.rejectionReason ? <p className="text-xs text-[#B91C1C] mt-2">Reason: {row.rejectionReason}</p> : null}
-                    {String(row.status).toUpperCase() === "APPROVED" ? (
-                      <p className="text-xs text-[#334155] mt-2">
-                        Credentials Email:{" "}
-                        <Badge className={statusBadgeClass(row.credentialsEmailStatus || "PENDING")}>
-                          {humanizeEnum(row.credentialsEmailStatus || "PENDING")}
-                        </Badge>
-                        {row.credentialsEmailSentAt ? ` • ${formatDateTime(row.credentialsEmailSentAt)}` : ""}
-                        {row.credentialsEmailError ? ` • ${row.credentialsEmailError}` : ""}
-                      </p>
-                    ) : null}
-                    {isPending ? (
-                      <div className="flex gap-2 mt-3">
-                        <Button size="sm" onClick={() => void reviewHousehold("authorized", row.id, "APPROVED")}>Approve</Button>
-                        <Button size="sm" variant="outline" onClick={() => void reviewHousehold("authorized", row.id, "REJECTED")}>Reject</Button>
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-              {householdRows.authorized.length === 0 ? <p className="text-xs text-[#64748B]">No authorized requests.</p> : null}
+            <div className="rounded-xl border border-[#E2E8F0] p-4">
+              <h3 className="mb-3 text-sm font-medium text-[#0F172A]">Documents</h3>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {renderDocumentCard("Profile Photo", selectedItem.item.documents.photo)}
+                {renderDocumentCard("National ID", selectedItem.item.documents.nationalId)}
+                {renderDocumentCard("Passport", selectedItem.item.documents.passport)}
+                {selectedItem.item.documents.other.map((doc) => renderDocumentCard(doc.label, doc.url))}
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-[#E2E8F0] p-4">
+              <h3 className="mb-3 text-sm font-medium text-[#0F172A]">Details</h3>
+              {selectedItem.tab === "owners" ? (
+                <div className="space-y-1 text-sm text-[#334155]">
+                  <p>Registration Source: {selectedItem.item.origin}</p>
+                  <p>National ID: {selectedItem.item.nationalId}</p>
+                  <p>Expires At: {formatDateTime(selectedItem.item.expiresAt)}</p>
+                </div>
+              ) : null}
+
+              {selectedItem.tab === "family" ? (
+                <div className="space-y-1 text-sm text-[#334155]">
+                  <p>Relationship: {humanizeEnum(selectedItem.item.relationship)}</p>
+                  <p>Owner: {selectedItem.item.ownerName}</p>
+                  <p>Unit: {buildUnitLabel(selectedItem.item.projectName, selectedItem.item.unitNumber)}</p>
+                  <p>Permissions: {selectedItem.item.featurePermissions ? Object.keys(selectedItem.item.featurePermissions).join(", ") || "None" : "None"}</p>
+                </div>
+              ) : null}
+
+              {selectedItem.tab === "delegates" ? (
+                <div className="space-y-1 text-sm text-[#334155]">
+                  <p>Owner: {selectedItem.item.ownerName}</p>
+                  <p>Unit: {buildUnitLabel(selectedItem.item.projectName, selectedItem.item.unitNumber)}</p>
+                  <p>Valid: {formatDate(selectedItem.item.validFrom)} - {formatDate(selectedItem.item.validTo)}</p>
+                  <p>QR Scopes: {selectedItem.item.qrScopes.length ? selectedItem.item.qrScopes.join(", ") : "None"}</p>
+                  <p>Fee: {humanizeEnum(selectedItem.item.feeMode)} {selectedItem.item.feeAmount !== null ? `(${formatCurrencyEGP(selectedItem.item.feeAmount)})` : ""}</p>
+                </div>
+              ) : null}
+
+              {selectedItem.tab === "home-staff" ? (
+                <div className="space-y-1 text-sm text-[#334155]">
+                  <p>Staff Type: {humanizeEnum(selectedItem.item.staffType)}</p>
+                  <p>Owner: {selectedItem.item.ownerName}</p>
+                  <p>Unit: {buildUnitLabel(selectedItem.item.projectName, selectedItem.item.unitNumber)}</p>
+                  <p>Live-In: {selectedItem.item.isLiveIn ? "Yes" : "No"}</p>
+                  <p>Employment: {selectedItem.item.employmentFrom ? formatDate(selectedItem.item.employmentFrom) : "N/A"} - {selectedItem.item.employmentTo ? formatDate(selectedItem.item.employmentTo) : "N/A"}</p>
+                  <p>Access: {formatDate(selectedItem.item.accessValidFrom)} - {formatDate(selectedItem.item.accessValidTo)}</p>
+                </div>
+              ) : null}
             </div>
           </div>
+        ) : (
+          <EmptyState title="No request selected" description="Select a row from the approvals table to review details." />
+        )}
+      </DrawerForm>
 
-          <div>
-            <h4 className="text-sm text-[#0F172A] mb-2">Home Staff</h4>
-            <div className="space-y-2">
-              {householdRows.homeStaff.map((row) => {
-                const isPending = String(row.status).toUpperCase() === "PENDING";
-                return (
-                  <div key={row.id} className="rounded-lg border border-[#E2E8F0] p-3 bg-white">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm text-[#0F172A]">{row.fullName}</p>
-                        <p className="text-xs text-[#64748B]">
-                          {humanizeEnum(row.staffType || "OTHER")} • {row.isLiveIn ? "Live-in" : "Non live-in"} • {unitLabel(row.unit)}
-                        </p>
-                        <p className="text-xs text-[#64748B]">{row.phone || "—"}</p>
-                      </div>
-                      <Badge className={statusBadgeClass(row.status)}>{humanizeEnum(row.status)}</Badge>
-                    </div>
-                    {row.rejectionReason ? <p className="text-xs text-[#B91C1C] mt-2">Reason: {row.rejectionReason}</p> : null}
-                    {isPending ? (
-                      <div className="flex gap-2 mt-3">
-                        <Button size="sm" onClick={() => void reviewHousehold("home-staff", row.id, "APPROVED")}>Approve</Button>
-                        <Button size="sm" variant="outline" onClick={() => void reviewHousehold("home-staff", row.id, "REJECTED")}>Reject</Button>
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-              {householdRows.homeStaff.length === 0 ? <p className="text-xs text-[#64748B]">No home staff requests.</p> : null}
-            </div>
+      <Dialog open={preRegisterOpen} onOpenChange={setPreRegisterOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Pre-Registration</DialogTitle>
+            <DialogDescription>Step {preRegisterStep} of 2</DialogDescription>
+          </DialogHeader>
+
+          <div className="mb-3 flex gap-2">
+            <Button variant={preRegisterMode === "OWNER" ? "default" : "outline"} onClick={() => setPreRegisterMode("OWNER")}>Pre-Register Owner</Button>
+            <Button variant={preRegisterMode === "FAMILY" ? "default" : "outline"} onClick={() => setPreRegisterMode("FAMILY")}>Pre-Register Family Member</Button>
           </div>
-        </div>
-      </Card>
+
+          {preRegisterStep === 1 ? (
+            <div className="space-y-3">
+              {preRegisterMode === "OWNER" ? (
+                <>
+                  <Input placeholder="Name" value={ownerForm.nameEN} onChange={(event) => setOwnerForm((prev) => ({ ...prev, nameEN: event.target.value }))} />
+                  <Input placeholder="Email" value={ownerForm.email} onChange={(event) => setOwnerForm((prev) => ({ ...prev, email: event.target.value }))} />
+                  <Input placeholder="Phone" value={ownerForm.phone} onChange={(event) => setOwnerForm((prev) => ({ ...prev, phone: event.target.value }))} />
+                  <Input placeholder="National ID" value={ownerForm.nationalId} onChange={(event) => setOwnerForm((prev) => ({ ...prev, nationalId: event.target.value }))} />
+                  <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={ownerForm.unitId} onChange={(event) => setOwnerForm((prev) => ({ ...prev, unitId: event.target.value }))}>
+                    <option value="">Select unit (optional)</option>
+                    {unitOptions.map((row) => <option key={row.id} value={row.id}>{row.label}</option>)}
+                  </select>
+                  <Textarea placeholder="Notes (optional)" value={ownerForm.notes} onChange={(event) => setOwnerForm((prev) => ({ ...prev, notes: event.target.value }))} />
+                </>
+              ) : (
+                <>
+                  {optionsLoading ? (
+                    <SkeletonTable columns={2} rows={3} />
+                  ) : (
+                    <>
+                      <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={familyForm.ownerUserId} onChange={(event) => setFamilyForm((prev) => ({ ...prev, ownerUserId: event.target.value }))}>
+                        <option value="">Select owner</option>
+                        {ownerOptions.map((row) => <option key={row.id} value={row.id}>{row.label}</option>)}
+                      </select>
+                      <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={familyForm.unitId} onChange={(event) => setFamilyForm((prev) => ({ ...prev, unitId: event.target.value }))}>
+                        <option value="">Select unit</option>
+                        {unitOptions.map((row) => <option key={row.id} value={row.id}>{row.label}</option>)}
+                      </select>
+                    </>
+                  )}
+                  <Input placeholder="Name" value={familyForm.fullName} onChange={(event) => setFamilyForm((prev) => ({ ...prev, fullName: event.target.value }))} />
+                  <Input placeholder="Phone" value={familyForm.phone} onChange={(event) => setFamilyForm((prev) => ({ ...prev, phone: event.target.value }))} />
+                  <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={familyForm.relationship} onChange={(event) => setFamilyForm((prev) => ({ ...prev, relationship: event.target.value as FamilyRelationship }))}>
+                    {RELATIONSHIP_OPTIONS.map((value) => (
+                      <option key={value} value={value}>{humanizeEnum(value)}</option>
+                    ))}
+                  </select>
+                  <Input placeholder="Email (optional)" value={familyForm.email} onChange={(event) => setFamilyForm((prev) => ({ ...prev, email: event.target.value }))} />
+                  <Input placeholder="National ID / Passport (optional)" value={familyForm.nationalIdOrPassport} onChange={(event) => setFamilyForm((prev) => ({ ...prev, nationalIdOrPassport: event.target.value }))} />
+                  <Textarea placeholder="Notes (optional)" value={familyForm.notes} onChange={(event) => setFamilyForm((prev) => ({ ...prev, notes: event.target.value }))} />
+                </>
+              )}
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setPreRegisterOpen(false)}>Cancel</Button>
+                <Button onClick={preRegisterNext}>Next</Button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-[#E2E8F0] p-4 text-sm text-[#334155]">
+                {preRegisterMode === "OWNER" ? (
+                  <div className="space-y-1">
+                    <p>Name: {ownerForm.nameEN}</p>
+                    <p>Email: {ownerForm.email}</p>
+                    <p>Phone: {ownerForm.phone}</p>
+                    <p>National ID: {ownerForm.nationalId}</p>
+                    <p>Unit: {ownerForm.unitId || "Not assigned"}</p>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <p>Owner User: {familyForm.ownerUserId}</p>
+                    <p>Unit: {familyForm.unitId}</p>
+                    <p>Name: {familyForm.fullName}</p>
+                    <p>Phone: {familyForm.phone}</p>
+                    <p>Relationship: {humanizeEnum(familyForm.relationship)}</p>
+                    <p>Email: {familyForm.email || "Not provided"}</p>
+                  </div>
+                )}
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setPreRegisterStep(1)}>Back</Button>
+                <Button onClick={() => void confirmPreRegistration()} disabled={preRegisterBusy}>Confirm and Send Invite</Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

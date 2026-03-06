@@ -1,6 +1,8 @@
 // src/service/dto/create-service.dto.ts
 
 import {
+  ArrayMaxSize,
+  IsArray,
   IsString,
   IsNotEmpty,
   IsEnum,
@@ -8,13 +10,17 @@ import {
   IsOptional,
   IsBoolean,
   Min,
-  IsDecimal,
+  IsNumber,
+  IsPositive,
   Matches,
   MaxLength,
   IsIn,
+  IsUUID,
+  ValidateNested,
 } from 'class-validator';
 import { ServiceCategory, EligibilityType } from '@prisma/client';
 import { Type } from 'class-transformer';
+import { CreateServiceFieldDto } from './create-service-field.dto';
 
 export class CreateServiceDto {
   @IsString()
@@ -45,14 +51,25 @@ export class CreateServiceDto {
   @IsOptional()
   description?: string;
 
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  @Type(() => Number)
+  slaHours?: number;
+
+  @IsUUID()
+  @IsOptional()
+  assignedRoleId?: string;
+
   @IsBoolean()
   @IsOptional()
   status?: boolean; // Toggles visibility in the Community App
 
-  @IsDecimal({ decimal_digits: '0,2' })
+  @Type(() => Number)
+  @IsNumber()
+  @IsPositive()
   @IsOptional()
-  @Type(() => String) // Decimal in Prisma/DB is often string in DTO
-  startingPrice?: string; // The mandatory starting price
+  startingPrice?: number;
 
   @IsBoolean()
   @IsOptional()
@@ -70,4 +87,11 @@ export class CreateServiceDto {
   @IsOptional()
   @IsIn(['auto', 'blue', 'orange', 'purple', 'green', 'pink', 'teal'])
   iconTone?: 'auto' | 'blue' | 'orange' | 'purple' | 'green' | 'pink' | 'teal';
+
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => CreateServiceFieldDto)
+  @IsOptional()
+  fields?: CreateServiceFieldDto[];
 }

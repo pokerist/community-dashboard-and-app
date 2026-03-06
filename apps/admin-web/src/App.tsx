@@ -4,20 +4,26 @@ import { AppSidebar } from "./components/AppSidebar";
 import { DashboardOverview } from "./components/pages/DashboardOverview";
 import { ResidentManagement } from "./components/pages/ResidentManagement";
 import { DashboardUsersPage } from "./components/pages/DashboardUsersPage";
+import { UsersHubPage } from "./components/pages/UsersHubPage";
 import { ResidentCreatePage } from "./components/pages/ResidentCreatePage";
 import { UnitsManagement } from "./components/pages/UnitsManagement";
 import { CommunitiesManagement } from "./components/pages/CommunitiesManagement";
+import { CommercialManagement } from "./components/pages/CommercialManagement";
+import { CompoundStaffManagement } from "./components/pages/CompoundStaffManagement";
+import { BlueCollarManagement } from "./components/pages/BlueCollarManagement";
 import { ServiceManagement } from "./components/pages/ServiceManagement";
+import { PermitsManagement } from "./components/pages/PermitsManagement";
 import { RequestsManagement } from "./components/pages/RequestsManagement";
 import { TicketsInbox } from "./components/pages/TicketsInbox";
 import { AccessControl } from "./components/pages/AccessControl";
-import { LeaseManagement } from "./components/pages/LeaseManagement";
+import { RentalManagement } from "./components/pages/RentalManagement";
 import { ComplaintsViolations } from "./components/pages/ComplaintsViolations";
 import { BillingPayments } from "./components/pages/BillingPayments";
 import { BannerManagement } from "./components/pages/BannerManagement";
 import { NotificationCenter } from "./components/pages/NotificationCenter";
 import { SecurityEmergency } from "./components/pages/SecurityEmergency";
 import { GateLiveFeed } from "./components/pages/GateLiveFeed";
+import { GatesManagement } from "./components/pages/GatesManagement";
 import { AmenitiesManagement } from "./components/pages/AmenitiesManagement";
 import { ReportsAnalytics } from "./components/pages/ReportsAnalytics";
 import { SystemSettings } from "./components/pages/SystemSettings";
@@ -40,20 +46,27 @@ type FooterPanel = "documentation" | "support" | "privacy" | null;
 const VALID_SECTIONS = new Set([
   "dashboard",
   "residents",
+  "users",
   "dashboard-users",
   "residents-create",
   "units",
   "communities",
+  "commercial",
+  "compound-staff",
+  "blue-collar",
   "services",
+  "permits",
   "requests",
   "tickets",
   "access",
   "lease",
+  "rental",
   "complaints",
   "billing",
   "banners",
   "notifications",
   "security",
+  "gates",
   "gate-live",
   "amenities",
   "reports",
@@ -91,11 +104,16 @@ function mapNotificationRouteToSection(routeRaw?: string | null): string | null 
   if (route.includes("gate-live")) return "gate-live";
   if (route.includes("requests")) return "requests";
   if (route.includes("services")) return "services";
+  if (route.includes("permits")) return "permits";
+  if (route.includes("commercial")) return "commercial";
+  if (route.includes("compound-staff") || route.includes("compound_staff")) return "compound-staff";
+  if (route.includes("blue-collar") || route.includes("blue_collar")) return "blue-collar";
   if (route.includes("complaints")) return "complaints";
   if (route.includes("tickets")) return "tickets";
   if (route.includes("access") || route.includes("qr")) return "access";
   if (route.includes("billing") || route.includes("payment") || route.includes("invoice")) return "billing";
   if (route.includes("security")) return "security";
+  if (route.includes("gates")) return "gates";
   if (route.includes("gate")) return "gate-live";
   return null;
 }
@@ -313,6 +331,8 @@ export default function App() {
         return <DashboardOverview onNavigate={navigateToSection} />;
       case "residents":
         return <ResidentManagement onNavigateToCreate={() => navigateToSection("residents-create")} />;
+      case "users":
+        return <UsersHubPage />;
       case "dashboard-users":
         return <DashboardUsersPage />;
       case "residents-create":
@@ -321,8 +341,16 @@ export default function App() {
         return <UnitsManagement />;
       case "communities":
         return <CommunitiesManagement />;
+      case "commercial":
+        return <CommercialManagement />;
+      case "compound-staff":
+        return <CompoundStaffManagement />;
+      case "blue-collar":
+        return <BlueCollarManagement />;
       case "services":
         return <ServiceManagement />;
+      case "permits":
+        return <PermitsManagement />;
       case "requests":
         return <RequestsManagement />;
       case "tickets":
@@ -330,7 +358,8 @@ export default function App() {
       case "access":
         return <AccessControl />;
       case "lease":
-        return <LeaseManagement />;
+      case "rental":
+        return <RentalManagement />;
       case "complaints":
         return <ComplaintsViolations />;
       case "billing":
@@ -341,6 +370,8 @@ export default function App() {
         return <NotificationCenter />;
       case "security":
         return <SecurityEmergency />;
+      case "gates":
+        return <GatesManagement />;
       case "gate-live":
         return <GateLiveFeed />;
       case "amenities":

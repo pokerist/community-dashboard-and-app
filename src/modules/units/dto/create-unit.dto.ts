@@ -1,70 +1,98 @@
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { GateAccessMode, UnitStatus, UnitType } from '@prisma/client';
 import {
-  IsNotEmpty,
-  IsString,
-  IsOptional,
-  IsNumber,
-  IsPositive,
+  IsArray,
+  IsBoolean,
   IsEnum,
-  Min,
   IsInt,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
   IsUUID,
+  Min,
 } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
-import { UnitType } from '@prisma/client';
 
 export class CreateUnitDto {
+  @ApiProperty({ example: 'community-uuid' })
+  @IsUUID()
+  communityId!: string;
+
+  @ApiPropertyOptional({ example: 'cluster-uuid' })
+  @IsOptional()
+  @IsUUID()
+  clusterId?: string;
+
+  @ApiPropertyOptional({ example: 'Block A' })
+  @IsOptional()
+  @IsString()
+  block?: string;
+
   @ApiProperty({ example: 'A-504' })
   @IsNotEmpty()
   @IsString()
   unitNumber!: string;
 
-  @ApiProperty({ example: 'Sunrise Residences' })
-  @IsNotEmpty()
-  @IsString()
-  projectName!: string;
-
-  @ApiProperty({ required: false, example: 'community-uuid' })
-  @IsOptional()
-  @IsUUID()
-  communityId?: string;
-
-  @ApiProperty({ example: 'Block A', required: false })
-  @IsOptional()
-  @IsString()
-  block?: string;
-
-  @ApiProperty({ example: 'APARTMENT', enum: UnitType })
-  @IsNotEmpty()
+  @ApiProperty({ example: UnitType.APARTMENT, enum: UnitType })
   @IsEnum(UnitType)
   type!: UnitType;
 
-  @ApiProperty({ example: 2, required: false })
+  @ApiPropertyOptional({ example: UnitStatus.AVAILABLE, enum: UnitStatus })
+  @IsOptional()
+  @IsEnum(UnitStatus)
+  status?: UnitStatus;
+
+  @ApiPropertyOptional({ example: false })
+  @IsOptional()
+  @IsBoolean()
+  isDelivered?: boolean;
+
+  @ApiPropertyOptional({ example: 2 })
   @IsOptional()
   @IsInt()
   @Min(0)
   floors?: number;
 
-  @ApiProperty({ example: 3, required: false })
+  @ApiPropertyOptional({ example: 3 })
   @IsOptional()
   @IsInt()
   @Min(0)
   bedrooms?: number;
 
-  @ApiProperty({ example: 2, required: false })
+  @ApiPropertyOptional({ example: 2 })
   @IsOptional()
   @IsInt()
   @Min(0)
   bathrooms?: number;
 
-  @ApiProperty({ example: 120.5 })
-  @IsNotEmpty()
-  @IsNumber()
-  @IsPositive()
-  sizeSqm!: number;
-
-  @ApiProperty({ example: 1500000.0, required: false })
+  @ApiPropertyOptional({ example: 120.5 })
   @IsOptional()
   @IsNumber()
-  @IsPositive()
+  @Min(0)
+  sizeSqm?: number;
+
+  @ApiPropertyOptional({ example: 1500000 })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
   price?: number;
+
+  @ApiPropertyOptional({
+    enum: GateAccessMode,
+    example: GateAccessMode.ALL_GATES,
+  })
+  @IsOptional()
+  @IsEnum(GateAccessMode)
+  gateAccessMode?: GateAccessMode;
+
+  @ApiPropertyOptional({
+    isArray: true,
+    type: String,
+    example: ['gate-uuid-1', 'gate-uuid-2'],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  allowedGateIds?: string[];
 }
+

@@ -1,6 +1,6 @@
 // src/service-request/dto/update-service-request-internal.dto.ts
 
-import { IsUUID, IsOptional, IsEnum } from 'class-validator';
+import { IsUUID, IsOptional, IsEnum, IsString, MaxLength } from 'class-validator';
 import { ServiceRequestStatus } from '@prisma/client';
 
 // Define the fields that the Staff/Admin are allowed to update
@@ -12,4 +12,9 @@ export class UpdateServiceRequestInternalDto {
   @IsUUID('4', { message: 'Assigned To ID must be a valid UUID.' })
   @IsOptional()
   assignedToId?: string; // ID of the manager/operator handling the request
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(2000)
+  notes?: string;
 }

@@ -1,115 +1,60 @@
-// src/modules/invoices/dto/invoices.dto.ts
-import {
-  IsUUID,
-  IsNotEmpty,
-  IsDateString,
-  IsNumber,
-  Min,
-  IsOptional,
-  IsEnum,
-  IsString,
-} from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { InvoiceType } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { ApiProperty, PartialType } from '@nestjs/swagger';
-import { InvoiceStatus, InvoiceType } from '@prisma/client';
+import {
+  IsBoolean,
+  IsDateString,
+  IsEnum,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsPositive,
+  IsString,
+  IsUUID,
+} from 'class-validator';
 
 export class CreateInvoiceDto {
-  @ApiProperty({
-    example: 'd290f1ee-6c54-4b01-90e6-d701748f0851',
-    description: 'The UUID of the unit receiving the bill.',
-  })
-  @IsUUID()
-  @IsNotEmpty()
+  @ApiProperty({ example: 'd290f1ee-6c54-4b01-90e6-d701748f0851' })
+  @IsUUID('4')
   unitId!: string;
 
-  @ApiProperty({
-    example: 'a01a01a0-b1b1-c2c2-d3d3-e4e4e4e4e4e4',
-    description: 'The UUID of the resident responsible for the bill.',
-    required: false,
-  })
-  @IsUUID()
+  @ApiPropertyOptional({ example: 'a01a01a0-b1b1-c2c2-d3d3-e4e4e4e4e4e4' })
   @IsOptional()
+  @IsUUID('4')
   residentId?: string;
 
-  @ApiProperty({
-    example: InvoiceType.RENT,
-    enum: InvoiceType,
-    description: 'The type of invoice.',
-  })
+  @ApiProperty({ enum: InvoiceType, example: InvoiceType.RENT })
   @IsEnum(InvoiceType)
-  @IsNotEmpty()
   type!: InvoiceType;
 
+  @ApiProperty({ example: 18000.0 })
   @Type(() => Number)
-  @ApiProperty({
-    example: 18000.0,
-    description: 'The total amount of the invoice.',
-  })
   @IsNumber()
-  @Min(0.01)
-  @IsNotEmpty()
+  @IsPositive()
   amount!: number;
 
-  @ApiProperty({
-    example: 'INV-00001',
-    description:
-      'The unique, sequential invoice number (optional for manual create).',
-    required: false,
-  })
+  @ApiProperty({ example: '2026-04-10T00:00:00.000Z' })
+  @IsDateString()
+  dueDate!: string;
+
+  @ApiPropertyOptional({ example: 'Manual adjustment for April period.' })
+  @IsOptional()
   @IsString()
-  @IsOptional()
-  invoiceNumber?: string;
-
-  @ApiProperty({
-    example: '2025-12-01T00:00:00.000Z',
-    description: 'The date the invoice is due.',
-  })
-  @IsDateString()
-  @IsNotEmpty()
-  dueDate!: Date;
-
-  @ApiProperty({
-    example: InvoiceStatus.PENDING,
-    enum: InvoiceStatus,
-    description: 'The status of the invoice.',
-    required: false,
-  })
-  @IsEnum(InvoiceStatus)
-  @IsOptional()
-  status?: InvoiceStatus;
-
-  @ApiProperty({
-    example: 'd290f1ee-6c54-4b01-90e6-d701748f0851',
-    description: 'The UUID of the linked violation (if applicable).',
-    required: false,
-  })
-  @IsUUID()
-  @IsOptional()
-  violationId?: string;
+  notes?: string;
 }
 
-export class UpdateInvoiceDto extends PartialType(CreateInvoiceDto) {
-  @ApiProperty({
-    example: '2025-11-20T10:30:00.000Z',
-    description: 'The date the invoice was paid.',
-    required: false,
-  })
-  @IsDateString()
-  @IsOptional()
-  paidDate?: Date;
-}
-
-// DTO for the payment action (often used to capture payment details)
 export class MarkAsPaidDto {
-  @ApiProperty({ example: 'Bank Transfer', required: false })
-  @IsString()
+  @ApiPropertyOptional({ example: '2026-03-06T10:00:00.000Z' })
   @IsOptional()
-  paymentMethod?: string;
+  @IsDateString()
+  paidDate?: string;
+}
 
-  @ApiProperty({ example: 'TRX123456', required: false })
+export class CancelInvoiceDto {
+  @ApiProperty({ example: 'Invoice issued by mistake.' })
   @IsString()
-  @IsOptional()
-  transactionRef?: string;
+  @IsNotEmpty()
+  reason!: string;
 }
 
 export class SimulateInvoicePaymentDto {
@@ -118,18 +63,30 @@ export class SimulateInvoicePaymentDto {
   @IsNotEmpty()
   paymentMethod!: string;
 
-  @ApiProperty({ example: '4242', required: false })
+  @ApiPropertyOptional({ example: '4242' })
   @IsString()
   @IsOptional()
   cardLast4?: string;
 
-  @ApiProperty({ example: 'SIM-TRX-123456', required: false })
+  @ApiPropertyOptional({ example: 'SIM-TRX-123456' })
   @IsString()
   @IsOptional()
   transactionRef?: string;
 
-  @ApiProperty({ example: 'Paid via demo simulation screen', required: false })
+  @ApiPropertyOptional({ example: 'Paid via demo simulation screen' })
   @IsString()
   @IsOptional()
   notes?: string;
+}
+
+export class BulkOverdueResultDto {
+  @ApiProperty({ example: 12 })
+  @IsNumber()
+  updatedCount!: number;
+}
+
+export class ToggleInvoiceCategoryActiveDto {
+  @ApiProperty({ example: true })
+  @IsBoolean()
+  isActive!: boolean;
 }

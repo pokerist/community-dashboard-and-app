@@ -426,6 +426,18 @@ export class HouseholdService {
         throw new ConflictException('Phone already exists for another account');
       }
 
+      if (current.activatedUserId) {
+        const activatedUser = await tx.user.findUnique({
+          where: { id: current.activatedUserId },
+          select: { id: true },
+        });
+        if (!activatedUser) {
+          throw new BadRequestException(
+            'Pre-registered family user is missing. Recreate pre-registration first',
+          );
+        }
+      }
+
       const password = this.generateRandomPassword();
       const passwordHash = await bcrypt.hash(password, 12);
       const nationalIdFileId =
@@ -436,24 +448,51 @@ export class HouseholdService {
         current.featurePermissions as Record<string, unknown> | null,
       );
 
-      const createdUser = await tx.user.create({
-        data: {
-          nameEN: current.fullName,
-          email: current.email ?? undefined,
-          phone: current.phone,
-          passwordHash,
-          userStatus: UserStatusEnum.ACTIVE,
-          signupSource: 'dashboard',
-          profilePhotoId: current.personalPhotoFileId,
-          nationalIdFileId: nationalIdFileId ?? undefined,
-        },
-      });
+      const isPreRegisteredUser =
+        current.isPreRegistration === true && Boolean(current.activatedUserId);
+      const createdUser = current.activatedUserId
+        ? await tx.user.update({
+            where: { id: current.activatedUserId },
+            data: {
+              nameEN: current.fullName,
+              email: current.email ?? undefined,
+              phone: current.phone,
+              passwordHash,
+              userStatus: UserStatusEnum.ACTIVE,
+              signupSource: 'dashboard',
+              profilePhotoId: current.personalPhotoFileId,
+              nationalIdFileId: nationalIdFileId ?? undefined,
+              requiresOnboarding: isPreRegisteredUser,
+              onboardingCompletedAt: isPreRegisteredUser ? null : new Date(),
+              onboardingStep: isPreRegisteredUser ? 'OTP' : 'COMPLETE',
+            },
+          })
+        : await tx.user.create({
+            data: {
+              nameEN: current.fullName,
+              email: current.email ?? undefined,
+              phone: current.phone,
+              passwordHash,
+              userStatus: UserStatusEnum.ACTIVE,
+              signupSource: 'dashboard',
+              profilePhotoId: current.personalPhotoFileId,
+              nationalIdFileId: nationalIdFileId ?? undefined,
+              requiresOnboarding: false,
+              onboardingCompletedAt: new Date(),
+              onboardingStep: 'COMPLETE',
+            },
+          });
 
       await this.ensureCommunityRole(tx, createdUser.id);
 
-      const resident = await tx.resident.create({
-        data: {
+      const resident = await tx.resident.upsert({
+        where: { userId: createdUser.id },
+        create: {
           userId: createdUser.id,
+          nationalId: current.nationalIdOrPassport ?? undefined,
+          relationship: this.relationshipToFamilyMemberType(current.relationship),
+        },
+        update: {
           nationalId: current.nationalIdOrPassport ?? undefined,
           relationship: this.relationshipToFamilyMemberType(current.relationship),
         },
@@ -467,12 +506,20 @@ export class HouseholdService {
         throw new BadRequestException('Owner resident profile is required before approving family requests');
       }
 
-      await tx.familyMember.create({
-        data: {
+      await tx.familyMember.upsert({
+        where: { familyResidentId: resident.id },
+        create: {
           primaryResidentId: ownerResident.id,
           familyResidentId: resident.id,
           relationship: this.relationshipToFamilyMemberType(current.relationship),
           status: UserStatusEnum.ACTIVE,
+          activatedAt: new Date(),
+        },
+        update: {
+          primaryResidentId: ownerResident.id,
+          relationship: this.relationshipToFamilyMemberType(current.relationship),
+          status: UserStatusEnum.ACTIVE,
+          deactivatedAt: null,
           activatedAt: new Date(),
         },
       });

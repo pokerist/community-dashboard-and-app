@@ -1,4 +1,4 @@
-import { IsDateString, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsDateString, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 
 export class MarkQrUsedDto {
   @IsOptional()
@@ -9,6 +9,10 @@ export class MarkQrUsedDto {
   @IsString()
   @MaxLength(120)
   gateName?: string;
+
+  @IsOptional()
+  @IsUUID()
+  gateId?: string;
 
   @IsOptional()
   @IsString()

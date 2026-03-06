@@ -1,18 +1,24 @@
 import {
+  ArrayMaxSize,
+  IsArray,
   IsString,
   IsEnum,
   IsInt,
   IsOptional,
   IsBoolean,
   Min,
-  IsDecimal,
+  IsNumber,
+  IsPositive,
   Matches,
   MaxLength,
   IsIn,
   ValidateIf,
+  IsUUID,
+  ValidateNested,
 } from 'class-validator';
 import { EligibilityType, ServiceCategory } from '@prisma/client';
 import { Type } from 'class-transformer';
+import { CreateServiceFieldDto } from './create-service-field.dto';
 
 export class UpdateServiceDto {
   @IsString()
@@ -43,14 +49,26 @@ export class UpdateServiceDto {
   @IsOptional()
   description?: string;
 
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  @Type(() => Number)
+  slaHours?: number | null;
+
+  @IsOptional()
+  @ValidateIf((_, value) => value !== null)
+  @IsUUID()
+  assignedRoleId?: string | null;
+
   @IsBoolean()
   @IsOptional()
   status?: boolean;
 
-  @IsDecimal({ decimal_digits: '0,2' })
+  @Type(() => Number)
+  @IsNumber()
+  @IsPositive()
   @IsOptional()
-  @Type(() => String)
-  startingPrice?: string;
+  startingPrice?: number | null;
 
   @IsBoolean()
   @IsOptional()
@@ -69,4 +87,11 @@ export class UpdateServiceDto {
   @IsOptional()
   @IsIn(['auto', 'blue', 'orange', 'purple', 'green', 'pink', 'teal'])
   iconTone?: 'auto' | 'blue' | 'orange' | 'purple' | 'green' | 'pink' | 'teal';
+
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => CreateServiceFieldDto)
+  @IsOptional()
+  fields?: CreateServiceFieldDto[];
 }

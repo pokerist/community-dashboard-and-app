@@ -1,24 +1,23 @@
-// src/service/service.controller.ts
-
-import {
-  Controller,
-  Get,
-  Post,
+﻿import {
   Body,
-  Patch,
-  Param,
+  Controller,
   Delete,
-  UseGuards,
+  Get,
+  Param,
+  Patch,
+  Post,
   Query,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { ServiceService } from './service.service';
-import { CreateServiceDto } from './dto/create-service.dto';
-import { UpdateServiceDto } from './dto/update-service.dto';
-import { ReorderServicesDto } from './dto/reorder-services.dto';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Permissions } from '../auth/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
-import { Permissions } from '../auth/decorators/permissions.decorator';
+import { ReorderServicesDto } from './dto/reorder-services.dto';
+import { CreateServiceDto } from './dto/create-service.dto';
+import { ListServicesQueryDto } from './dto/list-services-query.dto';
+import { UpdateServiceDto } from './dto/update-service.dto';
+import { ServiceService } from './service.service';
 
 @ApiBearerAuth()
 @ApiTags('Services')
@@ -27,82 +26,60 @@ import { Permissions } from '../auth/decorators/permissions.decorator';
 export class ServiceController {
   constructor(private readonly serviceService: ServiceService) {}
 
-  // POST /services (Admin: Create New Service Type)
-  @Post()
-  @ApiOperation({
-    summary: 'Create a service type',
-    description:
-      'Creates a new service in the catalog (name, category, eligibility, visibility status, pricing, etc.).',
-  })
-  @Permissions('service.create')
-  create(@Body() createServiceDto: CreateServiceDto) {
-    return this.serviceService.create(createServiceDto);
+  @Get()
+  @ApiOperation({ summary: 'List services with filters and catalog metrics' })
+  @Permissions('service.read', 'service_request.create')
+  listServices(@Query() query: ListServicesQueryDto) {
+    return this.serviceService.listServices(query);
   }
 
-  // GET /services?status=active|inactive|all (Community App & Dashboard: List services)
-  @Get()
-  @ApiOperation({
-    summary: 'List services',
-    description:
-      'Lists service types. Use `status=active` (default) for active only, `status=inactive` for inactive only, or `status=all` for both active and inactive services.',
-  })
+  @Get('stats')
+  @ApiOperation({ summary: 'Get service catalog and request statistics' })
+  @Permissions('service.read')
+  getServiceStats() {
+    return this.serviceService.getServiceStats();
+  }
+
+  @Get(':id([0-9a-fA-F-]{36})')
+  @ApiOperation({ summary: 'Get service detail with fields and SLA stats' })
   @Permissions('service.read', 'service_request.create')
-  findAll(
-    @Query('status') status?: string,
-    @Query('urgent') urgent?: string,
-    @Query('category') category?: string,
-    @Query('kind') kind?: 'services' | 'requests' | 'all',
-  ) {
-    let filter: boolean | undefined;
-    let urgentFilter: boolean | undefined;
+  getServiceDetail(@Param('id') id: string) {
+    return this.serviceService.getServiceDetail(id);
+  }
 
-    if (status === 'active') filter = true;
-    else if (status === 'inactive') filter = false;
-    else filter = undefined; // "all"
-
-    if (urgent === 'true') urgentFilter = true;
-    else if (urgent === 'false') urgentFilter = false;
-    else urgentFilter = undefined;
-
-    return this.serviceService.findAll(filter, urgentFilter, category, kind);
+  @Post()
+  @ApiOperation({ summary: 'Create a service with optional dynamic fields' })
+  @Permissions('service.create')
+  createService(@Body() dto: CreateServiceDto) {
+    return this.serviceService.create(dto);
   }
 
   @Patch('reorder')
-  @ApiOperation({
-    summary: 'Reorder service catalog items',
-    description:
-      'Saves ordered service IDs to displayOrder so app/dashboard can render predictable ordering.',
-  })
+  @ApiOperation({ summary: 'Reorder service catalog items' })
   @Permissions('service.update')
   reorder(@Body() dto: ReorderServicesDto) {
     return this.serviceService.reorder(dto.ids);
   }
 
-  // GET /services/:id (Admin: View details)
-  @Get(':id')
-  @ApiOperation({ summary: 'Get a service by id' })
-  @Permissions('service.read', 'service_request.create')
-  findOne(@Param('id') id: string) {
-    return this.serviceService.findOne(id);
-  }
-
-  // PATCH /services/:id (Admin: Update status, price, etc.)
-  @Patch(':id')
-  @ApiOperation({
-    summary: 'Update a service',
-    description:
-      'Updates service properties such as visibility (status), processing time, description, or pricing.',
-  })
+  @Patch(':id([0-9a-fA-F-]{36})')
+  @ApiOperation({ summary: 'Update service properties and fields' })
   @Permissions('service.update')
-  update(@Param('id') id: string, @Body() updateServiceDto: UpdateServiceDto) {
-    return this.serviceService.update(id, updateServiceDto);
+  updateService(@Param('id') id: string, @Body() dto: UpdateServiceDto) {
+    return this.serviceService.update(id, dto);
   }
 
-  // DELETE /services/:id (Admin: Remove a service)
-  @Delete(':id')
-  @ApiOperation({ summary: 'Delete a service' })
+  @Patch(':id([0-9a-fA-F-]{36})/toggle')
+  @ApiOperation({ summary: 'Toggle service active/inactive status' })
+  @Permissions('service.update')
+  toggleService(@Param('id') id: string) {
+    return this.serviceService.toggleService(id);
+  }
+
+  @Delete(':id([0-9a-fA-F-]{36})')
+  @ApiOperation({ summary: 'Delete a service with no linked requests' })
   @Permissions('service.delete')
-  remove(@Param('id') id: string) {
+  removeService(@Param('id') id: string) {
     return this.serviceService.remove(id);
   }
 }
+

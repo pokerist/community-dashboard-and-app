@@ -1,27 +1,38 @@
 import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
-  Param,
   Body,
-  Query,
-  Request,
+  Controller,
+  Delete,
+  Get,
   HttpCode,
   HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
-import { UnitsService } from './units.service';
-import { CreateUnitDto } from './dto/create-unit.dto';
-import { UpdateUnitDto } from './dto/update-unit.dto';
-import { AssignUserDto } from './dto/assign-user.dto';
-import { UnitQueryDto } from './dto/unit-query.dto';
-import { ApiTags, ApiBody } from '@nestjs/swagger';
-import { UpdateUnitStatusDto } from './dto/update-unit-status.dto'; // new DTO for status updates
-import { PermissionsGuard } from '../auth/guards/permissions.guard';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { ApiBody, ApiTags } from '@nestjs/swagger';
+import { Request } from 'express';
 import { Permissions } from '../auth/decorators/permissions.decorator';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { AssignUserDto } from './dto/assign-user.dto';
+import { CreateUnitDto } from './dto/create-unit.dto';
+import { DeactivateUnitDto } from './dto/deactivate-unit.dto';
+import { UnitQueryDto } from './dto/unit-query.dto';
+import { UpdateUnitGateAccessDto } from './dto/update-unit-gate-access.dto';
+import { UpdateUnitStatusDto } from './dto/update-unit-status.dto';
+import { UpdateUnitDto } from './dto/update-unit.dto';
+import { UnitsService } from './units.service';
+
+type AuthenticatedRequest = Request & {
+  user: {
+    id: string;
+    roles?: string[];
+    permissions?: string[];
+  };
+};
 
 @ApiTags('units')
 @Controller('units')
@@ -29,15 +40,21 @@ import { Permissions } from '../auth/decorators/permissions.decorator';
 export class UnitsController {
   constructor(private readonly unitsService: UnitsService) {}
 
-  // ----- CRUD -----
   @Get('my')
   @HttpCode(HttpStatus.OK)
   @Permissions('unit.view_own', 'unit.view_all')
-  findMyUnits(@Query() query: UnitQueryDto, @Request() req: any) {
+  findMyUnits(@Query() query: UnitQueryDto, @Req() req: AuthenticatedRequest) {
     return this.unitsService.findMyUnits(req.user.id, query, {
       permissions: Array.isArray(req.user.permissions) ? req.user.permissions : [],
       roles: Array.isArray(req.user.roles) ? req.user.roles : [],
     });
+  }
+
+  @Get('number/:unitNumber')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('unit.view_all', 'unit.view_own')
+  getByNumber(@Param('unitNumber') unitNumber: string) {
+    return this.unitsService.getByNumber(unitNumber);
   }
 
   @Get()
@@ -70,13 +87,43 @@ export class UnitsController {
   }
 
   @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
   @Permissions('unit.delete')
-  remove(@Param('id') id: string) {
-    return this.unitsService.remove(id);
+  remove(@Param('id') id: string, @Body() dto?: DeactivateUnitDto) {
+    return this.unitsService.remove(id, dto);
   }
 
-  // ----- User Assignment -----
+  @Post(':id/reactivate')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('unit.update', 'admin.update')
+  reactivate(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+    return this.unitsService.reactivate(id, req.user.id);
+  }
+
+  @Get(':id/gate-access')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('unit.view_all', 'unit.view_own')
+  getUnitGateAccess(@Param('id') id: string) {
+    return this.unitsService.getUnitGateAccess(id);
+  }
+
+  @Patch(':id/gate-access')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('unit.update')
+  updateUnitGateAccess(
+    @Param('id') id: string,
+    @Body() dto: UpdateUnitGateAccessDto,
+  ) {
+    return this.unitsService.updateGateAccess(id, dto);
+  }
+
+  @Get('clusters/:clusterId')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('unit.view_all')
+  getUnitsByCluster(@Param('clusterId') clusterId: string) {
+    return this.unitsService.getUnitsByCluster(clusterId);
+  }
+
   @Post(':id/assign-user')
   @HttpCode(HttpStatus.CREATED)
   @Permissions('unit.assign_resident')
@@ -98,7 +145,6 @@ export class UnitsController {
     return this.unitsService.getUsers(unitId);
   }
 
-  // ----- Status -----
   @Patch(':id/status')
   @ApiBody({ type: UpdateUnitStatusDto })
   @HttpCode(HttpStatus.OK)
@@ -107,7 +153,6 @@ export class UnitsController {
     return this.unitsService.updateStatus(unitId, dto.status);
   }
 
-  // ----- Lease info -----
   @Get(':id/leases')
   @HttpCode(HttpStatus.OK)
   @Permissions('unit.view_leases')
@@ -115,15 +160,6 @@ export class UnitsController {
     return this.unitsService.getLeases(unitId);
   }
 
-  // ----- Get by unit number -----
-  @Get('number/:unitNumber')
-  @HttpCode(HttpStatus.OK)
-  @Permissions('unit.view_all', 'unit.view_own')
-  getByNumber(@Param('unitNumber') unitNumber: string) {
-    return this.unitsService.getByNumber(unitNumber);
-  }
-
-  // ----- Access Control -----
   @Get('access/:unitId/:userId')
   @HttpCode(HttpStatus.OK)
   @Permissions('unit.view_all')
@@ -145,3 +181,4 @@ export class UnitsController {
     return { canAccess: hasAccess };
   }
 }
+

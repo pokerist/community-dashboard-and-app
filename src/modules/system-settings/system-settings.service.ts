@@ -811,7 +811,8 @@ export class SystemSettingsService {
   }
 
   async listBackupHistory(query: ListSystemSettingsBackupsDto) {
-    const limit = query.limit && query.limit > 0 ? query.limit : 20;
+    const requestedLimit = query.limit && query.limit > 0 ? query.limit : 20;
+    const limit = Math.min(requestedLimit, 100);
     const rows = await this.prisma.systemSettingsBackupSnapshot.findMany({
       orderBy: { createdAt: 'desc' },
       take: limit,

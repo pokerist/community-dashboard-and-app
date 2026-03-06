@@ -14,9 +14,41 @@ import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'ax
 
 // Backend in this workspace exposes routes at root (no global /api prefix).
 // Can be overridden via VITE_API_BASE_URL.
-export const API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000'
-).replace(/\/+$/, '');
+function getResolvedApiBaseUrl(): string {
+  const envBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)
+    ?.trim()
+    .replace(/\/+$/, '');
+
+  if (!envBaseUrl) {
+    // Default backend port in this project is 4003.
+    // Using 3000 can accidentally target the Vite dev server.
+    return 'http://localhost:4003';
+  }
+
+  // When frontend runs on a non-localhost host but env still points to localhost,
+  // rewrite host to current browser hostname so the API stays reachable.
+  if (typeof window !== 'undefined') {
+    try {
+      const parsed = new URL(envBaseUrl);
+      const apiHostIsLocal =
+        parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+      const browserHostIsLocal =
+        window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1';
+
+      if (apiHostIsLocal && !browserHostIsLocal) {
+        parsed.hostname = window.location.hostname;
+        return parsed.toString().replace(/\/+$/, '');
+      }
+    } catch {
+      return envBaseUrl;
+    }
+  }
+
+  return envBaseUrl;
+}
+
+export const API_BASE_URL = getResolvedApiBaseUrl();
 
 /**
  * Create Axios instance with default configuration
@@ -75,7 +107,9 @@ apiClient.interceptors.response.use(
   (error: AxiosError) => {
     // Log errors with useful details (avoid opaque "Object" console output)
     const status = error.response?.status;
-    const data = error.response?.data as any;
+    const data = error.response?.data as
+      | { message?: string | string[]; error?: string }
+      | undefined;
     const backendMessage = Array.isArray(data?.message)
       ? data.message.join(', ')
       : data?.message || data?.error;

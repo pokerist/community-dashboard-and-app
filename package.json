@@ -6,7 +6,7 @@
   "private": true,
   "license": "UNLICENSED",
   "prisma": {
-    "seed": "ts-node prisma/seed.ts"
+    "seed": "node prisma/seed-fast.js"
   },
   "scripts": {
     "prebuild": "npm run prisma:generate",
@@ -15,7 +15,7 @@
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
-    "start:prod": "node dist/main",
+    "start:prod": "node dist/src/main.js",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",
     "test:watch": "jest --watch",
@@ -24,6 +24,7 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "prisma:generate": "npx prisma generate",
     "prisma:migrate": "npx prisma migrate dev",
+    "seed:fast": "node prisma/seed-fast.js",
     "guard:ui-contrast": "node scripts/ui-contrast-guard.js",
     "seed:mobile-personas": "ts-node scripts/seed-mobile-personas.ts",
     "seed:dashboard-load": "ts-node scripts/reset-dashboard-data.ts",

@@ -13,6 +13,7 @@ import {
   Image,
   Bell,
   Shield,
+  DoorOpen,
   Dumbbell,
   Settings,
   BarChart3,
@@ -48,6 +49,21 @@ const menuItems = [
     url: "#communities",
   },
   {
+    title: "Commercial",
+    icon: Building2,
+    url: "#commercial",
+  },
+  {
+    title: "Compound Staff",
+    icon: Users,
+    url: "#compound-staff",
+  },
+  {
+    title: "Blue Collar",
+    icon: ClipboardList,
+    url: "#blue-collar",
+  },
+  {
     title: "Units",
     icon: Building2,
     url: "#units",
@@ -58,6 +74,11 @@ const menuItems = [
     url: "#residents",
   },
   {
+    title: "Users Hub",
+    icon: Users,
+    url: "#users",
+  },
+  {
     title: "Dashboard Users",
     icon: Users,
     url: "#dashboard-users",
@@ -66,6 +87,11 @@ const menuItems = [
     title: "Services",
     icon: Wrench,
     url: "#services",
+  },
+  {
+    title: "Permits",
+    icon: ClipboardCheck,
+    url: "#permits",
   },
   {
     title: "Requests",
@@ -83,9 +109,9 @@ const menuItems = [
     url: "#access",
   },
   {
-    title: "Lease Management",
+    title: "Rental / Lease",
     icon: FileText,
-    url: "#lease",
+    url: "#rental",
   },
 ];
 
@@ -114,6 +140,11 @@ const secondaryItems = [
     title: "Security",
     icon: Shield,
     url: "#security",
+  },
+  {
+    title: "Gates",
+    icon: DoorOpen,
+    url: "#gates",
   },
   {
     title: "Gate Live Feed",
