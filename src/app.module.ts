@@ -36,6 +36,12 @@ import { DiscoverModule } from './modules/discover/discover.module';
 import { HouseholdModule } from './modules/household/household.module';
 import { RentRequestsModule } from './modules/rent-requests/rent-requests.module';
 import { CommunitiesModule } from './modules/communities/communities.module';
+import { CommercialModule } from './modules/commercial/commercial.module';
+import { CompoundStaffModule } from './modules/compound-staff/compound-staff.module';
+import { GatesModule } from './modules/gates/gates.module';
+import { ApprovalsModule } from './modules/approvals/approvals.module';
+import { RentalModule } from './modules/rental/rental.module';
+import { PermitsModule } from './modules/permits/permits.module';
 
 @Module({
   imports: [
@@ -76,6 +82,12 @@ import { CommunitiesModule } from './modules/communities/communities.module';
     HouseholdModule,
     RentRequestsModule,
     CommunitiesModule,
+    CommercialModule,
+    CompoundStaffModule,
+    GatesModule,
+    ApprovalsModule,
+    RentalModule,
+    PermitsModule,
   ],
   controllers: [],
   providers: [],

@@ -1,421 +1,473 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { StatCard } from "../StatCard";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { ActivityFeed } from "../ActivityFeed";
 import { QuickActions } from "../QuickActions";
-import { Card } from "../ui/card";
+import { StatCard } from "../StatCard";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
-import { toast } from "sonner";
+import { Card } from "../ui/card";
 import {
-  LineChart,
-  Line,
-  BarChart,
-  Bar,
-  PieChart,
-  Pie,
-  Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Legend,
-} from "recharts";
-import apiClient, { isAuthenticated } from "../../lib/api-client";
-import { errorMessage, extractRows, formatCurrencyEGP, humanizeEnum, relativeTime } from "../../lib/live-data";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "../ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../ui/table";
+import dashboardService, {
+  CurrentVisitorDrilldownItem,
+  DashboardPeriod,
+  OpenComplaintDrilldownItem,
+  RevenueDrilldownItem,
+} from "../../lib/dashboard-service";
+import {
+  errorMessage,
+  formatCurrencyEGP,
+  formatDateTime,
+  humanizeEnum,
+  relativeTime,
+} from "../../lib/live-data";
 
-type DashboardSummary = any;
-
-const PIE_COLORS = ["#0B5FFF", "#00B386", "#3B82F6", "#F59E0B", "#64748B"];
+type DashboardCardKey =
+  | "totalRegisteredDevices"
+  | "activeMobileUsers"
+  | "totalComplaints"
+  | "openComplaints"
+  | "closedComplaints"
+  | "ticketsByStatus"
+  | "revenueCurrentMonth"
+  | "occupancyRate"
+  | "currentVisitors"
+  | "blueCollarWorkers"
+  | "totalCars";
 
 interface DashboardOverviewProps {
   onNavigate?: (section: string) => void;
 }
 
+const PERIOD_OPTIONS: Array<{ value: DashboardPeriod; label: string }> = [
+  { value: "MONTHLY", label: "Monthly" },
+  { value: "QUARTERLY", label: "Quarterly" },
+  { value: "SEMI_ANNUAL", label: "Semi-Annual" },
+  { value: "ANNUAL", label: "Annual" },
+];
+
 export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [revenueData, setRevenueData] = useState<any[]>([]);
-  const [occupancyBlocks, setOccupancyBlocks] = useState<any[]>([]);
-  const [incidentRows, setIncidentRows] = useState<any[]>([]);
-  const [notificationRows, setNotificationRows] = useState<any[]>([]);
-  const [serviceRequestRows, setServiceRequestRows] = useState<any[]>([]);
-  const [qrRows, setQrRows] = useState<any[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [period, setPeriod] = useState<DashboardPeriod>("MONTHLY");
+  const [selectedCard, setSelectedCard] = useState<DashboardCardKey | null>(null);
+  const [clockNow, setClockNow] = useState(Date.now());
 
-  const loadDashboard = useCallback(async () => {
-    if (!isAuthenticated()) {
-      setLoadError("Sign in to load live dashboard data.");
-      return;
-    }
+  const statsQuery = useQuery({
+    queryKey: ["dashboard-stats", period],
+    queryFn: () => dashboardService.getStats(period),
+    refetchInterval: 10000,
+  });
 
-    setIsLoading(true);
-    setLoadError(null);
-    try {
-      const [
-        summaryRes,
-        revenueRes,
-        occupancyRes,
-        incidentsRes,
-        notificationsRes,
-        serviceReqRes,
-        accessRes,
-      ] = await Promise.all([
-        apiClient.get("/dashboard/summary"),
-        apiClient.get("/dashboard/revenue"),
-        apiClient.get("/dashboard/occupancy"),
-        apiClient.get("/incidents/list", { params: { page: 1, limit: 10 } }),
-        apiClient.get("/notifications/admin/all", { params: { page: 1, limit: 10 } }),
-        apiClient.get("/service-requests"),
-        apiClient.get("/access-qrcodes"),
-      ]);
+  const activityQuery = useQuery({
+    queryKey: ["dashboard-activity"],
+    queryFn: () => dashboardService.getActivity(),
+    refetchInterval: 30000,
+  });
 
-      setSummary(summaryRes.data ?? null);
+  const openComplaintsDetailQuery = useQuery({
+    queryKey: ["dashboard-open-complaints-drilldown", period],
+    queryFn: () => dashboardService.getOpenComplaintsDrilldown(period, 20),
+    enabled: selectedCard === "openComplaints",
+  });
 
-      const rawChartData = Array.isArray(revenueRes.data?.chartData) ? revenueRes.data.chartData : [];
-      setRevenueData(
-        rawChartData.map((row: any) => ({
-          month: row.month ?? row.label ?? row.name ?? "—",
-          revenue: Number(row.revenue ?? row.amount ?? row.value ?? row.total ?? 0),
-        })),
-      );
+  const currentVisitorsDetailQuery = useQuery({
+    queryKey: ["dashboard-current-visitors-drilldown", period],
+    queryFn: () => dashboardService.getCurrentVisitorsDrilldown(period, 20),
+    enabled: selectedCard === "currentVisitors",
+  });
 
-      setOccupancyBlocks(Array.isArray(occupancyRes.data?.byLocation) ? occupancyRes.data.byLocation : []);
-      setIncidentRows(extractRows(incidentsRes.data));
-      setNotificationRows(extractRows(notificationsRes.data));
-      setServiceRequestRows(extractRows(serviceReqRes.data));
-      setQrRows(extractRows(accessRes.data));
-    } catch (error) {
-      const msg = errorMessage(error);
-      setLoadError(msg);
-      toast.error("Failed to load dashboard", { description: msg });
-    } finally {
-      setIsLoading(false);
-    }
+  const revenueDetailQuery = useQuery({
+    queryKey: ["dashboard-revenue-drilldown", period],
+    queryFn: () => dashboardService.getRevenueDrilldown(period, 20),
+    enabled: selectedCard === "revenueCurrentMonth",
+  });
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setClockNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
   }, []);
 
   useEffect(() => {
-    void loadDashboard();
-  }, [loadDashboard]);
+    if (statsQuery.error) {
+      toast.error("Failed to load dashboard stats", {
+        description: errorMessage(statsQuery.error),
+      });
+    }
+  }, [statsQuery.error]);
 
   useEffect(() => {
-    const onUnauthorized = () => {
-      setSummary(null);
-      setLoadError("Session expired. Sign in again to load dashboard.");
-    };
-    window.addEventListener("auth:unauthorized", onUnauthorized as EventListener);
-    return () => {
-      window.removeEventListener("auth:unauthorized", onUnauthorized as EventListener);
-    };
-  }, []);
+    if (activityQuery.error) {
+      toast.error("Failed to load dashboard activity", {
+        description: errorMessage(activityQuery.error),
+      });
+    }
+  }, [activityQuery.error]);
 
-  const dashboardStats = useMemo(() => {
-    const occupancyRate = Number(summary?.occupancyRate ?? 0);
-    const activeIncidents = Number(summary?.activeIncidents ?? 0);
-    const openComplaints = Number(summary?.openComplaints ?? 0);
-    const revenueThisMonth = Number(summary?.revenueThisMonth ?? 0);
-    const smartOnline = Number(summary?.smartDevices?.online ?? 0);
-    const smartOffline = Number(summary?.smartDevices?.offline ?? 0);
-    const cctvOnline = Number(summary?.cctvCameras?.online ?? 0);
-    const cctvOffline = Number(summary?.cctvCameras?.offline ?? 0);
+  const stats = statsQuery.data;
+  const kpis = stats?.kpis;
+  const secondsSinceUpdate = statsQuery.dataUpdatedAt
+    ? Math.max(0, Math.floor((clockNow - statsQuery.dataUpdatedAt) / 1000))
+    : null;
+
+  const cards = useMemo(() => {
+    if (!kpis) return [];
+
+    const ticketsSummary = `NEW ${kpis.ticketsByStatus.NEW} | IN_PROGRESS ${kpis.ticketsByStatus.IN_PROGRESS} | RESOLVED ${kpis.ticketsByStatus.RESOLVED} | CLOSED ${kpis.ticketsByStatus.CLOSED}`;
 
     return [
       {
-        id: 1,
-        title: "Active Incidents",
-        value: String(activeIncidents),
-        change: activeIncidents > 0 ? "Needs attention" : "0",
-        trend: activeIncidents > 0 ? ("up" as const) : ("neutral" as const),
-        icon: "shield",
+        key: "totalRegisteredDevices" as const,
+        title: "Total Registered Devices",
+        value: String(kpis.totalRegisteredDevices),
+        subtitle: `Android ${kpis.totalRegisteredDevicesByPlatform.android} | iOS ${kpis.totalRegisteredDevicesByPlatform.ios}`,
+        icon: "devices" as const,
       },
       {
-        id: 2,
+        key: "activeMobileUsers" as const,
+        title: "Active Mobile Users",
+        value: String(kpis.activeMobileUsers),
+        subtitle: `Android ${kpis.activeMobileUsersByPlatform.android} | iOS ${kpis.activeMobileUsersByPlatform.ios}`,
+        icon: "active-users" as const,
+      },
+      {
+        key: "totalComplaints" as const,
+        title: "Total Complaints",
+        value: String(kpis.totalComplaints),
+        subtitle: `Period: ${stats.periodLabel}`,
+        icon: "complaints-total" as const,
+      },
+      {
+        key: "openComplaints" as const,
         title: "Open Complaints",
-        value: String(openComplaints),
-        change: `${openComplaints}`,
-        trend: openComplaints > 0 ? ("up" as const) : ("neutral" as const),
-        icon: "clipboard",
+        value: String(kpis.openComplaints),
+        subtitle: "Tap to view open complaint list",
+        icon: "complaints-open" as const,
       },
       {
-        id: 3,
+        key: "closedComplaints" as const,
+        title: "Closed Complaints",
+        value: String(kpis.closedComplaints),
+        subtitle: `Period: ${stats.periodLabel}`,
+        icon: "complaints-closed" as const,
+      },
+      {
+        key: "ticketsByStatus" as const,
+        title: "Tickets By Status",
+        value: String(kpis.totalComplaints),
+        subtitle: ticketsSummary,
+        icon: "tickets" as const,
+      },
+      {
+        key: "revenueCurrentMonth" as const,
+        title: "Revenue",
+        value: formatCurrencyEGP(kpis.revenueCurrentMonth),
+        subtitle: `Paid invoices in ${stats.periodLabel}`,
+        icon: "revenue" as const,
+      },
+      {
+        key: "occupancyRate" as const,
         title: "Occupancy Rate",
-        value: `${occupancyRate.toFixed(1)}%`,
-        change: `${occupancyRate.toFixed(1)}%`,
-        trend: occupancyRate > 0 ? ("up" as const) : ("neutral" as const),
-        icon: "building",
+        value: `${kpis.occupancyRate.toFixed(2)}%`,
+        subtitle: "Occupied / total active units",
+        icon: "occupancy" as const,
       },
       {
-        id: 4,
-        title: "Revenue This Month",
-        value: formatCurrencyEGP(revenueThisMonth),
-        change: formatCurrencyEGP(revenueThisMonth),
-        trend: revenueThisMonth > 0 ? ("up" as const) : ("neutral" as const),
-        icon: "wallet",
+        key: "currentVisitors" as const,
+        title: "Current Visitors",
+        value: String(kpis.currentVisitors),
+        subtitle: "Tap to view checked-in visitors",
+        icon: "visitors" as const,
       },
       {
-        id: 5,
-        title: "Smart Devices",
-        value: `${smartOnline} online`,
-        change: `${smartOffline} offline`,
-        trend: smartOffline > 0 ? ("down" as const) : ("neutral" as const),
-        icon: "users",
+        key: "blueCollarWorkers" as const,
+        title: "Blue Collar Workers",
+        value: String(kpis.blueCollarWorkers),
+        subtitle: "Active workers",
+        icon: "workers" as const,
       },
       {
-        id: 6,
-        title: "CCTV Cameras",
-        value: `${cctvOnline} online`,
-        change: `${cctvOffline} offline`,
-        trend: cctvOffline > 0 ? ("down" as const) : ("neutral" as const),
-        icon: "shield",
+        key: "totalCars" as const,
+        title: "Total Cars",
+        value: String(kpis.totalCars),
+        subtitle: "Vehicles of active residents",
+        icon: "cars" as const,
       },
     ];
-  }, [summary]);
+  }, [kpis, stats?.periodLabel]);
 
-  const visitorTrafficData = useMemo(() => {
-    const counts = new Map<string, number>();
-    qrRows.forEach((row: any) => {
-      const createdAt = row.createdAt ?? row.generatedAt ?? row.validFrom;
-      if (!createdAt) return;
-      const d = new Date(createdAt);
-      if (Number.isNaN(d.getTime())) return;
-      const label = d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-      counts.set(label, (counts.get(label) ?? 0) + 1);
-    });
-    return Array.from(counts.entries())
-      .map(([date, visitors]) => ({ date, visitors }))
-      .slice(-14);
-  }, [qrRows]);
-
-  const serviceRequestsData = useMemo(() => {
-    const counts = new Map<string, number>();
-    serviceRequestRows.forEach((row: any) => {
-      const key = humanizeEnum(row.category ?? row.service?.name ?? row.status ?? "Other");
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    });
-    return Array.from(counts.entries()).map(([name, value], index) => ({
-      name,
-      value,
-      fill: PIE_COLORS[index % PIE_COLORS.length],
-    }));
-  }, [serviceRequestRows]);
-
-  const monthlyRevenueData = useMemo(() => revenueData.slice(-6), [revenueData]);
-
-  const recentActivities = useMemo(() => {
-    const activitySeed: any[] = [];
-
-    incidentRows.forEach((incident: any) => {
-      activitySeed.push({
-        id: `incident-${incident.id}`,
-        user: "Security",
-        action: "reported incident",
-        target: incident.incidentNumber ?? incident.type ?? "Incident",
-        timestamp: relativeTime(incident.reportedAt ?? incident.createdAt),
-        type: "security",
-        at: new Date(incident.reportedAt ?? incident.createdAt ?? 0).getTime(),
-      });
-    });
-
-    notificationRows.forEach((notification: any) => {
-      activitySeed.push({
-        id: `notification-${notification.id}`,
-        user: notification.sender?.nameEN ?? "Admin",
-        action: "sent notification",
-        target: notification.title ?? "Announcement",
-        timestamp: relativeTime(notification.sentAt ?? notification.createdAt),
-        type: "access",
-        at: new Date(notification.sentAt ?? notification.createdAt ?? 0).getTime(),
-      });
-    });
-
-    serviceRequestRows.forEach((request: any) => {
-      activitySeed.push({
-        id: `service-${request.id}`,
-        user: request.requester?.nameEN ?? "Resident",
-        action: "created service request",
-        target: request.service?.name ?? humanizeEnum(request.status),
-        timestamp: relativeTime(request.createdAt),
-        type: "maintenance",
-        at: new Date(request.createdAt ?? 0).getTime(),
-      });
-    });
-
-    return activitySeed
-      .filter((a) => Number.isFinite(a.at))
-      .sort((a, b) => b.at - a.at)
-      .slice(0, 6)
-      .map((a, index) => ({
-        id: index + 1,
-        user: a.user,
-        action: a.action,
-        target: a.target,
-        timestamp: a.timestamp,
-        type: a.type,
-      }));
-  }, [incidentRows, notificationRows, serviceRequestRows]);
-
-  const hasOccupancy = occupancyBlocks.length > 0;
+  const detailTitle = useMemo(() => {
+    if (!selectedCard) return "";
+    if (selectedCard === "openComplaints") return "Open Complaints Detail";
+    if (selectedCard === "currentVisitors") return "Current Visitors Detail";
+    if (selectedCard === "revenueCurrentMonth") return "Revenue Detail";
+    return "Detail View";
+  }, [selectedCard]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-[#1E293B]">Dashboard Overview</h1>
-          <p className="text-[#64748B] mt-1">Live operational snapshot from the backend API.</p>
+          <p className="mt-1 text-sm text-[#64748B]">
+            Period: <span className="font-medium">{stats?.periodLabel ?? "-"}</span>
+          </p>
         </div>
         <div className="flex items-center gap-2">
-          <Badge className="bg-[#10B981]/10 text-[#10B981] hover:bg-[#10B981]/20">Live Data</Badge>
-          <Button variant="outline" onClick={() => void loadDashboard()} disabled={isLoading}>
-            {isLoading ? "Refreshing..." : "Refresh"}
+          <Badge className="bg-[#10B981]/10 text-[#10B981] hover:bg-[#10B981]/20">
+            {statsQuery.isFetching ? "Refreshing..." : "Live"}
+          </Badge>
+          <span className="text-xs text-[#64748B]">
+            Last updated:{" "}
+            {secondsSinceUpdate === null ? "-" : `${secondsSinceUpdate} seconds ago`}
+          </span>
+          <Button
+            variant="outline"
+            onClick={() => void statsQuery.refetch()}
+            disabled={statsQuery.isFetching}
+          >
+            Refresh
           </Button>
         </div>
       </div>
 
-      {loadError ? (
-        <Card className="p-4 border border-[#FECACA] bg-[#FEF2F2] text-[#991B1B] rounded-xl">
-          {loadError}
-        </Card>
-      ) : null}
+      <Card className="rounded-lg border border-[#DDE5EF] bg-gradient-to-r from-white to-[#F8FBFF] p-4 shadow-[0_10px_20px_-18px_rgba(15,23,42,0.7)]">
+        <div className="flex flex-wrap items-center gap-2">
+          {PERIOD_OPTIONS.map((option) => (
+            <Button
+              key={option.value}
+              variant={period === option.value ? "default" : "outline"}
+              className={period === option.value ? "bg-[#0B5FFF] text-white" : "border-[#D4DEE9]"}
+              onClick={() => setPeriod(option.value)}
+            >
+              {option.label}
+            </Button>
+          ))}
+        </div>
+      </Card>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {dashboardStats.map((stat) => (
-          <StatCard key={stat.id} {...stat} />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {cards.map((card) => (
+          <StatCard
+            key={card.key}
+            title={card.title}
+            value={card.value}
+            subtitle={card.subtitle}
+            icon={card.icon}
+            onClick={() => setSelectedCard(card.key)}
+          />
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card className="p-6 shadow-card rounded-xl">
-          <h3 className="mb-6 text-[#1E293B]">QR Generation Traffic</h3>
-          {visitorTrafficData.length === 0 ? (
-            <div className="h-[300px] grid place-items-center text-[#64748B] text-sm">
-              No QR activity yet.
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={visitorTrafficData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                <XAxis dataKey="date" stroke="#64748B" style={{ fontSize: "12px" }} />
-                <YAxis stroke="#64748B" style={{ fontSize: "12px" }} />
-                <Tooltip />
-                <Line
-                  type="monotone"
-                  dataKey="visitors"
-                  stroke="#0B5FFF"
-                  strokeWidth={2}
-                  dot={{ fill: "#0B5FFF", r: 4 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          )}
-        </Card>
+      <QuickActions onNavigate={onNavigate} />
 
-        <Card className="p-6 shadow-card rounded-xl">
-          <h3 className="mb-6 text-[#1E293B]">Service Request Distribution</h3>
-          {serviceRequestsData.length === 0 ? (
-            <div className="h-[300px] grid place-items-center text-[#64748B] text-sm">
-              No service requests yet.
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={serviceRequestsData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={100}
-                  paddingAngle={2}
-                  dataKey="value"
-                >
-                  {serviceRequestsData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.fill} />
-                  ))}
-                </Pie>
-                <Tooltip />
-                <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{ fontSize: "12px" }} />
-              </PieChart>
-            </ResponsiveContainer>
-          )}
-        </Card>
+      <ActivityFeed
+        activities={activityQuery.data ?? []}
+        loading={activityQuery.isLoading}
+      />
 
-        <Card className="p-6 shadow-card rounded-xl">
-          <h3 className="mb-6 text-[#1E293B]">Monthly Revenue Collection (EGP)</h3>
-          {monthlyRevenueData.length === 0 ? (
-            <div className="h-[300px] grid place-items-center text-[#64748B] text-sm">
-              No revenue chart data available yet.
-            </div>
-          ) : (
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={monthlyRevenueData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                <XAxis dataKey="month" stroke="#64748B" style={{ fontSize: "12px" }} />
-                <YAxis
-                  stroke="#64748B"
-                  style={{ fontSize: "12px" }}
-                  tickFormatter={(value) => `${(Number(value) / 1000).toFixed(0)}K`}
-                />
-                <Tooltip formatter={(value: number) => formatCurrencyEGP(value)} />
-                <Bar dataKey="revenue" fill="#00B386" radius={[8, 8, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </Card>
+      <Dialog open={selectedCard !== null} onOpenChange={(open) => !open && setSelectedCard(null)}>
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>{detailTitle}</DialogTitle>
+            <DialogDescription>
+              {selectedCard === "openComplaints" ||
+              selectedCard === "currentVisitors" ||
+              selectedCard === "revenueCurrentMonth"
+                ? `Showing latest records for ${stats?.periodLabel ?? period}.`
+                : "Detail view coming soon for this metric."}
+            </DialogDescription>
+          </DialogHeader>
 
-        <Card className="p-6 shadow-card rounded-xl">
-          <h3 className="mb-6 text-[#1E293B]">Occupancy by Block</h3>
-          {!hasOccupancy ? (
-            <div className="h-[300px] grid place-items-center text-[#64748B] text-sm">
-              No occupancy breakdown available yet.
-            </div>
-          ) : (
-            <>
-              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
-                {occupancyBlocks.map((row: any, index: number) => {
-                  const rate = Number(row.occupancyRate ?? 0);
-                  const blockLabel = row.block ? `Block ${row.block}` : `Block ${index + 1}`;
-                  const color =
-                    rate >= 90
-                      ? "bg-[#00B386]"
-                      : rate >= 75
-                      ? "bg-[#3B82F6]"
-                      : rate >= 60
-                      ? "bg-[#F59E0B]"
-                      : "bg-[#EF4444]";
-                  return (
-                    <div key={`${row.projectName}-${row.block}-${index}`} className={`${color} rounded-lg p-4 text-white text-center`}>
-                      <div className="font-semibold text-sm">{blockLabel}</div>
-                      <div className="text-xs opacity-90 mt-1">{row.projectName ?? "Project"}</div>
-                      <div className="text-xl font-bold mt-2">{rate.toFixed(0)}%</div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="text-xs text-[#64748B] mt-4">
-                Source: <code>/dashboard/occupancy</code>
-              </div>
-            </>
-          )}
-        </Card>
-      </div>
+          {selectedCard === "openComplaints" ? (
+            <OpenComplaintsTable
+              rows={openComplaintsDetailQuery.data ?? []}
+              loading={openComplaintsDetailQuery.isLoading}
+            />
+          ) : null}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          {recentActivities.length > 0 ? (
-            <ActivityFeed activities={recentActivities} />
-          ) : (
-            <Card className="p-6 shadow-card rounded-xl">
-              <h3 className="mb-3 text-[#1E293B]">Recent Activity</h3>
-              <p className="text-sm text-[#64748B]">
-                No recent activity was found yet. Activity will appear here after incidents, invoices, notifications,
-                or service requests are created.
-              </p>
-            </Card>
-          )}
-        </div>
-        <div>
-          <QuickActions onNavigate={onNavigate} />
-        </div>
-      </div>
+          {selectedCard === "currentVisitors" ? (
+            <CurrentVisitorsTable
+              rows={currentVisitorsDetailQuery.data ?? []}
+              loading={currentVisitorsDetailQuery.isLoading}
+            />
+          ) : null}
+
+          {selectedCard === "revenueCurrentMonth" ? (
+            <RevenueTable
+              rows={revenueDetailQuery.data ?? []}
+              loading={revenueDetailQuery.isLoading}
+            />
+          ) : null}
+
+          {selectedCard !== "openComplaints" &&
+          selectedCard !== "currentVisitors" &&
+          selectedCard !== "revenueCurrentMonth" ? (
+            <p className="text-sm text-[#64748B]">Detail view coming soon.</p>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function OpenComplaintsTable({
+  rows,
+  loading,
+}: {
+  rows: OpenComplaintDrilldownItem[];
+  loading: boolean;
+}) {
+  return (
+    <div className="max-h-[420px] overflow-auto">
+      <Table>
+        <TableHeader>
+          <TableRow className="bg-[#F8FAFC]">
+            <TableHead>Number</TableHead>
+            <TableHead>Category</TableHead>
+            <TableHead>Priority</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Unit</TableHead>
+            <TableHead>Created</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {loading ? (
+            <TableRow>
+              <TableCell colSpan={6} className="text-center text-[#64748B]">
+                Loading...
+              </TableCell>
+            </TableRow>
+          ) : null}
+          {!loading && rows.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={6} className="text-center text-[#64748B]">
+                No records.
+              </TableCell>
+            </TableRow>
+          ) : null}
+          {rows.map((row) => (
+            <TableRow key={row.id}>
+              <TableCell>{row.complaintNumber}</TableCell>
+              <TableCell>{row.category}</TableCell>
+              <TableCell>{humanizeEnum(row.priority)}</TableCell>
+              <TableCell>{humanizeEnum(row.status)}</TableCell>
+              <TableCell>{row.unitNumber ?? "-"}</TableCell>
+              <TableCell>{formatDateTime(row.createdAt)}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+function CurrentVisitorsTable({
+  rows,
+  loading,
+}: {
+  rows: CurrentVisitorDrilldownItem[];
+  loading: boolean;
+}) {
+  return (
+    <div className="max-h-[420px] overflow-auto">
+      <Table>
+        <TableHeader>
+          <TableRow className="bg-[#F8FAFC]">
+            <TableHead>Visitor</TableHead>
+            <TableHead>Unit</TableHead>
+            <TableHead>Checked In</TableHead>
+            <TableHead>Valid To</TableHead>
+            <TableHead>Relative</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {loading ? (
+            <TableRow>
+              <TableCell colSpan={5} className="text-center text-[#64748B]">
+                Loading...
+              </TableCell>
+            </TableRow>
+          ) : null}
+          {!loading && rows.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={5} className="text-center text-[#64748B]">
+                No records.
+              </TableCell>
+            </TableRow>
+          ) : null}
+          {rows.map((row) => (
+            <TableRow key={row.id}>
+              <TableCell>{row.visitorName ?? "Visitor"}</TableCell>
+              <TableCell>{row.unitNumber ?? "-"}</TableCell>
+              <TableCell>{row.checkedInAt ? formatDateTime(row.checkedInAt) : "-"}</TableCell>
+              <TableCell>{formatDateTime(row.validTo)}</TableCell>
+              <TableCell>{row.checkedInAt ? relativeTime(row.checkedInAt) : "-"}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+function RevenueTable({
+  rows,
+  loading,
+}: {
+  rows: RevenueDrilldownItem[];
+  loading: boolean;
+}) {
+  return (
+    <div className="max-h-[420px] overflow-auto">
+      <Table>
+        <TableHeader>
+          <TableRow className="bg-[#F8FAFC]">
+            <TableHead>Invoice</TableHead>
+            <TableHead>Amount</TableHead>
+            <TableHead>Resident</TableHead>
+            <TableHead>Unit</TableHead>
+            <TableHead>Paid At</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {loading ? (
+            <TableRow>
+              <TableCell colSpan={5} className="text-center text-[#64748B]">
+                Loading...
+              </TableCell>
+            </TableRow>
+          ) : null}
+          {!loading && rows.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={5} className="text-center text-[#64748B]">
+                No records.
+              </TableCell>
+            </TableRow>
+          ) : null}
+          {rows.map((row) => (
+            <TableRow key={row.id}>
+              <TableCell>{row.invoiceNumber}</TableCell>
+              <TableCell>{formatCurrencyEGP(row.amount)}</TableCell>
+              <TableCell>{row.residentName ?? "-"}</TableCell>
+              <TableCell>{row.unitNumber ?? "-"}</TableCell>
+              <TableCell>{formatDateTime(row.paidDate)}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
     </div>
   );
 }

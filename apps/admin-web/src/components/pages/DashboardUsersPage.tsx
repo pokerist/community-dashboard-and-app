@@ -90,13 +90,6 @@ export function DashboardUsersPage() {
     void load();
   }, [load]);
 
-  useEffect(() => {
-    if (!isRoleDialogOpen) return;
-    if (expandedModules.length > 0) return;
-    if (permissionModules.length === 0) return;
-    setExpandedModules(permissionModules);
-  }, [expandedModules.length, isRoleDialogOpen, permissionModules]);
-
   const filteredUsers = useMemo(() => {
     const q = search.trim().toLowerCase();
     if (!q) return users;
@@ -140,6 +133,13 @@ export function DashboardUsersPage() {
     () => Array.from(new Set(permissions.map((perm) => getPermissionModule(perm.key)))).sort((a, b) => a.localeCompare(b)),
     [permissions],
   );
+
+  useEffect(() => {
+    if (!isRoleDialogOpen) return;
+    if (expandedModules.length > 0) return;
+    if (permissionModules.length === 0) return;
+    setExpandedModules(permissionModules);
+  }, [expandedModules.length, isRoleDialogOpen, permissionModules]);
 
   const rolePermissionMatrix = useMemo(() => {
     return roles.map((role) => {

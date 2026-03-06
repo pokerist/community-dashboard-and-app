@@ -47,11 +47,17 @@ async function bootstrap() {
       'Service Requests',
       'Resident service requests, attachments, and staff processing workflows.',
     )
+    .addTag('Permit Types', 'Permit catalog configuration and dynamic permit fields.')
+    .addTag('Permits', 'Permit request workflows and operational approvals.')
     .addTag('Devices', 'Smart device registration and integration.')
     .addTag('AccessControl', 'QR codes and access authorization flows.')
     .addTag('Notifications', 'In-app and external notification management.')
     .addTag('Registrations', 'Pending user registrations and verification.')
     .addTag('Auth', 'Authentication, roles, and permissions management.')
+    .addTag('Commercial', 'Commercial entities, branches, staff, and access control.')
+    .addTag('Compound Staff', 'Internal compound staff profiles, contracts, and capabilities.')
+    .addTag('Blue Collar', 'Blue collar settings, worker access requests, and approvals.')
+    .addTag('Gates', 'Gate configuration, unit access mapping, and gate entry logs.')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
@@ -61,9 +67,31 @@ async function bootstrap() {
 
   // Frontend admin/mobile apps run on separate local ports during development.
   // Keep this configurable and permissive by default for local integration.
+  const configuredOrigins = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',')
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0)
+    : [];
+  const localhostOriginPattern = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+
   app.enableCors({
-    origin:
-      process.env.CORS_ORIGIN?.split(',').map((v) => v.trim()) ?? true,
+    origin: (origin, callback) => {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      if (
+        configuredOrigins.includes('*') ||
+        configuredOrigins.includes(origin) ||
+        localhostOriginPattern.test(origin)
+      ) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error(`CORS origin not allowed: ${origin}`), false);
+    },
     credentials: true,
   });
 

@@ -1,42 +1,50 @@
-// src/modules/invoices/invoices.controller.ts
 import {
-  Controller,
-  Get,
-  Post,
   Body,
-  Patch,
-  Param,
+  Controller,
   Delete,
-  UseGuards,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
   Req,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
-import { InvoicesService } from './invoices.service';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Request } from 'express';
+import { Permissions } from '../auth/decorators/permissions.decorator';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { GenerateUtilityInvoicesDto } from './dto/generate-invoice.dto';
+import { InvoiceStatsQueryDto, ListInvoicesDto } from './dto/invoice-query.dto';
 import {
+  CancelInvoiceDto,
   CreateInvoiceDto,
-  UpdateInvoiceDto,
   MarkAsPaidDto,
   SimulateInvoicePaymentDto,
 } from './dto/invoices.dto';
-import { CreateUnitFeeDto, UpdateUnitFeeDto } from './dto/unit-fees.dto';
-import { GenerateUtilityInvoicesDto } from './dto/generate-invoice.dto';
-import { Permissions } from '../auth/decorators/permissions.decorator';
-import { PermissionsGuard } from '../auth/guards/permissions.guard';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { CreateUnitFeeDto } from './dto/unit-fees.dto';
+import { InvoicesService } from './invoices.service';
+
+interface AuthenticatedRequest extends Request {
+  user?: {
+    id: string;
+    permissions?: unknown;
+    roles?: unknown;
+  };
+}
 
 @ApiTags('Invoices')
+@ApiBearerAuth()
 @Controller('invoices')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class InvoicesController {
   constructor(private readonly invoicesService: InvoicesService) {}
 
-  // POST /invoices/generate (Admin: Manually trigger monthly utility billing)
   @Post('generate')
   @Permissions('invoice.generate')
   @ApiOperation({
-    summary: 'Generates invoices for all un-invoiced fees for a given month.',
-    description:
-      'Trigger the monthly utility billing job based on UnitFee records.',
+    summary: 'Generates monthly utility invoices from un-invoiced unit fees.',
   })
   generateUtilityInvoices(@Body() dto: GenerateUtilityInvoicesDto) {
     return this.invoicesService.generateMonthlyUtilityInvoices(
@@ -44,101 +52,98 @@ export class InvoicesController {
     );
   }
 
-  // GET /invoices/resident/:residentId (Community App: Resident view)
   @Get('resident/:residentId')
   @Permissions('invoice.view_all', 'invoice.view_own')
-  findByResident(@Param('residentId') residentId: string, @Req() req: any) {
-    return this.invoicesService.findByResidentForActor(residentId, {
-      actorUserId: req.user.id,
-      permissions: Array.isArray(req.user.permissions) ? req.user.permissions : [],
-      roles: Array.isArray(req.user.roles) ? req.user.roles : [],
-    });
+  findByResident(
+    @Param('residentId') residentId: string,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    return this.invoicesService.findByResidentForActor(
+      residentId,
+      this.buildActorContext(req),
+    );
   }
 
-  // GET /invoices/fees (Admin: List all fee records)
   @Get('fees')
-  @ApiOperation({ summary: 'Lists all individual UnitFee records.' })
   @Permissions('unit_fee.view_all', 'unit_fee.view_own')
-  findAllUnitFees(@Req() req: any) {
-    return this.invoicesService.findAllUnitFeesForActor({
-      actorUserId: req.user.id,
-      permissions: Array.isArray(req.user.permissions) ? req.user.permissions : [],
-      roles: Array.isArray(req.user.roles) ? req.user.roles : [],
-    });
+  findAllUnitFees(@Req() req: AuthenticatedRequest) {
+    return this.invoicesService.findAllUnitFeesForActor(
+      this.buildActorContext(req),
+    );
   }
 
-  // POST /invoices/fees (Admin: Input new variable fee record)
   @Post('fees')
   @Permissions('unit_fee.create')
-  @ApiOperation({ summary: 'Creates a single variable fee record for a unit.' })
   createUnitFee(@Body() createUnitFeeDto: CreateUnitFeeDto) {
     return this.invoicesService.createUnitFee(createUnitFeeDto);
   }
 
-  // DELETE /invoices/fees/:id (Admin: Delete an un-invoiced fee record)
   @Delete('fees/:id')
   @Permissions('unit_fee.delete')
-  @ApiOperation({ summary: 'Deletes a UnitFee record before it is invoiced.' })
   removeUnitFee(@Param('id') id: string) {
     return this.invoicesService.removeUnitFee(id);
   }
 
-  // GET /invoices (Admin: List all invoices)
+  @Get('stats')
+  @Permissions('invoice.view_all')
+  getInvoiceStats(@Query() query: InvoiceStatsQueryDto) {
+    return this.invoicesService.getInvoiceStats(query);
+  }
+
+  @Post('bulk-overdue')
+  @Permissions('invoice.update')
+  bulkMarkOverdue() {
+    return this.invoicesService.bulkMarkOverdue();
+  }
+
   @Get()
   @Permissions('invoice.view_all')
-  findAll() {
-    return this.invoicesService.findAll();
+  listInvoices(@Query() query: ListInvoicesDto) {
+    return this.invoicesService.listInvoices(query);
   }
 
-  // GET /invoices/me (Community App)
   @Get('me')
   @Permissions('invoice.view_own', 'invoice.view_all')
-  findMine(@Req() req: any) {
-    return this.invoicesService.findMineForActor({
-      actorUserId: req.user.id,
-      permissions: Array.isArray(req.user.permissions) ? req.user.permissions : [],
-      roles: Array.isArray(req.user.roles) ? req.user.roles : [],
-    });
+  findMine(@Req() req: AuthenticatedRequest) {
+    return this.invoicesService.findMineForActor(this.buildActorContext(req));
   }
 
-  // GET /invoices/:id
   @Get(':id')
   @Permissions('invoice.view_all', 'invoice.view_own')
-  findOne(@Param('id') id: string, @Req() req: any) {
-    return this.invoicesService.findOneForActor(id, {
-      actorUserId: req.user.id,
-      permissions: Array.isArray(req.user.permissions) ? req.user.permissions : [],
-      roles: Array.isArray(req.user.roles) ? req.user.roles : [],
-    });
+  getInvoiceDetail(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+    return this.invoicesService.findOneForActor(
+      id,
+      this.buildActorContext(req),
+    );
   }
 
-  // POST /invoices (Admin: Manual invoice creation)
   @Post()
   @Permissions('invoice.create')
-  create(@Body() createInvoiceDto: CreateInvoiceDto) {
-    const payload: CreateInvoiceDto = {
-      ...createInvoiceDto,
-      dueDate: new Date(createInvoiceDto.dueDate as unknown as string),
-    };
-    return this.invoicesService.create(payload);
+  createInvoice(@Body() createInvoiceDto: CreateInvoiceDto) {
+    return this.invoicesService.createInvoice(createInvoiceDto);
   }
 
-  // PATCH /invoices/:id (Admin: Update details like due date or amount)
-  @Patch(':id')
-  @Permissions('invoice.update')
-  update(@Param('id') id: string, @Body() updateInvoiceDto: UpdateInvoiceDto) {
-    return this.invoicesService.update(id, updateInvoiceDto);
-  }
-
-  // POST /invoices/:id/pay (Workflow: Mark as paid)
-  @Post(':id/pay')
+  @Patch(':id/pay')
   @Permissions('invoice.mark_paid')
   markAsPaid(@Param('id') id: string, @Body() markAsPaidDto: MarkAsPaidDto) {
-    // You can use the DTO here to process payment details if needed
-    return this.invoicesService.markAsPaid(id);
+    return this.invoicesService.markAsPaid(id, markAsPaidDto);
   }
 
-  // POST /invoices/:id/pay/simulate-self (Community App: Demo payment simulation)
+  @Post(':id/pay')
+  @Permissions('invoice.mark_paid')
+  markAsPaidLegacy(
+    @Param('id') id: string,
+    @Body() markAsPaidDto: MarkAsPaidDto,
+  ) {
+    return this.invoicesService.markAsPaid(id, markAsPaidDto);
+  }
+
+  @Patch(':id/cancel')
+  @Permissions('invoice.update')
+  cancelInvoice(@Param('id') id: string, @Body() dto: CancelInvoiceDto) {
+    return this.invoicesService.cancelInvoice(id, dto);
+  }
+
   @Post(':id/pay/simulate-self')
   @Permissions('invoice.view_own', 'invoice.view_all')
   @ApiOperation({
@@ -148,19 +153,42 @@ export class InvoicesController {
   simulateSelfPayment(
     @Param('id') id: string,
     @Body() dto: SimulateInvoicePaymentDto,
-    @Req() req: any,
+    @Req() req: AuthenticatedRequest,
   ) {
-    return this.invoicesService.simulatePaymentForActor(id, dto, {
-      actorUserId: req.user.id,
-      permissions: Array.isArray(req.user.permissions) ? req.user.permissions : [],
-      roles: Array.isArray(req.user.roles) ? req.user.roles : [],
-    });
+    return this.invoicesService.simulatePaymentForActor(
+      id,
+      dto,
+      this.buildActorContext(req),
+    );
   }
 
-  // DELETE /invoices/:id (Admin: Cancel/Delete)
   @Delete(':id')
   @Permissions('invoice.delete')
   remove(@Param('id') id: string) {
     return this.invoicesService.remove(id);
+  }
+
+  private buildActorContext(req: AuthenticatedRequest): {
+    actorUserId: string;
+    permissions: string[];
+    roles: string[];
+  } {
+    const actorUserId = req.user?.id ?? '';
+    const permissions = Array.isArray(req.user?.permissions)
+      ? req.user.permissions.filter(
+          (value): value is string => typeof value === 'string',
+        )
+      : [];
+    const roles = Array.isArray(req.user?.roles)
+      ? req.user.roles.filter(
+          (value): value is string => typeof value === 'string',
+        )
+      : [];
+
+    return {
+      actorUserId,
+      permissions,
+      roles,
+    };
   }
 }

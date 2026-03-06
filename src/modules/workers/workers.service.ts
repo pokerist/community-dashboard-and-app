@@ -11,6 +11,7 @@ import {
   ContractorRoleEnum,
   EntityStatus,
   MemberStatusEnum,
+  Prisma,
   QRType,
   UnitAccessRole,
 } from '@prisma/client';
@@ -314,7 +315,7 @@ export class WorkersService {
       }
     }
 
-    const accessProfileUpdates: any = {};
+    const accessProfileUpdates: Prisma.AccessProfileUpdateInput = {};
     if (dto.fullName !== undefined) accessProfileUpdates.fullName = dto.fullName.trim();
     if (dto.nationalId !== undefined)
       accessProfileUpdates.nationalId = dto.nationalId.trim();
@@ -323,7 +324,7 @@ export class WorkersService {
     if (dto.photoId !== undefined)
       accessProfileUpdates.photoId = dto.photoId ? dto.photoId.trim() : null;
 
-    const workerUpdates: any = {};
+    const workerUpdates: Prisma.WorkerUpdateInput = {};
     if (dto.jobType !== undefined) workerUpdates.jobType = dto.jobType?.trim() || null;
     if (dto.status !== undefined) workerUpdates.status = dto.status;
 

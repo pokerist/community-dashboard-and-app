@@ -4,7 +4,10 @@ import { AccessControlService } from './access-control.service';
 
 describe('AccessControlService', () => {
   const prismaMock = {
+    admin: { findUnique: jest.fn().mockResolvedValue(null) },
+    user: { findUnique: jest.fn().mockResolvedValue(null) },
     unitAccess: { findFirst: jest.fn() },
+    gateUnitAccess: { findMany: jest.fn().mockResolvedValue([]) },
     accessQRCode: {
       findFirst: jest.fn(),
       create: jest.fn(),
@@ -21,12 +24,23 @@ describe('AccessControlService', () => {
     createQrCode: jest.fn(),
   };
 
+  const notificationsMock = {
+    sendNotification: jest.fn(),
+  };
+
   const makeService = () =>
-    new AccessControlService(prismaMock as any, hikCentralMock as any);
+    new AccessControlService(
+      prismaMock as any,
+      hikCentralMock as any,
+      notificationsMock as any,
+    );
 
   beforeEach(() => {
     jest.resetAllMocks();
     process.env.QR_ENFORCE_SINGLE_ACTIVE = 'true';
+    prismaMock.admin.findUnique.mockResolvedValue(null);
+    prismaMock.user.findUnique.mockResolvedValue(null);
+    prismaMock.gateUnitAccess.findMany.mockResolvedValue([]);
   });
 
   it('rejects VISITOR QR without visitorName', async () => {

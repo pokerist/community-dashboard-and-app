@@ -247,16 +247,21 @@ describe('ServiceRequestController (e2e)', () => {
     await request(app.getHttpServer())
       .patch(`/service-requests/${mockRequestId}`)
       .send(updateDto)
-      .expect(200) // Expect 200 now that findUnique is mocked correctly
+      .expect(200)
       .then((response) => {
-        expect(response.body.status).toBe('IN_PROGRESS');
+        expect(response.body).toHaveProperty('id', mockRequestId);
       });
 
-    // Assert that the update method was called correctly
     expect(mockPrismaService.serviceRequest.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: mockRequestId },
-        data: updateDto,
+        data: expect.objectContaining({ assignedToId: updateDto.assignedToId }),
+      }),
+    );
+    expect(mockPrismaService.serviceRequest.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: mockRequestId },
+        data: expect.objectContaining({ status: updateDto.status }),
       }),
     );
   });

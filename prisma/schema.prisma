@@ -68,6 +68,14 @@ enum ServiceCategory {
   OTHER
 }
 
+enum PermitCategory {
+  ACCOUNT_INFO
+  LEGAL_OWNERSHIP
+  UTILITIES_SERVICES
+  COMMUNITY_ACTIVITIES
+  OPERATIONAL
+}
+
 enum ServiceFieldType {
   TEXT
   TEXTAREA
@@ -226,6 +234,7 @@ enum Channel {
   SMS
   IN_APP
   EMAIL
+  WHATSAPP
 }
 
 enum PushPlatform {
@@ -380,6 +389,12 @@ enum ServiceRequestStatus {
   CANCELLED
 }
 
+enum PermitStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum UserStatusLogSource {
   SIGNUP_AUTO
   ADMIN
@@ -421,6 +436,85 @@ enum EntityStatus {
   SUSPENDED
 }
 
+enum BlueCollarRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum BlueCollarWeekDay {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+enum GateAccessRole {
+  RESIDENT
+  VISITOR
+  WORKER
+  STAFF
+  DELIVERY
+  RIDESHARE
+}
+
+enum GateRole {
+  RESIDENT
+  VISITOR
+  WORKER
+  DELIVERY
+  STAFF
+  RIDESHARE
+}
+
+enum EntryRole {
+  RESIDENT_OWNER
+  RESIDENT_FAMILY
+  RESIDENT_TENANT
+  VISITOR
+  WORKER
+  STAFF
+}
+
+enum GateAccessMode {
+  ALL_GATES
+  SELECTED_GATES
+}
+
+enum GateDirection {
+  ENTRY
+  EXIT
+}
+
+enum GateScanResult {
+  ALLOWED
+  DENIED
+}
+
+enum CommercialEntityMemberRole {
+  OWNER
+  HR
+  STAFF
+}
+
+enum CompoundStaffStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum CompoundStaffPermission {
+  ENTRY_EXIT
+  WORK_ORDERS
+  ATTENDANCE
+  RESIDENT_COMMUNICATION
+  TASK_REMINDERS
+}
+
 enum UnitAccessRole {
   OWNER // full control
   TENANT // resident-level access
@@ -441,21 +535,24 @@ enum AccessGrantPermission {
 }
 
 model User {
-  id               String         @id @default(uuid())
-  email            String?        @unique
-  passwordHash     String?
-  nameEN           String?
-  nameAR           String?
-  preferredLanguage String?
-  userStatus       UserStatusEnum @default(ACTIVE)
-  phone            String?
-  signupSource     String         @default("dashboard") // "community" or "dashboard"
-  profilePhotoId   String?        @unique
-  profilePhoto     File?          @relation("file_profile_photo", fields: [profilePhotoId], references: [id])
-  nationalIdFileId String?        @unique // For delegates and residents
-  nationalIdFile   File?          @relation("file_national_id", fields: [nationalIdFileId], references: [id])
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  id                    String         @id @default(uuid())
+  email                 String?        @unique
+  passwordHash          String?
+  nameEN                String?
+  nameAR                String?
+  preferredLanguage     String?
+  userStatus            UserStatusEnum @default(ACTIVE)
+  phone                 String?
+  signupSource          String         @default("dashboard") // "community" or "dashboard"
+  requiresOnboarding    Boolean        @default(false)
+  onboardingCompletedAt DateTime?
+  onboardingStep        String? // 'OTP' | 'PHOTO' | 'ID_UPLOAD' | 'COMPLETE'
+  profilePhotoId        String?        @unique
+  profilePhoto          File?          @relation("file_profile_photo", fields: [profilePhotoId], references: [id])
+  nationalIdFileId      String?        @unique // For delegates and residents
+  nationalIdFile        File?          @relation("file_national_id", fields: [nationalIdFileId], references: [id])
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
 
   // Authentication
   passwordResetToken          String?
@@ -467,9 +564,9 @@ model User {
   phoneVerificationToken          String?
   phoneVerificationTokenExpiresAt DateTime?
 
-  emailVerifiedAt DateTime?
-  phoneVerifiedAt DateTime?
-  twoFactorEnabled Boolean @default(false)
+  emailVerifiedAt  DateTime?
+  phoneVerifiedAt  DateTime?
+  twoFactorEnabled Boolean   @default(false)
 
   lastLoginAt   DateTime?
   loginAttempts Int       @default(0)
@@ -480,9 +577,9 @@ model User {
   roles UserRole[]
 
   // Leases (owner/tenant)
-  leasesAsOwner  Lease[] @relation("owner_leases")
-  leasesAsTenant Lease[] @relation("tenant_leases")
-  rentRequestsAsOwner RentRequest[] @relation("rent_request_owner")
+  leasesAsOwner        Lease[]       @relation("owner_leases")
+  leasesAsTenant       Lease[]       @relation("tenant_leases")
+  rentRequestsAsOwner  RentRequest[] @relation("rent_request_owner")
   rentRequestsReviewed RentRequest[] @relation("rent_request_reviewer")
 
   // Complaints (issued/targeted)
@@ -512,7 +609,7 @@ model User {
   devices SmartDevice[]
 
   // Notifications
-  notificationsSent Notification[] @relation("sender")
+  notificationsSent        Notification[]            @relation("sender")
   notificationDeviceTokens NotificationDeviceToken[]
 
   // Status Logs
@@ -527,34 +624,48 @@ model User {
   resident Resident?
   owner    Owner?
   tenant   Tenant?
+  broker   Broker?
 
   // Authentication Tokens
   refreshTokens RefreshToken[]
 
   // Verification Tokens
-  passwordResetTokens     PasswordResetToken[]
-  emailVerificationTokens EmailVerificationToken[]
-  phoneVerificationOtps   PhoneVerificationOtp[]
-  unitAccesses            UnitAccess[]
-  contractorMembers       ContractorMember[]
-  clubhouseAccessRequests ClubhouseAccessRequest[]
-  ownerUnitContracts      OwnerUnitContract[] @relation("owner_unit_contract_owner")
-  ownerUnitContractsCreated OwnerUnitContract[] @relation("owner_unit_contract_created_by")
-  profileChangeRequests   ProfileChangeRequest[] @relation("profile_change_request_user")
-  profileChangeReviewed   ProfileChangeRequest[] @relation("profile_change_request_reviewer")
-  familyRequests          FamilyAccessRequest[]  @relation("family_request_owner")
-  familyRequestsReviewed  FamilyAccessRequest[]  @relation("family_request_reviewer")
-  familyRequestsActivated FamilyAccessRequest[]  @relation("family_request_activated_user")
-  authorizedRequests      AuthorizedAccessRequest[] @relation("authorized_request_owner")
-  authorizedRequestsReviewed AuthorizedAccessRequest[] @relation("authorized_request_reviewer")
-  authorizedRequestsActivated AuthorizedAccessRequest[] @relation("authorized_request_activated_user")
-  homeStaffRequests       HomeStaffAccess[] @relation("home_staff_request_owner")
-  homeStaffRequestsReviewed HomeStaffAccess[] @relation("home_staff_request_reviewer")
-  violationActionRequests ViolationActionRequest[] @relation("violation_action_request_user")
-  violationActionReviewed ViolationActionRequest[] @relation("violation_action_request_reviewer")
-  ownershipTransfersFrom  UnitOwnershipTransfer[] @relation("ownership_transfer_from_user")
-  ownershipTransfersTo    UnitOwnershipTransfer[] @relation("ownership_transfer_to_user")
-  ownershipTransfersBy    UnitOwnershipTransfer[] @relation("ownership_transfer_by_user")
+  passwordResetTokens              PasswordResetToken[]
+  emailVerificationTokens          EmailVerificationToken[]
+  phoneVerificationOtps            PhoneVerificationOtp[]
+  unitAccesses                     UnitAccess[]
+  contractorMembers                ContractorMember[]
+  commercialEntityMemberships      CommercialEntityMember[]   @relation("commercial_entity_member_user")
+  commercialMembersCreated         CommercialEntityMember[]   @relation("commercial_entity_member_created_by")
+  compoundStaffAssignments         CompoundStaff[]            @relation("compound_staff_user")
+  compoundStaffAccessGranted       CompoundStaffAccess[]      @relation("compound_staff_access_granted_by")
+  compoundStaffGateAccessesGranted CompoundStaffGateAccess[]  @relation("compound_staff_gate_access_granted_by")
+  compoundStaffActivitiesAuthored  CompoundStaffActivityLog[] @relation("compound_staff_activity_actor")
+  blueCollarSettingsCreated        BlueCollarSetting[]        @relation("blue_collar_setting_created_by")
+  blueCollarSettingsUpdated        BlueCollarSetting[]        @relation("blue_collar_setting_updated_by")
+  blueCollarRequestsSubmitted      BlueCollarAccessRequest[]  @relation("blue_collar_request_requested_by")
+  blueCollarRequestsReviewed       BlueCollarAccessRequest[]  @relation("blue_collar_request_reviewed_by")
+  gateEntryOperations              GateEntryLog[]             @relation("gate_entry_operator")
+  clubhouseAccessRequests          ClubhouseAccessRequest[]
+  ownerUnitContracts               OwnerUnitContract[]        @relation("owner_unit_contract_owner")
+  ownerUnitContractsCreated        OwnerUnitContract[]        @relation("owner_unit_contract_created_by")
+  profileChangeRequests            ProfileChangeRequest[]     @relation("profile_change_request_user")
+  profileChangeReviewed            ProfileChangeRequest[]     @relation("profile_change_request_reviewer")
+  familyRequests                   FamilyAccessRequest[]      @relation("family_request_owner")
+  familyRequestsReviewed           FamilyAccessRequest[]      @relation("family_request_reviewer")
+  familyRequestsActivated          FamilyAccessRequest[]      @relation("family_request_activated_user")
+  authorizedRequests               AuthorizedAccessRequest[]  @relation("authorized_request_owner")
+  authorizedRequestsReviewed       AuthorizedAccessRequest[]  @relation("authorized_request_reviewer")
+  authorizedRequestsActivated      AuthorizedAccessRequest[]  @relation("authorized_request_activated_user")
+  homeStaffRequests                HomeStaffAccess[]          @relation("home_staff_request_owner")
+  homeStaffRequestsReviewed        HomeStaffAccess[]          @relation("home_staff_request_reviewer")
+  violationActionRequests          ViolationActionRequest[]   @relation("violation_action_request_user")
+  violationActionReviewed          ViolationActionRequest[]   @relation("violation_action_request_reviewer")
+  ownershipTransfersFrom           UnitOwnershipTransfer[]    @relation("ownership_transfer_from_user")
+  ownershipTransfersTo             UnitOwnershipTransfer[]    @relation("ownership_transfer_to_user")
+  ownershipTransfersBy             UnitOwnershipTransfer[]    @relation("ownership_transfer_by_user")
+  permitRequests                   PermitRequest[]            @relation("permit_requester")
+  reviewedPermitRequests           PermitRequest[]            @relation("permit_reviewer")
 
   @@index([email])
   @@index([phone])
@@ -562,10 +673,11 @@ model User {
 }
 
 model Role {
-  id          String           @id @default(uuid())
-  name        String           @unique
-  permissions RolePermission[]
-  users       UserRole[]
+  id               String           @id @default(uuid())
+  name             String           @unique
+  permissions      RolePermission[]
+  users            UserRole[]
+  assignedServices Service[]
 }
 
 model UserRole {
@@ -596,8 +708,8 @@ model Resident {
   bookings     Booking[]
 
   residentUnits ResidentUnit[]
-  familyMembers FamilyMember[] @relation("primary_family_members")
-  familyOf      FamilyMember?  @relation("family_member_of")
+  familyMembers FamilyMember[]     @relation("primary_family_members")
+  familyOf      FamilyMember?      @relation("family_member_of")
   documents     ResidentDocument[] @relation("resident_documents")
   vehicles      ResidentVehicle[]
 }
@@ -630,8 +742,8 @@ model FamilyMember {
   familyResident   Resident @relation("family_member_of", fields: [familyResidentId], references: [id])
 
   relationship  RelationshipType // CHILD | SPOUSE | PARENT
-  status        UserStatusEnum @default(ACTIVE)
-  activatedAt   DateTime       @default(now())
+  status        UserStatusEnum   @default(ACTIVE)
+  activatedAt   DateTime         @default(now())
   deactivatedAt DateTime?
 
   createdAt DateTime @default(now())
@@ -653,6 +765,17 @@ model Tenant {
   user   User   @relation(fields: [userId], references: [id])
 }
 
+model Broker {
+  id            String         @id @default(uuid())
+  userId        String         @unique
+  user          User           @relation(fields: [userId], references: [id])
+  agencyName    String?
+  licenseNumber String?
+  status        UserStatusEnum @default(ACTIVE)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+}
+
 model Permission {
   id  String @id @default(uuid())
   key String @unique // billing.create_invoice
@@ -671,24 +794,33 @@ model RolePermission {
 }
 
 model Unit {
-  id              String           @id @default(uuid())
-  projectName     String
-  communityId     String?
-  block           String?
-  unitNumber      String
-  type            UnitType
-  floors          Int?
-  bedrooms        Int?
-  bathrooms       Int?
-  sizeSqm         Float?
-  price           Decimal?         @db.Decimal(12, 2)
-  status          UnitStatus       @default(AVAILABLE)
-  isDelivered     Boolean          @default(false)
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  id             String         @id @default(uuid())
+  projectName    String
+  communityId    String?
+  clusterId      String?
+  gateAccessMode GateAccessMode @default(ALL_GATES)
+  allowedGateIds String[]       @default([])
+  block          String?
+  unitNumber     String
+  type           UnitType
+  floors         Int?
+  bedrooms       Int?
+  bathrooms      Int?
+  sizeSqm        Float?
+  price          Decimal?       @db.Decimal(12, 2)
+  status         UnitStatus     @default(AVAILABLE)
+  isDelivered    Boolean        @default(false)
+  deliveryDate   DateTime?
+  isActive       Boolean        @default(true)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  deletedAt      DateTime?
+
+  // relationships
   serviceRequests ServiceRequest[]
   residents       ResidentUnit[]
   community       Community?       @relation(fields: [communityId], references: [id], onDelete: SetNull)
+  cluster         Cluster?         @relation(fields: [clusterId], references: [id], onDelete: SetNull)
   leases          Lease[]
   invoices        Invoice[]
   bookings        Booking[]
@@ -703,27 +835,136 @@ model Unit {
   unitAccesses            UnitAccess[]
   clubhouseAccessRequests ClubhouseAccessRequest[]
 
-  workers Worker[]
-  ownerUnitContracts OwnerUnitContract[]
-  rentRequests RentRequest[]
-  familyAccessRequests FamilyAccessRequest[]
+  workers                  Worker[]
+  blueCollarAccessRequests BlueCollarAccessRequest[]
+  gateUnitAccesses         GateUnitAccess[]
+  gateEntryLogs            GateEntryLog[]
+  commercialEntities       CommercialEntity[]
+  ownerUnitContracts       OwnerUnitContract[]
+  rentRequests             RentRequest[]
+  familyAccessRequests     FamilyAccessRequest[]
   authorizedAccessRequests AuthorizedAccessRequest[]
-  homeStaffAccesses HomeStaffAccess[]
-  ownershipTransfers UnitOwnershipTransfer[]
+  homeStaffAccesses        HomeStaffAccess[]
+  ownershipTransfers       UnitOwnershipTransfer[]
+  permitRequests           PermitRequest[]
 
   @@index([communityId])
+  @@index([clusterId])
+}
+
+model Cluster {
+  id           String    @id @default(uuid())
+  communityId  String
+  name         String
+  code         String?
+  displayOrder Int       @default(0)
+  description  String?
+  isActive     Boolean   @default(true)
+  deletedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  units     Unit[]
+
+  @@unique([communityId, name])
+  @@index([communityId])
+  @@index([communityId, displayOrder])
+  @@index([isActive])
+  @@index([deletedAt])
 }
 
 model Community {
-  id           String   @id @default(uuid())
-  name         String   @unique
-  code         String?  @unique
-  isActive     Boolean  @default(true)
-  displayOrder Int      @default(0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                String      @id @default(uuid())
+  name              String      @unique
+  code              String?     @unique
+  isActive          Boolean     @default(true)
+  allowedEntryRoles EntryRole[] @default([])
+  displayOrder      Int         @default(0)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
 
-  units Unit[]
+  units              Unit[]
+  clusters           Cluster[]
+  gates              Gate[]
+  commercialEntities CommercialEntity[]
+  compoundStaff      CompoundStaff[]
+  blueCollarSetting  BlueCollarSetting?
+  blueCollarHolidays BlueCollarHoliday[]
+}
+
+model Gate {
+  id                       String       @id @default(uuid())
+  communityId              String
+  name                     String
+  code                     String?
+  status                   EntityStatus @default(ACTIVE)
+  allowedRoles             GateRole[]   @default([VISITOR])
+  etaMinutes               Int?
+  isActive                 Boolean      @default(true)
+  isVisitorRequestRequired Boolean      @default(false)
+  createdAt                DateTime     @default(now())
+  updatedAt                DateTime     @updatedAt
+  deletedAt                DateTime?
+
+  community             Community                 @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  unitAccesses          GateUnitAccess[]
+  entryLogs             GateEntryLog[]
+  compoundStaffAccesses CompoundStaffGateAccess[]
+
+  @@unique([communityId, name])
+  @@index([communityId])
+  @@index([communityId, isActive])
+  @@index([status])
+  @@index([deletedAt])
+}
+
+model GateUnitAccess {
+  id        String    @id @default(uuid())
+  gateId    String
+  unitId    String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  gate Gate @relation(fields: [gateId], references: [id], onDelete: Cascade)
+  unit Unit @relation(fields: [unitId], references: [id], onDelete: Cascade)
+
+  @@unique([gateId, unitId])
+  @@index([gateId])
+  @@index([unitId])
+  @@index([deletedAt])
+}
+
+model GateEntryLog {
+  id                  String          @id @default(uuid())
+  gateId              String?
+  qrCodeId            String?
+  unitId              String?
+  direction           GateDirection
+  result              GateScanResult  @default(ALLOWED)
+  scanRole            GateAccessRole?
+  operatorUserId      String?
+  visitorNameSnapshot String?
+  scannedAt           DateTime        @default(now())
+  notes               String?
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  deletedAt           DateTime?
+
+  gate         Gate?         @relation(fields: [gateId], references: [id], onDelete: SetNull)
+  qrCode       AccessQRCode? @relation(fields: [qrCodeId], references: [id], onDelete: SetNull)
+  unit         Unit?         @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  operatorUser User?         @relation("gate_entry_operator", fields: [operatorUserId], references: [id], onDelete: SetNull)
+
+  @@index([gateId])
+  @@index([qrCodeId])
+  @@index([unitId])
+  @@index([operatorUserId])
+  @@index([scannedAt])
+  @@index([direction])
+  @@index([result])
+  @@index([deletedAt])
 }
 
 // ⚠️ residentUnit is legacy. Do NOT use for permission checks.
@@ -759,12 +1000,12 @@ model UnitAccess {
 
   source String? // OWNER_DELEGATION | ADMIN_ASSIGNMENT | FAMILY_AUTO | TENANT_AUTO
 
-  canViewFinancials Boolean @default(false)
-  canReceiveBilling Boolean @default(false)
-  canBookFacilities Boolean @default(true)
-  canGenerateQR     Boolean @default(false)
-  canManageWorkers  Boolean @default(false)
-  qrScopes          String[] @default([])
+  canViewFinancials  Boolean  @default(false)
+  canReceiveBilling  Boolean  @default(false)
+  canBookFacilities  Boolean  @default(true)
+  canGenerateQR      Boolean  @default(false)
+  canManageWorkers   Boolean  @default(false)
+  qrScopes           String[] @default([])
   featurePermissions Json?
 
   createdAt DateTime @default(now())
@@ -780,6 +1021,7 @@ model AccessProfile {
   nationalId String
   phone      String?
   photoId    String?
+  notes      String?
   status     AccessStatus @default(ACTIVE)
   createdAt  DateTime     @default(now())
 
@@ -793,8 +1035,9 @@ model Contractor {
   name   String
   status EntityStatus @default(ACTIVE)
 
-  workers Worker[]
-  members ContractorMember[]
+  workers                  Worker[]
+  blueCollarAccessRequests BlueCollarAccessRequest[]
+  members                  ContractorMember[]
 }
 
 model ContractorMember {
@@ -823,9 +1066,272 @@ model Worker {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  accessProfile AccessProfile @relation(fields: [accessProfileId], references: [id])
-  contractor    Contractor    @relation(fields: [contractorId], references: [id])
-  homeStaffAccesses HomeStaffAccess[]
+  accessProfile            AccessProfile             @relation(fields: [accessProfileId], references: [id])
+  contractor               Contractor                @relation(fields: [contractorId], references: [id])
+  homeStaffAccesses        HomeStaffAccess[]
+  blueCollarAccessRequests BlueCollarAccessRequest[]
+}
+
+model BlueCollarSetting {
+  id String @id @default(uuid())
+
+  communityId String
+  community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+
+  workDays              BlueCollarWeekDay[] @default([])
+  workStartTime         String?
+  workEndTime           String?
+  workingHoursStart     String              @default("07:00")
+  workingHoursEnd       String              @default("18:00")
+  allowedDays           Int[]               @default([1, 2, 3, 4, 5])
+  holidays              Json?
+  termsAndConditions    String?
+  termsVersion          Int                 @default(1)
+  requiresAdminApproval Boolean             @default(true)
+
+  createdById String?
+  createdBy   User?   @relation("blue_collar_setting_created_by", fields: [createdById], references: [id], onDelete: SetNull)
+  updatedById String?
+  updatedBy   User?   @relation("blue_collar_setting_updated_by", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  accessRequests BlueCollarAccessRequest[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@unique([communityId])
+  @@index([communityId])
+  @@index([createdById])
+  @@index([updatedById])
+  @@index([deletedAt])
+}
+
+model BlueCollarHoliday {
+  id          String   @id @default(uuid())
+  communityId String
+  date        DateTime
+  label       String
+  createdAt   DateTime @default(now())
+
+  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+
+  @@unique([communityId, date])
+  @@index([communityId, date])
+}
+
+model BlueCollarAccessRequest {
+  id String @id @default(uuid())
+
+  workerId String
+  worker   Worker @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  unitId String
+  unit   Unit   @relation(fields: [unitId], references: [id], onDelete: Cascade)
+
+  contractorId String
+  contractor   Contractor @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+
+  settingId String?
+  setting   BlueCollarSetting? @relation(fields: [settingId], references: [id], onDelete: SetNull)
+
+  requestedById String
+  requestedBy   User    @relation("blue_collar_request_requested_by", fields: [requestedById], references: [id], onDelete: Cascade)
+  reviewedById  String?
+  reviewedBy    User?   @relation("blue_collar_request_reviewed_by", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  qrCodeId String?       @unique
+  qrCode   AccessQRCode? @relation(fields: [qrCodeId], references: [id], onDelete: SetNull)
+
+  idDocumentRef      String?
+  status             BlueCollarRequestStatus @default(PENDING)
+  requestedValidFrom DateTime
+  requestedValidTo   DateTime
+  gates              String[]                @default([])
+  notes              String?
+  rejectionReason    String?
+  reviewedAt         DateTime?
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@index([workerId])
+  @@index([unitId])
+  @@index([contractorId])
+  @@index([settingId])
+  @@index([requestedById])
+  @@index([reviewedById])
+  @@index([qrCodeId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([deletedAt])
+}
+
+model CommercialEntity {
+  id          String  @id @default(uuid())
+  name        String
+  description String?
+
+  communityId String
+  community   Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
+
+  unitId String
+  unit   Unit   @relation(fields: [unitId], references: [id], onDelete: Restrict)
+
+  isActive Boolean                  @default(true)
+  members  CommercialEntityMember[]
+  staff    CompoundStaff[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  @@unique([communityId, name])
+  @@index([communityId])
+  @@index([unitId])
+  @@index([isActive])
+  @@index([deletedAt])
+}
+
+model CommercialEntityMember {
+  id          String                     @id @default(uuid())
+  entityId    String
+  userId      String
+  role        CommercialEntityMemberRole
+  permissions Json?
+  createdById String?
+  isActive    Boolean                    @default(true)
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  entity    CommercialEntity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  user      User             @relation("commercial_entity_member_user", fields: [userId], references: [id], onDelete: Cascade)
+  createdBy User?            @relation("commercial_entity_member_created_by", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@unique([entityId, userId])
+  @@index([entityId])
+  @@index([userId])
+  @@index([createdById])
+  @@index([role])
+  @@index([isActive])
+  @@index([deletedAt])
+}
+
+model CompoundStaff {
+  id                 String                     @id @default(uuid())
+  communityId        String?
+  commercialEntityId String?
+  userId             String?
+  fullName           String
+  phone              String
+  nationalId         String
+  photoFileId        String?                    @unique
+  profession         String
+  jobTitle           String?
+  workSchedule       Json?
+  contractFrom       DateTime?
+  contractTo         DateTime?
+  status             CompoundStaffStatus        @default(ACTIVE)
+  isActive           Boolean                    @default(true)
+  accesses           CompoundStaffAccess[]
+  schedules          CompoundStaffSchedule[]
+  gateAccesses       CompoundStaffGateAccess[]
+  activityLogs       CompoundStaffActivityLog[]
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+  deletedAt          DateTime?
+
+  community        Community?        @relation(fields: [communityId], references: [id], onDelete: SetNull)
+  commercialEntity CommercialEntity? @relation(fields: [commercialEntityId], references: [id], onDelete: SetNull)
+  user             User?             @relation("compound_staff_user", fields: [userId], references: [id], onDelete: SetNull)
+  photoFile        File?             @relation("compound_staff_photo", fields: [photoFileId], references: [id], onDelete: SetNull)
+
+  @@unique([communityId, nationalId])
+  @@index([userId])
+  @@index([communityId])
+  @@index([commercialEntityId])
+  @@index([profession])
+  @@index([contractTo])
+  @@index([status])
+  @@index([isActive])
+  @@index([deletedAt])
+}
+
+model CompoundStaffAccess {
+  id          String                  @id @default(uuid())
+  staffId     String
+  staff       CompoundStaff           @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  permission  CompoundStaffPermission
+  isGranted   Boolean                 @default(true)
+  grantedById String?
+  grantedBy   User?                   @relation("compound_staff_access_granted_by", fields: [grantedById], references: [id], onDelete: SetNull)
+  createdAt   DateTime                @default(now())
+  updatedAt   DateTime                @updatedAt
+  deletedAt   DateTime?
+
+  @@unique([staffId, permission])
+  @@index([staffId])
+  @@index([permission])
+  @@index([grantedById])
+  @@index([deletedAt])
+}
+
+model CompoundStaffSchedule {
+  id        String            @id @default(uuid())
+  staffId   String
+  dayOfWeek BlueCollarWeekDay
+  startTime String?
+  endTime   String?
+  notes     String?
+  isActive  Boolean           @default(true)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  staff CompoundStaff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+
+  @@unique([staffId, dayOfWeek])
+  @@index([staffId])
+  @@index([isActive])
+}
+
+model CompoundStaffGateAccess {
+  id          String          @id @default(uuid())
+  staffId     String
+  gateId      String
+  directions  GateDirection[] @default([ENTRY, EXIT])
+  isActive    Boolean         @default(true)
+  grantedById String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  staff     CompoundStaff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  gate      Gate          @relation(fields: [gateId], references: [id], onDelete: Cascade)
+  grantedBy User?         @relation("compound_staff_gate_access_granted_by", fields: [grantedById], references: [id], onDelete: SetNull)
+
+  @@unique([staffId, gateId])
+  @@index([staffId])
+  @@index([gateId])
+  @@index([isActive])
+  @@index([grantedById])
+}
+
+model CompoundStaffActivityLog {
+  id          String   @id @default(uuid())
+  staffId     String
+  actorUserId String?
+  action      String
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  staff     CompoundStaff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  actorUser User?         @relation("compound_staff_activity_actor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([staffId])
+  @@index([actorUserId])
+  @@index([createdAt])
 }
 
 model File {
@@ -838,36 +1344,37 @@ model File {
   createdAt DateTime     @default(now())
 
   // optional polymorphic relations
-  profilePhotoOf User?        @relation("file_profile_photo")
-  nationalIdOf   User?        @relation("file_national_id")
-  attachments    Attachment[]
-  leaseContract  Lease?       @relation("lease_contract")
+  profilePhotoOf       User?          @relation("file_profile_photo")
+  nationalIdOf         User?          @relation("file_national_id")
+  compoundStaffPhotoOf CompoundStaff? @relation("compound_staff_photo")
+  attachments          Attachment[]
+  leaseContract        Lease?         @relation("lease_contract")
 
-  pendingRegistrations PendingRegistration[]
-  documents            ResidentDocument[] @relation("file_documents")
-  ownerUnitContracts   OwnerUnitContract[] @relation("owner_unit_contract_file")
-  ownerInstallments    OwnerInstallment[] @relation("owner_installment_reference_file")
-  rentRequestContracts RentRequest[] @relation("rent_request_contract_file")
-  rentRequestNationalIds RentRequest[] @relation("rent_request_national_id_file")
+  pendingRegistrations   PendingRegistration[]
+  documents              ResidentDocument[]    @relation("file_documents")
+  ownerUnitContracts     OwnerUnitContract[]   @relation("owner_unit_contract_file")
+  ownerInstallments      OwnerInstallment[]    @relation("owner_installment_reference_file")
+  rentRequestContracts   RentRequest[]         @relation("rent_request_contract_file")
+  rentRequestNationalIds RentRequest[]         @relation("rent_request_national_id_file")
 }
 
 model OwnerUnitContract {
-  id             String           @id @default(uuid())
-  ownerUserId    String
-  unitId         String
-  contractFileId String?
+  id               String           @id @default(uuid())
+  ownerUserId      String
+  unitId           String
+  contractFileId   String?
   contractSignedAt DateTime?
-  paymentMode    OwnerPaymentMode @default(CASH)
-  notes          String?
-  archivedAt     DateTime?
-  createdById    String?
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
+  paymentMode      OwnerPaymentMode @default(CASH)
+  notes            String?
+  archivedAt       DateTime?
+  createdById      String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
-  ownerUser User  @relation("owner_unit_contract_owner", fields: [ownerUserId], references: [id], onDelete: Cascade)
-  unit      Unit  @relation(fields: [unitId], references: [id], onDelete: Cascade)
-  contractFile File? @relation("owner_unit_contract_file", fields: [contractFileId], references: [id])
-  createdBy User? @relation("owner_unit_contract_created_by", fields: [createdById], references: [id])
+  ownerUser    User               @relation("owner_unit_contract_owner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  unit         Unit               @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  contractFile File?              @relation("owner_unit_contract_file", fields: [contractFileId], references: [id])
+  createdBy    User?              @relation("owner_unit_contract_created_by", fields: [createdById], references: [id])
   installments OwnerInstallment[]
 
   @@unique([ownerUserId, unitId])
@@ -876,22 +1383,22 @@ model OwnerUnitContract {
 }
 
 model UnitOwnershipTransfer {
-  id                         String                @id @default(uuid())
-  unitId                     String
-  fromUserId                 String
-  toUserId                   String
-  transferMode               OwnershipTransferMode
-  movedContractId            String?
-  createdContractId          String?
-  transferredInstallmentsCount Int                 @default(0)
-  transferredById            String
-  notes                      String?
-  createdAt                  DateTime              @default(now())
+  id                           String                @id @default(uuid())
+  unitId                       String
+  fromUserId                   String
+  toUserId                     String
+  transferMode                 OwnershipTransferMode
+  movedContractId              String?
+  createdContractId            String?
+  transferredInstallmentsCount Int                   @default(0)
+  transferredById              String
+  notes                        String?
+  createdAt                    DateTime              @default(now())
 
-  unit             Unit               @relation(fields: [unitId], references: [id], onDelete: Cascade)
-  fromUser         User               @relation("ownership_transfer_from_user", fields: [fromUserId], references: [id], onDelete: Cascade)
-  toUser           User               @relation("ownership_transfer_to_user", fields: [toUserId], references: [id], onDelete: Cascade)
-  transferredByUser User              @relation("ownership_transfer_by_user", fields: [transferredById], references: [id], onDelete: Cascade)
+  unit              Unit @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  fromUser          User @relation("ownership_transfer_from_user", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser            User @relation("ownership_transfer_to_user", fields: [toUserId], references: [id], onDelete: Cascade)
+  transferredByUser User @relation("ownership_transfer_by_user", fields: [transferredById], references: [id], onDelete: Cascade)
 
   @@index([unitId, createdAt])
   @@index([fromUserId, createdAt])
@@ -922,10 +1429,10 @@ model OwnerInstallment {
 }
 
 model ResidentDocument {
-  id          String @id @default(uuid())
-  residentId  String
-  type        FileCategory
-  fileId      String
+  id         String       @id @default(uuid())
+  residentId String
+  type       FileCategory
+  fileId     String
 
   resident Resident @relation("resident_documents", fields: [residentId], references: [id])
   file     File     @relation("file_documents", fields: [fileId], references: [id])
@@ -968,11 +1475,17 @@ model Service {
   status          Boolean          @default(true)
   isUrgent        Boolean          @default(false)
   startingPrice   Decimal?         @db.Decimal(12, 2)
+  slaHours        Int?
+  assignedRoleId  String?
+  assignedRole    Role?            @relation(fields: [assignedRoleId], references: [id])
+  revenueTotal    Decimal          @default(0) @db.Decimal(12, 2)
   formFields      ServiceField[]
   requests        ServiceRequest[]
   totalRequests   Int?             @default(0)
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
+
+  @@index([assignedRoleId])
 }
 
 model ServiceField {
@@ -988,29 +1501,106 @@ model ServiceField {
 }
 
 model ServiceRequest {
-  id           String                     @id @default(uuid())
-  service      Service                    @relation(fields: [serviceId], references: [id])
-  serviceId    String
-  unit         Unit?                      @relation(fields: [unitId], references: [id])
-  unitId       String?
-  createdBy    User                       @relation("creator_requests", fields: [createdById], references: [id])
-  createdById  String
-  assignedToId String?
-  status       ServiceRequestStatus       @default(NEW)
-  priority     Priority                   @default(MEDIUM)
-  description  String
-  fieldValues  ServiceRequestFieldValue[]
-  attachments  Attachment[]               @relation("ServiceRequestAttachments")
-  comments     ServiceRequestComment[]
-  requestedAt  DateTime                   @default(now())
-  updatedAt    DateTime                   @updatedAt
-  invoices     Invoice[]
+  id             String                     @id @default(uuid())
+  service        Service                    @relation(fields: [serviceId], references: [id])
+  serviceId      String
+  unit           Unit?                      @relation(fields: [unitId], references: [id])
+  unitId         String?
+  createdBy      User                       @relation("creator_requests", fields: [createdById], references: [id])
+  createdById    String
+  assignedToId   String?
+  status         ServiceRequestStatus       @default(NEW)
+  priority       Priority                   @default(MEDIUM)
+  description    String
+  fieldValues    ServiceRequestFieldValue[]
+  attachments    Attachment[]               @relation("ServiceRequestAttachments")
+  comments       ServiceRequestComment[]
+  requestedAt    DateTime                   @default(now())
+  slaBreachedAt  DateTime?
+  resolvedAt     DateTime?
+  closedAt       DateTime?
+  assignedAt     DateTime?
+  customerRating Int?
+  internalNotes  String?
+  updatedAt      DateTime                   @updatedAt
+  invoices       Invoice[]
 
   @@index([requestedAt])
+  @@index([status, requestedAt])
+  @@index([assignedToId, requestedAt])
+  @@index([slaBreachedAt])
+}
+
+model PermitType {
+  id           String          @id @default(uuid())
+  name         String          @unique
+  slug         String          @unique
+  category     PermitCategory
+  description  String?
+  isActive     Boolean         @default(true)
+  displayOrder Int             @default(0)
+  fields       PermitField[]
+  requests     PermitRequest[]
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+}
+
+model PermitField {
+  id           String                    @id @default(uuid())
+  permitTypeId String
+  permitType   PermitType                @relation(fields: [permitTypeId], references: [id])
+  label        String
+  type         ServiceFieldType
+  placeholder  String?
+  required     Boolean                   @default(false)
+  displayOrder Int                       @default(0)
+  fieldValues  PermitRequestFieldValue[]
+
+  @@index([permitTypeId, displayOrder])
+}
+
+model PermitRequest {
+  id              String                    @id @default(uuid())
+  requestNumber   String                    @unique
+  permitTypeId    String
+  permitType      PermitType                @relation(fields: [permitTypeId], references: [id])
+  unitId          String
+  unit            Unit                      @relation(fields: [unitId], references: [id])
+  requestedById   String
+  requestedBy     User                      @relation("permit_requester", fields: [requestedById], references: [id])
+  status          PermitStatus              @default(PENDING)
+  reviewedById    String?
+  reviewedBy      User?                     @relation("permit_reviewer", fields: [reviewedById], references: [id])
+  reviewedAt      DateTime?
+  rejectionReason String?
+  notes           String?
+  fieldValues     PermitRequestFieldValue[]
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+
+  @@index([permitTypeId, createdAt])
+  @@index([status, createdAt])
+  @@index([unitId, createdAt])
+  @@index([requestedById, createdAt])
+}
+
+model PermitRequestFieldValue {
+  id          String        @id @default(uuid())
+  requestId   String
+  request     PermitRequest @relation(fields: [requestId], references: [id])
+  fieldId     String
+  field       PermitField   @relation(fields: [fieldId], references: [id])
+  valueText   String?
+  valueNumber Float?
+  valueBool   Boolean?
+  valueDate   DateTime?
+
+  @@index([requestId])
+  @@index([fieldId])
 }
 
 model ServiceRequestComment {
-  id         String         @id @default(uuid())
+  id          String         @id @default(uuid())
   request     ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
   requestId   String
   createdBy   User           @relation(fields: [createdById], references: [id], onDelete: Cascade)
@@ -1050,33 +1640,35 @@ model AccessGrant {
 }
 
 model AccessQRCode {
-  id            String       @id @default(uuid())
-  qrId          String       @unique
-  type          QRType
-  usageMode     QrUsageMode  @default(SINGLE_USE)
-  generatedBy   User         @relation("generated_by", fields: [generatedById], references: [id])
-  generatedById String
-  forUnit       Unit?        @relation(fields: [unitId], references: [id])
-  unitId        String?
-  accessGrantId String?
-  visitorName   String?
+  id                     String                   @id @default(uuid())
+  qrId                   String                   @unique
+  type                   QRType
+  usageMode              QrUsageMode              @default(SINGLE_USE)
+  generatedBy            User                     @relation("generated_by", fields: [generatedById], references: [id])
+  generatedById          String
+  forUnit                Unit?                    @relation(fields: [unitId], references: [id])
+  unitId                 String?
+  accessGrantId          String?
+  visitorName            String?
   requesterNameSnapshot  String?
   requesterPhoneSnapshot String?
-  validFrom     DateTime
-  validTo       DateTime
-  gates         String[]
-  scans         Int          @default(0)
-  status        AccessStatus @default(ACTIVE) // ACTIVE | EXPIRED | USED
-  qrImageBase64 String?
-  checkedInAt   DateTime?
-  checkedOutAt  DateTime?
-  gateOperatorId String?
-  gateOperator  User?        @relation("gate_operator", fields: [gateOperatorId], references: [id])
-  overdueExitAt DateTime?
-  arrivalNotifiedAt DateTime?
-  notes         String?
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
+  validFrom              DateTime
+  validTo                DateTime
+  gates                  String[]
+  scans                  Int                      @default(0)
+  status                 AccessStatus             @default(ACTIVE) // ACTIVE | EXPIRED | USED
+  qrImageBase64          String?
+  checkedInAt            DateTime?
+  checkedOutAt           DateTime?
+  gateOperatorId         String?
+  gateOperator           User?                    @relation("gate_operator", fields: [gateOperatorId], references: [id])
+  blueCollarRequest      BlueCollarAccessRequest?
+  gateEntryLogs          GateEntryLog[]
+  overdueExitAt          DateTime?
+  arrivalNotifiedAt      DateTime?
+  notes                  String?
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
 
   @@index([createdAt])
   @@index([unitId, status, createdAt])
@@ -1084,25 +1676,32 @@ model AccessQRCode {
 }
 
 model Lease {
-  id               String      @id @default(uuid())
-  unit             Unit        @relation(fields: [unitId], references: [id])
-  unitId           String
-  owner            User        @relation("owner_leases", fields: [ownerId], references: [id])
-  ownerId          String
-  tenant           User?       @relation("tenant_leases", fields: [tenantId], references: [id])
-  tenantId         String?
-  tenantNationalId String?
-  tenantEmail      String?
-  startDate        DateTime
-  endDate          DateTime
-  monthlyRent      Decimal     @db.Decimal(12, 2)
-  securityDeposit  Decimal?    @db.Decimal(12, 2)
-  contractFileId   String?     @unique
-  contractFile     File?       @relation("lease_contract", fields: [contractFileId], references: [id])
-  status           LeaseStatus @default(ACTIVE)
-  source           LeaseSource @default(OWNER)
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
+  id                  String      @id @default(uuid())
+  unit                Unit        @relation(fields: [unitId], references: [id])
+  unitId              String
+  owner               User        @relation("owner_leases", fields: [ownerId], references: [id])
+  ownerId             String
+  tenant              User?       @relation("tenant_leases", fields: [tenantId], references: [id])
+  tenantId            String?
+  tenantNationalId    String?
+  tenantEmail         String?
+  startDate           DateTime
+  endDate             DateTime
+  monthlyRent         Decimal     @db.Decimal(12, 2)
+  securityDeposit     Decimal?    @db.Decimal(12, 2)
+  contractFileId      String?     @unique
+  contractFile        File?       @relation("lease_contract", fields: [contractFileId], references: [id])
+  status              LeaseStatus @default(ACTIVE)
+  source              LeaseSource @default(OWNER)
+  renewedFromId       String?
+  renewedToId         String?
+  autoRenew           Boolean     @default(false)
+  renewalNoticeSentAt DateTime?
+  createdAt           DateTime    @default(now())
+  updatedAt           DateTime    @updatedAt
+
+  @@index([renewedFromId])
+  @@index([renewedToId])
 }
 
 model RentRequest {
@@ -1125,10 +1724,10 @@ model RentRequest {
   createdAt              DateTime          @default(now())
   updatedAt              DateTime          @updatedAt
 
-  owner        User   @relation("rent_request_owner", fields: [ownerUserId], references: [id], onDelete: Cascade)
-  unit         Unit   @relation(fields: [unitId], references: [id], onDelete: Cascade)
-  reviewedBy   User?  @relation("rent_request_reviewer", fields: [reviewedById], references: [id])
-  contractFile File?  @relation("rent_request_contract_file", fields: [contractFileId], references: [id])
+  owner          User  @relation("rent_request_owner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  unit           Unit  @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  reviewedBy     User? @relation("rent_request_reviewer", fields: [reviewedById], references: [id])
+  contractFile   File? @relation("rent_request_contract_file", fields: [contractFileId], references: [id])
   nationalIdFile File? @relation("rent_request_national_id_file", fields: [tenantNationalIdFileId], references: [id])
 
   @@index([ownerUserId, status, createdAt])
@@ -1170,31 +1769,46 @@ model Invoice {
   incidentId String?
   incident   Incident? @relation(fields: [incidentId], references: [id])
 
-  unitFees UnitFee[] @relation("FeeInvoices")
+  unitFees                     UnitFee[]                 @relation("FeeInvoices")
   authorizedActivationRequests AuthorizedAccessRequest[]
 
   @@index([createdAt])
 }
 
+model InvoiceCategory {
+  id           String      @id @default(uuid())
+  label        String
+  mappedType   InvoiceType
+  isSystem     Boolean     @default(false)
+  description  String?
+  isActive     Boolean     @default(true)
+  displayOrder Int         @default(0)
+  color        String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@unique([label])
+}
+
 model Complaint {
-  id              String          @id @default(uuid())
-  complaintNumber String          @unique
+  id              String             @id @default(uuid())
+  complaintNumber String             @unique
   title           String?
   team            String?
-  reporter        User            @relation("reporter", fields: [reporterId], references: [id])
+  reporter        User               @relation("reporter", fields: [reporterId], references: [id])
   reporterId      String
-  unit            Unit?           @relation(fields: [unitId], references: [id])
+  unit            Unit?              @relation(fields: [unitId], references: [id])
   unitId          String?
   category        String
   description     String
-  priority        Priority        @default(MEDIUM)
-  status          ComplaintStatus @default(NEW)
+  priority        Priority           @default(MEDIUM)
+  status          ComplaintStatus    @default(NEW)
   resolutionNotes String?
   resolvedAt      DateTime?
   assignedToId    String?
-  assignedTo      User?           @relation("complaint_assignee", fields: [assignedToId], references: [id])
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  assignedTo      User?              @relation("complaint_assignee", fields: [assignedToId], references: [id])
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
   invoices        Invoice[]
   comments        ComplaintComment[]
 
@@ -1202,7 +1816,7 @@ model Complaint {
 }
 
 model ComplaintComment {
-  id         String    @id @default(uuid())
+  id          String    @id @default(uuid())
   complaint   Complaint @relation(fields: [complaintId], references: [id], onDelete: Cascade)
   complaintId String
   createdBy   User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
@@ -1217,21 +1831,21 @@ model ComplaintComment {
 }
 
 model Violation {
-  id              String          @id @default(uuid())
-  violationNumber String          @unique
-  unit            Unit            @relation(fields: [unitId], references: [id])
+  id              String                   @id @default(uuid())
+  violationNumber String                   @unique
+  unit            Unit                     @relation(fields: [unitId], references: [id])
   unitId          String
   type            String
   description     String
-  fineAmount      Decimal         @db.Decimal(12, 2)
-  status          ViolationStatus @default(PENDING)
+  fineAmount      Decimal                  @db.Decimal(12, 2)
+  status          ViolationStatus          @default(PENDING)
   appealStatus    String?
-  issuedBy        User?           @relation("issued_by", fields: [issuedById], references: [id])
+  issuedBy        User?                    @relation("issued_by", fields: [issuedById], references: [id])
   issuedById      String?
-  resident        User?           @relation("violation_target", fields: [residentId], references: [id])
+  resident        User?                    @relation("violation_target", fields: [residentId], references: [id])
   residentId      String?
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
   invoices        Invoice[]
   actionRequests  ViolationActionRequest[]
 }
@@ -1264,10 +1878,10 @@ model SystemSetting {
 }
 
 model SystemSettingsBackupSnapshot {
-  id           String   @id @default(uuid())
+  id           String    @id @default(uuid())
   label        String?
   snapshot     Json
-  createdAt    DateTime @default(now())
+  createdAt    DateTime  @default(now())
   createdById  String?
   restoredAt   DateTime?
   restoredById String?
@@ -1288,19 +1902,19 @@ model GeneratedReport {
 }
 
 model ReportSchedule {
-  id          String        @id @default(uuid())
+  id          String          @id @default(uuid())
   reportType  ReportType
   format      ReportFormat
   label       String
   params      Json?
   frequency   String
   cronExpr    String?
-  isEnabled   Boolean       @default(true)
+  isEnabled   Boolean         @default(true)
   status      ReportJobStatus @default(ACTIVE)
   nextRunAt   DateTime?
   lastRunAt   DateTime?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
   createdById String?
 }
 
@@ -1335,11 +1949,11 @@ model Facility {
   capacity Int?
 
   // Pricing model
-  price        Float? // optional
-  billingCycle BillingCycle @default(NONE)
-  isBookable   Boolean @default(true)
-  requiresPrepayment Boolean @default(false)
-  reminderMinutesBefore Int? @default(60)
+  price                 Float? // optional
+  billingCycle          BillingCycle @default(NONE)
+  isBookable            Boolean      @default(true)
+  requiresPrepayment    Boolean      @default(false)
+  reminderMinutesBefore Int?         @default(60)
 
   // Limits
   maxReservationsPerDay Int? // per user
@@ -1493,16 +2107,16 @@ model NotificationLog {
 }
 
 model ProfileChangeRequest {
-  id              String                     @id @default(uuid())
-  userId          String
-  status          ProfileChangeRequestStatus @default(PENDING)
-  requestedFields Json
+  id               String                     @id @default(uuid())
+  userId           String
+  status           ProfileChangeRequestStatus @default(PENDING)
+  requestedFields  Json
   previousSnapshot Json?
-  reviewedById    String?
-  reviewedAt      DateTime?
-  rejectionReason String?
-  createdAt       DateTime                   @default(now())
-  updatedAt       DateTime                   @updatedAt
+  reviewedById     String?
+  reviewedAt       DateTime?
+  rejectionReason  String?
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
 
   user       User  @relation("profile_change_request_user", fields: [userId], references: [id], onDelete: Cascade)
   reviewedBy User? @relation("profile_change_request_reviewer", fields: [reviewedById], references: [id])
@@ -1512,36 +2126,38 @@ model ProfileChangeRequest {
 }
 
 model FamilyAccessRequest {
-  id                       String                 @id @default(uuid())
-  ownerUserId              String
-  unitId                   String
-  status                   HouseholdRequestStatus @default(PENDING)
-  relationship             FamilyRelationType
-  fullName                 String
-  email                    String?
-  phone                    String
-  nationality              NationalityType        @default(EGYPTIAN)
-  nationalIdOrPassport     String?
-  personalPhotoFileId      String
-  nationalIdFileId         String?
-  passportFileId           String?
-  birthCertificateFileId   String?
+  id                        String                 @id @default(uuid())
+  ownerUserId               String
+  unitId                    String
+  status                    HouseholdRequestStatus @default(PENDING)
+  preRegisteredById         String?
+  isPreRegistration         Boolean                @default(false)
+  relationship              FamilyRelationType
+  fullName                  String
+  email                     String?
+  phone                     String
+  nationality               NationalityType        @default(EGYPTIAN)
+  nationalIdOrPassport      String?
+  personalPhotoFileId       String
+  nationalIdFileId          String?
+  passportFileId            String?
+  birthCertificateFileId    String?
   marriageCertificateFileId String?
-  childAgeBracket          String?
-  featurePermissions       Json?
-  reviewedById             String?
-  reviewedAt               DateTime?
-  credentialsEmailStatus   ApprovalDeliveryStatus   @default(PENDING)
-  credentialsEmailSentAt   DateTime?
-  credentialsEmailError    String?
-  rejectionReason          String?
-  activatedUserId          String?
-  createdAt                DateTime               @default(now())
-  updatedAt                DateTime               @updatedAt
+  childAgeBracket           String?
+  featurePermissions        Json?
+  reviewedById              String?
+  reviewedAt                DateTime?
+  credentialsEmailStatus    ApprovalDeliveryStatus @default(PENDING)
+  credentialsEmailSentAt    DateTime?
+  credentialsEmailError     String?
+  rejectionReason           String?
+  activatedUserId           String?
+  createdAt                 DateTime               @default(now())
+  updatedAt                 DateTime               @updatedAt
 
-  owner      User  @relation("family_request_owner", fields: [ownerUserId], references: [id], onDelete: Cascade)
-  unit       Unit  @relation(fields: [unitId], references: [id], onDelete: Cascade)
-  reviewedBy User? @relation("family_request_reviewer", fields: [reviewedById], references: [id])
+  owner         User  @relation("family_request_owner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  unit          Unit  @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  reviewedBy    User? @relation("family_request_reviewer", fields: [reviewedById], references: [id])
   activatedUser User? @relation("family_request_activated_user", fields: [activatedUserId], references: [id])
 
   @@index([ownerUserId, unitId, status, createdAt])
@@ -1549,41 +2165,41 @@ model FamilyAccessRequest {
 }
 
 model AuthorizedAccessRequest {
-  id                    String                 @id @default(uuid())
-  ownerUserId           String
-  unitId                String
-  status                HouseholdRequestStatus @default(PENDING)
-  fullName              String
-  email                 String?
-  phone                 String
-  nationality           NationalityType        @default(EGYPTIAN)
-  nationalIdOrPassport  String?
-  idOrPassportFileId    String
-  powerOfAttorneyFileId String
-  personalPhotoFileId   String
-  validFrom             DateTime
-  validTo               DateTime
-  authorizationStartsAt DateTime?
-  authorizationEndsAt   DateTime?
-  qrScopes              String[]               @default([])
-  featurePermissions    Json?
-  feeMode               AuthorizedFeeMode      @default(NO_FEE)
-  feeAmount             Decimal?               @db.Decimal(12, 2)
-  activationInvoiceId   String?
-  reviewedById          String?
-  reviewedAt            DateTime?
-  credentialsEmailStatus ApprovalDeliveryStatus   @default(PENDING)
+  id                     String                 @id @default(uuid())
+  ownerUserId            String
+  unitId                 String
+  status                 HouseholdRequestStatus @default(PENDING)
+  fullName               String
+  email                  String?
+  phone                  String
+  nationality            NationalityType        @default(EGYPTIAN)
+  nationalIdOrPassport   String?
+  idOrPassportFileId     String
+  powerOfAttorneyFileId  String
+  personalPhotoFileId    String
+  validFrom              DateTime
+  validTo                DateTime
+  authorizationStartsAt  DateTime?
+  authorizationEndsAt    DateTime?
+  qrScopes               String[]               @default([])
+  featurePermissions     Json?
+  feeMode                AuthorizedFeeMode      @default(NO_FEE)
+  feeAmount              Decimal?               @db.Decimal(12, 2)
+  activationInvoiceId    String?
+  reviewedById           String?
+  reviewedAt             DateTime?
+  credentialsEmailStatus ApprovalDeliveryStatus @default(PENDING)
   credentialsEmailSentAt DateTime?
   credentialsEmailError  String?
-  rejectionReason       String?
-  activatedUserId       String?
-  createdAt             DateTime               @default(now())
-  updatedAt             DateTime               @updatedAt
+  rejectionReason        String?
+  activatedUserId        String?
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
 
-  owner      User  @relation("authorized_request_owner", fields: [ownerUserId], references: [id], onDelete: Cascade)
-  unit       Unit  @relation(fields: [unitId], references: [id], onDelete: Cascade)
-  reviewedBy User? @relation("authorized_request_reviewer", fields: [reviewedById], references: [id])
-  activatedUser User? @relation("authorized_request_activated_user", fields: [activatedUserId], references: [id])
+  owner             User     @relation("authorized_request_owner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  unit              Unit     @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  reviewedBy        User?    @relation("authorized_request_reviewer", fields: [reviewedById], references: [id])
+  activatedUser     User?    @relation("authorized_request_activated_user", fields: [activatedUserId], references: [id])
   activationInvoice Invoice? @relation(fields: [activationInvoiceId], references: [id])
 
   @@index([ownerUserId, unitId, status, createdAt])
@@ -1591,32 +2207,34 @@ model AuthorizedAccessRequest {
 }
 
 model HomeStaffAccess {
-  id                  String                 @id @default(uuid())
-  ownerUserId         String
-  unitId              String
-  status              HouseholdRequestStatus @default(PENDING)
-  fullName            String
-  phone               String
-  nationality         NationalityType        @default(EGYPTIAN)
+  id                   String                 @id @default(uuid())
+  ownerUserId          String
+  unitId               String
+  status               HouseholdRequestStatus @default(PENDING)
+  preRegisteredById    String?
+  isPreRegistration    Boolean                @default(false)
+  fullName             String
+  phone                String
+  nationality          NationalityType        @default(EGYPTIAN)
   nationalIdOrPassport String?
-  idOrPassportFileId  String
-  personalPhotoFileId String?
-  employmentFrom      DateTime?
-  employmentTo        DateTime?
-  isLiveIn            Boolean                @default(false)
-  staffType           HomeStaffType          @default(OTHER)
-  accessValidFrom     DateTime
-  accessValidTo       DateTime
-  reviewedById        String?
-  reviewedAt          DateTime?
-  rejectionReason     String?
-  workerId            String?
-  createdAt           DateTime               @default(now())
-  updatedAt           DateTime               @updatedAt
+  idOrPassportFileId   String
+  personalPhotoFileId  String?
+  employmentFrom       DateTime?
+  employmentTo         DateTime?
+  isLiveIn             Boolean                @default(false)
+  staffType            HomeStaffType          @default(OTHER)
+  accessValidFrom      DateTime
+  accessValidTo        DateTime
+  reviewedById         String?
+  reviewedAt           DateTime?
+  rejectionReason      String?
+  workerId             String?
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
 
-  owner      User  @relation("home_staff_request_owner", fields: [ownerUserId], references: [id], onDelete: Cascade)
-  unit       Unit  @relation(fields: [unitId], references: [id], onDelete: Cascade)
-  reviewedBy User? @relation("home_staff_request_reviewer", fields: [reviewedById], references: [id])
+  owner      User    @relation("home_staff_request_owner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  unit       Unit    @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  reviewedBy User?   @relation("home_staff_request_reviewer", fields: [reviewedById], references: [id])
   worker     Worker? @relation(fields: [workerId], references: [id])
 
   @@index([ownerUserId, unitId, status, createdAt])
@@ -1624,18 +2242,18 @@ model HomeStaffAccess {
 }
 
 model ViolationActionRequest {
-  id             String                @id @default(uuid())
-  violationId    String
-  requestedById  String
-  type           ViolationActionType
-  status         ViolationActionStatus @default(PENDING)
-  note           String?
-  attachmentIds  String[]              @default([])
-  reviewedById   String?
-  reviewedAt     DateTime?
+  id              String                @id @default(uuid())
+  violationId     String
+  requestedById   String
+  type            ViolationActionType
+  status          ViolationActionStatus @default(PENDING)
+  note            String?
+  attachmentIds   String[]              @default([])
+  reviewedById    String?
+  reviewedAt      DateTime?
   rejectionReason String?
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
 
   violation   Violation @relation(fields: [violationId], references: [id], onDelete: Cascade)
   requestedBy User      @relation("violation_action_request_user", fields: [requestedById], references: [id], onDelete: Cascade)
@@ -1646,14 +2264,14 @@ model ViolationActionRequest {
 }
 
 model HelpCenterEntry {
-  id          String   @id @default(uuid())
-  title       String
-  phone       String
+  id           String   @id @default(uuid())
+  title        String
+  phone        String
   availability String?
-  priority    Int      @default(100)
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  priority     Int      @default(100)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 model DiscoverPlace {
@@ -1672,16 +2290,16 @@ model DiscoverPlace {
 
 model NotificationDeviceToken {
   id         String       @id @default(uuid())
-  userId      String
-  token       String       @unique
-  platform    PushPlatform
-  deviceId    String?
-  appVersion  String?
-  metadata    Json?
-  isActive    Boolean      @default(true)
-  lastUsedAt  DateTime?
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  userId     String
+  token      String       @unique
+  platform   PushPlatform
+  deviceId   String?
+  appVersion String?
+  metadata   Json?
+  isActive   Boolean      @default(true)
+  lastUsedAt DateTime?
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -1745,6 +2363,12 @@ model InvoiceSequence {
 
 // --- Incident Sequence for DB-backed incident numbers ---
 model IncidentSequence {
+  name    String @id
+  counter BigInt @default(0)
+}
+
+// --- Permit Request Sequence for DB-backed permit request numbers ---
+model PermitRequestSequence {
   name    String @id
   counter BigInt @default(0)
 }

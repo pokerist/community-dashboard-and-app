@@ -1,5 +1,5 @@
 import { FormEvent, useMemo, useState } from "react";
-import { apiClient, handleApiError, setAuthToken } from "../../lib/api-client";
+import { API_BASE_URL, apiClient, handleApiError, setAuthToken } from "../../lib/api-client";
 import { toast } from "sonner";
 import "./admin-login.css";
 
@@ -32,10 +32,7 @@ export function AdminLoginPage({ onLoginSuccess }: AdminLoginPageProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const apiBase = useMemo(
-    () => (import.meta.env.VITE_API_BASE_URL || "http://localhost:3000").replace(/\/+$/, ""),
-    [],
-  );
+  const apiBase = useMemo(() => API_BASE_URL, []);
   const backendOffline = !!errorMessage && errorMessage.includes("Cannot reach backend");
 
   const fillSeedCredentials = () => {

@@ -1,633 +1,1324 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Card } from "../ui/card";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
-import { Badge } from "../ui/badge";
-import { toast } from "sonner";
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogFooter,
-} from "../ui/dialog";
-import { Label } from "../ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { Search, Plus, Download, CreditCard, TrendingUp, AlertCircle } from "lucide-react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
-import apiClient from "../../lib/api-client";
-import { errorMessage, formatCurrencyEGP, formatDate, getStatusColorClass, humanizeEnum } from "../../lib/live-data";
+  ArrowDown,
+  ArrowUp,
+  Ban,
+  Check,
+  Eye,
+  GripVertical,
+  Plus,
+  Search,
+  Settings,
+  X,
+} from 'lucide-react';
+import { toast } from 'sonner';
+import { EmptyState } from '../EmptyState';
+import { SkeletonTable } from '../SkeletonTable';
+import invoiceService, {
+  type CommunityOption,
+  type InvoiceCategory,
+  type InvoiceDetail,
+  type InvoiceListItem,
+  type InvoiceStatus,
+  type InvoiceStats,
+  type InvoiceType,
+  type ResidentOption,
+  SOURCE_BADGE_COLOR,
+  INVOICE_TYPE_OPTIONS,
+  type UnitOption,
+} from '../../lib/invoiceService';
+import { errorMessage } from '../../lib/live-data';
 
-const INVOICE_TYPES = [
-  "RENT",
-  "SERVICE_FEE",
-  "UTILITY",
-  "FINE",
-  "MAINTENANCE_FEE",
-  "BOOKING_FEE",
-  "SETUP_FEE",
-  "LATE_FEE",
-  "MISCELLANEOUS",
-  "OWNER_EXPENSE",
-  "MANAGEMENT_FEE",
+const CARD_CLASS = 'bg-[#181c27] rounded-xl border border-white/5 p-6';
+
+const statusClass: Record<string, string> = {
+  PAID: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30',
+  PENDING: 'bg-amber-500/15 text-amber-300 border border-amber-500/30',
+  OVERDUE: 'bg-red-500/15 text-red-300 border border-red-500/30',
+  CANCELLED: 'bg-slate-500/15 text-slate-300 border border-slate-500/30',
+};
+
+const categorySwatches: Array<{ value: string; className: string }> = [
+  { value: '#3b82f6', className: 'bg-blue-500' },
+  { value: '#10b981', className: 'bg-emerald-500' },
+  { value: '#f59e0b', className: 'bg-amber-500' },
+  { value: '#ef4444', className: 'bg-red-500' },
+  { value: '#8b5cf6', className: 'bg-violet-500' },
+  { value: '#f97316', className: 'bg-orange-500' },
+  { value: '#14b8a6', className: 'bg-teal-500' },
+  { value: '#64748b', className: 'bg-slate-500' },
 ];
 
-type ResidentOption = {
-  userId: string;
-  name: string;
-  email: string;
-  residentId?: string;
-  units: { id: string; label: string }[];
+const swatchClassByValue = new Map(
+  categorySwatches.map((swatch) => [swatch.value, swatch.className]),
+);
+
+const emptyStats: InvoiceStats = {
+  totalRevenue: 0,
+  pendingAmount: 0,
+  overdueAmount: 0,
+  overdueCount: 0,
+  paidThisMonth: 0,
+  invoicesByType: {
+    RENT: 0,
+    SERVICE_FEE: 0,
+    UTILITY: 0,
+    FINE: 0,
+    MAINTENANCE_FEE: 0,
+    BOOKING_FEE: 0,
+    SETUP_FEE: 0,
+    LATE_FEE: 0,
+    MISCELLANEOUS: 0,
+    OWNER_EXPENSE: 0,
+    MANAGEMENT_FEE: 0,
+    CREDIT_MEMO: 0,
+    DEBIT_MEMO: 0,
+  },
+  invoicesByStatus: {
+    PAID: 0,
+    PENDING: 0,
+    OVERDUE: 0,
+    CANCELLED: 0,
+  },
 };
 
-type InvoiceRow = {
-  id: string;
-  invoiceNumber: string;
-  unitId?: string;
-  unitLabel: string;
-  residentLabel: string;
-  residentId?: string;
-  type: string;
-  amountValue: number;
-  amountLabel: string;
+type CreateInvoiceForm = {
+  unitId: string;
+  residentId: string;
+  type: InvoiceType;
+  amount: string;
   dueDate: string;
-  status: string;
-  paidDate: string | null;
 };
 
-type OwnerInstallmentRow = {
-  id: string;
-  ownerName: string;
-  ownerEmail: string;
-  unitLabel: string;
-  amountValue: number;
-  amountLabel: string;
-  dueDateRaw: string;
-  dueDate: string;
-  status: string;
-  reminderSentAt: string | null;
-  overdueNotifiedAt: string | null;
+type CreateCategoryForm = {
+  label: string;
+  description: string;
+  color: string;
 };
+
+function enumLabel(value: string): string {
+  return value
+    .replace(/_/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formatCurrency(value: number): string {
+  return `EGP ${value.toLocaleString('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function formatDate(value: string | null): string {
+  if (!value) return '--';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '--';
+  return date.toLocaleDateString('en-GB');
+}
+
+function formatDateTime(value: string | null): string {
+  if (!value) return '--';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '--';
+  return date.toLocaleString('en-GB');
+}
 
 export function BillingPayments() {
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [invoicesData, setInvoicesData] = useState<InvoiceRow[]>([]);
-  const [ownerInstallments, setOwnerInstallments] = useState<OwnerInstallmentRow[]>([]);
-  const [installmentsLoading, setInstallmentsLoading] = useState(false);
-  const [installmentActionId, setInstallmentActionId] = useState<string | null>(null);
-  const [residentOptions, setResidentOptions] = useState<ResidentOption[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [invoiceFormData, setInvoiceFormData] = useState({
-    residentUserId: "",
-    unitId: "",
-    type: "",
-    amount: "",
-    dueDate: "",
-    description: "",
+  const [loading, setLoading] = useState(false);
+  const [tableLoading, setTableLoading] = useState(false);
+  const [stats, setStats] = useState<InvoiceStats>(emptyStats);
+  const [rows, setRows] = useState<InvoiceListItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [limit] = useState(25);
+
+  const [filters, setFilters] = useState<{
+    search: string;
+    status: string;
+    type: string;
+    fromDate: string;
+    toDate: string;
+    communityId: string;
+  }>({
+    search: '',
+    status: 'all',
+    type: 'all',
+    fromDate: '',
+    toDate: '',
+    communityId: 'all',
   });
 
-  const loadBillingData = useCallback(async () => {
-    setIsLoading(true);
-    setInstallmentsLoading(true);
-    setLoadError(null);
+  const [communities, setCommunities] = useState<CommunityOption[]>([]);
+  const [units, setUnits] = useState<UnitOption[]>([]);
+  const [residents, setResidents] = useState<ResidentOption[]>([]);
+
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(
+    null,
+  );
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detail, setDetail] = useState<InvoiceDetail | null>(null);
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createSubmitting, setCreateSubmitting] = useState(false);
+  const [createForm, setCreateForm] = useState<CreateInvoiceForm>({
+    unitId: '',
+    residentId: '',
+    type: 'RENT',
+    amount: '',
+    dueDate: '',
+  });
+
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [categoryDrawerOpen, setCategoryDrawerOpen] = useState(false);
+  const [categories, setCategories] = useState<InvoiceCategory[]>([]);
+  const [categorySubmitting, setCategorySubmitting] = useState(false);
+  const [categoryForm, setCategoryForm] = useState<CreateCategoryForm>({
+    label: '',
+    description: '',
+    color: categorySwatches[0].value,
+  });
+
+  const totalPages = Math.max(1, Math.ceil(total / limit));
+
+  const loadBaseOptions = useCallback(async () => {
+    const [communityOptions, unitOptions, residentOptions] = await Promise.all([
+      invoiceService.listCommunityOptions(),
+      invoiceService.listUnitOptions(),
+      invoiceService.listResidentOptions(),
+    ]);
+
+    setCommunities(communityOptions);
+    setUnits(unitOptions);
+    setResidents(residentOptions);
+  }, []);
+
+  const loadCategories = useCallback(async () => {
+    const data = await invoiceService.listCategories(true);
+    setCategories(data);
+  }, []);
+
+  const loadStats = useCallback(async () => {
+    const data = await invoiceService.getInvoiceStats(
+      filters.communityId !== 'all'
+        ? { communityId: filters.communityId }
+        : undefined,
+    );
+    setStats(data);
+  }, [filters.communityId]);
+
+  const loadInvoices = useCallback(async () => {
+    setTableLoading(true);
     try {
-      const [invoicesRes, residentsRes, installmentsRes] = await Promise.all([
-        apiClient.get("/invoices"),
-        apiClient.get("/admin/users", { params: { userType: "resident", take: 200, skip: 0 } }),
-        apiClient.get("/owners/payment-plans/installments", {
-          params: { status: "ALL" },
-        }),
-      ]);
-
-      const invoiceRows = (Array.isArray(invoicesRes.data) ? invoicesRes.data : []).map((invoice: any) => ({
-        id: invoice.id,
-        invoiceNumber: invoice.invoiceNumber ?? invoice.id,
-        unitId: invoice.unitId,
-        unitLabel: invoice.unit?.unitNumber ? `${invoice.unit?.projectName ?? ""} ${invoice.unit.unitNumber}`.trim() : "—",
-        residentLabel: invoice.resident?.nameEN ?? invoice.resident?.email ?? "—",
-        residentId: invoice.residentId,
-        type: humanizeEnum(invoice.type),
-        amountValue: Number(invoice.amount ?? 0),
-        amountLabel: formatCurrencyEGP(invoice.amount),
-        dueDate: formatDate(invoice.dueDate),
-        status: humanizeEnum(invoice.status),
-        paidDate: invoice.paidDate ? formatDate(invoice.paidDate) : null,
-      }));
-
-      const residents = Array.isArray(residentsRes.data) ? residentsRes.data : [];
-      const options: ResidentOption[] = residents.map((user: any) => ({
-        userId: user.id,
-        residentId: user.resident?.id,
-        name: user.nameEN ?? user.email ?? "Resident",
-        email: user.email ?? "",
-        units:
-          user?.resident?.residentUnits?.map((ru: any) => ({
-            id: ru.unit?.id,
-            label: [ru.unit?.projectName, ru.unit?.block && `Block ${ru.unit.block}`, ru.unit?.unitNumber]
-              .filter(Boolean)
-              .join(" - "),
-          }))?.filter((u: any) => !!u.id) ?? [],
-      }));
-
-      setInvoicesData(invoiceRows);
-      setResidentOptions(options);
-      const installmentsRows = (Array.isArray(installmentsRes.data) ? installmentsRes.data : []).map((row: any) => {
-        const amount = Number(row.amount ?? 0);
-        const owner = row.ownerUnitContract?.ownerUser;
-        const unit = row.ownerUnitContract?.unit;
-        return {
-          id: String(row.id),
-          ownerName: owner?.nameEN ?? owner?.email ?? "Owner",
-          ownerEmail: owner?.email ?? "—",
-          unitLabel: [unit?.projectName, unit?.block ? `Block ${unit.block}` : null, unit?.unitNumber ? `Unit ${unit.unitNumber}` : null]
-            .filter(Boolean)
-            .join(" - ") || unit?.id || "—",
-          amountValue: amount,
-          amountLabel: formatCurrencyEGP(amount),
-          dueDateRaw: row.dueDate,
-          dueDate: formatDate(row.dueDate),
-          status: humanizeEnum(row.status),
-          reminderSentAt: row.reminderSentAt ? formatDate(row.reminderSentAt) : null,
-          overdueNotifiedAt: row.overdueNotifiedAt ? formatDate(row.overdueNotifiedAt) : null,
-        } satisfies OwnerInstallmentRow;
+      const response = await invoiceService.listInvoices({
+        page,
+        limit,
+        search: filters.search.trim() || undefined,
+        status:
+          filters.status !== 'all'
+            ? (filters.status as InvoiceStatus)
+            : undefined,
+        type:
+          filters.type !== 'all' ? (filters.type as InvoiceType) : undefined,
+        createdFrom: filters.fromDate
+          ? new Date(`${filters.fromDate}T00:00:00.000Z`).toISOString()
+          : undefined,
+        createdTo: filters.toDate
+          ? new Date(`${filters.toDate}T23:59:59.999Z`).toISOString()
+          : undefined,
+        communityId:
+          filters.communityId !== 'all' ? filters.communityId : undefined,
       });
-      setOwnerInstallments(installmentsRows);
+
+      setRows(response.data);
+      setTotal(response.total);
     } catch (error) {
-      const msg = errorMessage(error);
-      setLoadError(msg);
-      toast.error("Failed to load billing data", { description: msg });
+      toast.error('Failed to load invoices', {
+        description: errorMessage(error),
+      });
     } finally {
-      setIsLoading(false);
-      setInstallmentsLoading(false);
+      setTableLoading(false);
+    }
+  }, [
+    filters.communityId,
+    filters.fromDate,
+    filters.search,
+    filters.status,
+    filters.toDate,
+    filters.type,
+    limit,
+    page,
+  ]);
+
+  const loadPage = useCallback(async () => {
+    setLoading(true);
+    try {
+      await Promise.all([
+        loadBaseOptions(),
+        loadCategories(),
+        loadStats(),
+        loadInvoices(),
+      ]);
+    } catch (error) {
+      toast.error('Failed to initialize invoices page', {
+        description: errorMessage(error),
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [loadBaseOptions, loadCategories, loadInvoices, loadStats]);
+
+  useEffect(() => {
+    void loadPage();
+  }, [loadPage]);
+
+  useEffect(() => {
+    void loadInvoices();
+  }, [loadInvoices]);
+
+  const refreshData = useCallback(async () => {
+    await Promise.all([loadStats(), loadInvoices()]);
+  }, [loadInvoices, loadStats]);
+
+  const openDetail = useCallback(async (invoiceId: string) => {
+    setSelectedInvoiceId(invoiceId);
+    setDetailOpen(true);
+    setDetailLoading(true);
+    try {
+      const response = await invoiceService.getInvoiceDetail(invoiceId);
+      setDetail(response);
+    } catch (error) {
+      toast.error('Failed to load invoice details', {
+        description: errorMessage(error),
+      });
+      setDetailOpen(false);
+    } finally {
+      setDetailLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    void loadBillingData();
-  }, [loadBillingData]);
-
-  const selectedResident = useMemo(
-    () => residentOptions.find((r) => r.userId === invoiceFormData.residentUserId),
-    [residentOptions, invoiceFormData.residentUserId],
-  );
-
-  useEffect(() => {
-    if (!selectedResident) return;
-    if (selectedResident.units.length === 1 && !invoiceFormData.unitId) {
-      setInvoiceFormData((prev) => ({ ...prev, unitId: selectedResident.units[0].id }));
-    }
-  }, [selectedResident, invoiceFormData.unitId]);
-
-  const handleCreateInvoice = async () => {
-    if (!invoiceFormData.unitId || !invoiceFormData.type || !invoiceFormData.amount || !invoiceFormData.dueDate) {
-      toast.error("Please fill in all required fields");
+  const submitCreateInvoice = useCallback(async () => {
+    if (!createForm.unitId || !createForm.amount || !createForm.dueDate) {
+      toast.error('Unit, amount, and due date are required');
       return;
     }
 
-    setIsSubmitting(true);
-    try {
-      await apiClient.post("/invoices", {
-        unitId: invoiceFormData.unitId,
-        residentId: invoiceFormData.residentUserId || undefined,
-        type: invoiceFormData.type,
-        amount: Number(invoiceFormData.amount),
-        dueDate: new Date(invoiceFormData.dueDate).toISOString(),
-      });
-
-      toast.success("Invoice created in backend");
-      setIsCreateDialogOpen(false);
-      setInvoiceFormData({
-        residentUserId: "",
-        unitId: "",
-        type: "",
-        amount: "",
-        dueDate: "",
-        description: "",
-      });
-      await loadBillingData();
-    } catch (error) {
-      toast.error("Failed to create invoice", { description: errorMessage(error) });
-    } finally {
-      setIsSubmitting(false);
+    const amount = Number(createForm.amount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      toast.error('Amount must be greater than zero');
+      return;
     }
-  };
 
-  const handleMarkInstallmentPaid = async (id: string) => {
-    setInstallmentActionId(id);
+    setCreateSubmitting(true);
     try {
-      await apiClient.patch(`/owners/payment-plans/installments/${id}/mark-paid`, {
-        paidAt: new Date().toISOString(),
+      await invoiceService.createInvoice({
+        unitId: createForm.unitId,
+        residentId: createForm.residentId || undefined,
+        type: createForm.type,
+        amount,
+        dueDate: new Date(`${createForm.dueDate}T00:00:00.000Z`).toISOString(),
       });
-      toast.success("Installment marked as paid");
-      await loadBillingData();
+      toast.success('Invoice created');
+      setCreateOpen(false);
+      setCreateForm({
+        unitId: '',
+        residentId: '',
+        type: 'RENT',
+        amount: '',
+        dueDate: '',
+      });
+      await refreshData();
     } catch (error) {
-      toast.error("Failed to mark installment paid", { description: errorMessage(error) });
+      toast.error('Failed to create invoice', {
+        description: errorMessage(error),
+      });
     } finally {
-      setInstallmentActionId(null);
+      setCreateSubmitting(false);
     }
-  };
+  }, [
+    createForm.amount,
+    createForm.dueDate,
+    createForm.residentId,
+    createForm.type,
+    createForm.unitId,
+    refreshData,
+  ]);
 
-  const handleSendInstallmentReminder = async (id: string) => {
-    setInstallmentActionId(id);
+  const markAsPaid = useCallback(
+    async (invoiceId: string) => {
+      try {
+        await invoiceService.markAsPaid(invoiceId);
+        toast.success('Invoice marked as paid');
+        await refreshData();
+        if (selectedInvoiceId === invoiceId) {
+          await openDetail(invoiceId);
+        }
+      } catch (error) {
+        toast.error('Failed to mark invoice as paid', {
+          description: errorMessage(error),
+        });
+      }
+    },
+    [openDetail, refreshData, selectedInvoiceId],
+  );
+
+  const cancelInvoice = useCallback(
+    async (invoiceId: string) => {
+      const reason = window.prompt('Cancellation reason');
+      if (!reason || !reason.trim()) {
+        return;
+      }
+
+      try {
+        await invoiceService.cancelInvoice(invoiceId, reason.trim());
+        toast.success('Invoice cancelled');
+        await refreshData();
+        if (selectedInvoiceId === invoiceId) {
+          await openDetail(invoiceId);
+        }
+      } catch (error) {
+        toast.error('Failed to cancel invoice', {
+          description: errorMessage(error),
+        });
+      }
+    },
+    [openDetail, refreshData, selectedInvoiceId],
+  );
+
+  const bulkMarkOverdue = useCallback(async () => {
     try {
-      await apiClient.post(`/owners/payment-plans/installments/${id}/send-reminder`);
-      toast.success("Reminder sent");
-      await loadBillingData();
+      const response = await invoiceService.bulkMarkOverdue();
+      toast.success(`Marked ${response.updatedCount} invoice(s) overdue`);
+      await refreshData();
     } catch (error) {
-      toast.error("Failed to send reminder", { description: errorMessage(error) });
-    } finally {
-      setInstallmentActionId(null);
+      toast.error('Failed to mark overdue invoices', {
+        description: errorMessage(error),
+      });
     }
-  };
+  }, [refreshData]);
 
-  const filteredInvoices = useMemo(() => {
-    const q = searchTerm.trim().toLowerCase();
-    return invoicesData.filter((invoice) => {
-      if (!q) return true;
-      return (
-        invoice.invoiceNumber.toLowerCase().includes(q) ||
-        invoice.unitLabel.toLowerCase().includes(q) ||
-        invoice.residentLabel.toLowerCase().includes(q) ||
-        invoice.type.toLowerCase().includes(q)
-      );
-    });
-  }, [invoicesData, searchTerm]);
+  const submitCategory = useCallback(async () => {
+    if (!categoryForm.label.trim()) {
+      toast.error('Category label is required');
+      return;
+    }
 
-  const paidInvoices = useMemo(
-    () => invoicesData.filter((i) => i.status.toUpperCase() === "PAID"),
-    [invoicesData],
-  );
-  const pendingInvoices = useMemo(
-    () => invoicesData.filter((i) => i.status.toUpperCase() === "PENDING"),
-    [invoicesData],
-  );
-  const overdueInvoices = useMemo(
-    () => invoicesData.filter((i) => i.status.toUpperCase() === "OVERDUE"),
-    [invoicesData],
-  );
-  const overdueOwnerInstallments = useMemo(
-    () => ownerInstallments.filter((i) => i.status.toUpperCase() === "OVERDUE"),
-    [ownerInstallments],
+    setCategorySubmitting(true);
+    try {
+      await invoiceService.createCategory({
+        label: categoryForm.label.trim(),
+        description: categoryForm.description.trim() || undefined,
+        color: categoryForm.color,
+      });
+      toast.success('Category added');
+      setCategoryDrawerOpen(false);
+      setCategoryForm({
+        label: '',
+        description: '',
+        color: categorySwatches[0].value,
+      });
+      await loadCategories();
+    } catch (error) {
+      toast.error('Failed to add category', {
+        description: errorMessage(error),
+      });
+    } finally {
+      setCategorySubmitting(false);
+    }
+  }, [
+    categoryForm.color,
+    categoryForm.description,
+    categoryForm.label,
+    loadCategories,
+  ]);
+
+  const moveCategory = useCallback(
+    async (index: number, direction: -1 | 1) => {
+      const nextIndex = index + direction;
+      if (nextIndex < 0 || nextIndex >= categories.length) {
+        return;
+      }
+      const reordered = [...categories];
+      const [item] = reordered.splice(index, 1);
+      reordered.splice(nextIndex, 0, item);
+
+      try {
+        setCategories(reordered);
+        await invoiceService.reorderCategories(reordered.map((row) => row.id));
+      } catch (error) {
+        toast.error('Failed to reorder categories', {
+          description: errorMessage(error),
+        });
+        await loadCategories();
+      }
+    },
+    [categories, loadCategories],
   );
 
-  const totalRevenue = paidInvoices.reduce((sum, i) => sum + i.amountValue, 0);
-  const outstandingAmount = pendingInvoices.reduce((sum, i) => sum + i.amountValue, 0);
-  const overdueAmount = overdueInvoices.reduce((sum, i) => sum + i.amountValue, 0);
-  const collectionRate = invoicesData.length
-    ? (paidInvoices.reduce((sum, i) => sum + i.amountValue, 0) /
-        Math.max(1, invoicesData.reduce((sum, i) => sum + i.amountValue, 0))) *
-      100
-    : 0;
-
-  const renderTable = (rows: InvoiceRow[]) => (
-    <Table>
-      <TableHeader>
-        <TableRow className="bg-[#F9FAFB]">
-          <TableHead>Invoice ID</TableHead>
-          <TableHead>Unit</TableHead>
-          <TableHead>Resident</TableHead>
-          <TableHead>Type</TableHead>
-          <TableHead>Amount</TableHead>
-          <TableHead>Due Date</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead>Paid Date</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((invoice) => (
-          <TableRow key={invoice.id} className="hover:bg-[#F9FAFB]">
-            <TableCell className="font-medium text-[#1E293B]">{invoice.invoiceNumber}</TableCell>
-            <TableCell>
-              <Badge variant="secondary" className="bg-[#F3F4F6] text-[#1E293B]">
-                {invoice.unitLabel}
-              </Badge>
-            </TableCell>
-            <TableCell className="text-[#64748B]">{invoice.residentLabel}</TableCell>
-            <TableCell className="text-[#1E293B]">{invoice.type}</TableCell>
-            <TableCell className="text-[#1E293B]">{invoice.amountLabel}</TableCell>
-            <TableCell className="text-[#64748B]">{invoice.dueDate}</TableCell>
-            <TableCell>
-              <Badge className={getStatusColorClass(invoice.status)}>{invoice.status}</Badge>
-            </TableCell>
-            <TableCell className="text-[#64748B]">{invoice.paidDate || "—"}</TableCell>
-          </TableRow>
-        ))}
-        {rows.length === 0 ? (
-          <TableRow>
-            <TableCell colSpan={8} className="text-center py-10 text-[#64748B]">
-              No invoices found.
-            </TableCell>
-          </TableRow>
-        ) : null}
-      </TableBody>
-    </Table>
-  );
+  const filteredUnits = useMemo(() => {
+    if (filters.communityId === 'all') {
+      return units;
+    }
+    return units.filter((unit) => unit.communityId === filters.communityId);
+  }, [filters.communityId, units]);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="p-8 space-y-6">
+      <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-[#1E293B]">Billing & Payments</h1>
-          <p className="text-[#64748B] mt-1">Live invoices and payment status from the backend</p>
+          <h1 className="text-2xl font-semibold text-slate-100">
+            Payments & Invoices
+          </h1>
+          <p className="text-sm text-slate-400 mt-1">
+            Track invoices, collections, and category settings.
+          </p>
         </div>
-        <div className="flex gap-3">
-          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white rounded-lg gap-2">
-                <Plus className="w-4 h-4" />
+        <div className="flex items-center gap-2">
+          <button
+            className="bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+            onClick={() => setSettingsOpen(true)}
+          >
+            <Settings className="w-4 h-4" />
+            Categories
+          </button>
+          <button
+            className="bg-black hover:bg-black/90 border border-black text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+            style={{ backgroundColor: '#000000', color: '#ffffff' }}
+            onClick={() => setCreateOpen(true)}
+          >
+            <Plus className="w-4 h-4" />
+            Create Invoice
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-4 gap-4">
+        <div className="bg-[#181c27] rounded-xl border border-white/5 p-6 cursor-pointer hover:border-white/10 transition-colors">
+          <div className="flex items-start justify-between mb-4">
+            <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">
+              Total Revenue
+            </p>
+            <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center" />
+          </div>
+          <p className="text-3xl font-semibold text-emerald-400 font-['DM_Mono']">
+            {formatCurrency(stats.totalRevenue)}
+          </p>
+          <p className="text-xs text-slate-500 mt-1">Paid invoices</p>
+        </div>
+
+        <div className="bg-[#181c27] rounded-xl border border-white/5 p-6 cursor-pointer hover:border-white/10 transition-colors">
+          <div className="flex items-start justify-between mb-4">
+            <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">
+              Pending Amount
+            </p>
+            <div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center" />
+          </div>
+          <p className="text-3xl font-semibold text-slate-100 font-['DM_Mono']">
+            {formatCurrency(stats.pendingAmount)}
+          </p>
+          <p className="text-xs text-slate-500 mt-1">Awaiting payment</p>
+        </div>
+
+        <div className="bg-[#181c27] rounded-xl border border-white/5 p-6 cursor-pointer hover:border-white/10 transition-colors">
+          <div className="flex items-start justify-between mb-4">
+            <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">
+              Overdue Amount
+            </p>
+            <div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center" />
+          </div>
+          <p className="text-3xl font-semibold text-slate-100 font-['DM_Mono']">
+            {formatCurrency(stats.overdueAmount)}
+          </p>
+          <p className="text-xs text-slate-500 mt-1">Past due invoices</p>
+        </div>
+
+        <div className="bg-[#181c27] rounded-xl border border-white/5 p-6 cursor-pointer hover:border-white/10 transition-colors">
+          <div className="flex items-start justify-between mb-4">
+            <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">
+              Overdue Count
+            </p>
+            <div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center" />
+          </div>
+          <p
+            className={`text-3xl font-semibold font-['DM_Mono'] ${stats.overdueCount > 0 ? 'text-red-400' : 'text-slate-100'}`}
+          >
+            {stats.overdueCount.toLocaleString()}
+          </p>
+          <p className="text-xs text-slate-500 mt-1">
+            Current overdue invoices
+          </p>
+        </div>
+      </div>
+
+      <div className="bg-[#181c27] rounded-xl border border-white/5 p-0 overflow-hidden">
+        <div className="p-4 border-b border-white/5 flex items-center gap-3 flex-wrap">
+          <div className="relative flex-1 max-w-xs">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+            <input
+              className="w-full bg-[#0f1117] border border-white/10 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-blue-500/50"
+              placeholder="Search..."
+              value={filters.search}
+              onChange={(event) => {
+                setPage(1);
+                setFilters((prev) => ({ ...prev, search: event.target.value }));
+              }}
+            />
+          </div>
+
+          <select
+            className="w-40 bg-[#0f1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-blue-500/50 appearance-none"
+            value={filters.status}
+            onChange={(event) => {
+              setPage(1);
+              setFilters((prev) => ({ ...prev, status: event.target.value }));
+            }}
+          >
+            <option value="all">All Statuses</option>
+            <option value="PENDING">Pending</option>
+            <option value="PAID">Paid</option>
+            <option value="OVERDUE">Overdue</option>
+            <option value="CANCELLED">Cancelled</option>
+          </select>
+
+          <select
+            className="w-48 bg-[#0f1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-blue-500/50 appearance-none"
+            value={filters.type}
+            onChange={(event) => {
+              setPage(1);
+              setFilters((prev) => ({ ...prev, type: event.target.value }));
+            }}
+          >
+            <option value="all">All Types</option>
+            {INVOICE_TYPE_OPTIONS.map((type) => (
+              <option key={type} value={type}>
+                {enumLabel(type)}
+              </option>
+            ))}
+          </select>
+
+          <input
+            type="date"
+            className="w-36 bg-[#0f1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-blue-500/50"
+            value={filters.fromDate}
+            onChange={(event) => {
+              setPage(1);
+              setFilters((prev) => ({ ...prev, fromDate: event.target.value }));
+            }}
+          />
+          <input
+            type="date"
+            className="w-36 bg-[#0f1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-blue-500/50"
+            value={filters.toDate}
+            onChange={(event) => {
+              setPage(1);
+              setFilters((prev) => ({ ...prev, toDate: event.target.value }));
+            }}
+          />
+
+          <select
+            className="w-48 bg-[#0f1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-blue-500/50 appearance-none"
+            value={filters.communityId}
+            onChange={(event) => {
+              setPage(1);
+              setFilters((prev) => ({
+                ...prev,
+                communityId: event.target.value,
+              }));
+            }}
+          >
+            <option value="all">All Communities</option>
+            {communities.map((community) => (
+              <option key={community.id} value={community.id}>
+                {community.label}
+              </option>
+            ))}
+          </select>
+
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              className="bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+              onClick={() => void bulkMarkOverdue()}
+            >
+              Mark Overdue
+            </button>
+            <button
+              className="bg-black hover:bg-black/90 border border-black text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+              style={{ backgroundColor: '#000000', color: '#ffffff' }}
+              onClick={() => setCreateOpen(true)}
+            >
+              <Plus className="w-4 h-4" /> Create Invoice
+            </button>
+          </div>
+        </div>
+
+        {loading || tableLoading ? (
+          <div className="p-6">
+            <SkeletonTable columns={9} rows={8} />
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="p-6">
+            <EmptyState
+              title="No invoices found"
+              description="Try changing status, type, date, or search filters."
+            />
+          </div>
+        ) : (
+          <>
+            <div className="rounded-xl border border-white/5 overflow-hidden">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-[#0f1117] border-b border-white/5">
+                    {[
+                      'Invoice #',
+                      'Unit',
+                      'Resident',
+                      'Category',
+                      'Amount',
+                      'Due Date',
+                      'Status',
+                      'Source',
+                      'Actions',
+                    ].map((column) => (
+                      <th
+                        key={column}
+                        className="py-3 px-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wider"
+                      >
+                        {column}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => (
+                    <tr
+                      key={row.id}
+                      className={`border-b border-white/5 hover:bg-white/[0.02] transition-colors last:border-0 ${row.status === 'OVERDUE' ? 'border-l-2 border-red-500/40' : ''}`}
+                    >
+                      <td className="py-4 px-4 text-sm text-slate-300 font-['DM_Mono']">
+                        {row.invoiceNumber}
+                      </td>
+                      <td className="py-4 px-4 text-sm text-slate-300">
+                        {row.unitNumber}
+                      </td>
+                      <td className="py-4 px-4 text-sm text-slate-300">
+                        {row.residentName || '--'}
+                      </td>
+                      <td className="py-4 px-4 text-sm text-slate-300">
+                        {row.categoryLabel || '--'}
+                      </td>
+                      <td className="py-4 px-4 text-sm text-slate-300 text-right font-['DM_Mono']">
+                        {formatCurrency(row.amount)}
+                      </td>
+                      <td className="py-4 px-4 text-sm text-slate-300">
+                        {formatDate(row.dueDate)}
+                      </td>
+                      <td className="py-4 px-4 text-sm text-slate-300">
+                        <span
+                          className={`text-xs px-2.5 py-1 rounded-full ${statusClass[row.status] || statusClass.CANCELLED}`}
+                        >
+                          {enumLabel(row.status)}
+                        </span>
+                      </td>
+                      <td className="py-4 px-4 text-sm text-slate-300">
+                        <span
+                          className={`text-xs px-2.5 py-1 rounded-full ${SOURCE_BADGE_COLOR[row.source]}`}
+                        >
+                          {enumLabel(row.source)}
+                        </span>
+                      </td>
+                      <td className="py-4 px-4 text-sm text-slate-300">
+                        <div className="flex items-center gap-2">
+                          <button
+                            className="p-2 rounded-lg bg-white/5 hover:bg-white/10"
+                            onClick={() => void openDetail(row.id)}
+                          >
+                            <Eye className="w-4 h-4" />
+                          </button>
+                          {row.status === 'PENDING' ||
+                          row.status === 'OVERDUE' ? (
+                            <button
+                              className="p-2 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300"
+                              onClick={() => void markAsPaid(row.id)}
+                            >
+                              <Check className="w-4 h-4" />
+                            </button>
+                          ) : null}
+                          {row.status !== 'PAID' &&
+                          row.status !== 'CANCELLED' ? (
+                            <button
+                              className="p-2 rounded-lg bg-red-500/15 hover:bg-red-500/25 text-red-300"
+                              onClick={() => void cancelInvoice(row.id)}
+                            >
+                              <Ban className="w-4 h-4" />
+                            </button>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="px-6 py-4 border-t border-white/5 flex items-center justify-end gap-3">
+              <button
+                className="bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                disabled={page <= 1}
+                onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+              >
+                Previous
+              </button>
+              <span className="text-sm text-slate-400">
+                Page {page} of {totalPages}
+              </span>
+              <button
+                className="bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                disabled={page >= totalPages}
+                onClick={() =>
+                  setPage((prev) => Math.min(totalPages, prev + 1))
+                }
+              >
+                Next
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      {detailOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/50"
+          onClick={() => setDetailOpen(false)}
+        >
+          <div
+            className="w-full max-w-3xl max-h-[90vh] bg-white border border-slate-200 rounded-xl flex flex-col z-50 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="px-6 py-5 border-b border-slate-200 flex items-center justify-between flex-shrink-0">
+              <h2 className="text-base font-semibold text-slate-900">
+                Invoice Detail
+              </h2>
+              <button
+                className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700"
+                onClick={() => setDetailOpen(false)}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
+              {detailLoading || !detail ? (
+                <SkeletonTable columns={2} rows={6} />
+              ) : (
+                <>
+                  <div className="rounded-xl border border-slate-200 bg-white p-6">
+                    <p className="text-2xl font-semibold text-slate-900 font-['DM_Mono']">
+                      {detail.invoiceNumber}
+                    </p>
+                    <div className="flex items-center gap-2 mt-3">
+                      <span
+                        className={`text-xs px-2.5 py-1 rounded-full ${statusClass[detail.status] || statusClass.CANCELLED}`}
+                      >
+                        {enumLabel(detail.status)}
+                      </span>
+                      <span
+                        className={`text-xs px-2.5 py-1 rounded-full ${SOURCE_BADGE_COLOR[detail.source]}`}
+                      >
+                        {enumLabel(detail.source)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 bg-white p-6">
+                    <p className="text-xs font-medium text-slate-600 mb-2 uppercase tracking-wider">
+                      Parties
+                    </p>
+                    <p className="text-sm text-slate-800">
+                      Unit: {detail.parties.unitNumber}
+                    </p>
+                    <p className="text-sm text-slate-800">
+                      Resident: {detail.parties.residentName || '--'}
+                    </p>
+                    <p className="text-sm text-slate-800">
+                      Phone: {detail.parties.residentPhone || '--'}
+                    </p>
+                    <p className="text-sm text-slate-600">
+                      Community: {detail.parties.communityName}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 bg-white p-6">
+                    <p className="text-xs font-medium text-slate-600 mb-2 uppercase tracking-wider">
+                      Amount
+                    </p>
+                    <p className="text-2xl font-semibold text-slate-900 font-['DM_Mono']">
+                      {formatCurrency(detail.amount)}
+                    </p>
+                    <p className="text-sm text-slate-700 mt-2">
+                      Due: {formatDate(detail.dueDate)}
+                    </p>
+                    <p className="text-sm text-slate-700">
+                      Paid: {formatDate(detail.paidDate)}
+                    </p>
+                    <p className="text-sm text-slate-700 mt-1 flex items-center gap-2">
+                      <span
+                        className={`w-2 h-2 rounded-full ${swatchClassByValue.get(detail.categoryColor || '') || 'bg-slate-500'}`}
+                      />
+                      {detail.categoryLabel || '--'}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 bg-white p-6">
+                    <p className="text-xs font-medium text-slate-600 mb-2 uppercase tracking-wider">
+                      Source Record
+                    </p>
+                    <p className="text-sm text-slate-800">
+                      {detail.sourceRecord.label}
+                    </p>
+                    <p className="text-sm text-slate-600">
+                      {detail.sourceRecord.secondaryLabel || 'Manually created'}
+                    </p>
+                    <p className="text-sm text-slate-600 mt-1">
+                      Amount:{' '}
+                      {detail.sourceRecord.amount !== null
+                        ? formatCurrency(detail.sourceRecord.amount)
+                        : '--'}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 bg-white p-6">
+                    <p className="text-xs font-medium text-slate-600 mb-2 uppercase tracking-wider">
+                      Documents
+                    </p>
+                    {detail.documents.length === 0 ? (
+                      <p className="text-sm text-slate-500">
+                        No documents attached.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {detail.documents.map((document) => (
+                          <div
+                            key={document.id}
+                            className="flex items-center gap-3 p-3 rounded-lg bg-slate-50 border border-slate-200"
+                          >
+                            <div className="w-12 h-12 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-xs text-slate-500">
+                              FILE
+                            </div>
+                            <div>
+                              <p className="text-sm text-slate-800">
+                                {document.name}
+                              </p>
+                              <p className="text-xs text-slate-500">
+                                {document.mimeType || 'Unknown type'}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="px-6 py-4 border-t border-slate-200 flex items-center justify-end gap-3 flex-shrink-0">
+              {detail &&
+              (detail.status === 'PENDING' || detail.status === 'OVERDUE') ? (
+                <>
+                  <button
+                    className="bg-red-600 hover:bg-red-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                    onClick={() => detail && void cancelInvoice(detail.id)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                    onClick={() => detail && void markAsPaid(detail.id)}
+                  >
+                    Mark as Paid
+                  </button>
+                </>
+              ) : detail && detail.status === 'PAID' ? (
+                <p className="text-sm text-emerald-600">
+                  Paid on {formatDate(detail.paidDate)}
+                </p>
+              ) : (
+                <p className="text-sm text-slate-500">Cancelled</p>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {createOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/50"
+          onClick={() => setCreateOpen(false)}
+        >
+          <div
+            className="w-full max-w-2xl max-h-[90vh] bg-white border border-slate-200 rounded-xl flex flex-col z-50 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="px-6 py-5 border-b border-slate-200 flex items-center justify-between flex-shrink-0">
+              <h2 className="text-base font-semibold text-slate-900">
                 Create Invoice
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-lg">
-              <DialogHeader>
-                <DialogTitle>Create New Invoice</DialogTitle>
-                <DialogDescription>Creates a real invoice in the backend database.</DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label htmlFor="invoiceResident">Resident (optional)</Label>
-                  <Select
-                    value={invoiceFormData.residentUserId}
-                    onValueChange={(value) =>
-                      setInvoiceFormData((prev) => ({
+              </h2>
+              <button
+                className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700"
+                onClick={() => setCreateOpen(false)}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
+              <div>
+                <label className="text-xs font-medium text-slate-700 mb-1.5 block">
+                  Community
+                </label>
+                <select
+                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-blue-500"
+                  value={filters.communityId}
+                  onChange={(event) =>
+                    setFilters((prev) => ({
+                      ...prev,
+                      communityId: event.target.value,
+                    }))
+                  }
+                >
+                  <option value="all">All Communities</option>
+                  {communities.map((community) => (
+                    <option key={community.id} value={community.id}>
+                      {community.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-700 mb-1.5 block">
+                  Unit
+                </label>
+                <select
+                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-blue-500"
+                  value={createForm.unitId}
+                  onChange={(event) =>
+                    setCreateForm((prev) => ({
+                      ...prev,
+                      unitId: event.target.value,
+                    }))
+                  }
+                >
+                  <option value="">Select Unit</option>
+                  {filteredUnits.map((unit) => (
+                    <option key={unit.id} value={unit.id}>
+                      {unit.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-700 mb-1.5 block">
+                  Resident (Optional)
+                </label>
+                <select
+                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-blue-500"
+                  value={createForm.residentId}
+                  onChange={(event) =>
+                    setCreateForm((prev) => ({
+                      ...prev,
+                      residentId: event.target.value,
+                    }))
+                  }
+                >
+                  <option value="">No Resident</option>
+                  {residents.map((resident) => (
+                    <option key={resident.id} value={resident.id}>
+                      {resident.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-medium text-slate-700 mb-1.5 block">
+                    Type
+                  </label>
+                  <select
+                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-blue-500"
+                    value={createForm.type}
+                    onChange={(event) =>
+                      setCreateForm((prev) => ({
                         ...prev,
-                        residentUserId: value === "none" ? "" : value,
-                        unitId: "",
+                        type: event.target.value as InvoiceType,
                       }))
                     }
                   >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select resident" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">No resident</SelectItem>
-                      {residentOptions.map((resident) => (
-                        <SelectItem key={resident.userId} value={resident.userId}>
-                          {resident.name} ({resident.email || "no email"})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    {INVOICE_TYPE_OPTIONS.map((type) => (
+                      <option key={type} value={type}>
+                        {enumLabel(type)}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="invoiceUnit">Unit</Label>
-                  <Select
-                    value={invoiceFormData.unitId}
-                    onValueChange={(value) => setInvoiceFormData((prev) => ({ ...prev, unitId: value }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Choose unit" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(selectedResident?.units ?? residentOptions.flatMap((r) => r.units)).map((unit) => (
-                        <SelectItem key={`${unit.id}-${unit.label}`} value={unit.id}>
-                          {unit.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="invoiceType">Invoice Type</Label>
-                  <Select
-                    value={invoiceFormData.type}
-                    onValueChange={(value) => setInvoiceFormData((prev) => ({ ...prev, type: value }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {INVOICE_TYPES.map((type) => (
-                        <SelectItem key={type} value={type}>
-                          {humanizeEnum(type)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="amount">Amount (EGP)</Label>
-                  <Input
-                    id="amount"
+                <div>
+                  <label className="text-xs font-medium text-slate-700 mb-1.5 block">
+                    Amount
+                  </label>
+                  <input
+                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-blue-500"
                     type="number"
-                    placeholder="2500"
-                    value={invoiceFormData.amount}
-                    onChange={(e) => setInvoiceFormData((prev) => ({ ...prev, amount: e.target.value }))}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="dueDate">Due Date</Label>
-                  <Input
-                    id="dueDate"
-                    type="date"
-                    value={invoiceFormData.dueDate}
-                    onChange={(e) => setInvoiceFormData((prev) => ({ ...prev, dueDate: e.target.value }))}
+                    min={0}
+                    value={createForm.amount}
+                    onChange={(event) =>
+                      setCreateForm((prev) => ({
+                        ...prev,
+                        amount: event.target.value,
+                      }))
+                    }
                   />
                 </div>
               </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white"
-                  onClick={() => void handleCreateInvoice()}
-                  disabled={isSubmitting}
-                >
-                  {isSubmitting ? "Creating..." : "Generate Invoice"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-
-          <Button variant="outline" className="gap-2 rounded-lg" onClick={() => void loadBillingData()} disabled={isLoading}>
-            <Download className="w-4 h-4" />
-            {isLoading ? "Refreshing..." : "Refresh"}
-          </Button>
-        </div>
-      </div>
-
-      {loadError ? (
-        <Card className="p-4 border border-[#FECACA] bg-[#FEF2F2] text-[#991B1B] rounded-xl">{loadError}</Card>
-      ) : null}
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="p-6 shadow-card rounded-xl">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[#64748B] mb-2">Total Revenue (Paid)</p>
-              <h3 className="text-[#1E293B]">{formatCurrencyEGP(totalRevenue)}</h3>
-              <p className="text-xs text-[#10B981] mt-1">{paidInvoices.length} paid invoices</p>
-            </div>
-            <div className="w-12 h-12 rounded-xl bg-[#10B981]/10 flex items-center justify-center">
-              <TrendingUp className="w-6 h-6 text-[#10B981]" />
-            </div>
-          </div>
-        </Card>
-        <Card className="p-6 shadow-card rounded-xl">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[#64748B] mb-2">Outstanding</p>
-              <h3 className="text-[#1E293B]">{formatCurrencyEGP(outstandingAmount)}</h3>
-              <p className="text-xs text-[#F59E0B] mt-1">{pendingInvoices.length} pending invoices</p>
-            </div>
-            <div className="w-12 h-12 rounded-xl bg-[#F59E0B]/10 flex items-center justify-center">
-              <CreditCard className="w-6 h-6 text-[#F59E0B]" />
-            </div>
-          </div>
-        </Card>
-        <Card className="p-6 shadow-card rounded-xl">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[#64748B] mb-2">Overdue Amount</p>
-              <h3 className="text-[#1E293B]">{formatCurrencyEGP(overdueAmount)}</h3>
-              <p className="text-xs text-[#EF4444] mt-1">{overdueInvoices.length} overdue invoices</p>
-            </div>
-            <div className="w-12 h-12 rounded-xl bg-[#EF4444]/10 flex items-center justify-center">
-              <AlertCircle className="w-6 h-6 text-[#EF4444]" />
-            </div>
-          </div>
-        </Card>
-        <Card className="p-6 shadow-card rounded-xl">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[#64748B] mb-2">Collection Rate</p>
-              <h3 className="text-[#1E293B]">{collectionRate.toFixed(1)}%</h3>
-              <p className="text-xs text-[#64748B] mt-1">{invoicesData.length} total invoices</p>
-            </div>
-            <div className="w-12 h-12 rounded-xl bg-[#0B5FFF]/10 flex items-center justify-center">
-              <TrendingUp className="w-6 h-6 text-[#0B5FFF]" />
-            </div>
-          </div>
-        </Card>
-      </div>
-
-      <Card className="shadow-card rounded-xl overflow-hidden">
-        <div className="p-4 border-b border-[#E5E7EB] flex items-center justify-between">
-          <div>
-            <h3 className="text-[#1E293B]">Owner Payment Plan Installments</h3>
-            <p className="text-xs text-[#64748B] mt-1">
-              Overdue follow-up and manual reminder actions
-            </p>
-          </div>
-          <Badge className={overdueOwnerInstallments.length ? "bg-[#FEF2F2] text-[#991B1B]" : "bg-[#ECFDF5] text-[#166534]"}>
-            {overdueOwnerInstallments.length} overdue
-          </Badge>
-        </div>
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-[#F9FAFB]">
-              <TableHead>Owner</TableHead>
-              <TableHead>Unit</TableHead>
-              <TableHead>Amount</TableHead>
-              <TableHead>Due Date</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Reminder</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {ownerInstallments.map((item) => (
-              <TableRow key={item.id} className="hover:bg-[#F9FAFB]">
-                <TableCell>
-                  <div className="text-sm font-medium text-[#1E293B]">{item.ownerName}</div>
-                  <div className="text-xs text-[#64748B]">{item.ownerEmail}</div>
-                </TableCell>
-                <TableCell className="text-[#334155]">{item.unitLabel}</TableCell>
-                <TableCell className="text-[#1E293B]">{item.amountLabel}</TableCell>
-                <TableCell className="text-[#64748B]">{item.dueDate}</TableCell>
-                <TableCell>
-                  <Badge className={getStatusColorClass(item.status)}>{item.status}</Badge>
-                </TableCell>
-                <TableCell className="text-xs text-[#64748B]">
-                  {item.reminderSentAt
-                    ? `Due reminder: ${item.reminderSentAt}`
-                    : item.overdueNotifiedAt
-                      ? `Overdue notified: ${item.overdueNotifiedAt}`
-                      : "Not sent"}
-                </TableCell>
-                <TableCell className="text-right">
-                  {item.status.toUpperCase() === "PAID" ? (
-                    <span className="text-xs text-[#64748B]">No actions</span>
-                  ) : (
-                    <div className="flex justify-end gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void handleSendInstallmentReminder(item.id)}
-                        disabled={installmentActionId === item.id}
-                      >
-                        {installmentActionId === item.id ? "Working..." : "Send Reminder"}
-                      </Button>
-                      <Button
-                        size="sm"
-                        className="bg-[#16A34A] hover:bg-[#16A34A]/90 text-white"
-                        onClick={() => void handleMarkInstallmentPaid(item.id)}
-                        disabled={installmentActionId === item.id}
-                      >
-                        {installmentActionId === item.id ? "Working..." : "Mark Paid"}
-                      </Button>
-                    </div>
-                  )}
-                </TableCell>
-              </TableRow>
-            ))}
-            {!installmentsLoading && ownerInstallments.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center py-10 text-[#64748B]">
-                  No owner installments found.
-                </TableCell>
-              </TableRow>
-            ) : null}
-          </TableBody>
-        </Table>
-      </Card>
-
-      <Card className="shadow-card rounded-xl overflow-hidden">
-        <Tabs defaultValue="all" className="w-full">
-          <TabsList className="w-full justify-start border-b border-[#E5E7EB] rounded-none h-12 bg-transparent px-4">
-            <TabsTrigger value="all" className="rounded-lg">All Invoices</TabsTrigger>
-            <TabsTrigger value="paid" className="rounded-lg">Paid</TabsTrigger>
-            <TabsTrigger value="pending" className="rounded-lg">Pending</TabsTrigger>
-            <TabsTrigger value="overdue" className="rounded-lg">Overdue</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="all" className="m-0">
-            <div className="p-4 border-b border-[#E5E7EB]">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#64748B]" />
-                <Input
-                  placeholder="Search invoices..."
-                  className="pl-10 rounded-lg"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
+              <div>
+                <label className="text-xs font-medium text-slate-700 mb-1.5 block">
+                  Due Date
+                </label>
+                <input
+                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-blue-500"
+                  type="date"
+                  value={createForm.dueDate}
+                  onChange={(event) =>
+                    setCreateForm((prev) => ({
+                      ...prev,
+                      dueDate: event.target.value,
+                    }))
+                  }
                 />
               </div>
             </div>
-            {renderTable(filteredInvoices)}
-          </TabsContent>
-          <TabsContent value="paid" className="m-0">{renderTable(paidInvoices)}</TabsContent>
-          <TabsContent value="pending" className="m-0">{renderTable(pendingInvoices)}</TabsContent>
-          <TabsContent value="overdue" className="m-0">{renderTable(overdueInvoices)}</TabsContent>
-        </Tabs>
-      </Card>
+            <div className="px-6 py-4 border-t border-slate-200 flex items-center justify-end gap-3 flex-shrink-0">
+              <button
+                className="bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                onClick={() => setCreateOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="bg-black hover:bg-black/90 border border-black text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                style={{ backgroundColor: '#000000', color: '#ffffff' }}
+                onClick={() => void submitCreateInvoice()}
+                disabled={createSubmitting}
+              >
+                {createSubmitting ? 'Saving...' : 'Create'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {settingsOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-start justify-center p-6 overflow-y-auto"
+          style={{ backgroundColor: 'rgba(15, 23, 42, 0.28)', backdropFilter: 'blur(1px)' }}
+          onClick={() => setSettingsOpen(false)}
+        >
+          <div
+            className="w-[960px] max-w-[calc(100vw-48px)] mt-8 rounded-xl border border-white/10 shadow-2xl shadow-black/60 overflow-hidden"
+            style={{ backgroundColor: '#ffffff', color: '#0f172a', borderColor: '#e2e8f0' }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="px-6 py-5 border-b flex items-center justify-between" style={{ borderBottomColor: '#e2e8f0' }}>
+              <div>
+                <h2 className="text-lg font-semibold" style={{ color: '#0f172a' }}>
+                  Invoice Categories
+                </h2>
+                <p className="text-sm" style={{ color: '#475569' }}>
+                  Review system categories and add your own custom categories.
+                </p>
+              </div>
+              <button
+                className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+                onClick={() => setCategoryDrawerOpen(true)}
+              >
+                <Plus className="w-4 h-4" /> Add Category
+              </button>
+            </div>
+
+            <div className="p-6 space-y-3 max-h-[70vh] overflow-y-auto">
+              {categories.length === 0 ? (
+                <div
+                  className="rounded-xl border p-6 text-center"
+                  style={{ backgroundColor: '#f8fafc', borderColor: '#e2e8f0' }}
+                >
+                  <h3 className="text-base font-semibold" style={{ color: '#0f172a' }}>
+                    No categories configured
+                  </h3>
+                  <p className="mx-auto mt-2 max-w-xl text-sm" style={{ color: '#475569' }}>
+                    System categories are auto-created from invoice types. Add
+                    your own custom categories for manual billing workflows.
+                  </p>
+                </div>
+              ) : (
+                categories.map((category, index) => (
+                  <div
+                    key={category.id}
+                    className="border rounded-lg px-4 py-3 flex items-center gap-3"
+                    style={{ backgroundColor: '#ffffff', borderColor: '#e2e8f0' }}
+                  >
+                    <span
+                      className={`w-3 h-3 rounded-full ${swatchClassByValue.get(category.color || '') || 'bg-slate-500'}`}
+                    />
+                    <div className="min-w-[180px]">
+                      <p className="text-sm font-medium" style={{ color: '#0f172a' }}>
+                        {category.label}
+                      </p>
+                      <p className="text-xs" style={{ color: '#64748b' }}>
+                        {category.description || '--'}
+                      </p>
+                    </div>
+                    <span
+                      className="text-xs px-2.5 py-1 rounded-full"
+                      style={{ color: '#334155', backgroundColor: '#f1f5f9' }}
+                    >
+                      {category.isSystem
+                        ? `System - ${enumLabel(category.mappedType)}`
+                        : 'Custom'}
+                    </span>
+                    <div className="ml-auto flex items-center gap-2">
+                      <button
+                        className="p-2 rounded-lg"
+                        style={{ color: '#334155', backgroundColor: '#f8fafc' }}
+                        onClick={() => void moveCategory(index, -1)}
+                      >
+                        <ArrowUp className="w-4 h-4" />
+                      </button>
+                      <button
+                        className="p-2 rounded-lg"
+                        style={{ color: '#334155', backgroundColor: '#f8fafc' }}
+                        onClick={() => void moveCategory(index, 1)}
+                      >
+                        <ArrowDown className="w-4 h-4" />
+                      </button>
+                      <button
+                        className="text-xs px-2.5 py-1 rounded-full"
+                        style={
+                          category.isActive
+                            ? { backgroundColor: 'rgba(16, 185, 129, 0.16)', color: '#86efac' }
+                            : { backgroundColor: 'rgba(100, 116, 139, 0.24)', color: '#cbd5e1' }
+                        }
+                        onClick={() =>
+                          void invoiceService
+                            .toggleCategory(category.id)
+                            .then(loadCategories)
+                        }
+                      >
+                        {category.isActive ? 'Active' : 'Inactive'}
+                      </button>
+                      <GripVertical className="w-4 h-4" style={{ color: '#94a3b8' }} />
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {categoryDrawerOpen ? (
+        <div
+          className="fixed inset-0 z-[60] bg-black/50"
+          onClick={() => setCategoryDrawerOpen(false)}
+        >
+          <div
+            className="fixed inset-y-0 right-0 w-[480px] border-l border-white/5 flex flex-col z-[61] shadow-2xl shadow-black/50"
+            style={{ backgroundColor: '#ffffff', borderLeftColor: '#e2e8f0' }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="px-6 py-5 border-b flex items-center justify-between" style={{ borderBottomColor: '#e2e8f0' }}>
+              <h2 className="text-base font-semibold" style={{ color: '#0f172a' }}>
+                Add Category
+              </h2>
+              <button
+                className="p-2 rounded-lg hover:bg-slate-100"
+                style={{ color: '#475569' }}
+                onClick={() => setCategoryDrawerOpen(false)}
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
+              <div>
+                <label className="text-xs font-medium mb-1.5 block" style={{ color: '#334155' }}>
+                  Label
+                </label>
+                <input
+                  className="w-full border rounded-lg px-3 py-2.5 text-sm focus:outline-none"
+                  style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', color: '#0f172a' }}
+                  value={categoryForm.label}
+                  onChange={(event) =>
+                    setCategoryForm((prev) => ({
+                      ...prev,
+                      label: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium mb-1.5 block" style={{ color: '#334155' }}>
+                  Description
+                </label>
+                <textarea
+                  className="w-full border rounded-lg px-3 py-2.5 text-sm focus:outline-none"
+                  style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', color: '#0f172a' }}
+                  rows={4}
+                  value={categoryForm.description}
+                  onChange={(event) =>
+                    setCategoryForm((prev) => ({
+                      ...prev,
+                      description: event.target.value,
+                    }))
+                  }
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium mb-1.5 block" style={{ color: '#334155' }}>
+                  Color
+                </label>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {categorySwatches.map((swatch) => (
+                    <button
+                      key={swatch.value}
+                      className={`w-8 h-8 rounded-full border ${swatch.className} ${categoryForm.color === swatch.value ? 'border-white' : 'border-white/20'}`}
+                      onClick={() =>
+                        setCategoryForm((prev) => ({
+                          ...prev,
+                          color: swatch.value,
+                        }))
+                      }
+                    />
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="px-6 py-4 border-t flex items-center justify-end gap-3" style={{ borderTopColor: '#e2e8f0' }}>
+              <button
+                className="text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                style={{ backgroundColor: '#ffffff', color: '#334155', border: '1px solid #cbd5e1' }}
+                onClick={() => setCategoryDrawerOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                onClick={() => void submitCategory()}
+                disabled={categorySubmitting}
+              >
+                {categorySubmitting ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
     </div>
   );
 }

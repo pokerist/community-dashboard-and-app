@@ -51,7 +51,35 @@ export class RentRequestsService {
     return value;
   }
 
+  private async assertLeasingEnabled() {
+    const row = await this.prisma.systemSetting.findUnique({
+      where: { section: 'rental_settings' },
+      select: { value: true },
+    });
+
+    if (!row || !row.value || typeof row.value !== 'object' || Array.isArray(row.value)) {
+      return;
+    }
+
+    const raw = row.value as Record<string, unknown>;
+    const leasingEnabled =
+      typeof raw.leasingEnabled === 'boolean' ? raw.leasingEnabled : true;
+    if (leasingEnabled) {
+      return;
+    }
+
+    const reason =
+      typeof raw.suspensionReason === 'string' && raw.suspensionReason.trim().length > 0
+        ? raw.suspensionReason.trim()
+        : 'No reason provided';
+
+    throw new ForbiddenException(
+      `Leasing operations are currently suspended: ${reason}`,
+    );
+  }
+
   async create(ownerUserId: string, dto: CreateRentRequestDto) {
+    await this.assertLeasingEnabled();
     await this.assertActiveOwnerAccess(ownerUserId, dto.unitId);
 
     const unit = await this.prisma.unit.findUnique({

@@ -10,7 +10,12 @@ import {
   AccessStatus,
   Audience,
   Channel,
+  EntityStatus,
+  GateAccessRole,
+  GateDirection,
+  GateScanResult,
   NotificationType,
+  Prisma,
   QRType,
   UnitAccessRole,
 } from '@prisma/client';
@@ -58,6 +63,97 @@ export class AccessControlService {
     const isAdmin = await this.isAdminUser(userId);
     if (isAdmin) return;
     throw new ForbiddenException('Only gate operators/admin users can perform this action');
+  }
+
+  private roleFromQrType(type: QRType): GateAccessRole {
+    switch (type) {
+      case QRType.DELIVERY:
+        return GateAccessRole.DELIVERY;
+      case QRType.WORKER:
+      case QRType.SERVICE_PROVIDER:
+        return GateAccessRole.WORKER;
+      case QRType.RIDESHARE:
+        return GateAccessRole.RIDESHARE;
+      case QRType.SELF:
+        return GateAccessRole.RESIDENT;
+      case QRType.VISITOR:
+      default:
+        return GateAccessRole.VISITOR;
+    }
+  }
+
+  private async getConfiguredUnitGateIds(unitId: string): Promise<string[]> {
+    const rows = await this.prisma.gateUnitAccess.findMany({
+      where: {
+        unitId,
+        deletedAt: null,
+        gate: {
+          deletedAt: null,
+          status: EntityStatus.ACTIVE,
+        },
+      },
+      select: { gateId: true },
+    });
+
+    return rows.map((row) => row.gateId);
+  }
+
+  private async resolveGateForScan(
+    qrGateScope: string[],
+    gateId?: string,
+  ): Promise<{ id: string; name: string } | null> {
+    if (!gateId) {
+      return null;
+    }
+
+    const gate = await this.prisma.gate.findFirst({
+      where: {
+        id: gateId,
+        deletedAt: null,
+        status: EntityStatus.ACTIVE,
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+    if (!gate) {
+      throw new BadRequestException('Gate not found or inactive');
+    }
+
+    if (qrGateScope.length > 0 && !qrGateScope.includes(gate.id)) {
+      throw new ForbiddenException('QR code is not valid for this gate');
+    }
+
+    return gate;
+  }
+
+  private async logGateEntry(params: {
+    qrCodeId: string;
+    unitId: string | null;
+    gateId?: string | null;
+    direction: GateDirection;
+    result: GateScanResult;
+    qrType: QRType;
+    operatorUserId: string;
+    visitorName?: string | null;
+    notes?: string | null;
+    scannedAt: Date;
+  }): Promise<void> {
+    await this.prisma.gateEntryLog.create({
+      data: {
+        qrCodeId: params.qrCodeId,
+        unitId: params.unitId ?? null,
+        gateId: params.gateId ?? null,
+        direction: params.direction,
+        result: params.result,
+        scanRole: this.roleFromQrType(params.qrType),
+        operatorUserId: params.operatorUserId,
+        visitorNameSnapshot: params.visitorName ?? null,
+        scannedAt: params.scannedAt,
+        notes: params.notes ?? null,
+      },
+    });
   }
 
   private defaultDurationForType(
@@ -355,7 +451,11 @@ export class AccessControlService {
 
     const usageMode =
       dto.usageMode === 'MULTI_USE' ? 'MULTI_USE' : 'SINGLE_USE';
-    const gates = dto.gates ?? [];
+    const requestedGates = dto.gates ?? [];
+    const gates =
+      dto.type === QRType.VISITOR && requestedGates.length === 0
+        ? await this.getConfiguredUnitGateIds(dto.unitId)
+        : requestedGates;
     const requesterSnapshot = await this.getRequesterSnapshot(userId);
 
     if (this.enforceSingleActivePerTypeUnit) {
@@ -614,6 +714,7 @@ export class AccessControlService {
     qrCodeId: string,
     dto?: {
       scannedAt?: string;
+      gateId?: string;
       gateName?: string;
       notes?: string;
     },
@@ -630,6 +731,9 @@ export class AccessControlService {
         status: true,
         usageMode: true,
         scans: true,
+        type: true,
+        unitId: true,
+        gates: true,
         generatedById: true,
         visitorName: true,
         notes: true,
@@ -641,6 +745,7 @@ export class AccessControlService {
     if (Number.isNaN(scannedAt.getTime())) {
       throw new BadRequestException('scannedAt must be a valid datetime');
     }
+    const gate = await this.resolveGateForScan(qr.gates, dto?.gateId);
 
     if (qr.status === AccessStatus.USED) {
       return {
@@ -658,11 +763,15 @@ export class AccessControlService {
     const noteParts = [
       qr.notes?.trim() || '',
       dto?.notes?.trim() || '',
-      dto?.gateName?.trim() ? `Scanned at gate: ${dto.gateName.trim()}` : '',
+      gate?.name
+        ? `Scanned at gate: ${gate.name}`
+        : dto?.gateName?.trim()
+          ? `Scanned at gate: ${dto.gateName.trim()}`
+          : '',
       `Marked as USED at ${scannedAt.toISOString()}`,
     ].filter(Boolean);
 
-    const isMultiUse = String((qr as any).usageMode ?? 'SINGLE_USE') === 'MULTI_USE';
+    const isMultiUse = qr.usageMode === 'MULTI_USE';
     const updated = await this.prisma.accessQRCode.update({
       where: { id: qr.id },
       data: isMultiUse
@@ -677,11 +786,24 @@ export class AccessControlService {
           },
     });
 
+    await this.logGateEntry({
+      qrCodeId: updated.id,
+      unitId: qr.unitId ?? null,
+      gateId: gate?.id ?? null,
+      direction: GateDirection.ENTRY,
+      result: GateScanResult.ALLOWED,
+      qrType: qr.type,
+      operatorUserId: actorUserId,
+      visitorName: qr.visitorName ?? null,
+      notes: dto?.notes ?? null,
+      scannedAt,
+    });
+
     await this.notifyOwnerQrUsedArrival({
       qrId: updated.id,
       ownerUserId: qr.generatedById,
       visitorName: qr.visitorName ?? null,
-      gateName: dto?.gateName ?? null,
+      gateName: gate?.name ?? dto?.gateName ?? null,
       scannedAt,
       actorUserId,
     });
@@ -721,7 +843,9 @@ export class AccessControlService {
       data: { status: AccessStatus.EXPIRED },
     });
 
-    const where: any = { ...scopeWhere };
+    const where: Prisma.AccessQRCodeWhereInput = {
+      ...(scopeWhere as Prisma.AccessQRCodeWhereInput),
+    };
     if (!includeInactive) {
       where.status = AccessStatus.ACTIVE;
     }
@@ -812,18 +936,40 @@ export class AccessControlService {
           }
         : undefined;
 
-    const where: any = {
-      ...(filters?.type ? { type: String(filters.type).toUpperCase() } : {}),
-      ...(filters?.status ? { status: String(filters.status).toUpperCase() } : {}),
-      ...(requestedAtFilter ? { createdAt: requestedAtFilter } : {}),
-      ...(filters?.unitNumber
-        ? {
-            forUnit: {
-              unitNumber: { contains: String(filters.unitNumber), mode: 'insensitive' },
-            },
-          }
-        : {}),
-    };
+    const where: Prisma.AccessQRCodeWhereInput = {};
+
+    if (requestedAtFilter) {
+      where.createdAt = requestedAtFilter;
+    }
+
+    if (filters?.unitNumber) {
+      where.forUnit = {
+        is: {
+          unitNumber: {
+            contains: String(filters.unitNumber),
+            mode: Prisma.QueryMode.insensitive,
+          },
+        },
+      };
+    }
+
+    if (filters?.type) {
+      const normalizedType = String(filters.type).toUpperCase();
+      const validType = Object.values(QRType).find((value) => value === normalizedType);
+      if (validType) {
+        where.type = validType;
+      }
+    }
+
+    if (filters?.status) {
+      const normalizedStatus = String(filters.status).toUpperCase();
+      const validStatus = Object.values(AccessStatus).find(
+        (value) => value === normalizedStatus,
+      );
+      if (validStatus) {
+        where.status = validStatus;
+      }
+    }
 
     return this.prisma.accessQRCode.findMany({
       where,
@@ -846,13 +992,16 @@ export class AccessControlService {
   async checkInQr(
     actorUserId: string,
     qrCodeId: string,
-    body?: { gateName?: string; notes?: string },
+    body?: { gateId?: string; gateName?: string; notes?: string },
   ) {
     await this.assertGateOperator(actorUserId);
     const qr = await this.prisma.accessQRCode.findUnique({
       where: { id: qrCodeId },
       select: {
         id: true,
+        type: true,
+        unitId: true,
+        gates: true,
         status: true,
         generatedById: true,
         visitorName: true,
@@ -870,10 +1019,15 @@ export class AccessControlService {
     }
 
     const now = new Date();
+    const gate = await this.resolveGateForScan(qr.gates, body?.gateId);
     const lines = [
       qr.notes?.trim() || '',
       body?.notes?.trim() || '',
-      body?.gateName?.trim() ? `Checked in at gate: ${body.gateName.trim()}` : '',
+      gate?.name
+        ? `Checked in at gate: ${gate.name}`
+        : body?.gateName?.trim()
+          ? `Checked in at gate: ${body.gateName.trim()}`
+          : '',
       `Checked in at ${now.toISOString()}`,
     ].filter(Boolean);
 
@@ -889,11 +1043,24 @@ export class AccessControlService {
       },
     });
 
+    await this.logGateEntry({
+      qrCodeId: updated.id,
+      unitId: qr.unitId ?? null,
+      gateId: gate?.id ?? null,
+      direction: GateDirection.ENTRY,
+      result: GateScanResult.ALLOWED,
+      qrType: qr.type,
+      operatorUserId: actorUserId,
+      visitorName: qr.visitorName ?? null,
+      notes: body?.notes ?? null,
+      scannedAt: now,
+    });
+
     await this.notifyOwnerQrUsedArrival({
       qrId: updated.id,
       ownerUserId: qr.generatedById,
       visitorName: qr.visitorName ?? null,
-      gateName: body?.gateName ?? null,
+      gateName: gate?.name ?? body?.gateName ?? null,
       scannedAt: now,
       actorUserId,
     });
@@ -904,23 +1071,32 @@ export class AccessControlService {
   async checkOutQr(
     actorUserId: string,
     qrCodeId: string,
-    body?: { notes?: string },
+    body?: { gateId?: string; notes?: string },
   ) {
     await this.assertGateOperator(actorUserId);
     const qr = await this.prisma.accessQRCode.findUnique({
       where: { id: qrCodeId },
-      select: { id: true, notes: true },
+      select: {
+        id: true,
+        type: true,
+        unitId: true,
+        visitorName: true,
+        notes: true,
+        gates: true,
+      },
     });
     if (!qr) throw new NotFoundException('QR code not found');
 
     const now = new Date();
+    const gate = await this.resolveGateForScan(qr.gates, body?.gateId);
     const lines = [
       qr.notes?.trim() || '',
       body?.notes?.trim() || '',
+      gate?.name ? `Checked out at gate: ${gate.name}` : '',
       `Checked out at ${now.toISOString()}`,
     ].filter(Boolean);
 
-    return this.prisma.accessQRCode.update({
+    const updated = await this.prisma.accessQRCode.update({
       where: { id: qr.id },
       data: {
         checkedOutAt: now,
@@ -929,6 +1105,21 @@ export class AccessControlService {
         notes: lines.join('\n'),
       },
     });
+
+    await this.logGateEntry({
+      qrCodeId: updated.id,
+      unitId: qr.unitId ?? null,
+      gateId: gate?.id ?? null,
+      direction: GateDirection.EXIT,
+      result: GateScanResult.ALLOWED,
+      qrType: qr.type,
+      operatorUserId: actorUserId,
+      visitorName: qr.visitorName ?? null,
+      notes: body?.notes ?? null,
+      scannedAt: now,
+    });
+
+    return updated;
   }
 
   async processOverdueExits() {

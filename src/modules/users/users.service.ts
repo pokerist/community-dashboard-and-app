@@ -6,7 +6,16 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { Prisma, UserStatusEnum, UnitStatus } from '@prisma/client';
+import {
+  AccessStatus,
+  DelegateType,
+  HouseholdRequestStatus,
+  Prisma,
+  UnitAccessRole,
+  UserStatusEnum,
+  UnitStatus,
+  UserStatusLogSource,
+} from '@prisma/client';
 import { PermissionCacheService } from '../auth/permission-cache.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -21,6 +30,34 @@ import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { CreateAdminDto } from './dto/create-admin.dto';
 import { UpdateAdminDto } from './dto/update-admin.dto';
+import { CreateBrokerDto, UpdateBrokerDto } from './dto/broker.dto';
+import { ListCompoundStaffDto } from '../compound-staff/dto/list-compound-staff.dto';
+import { CompoundStaffService } from '../compound-staff/compound-staff.service';
+import {
+  ListBrokersQueryDto,
+  ListDelegatesQueryDto,
+  ListFamilyMembersQueryDto,
+  ListHomeStaffQueryDto,
+  ListOwnersQueryDto,
+  ListSystemUsersQueryDto,
+  ListTenantsQueryDto,
+} from './dto/users-hub-query.dto';
+import {
+  BrokerResponseDto,
+  DelegateListItemDto,
+  FamilyMemberListItemDto,
+  HomeStaffListItemDto,
+  LeaseItemDto,
+  OwnerListItemDto,
+  PaginatedResponseDto,
+  SystemUserListItemDto,
+  TenantListItemDto,
+  UnitItemDto,
+  UserDetailResponseDto,
+  UserItemDto,
+  UserStatsResponseDto,
+  UserTypeValue,
+} from './dto/users-hub-response.dto';
 import * as bcrypt from 'bcrypt';
 
 // Type definitions for Prisma includes
@@ -67,6 +104,7 @@ export class UsersService {
   constructor(
     private prisma: PrismaService,
     private permissionCacheService: PermissionCacheService,
+    private compoundStaffService: CompoundStaffService,
   ) {}
 
   private enforceDirectCreationPolicy(options?: { permissions?: string[] }) {
@@ -2123,5 +2161,1598 @@ export class UsersService {
       where: { id },
       include: { user: true },
     });
+  }
+
+  // ===== USERS HUB =====
+
+  async listOwners(
+    filters: ListOwnersQueryDto,
+  ): Promise<PaginatedResponseDto<OwnerListItemDto>> {
+    const { page, limit, skip } = this.normalizePagination(
+      filters.page,
+      filters.limit,
+    );
+    const searchFilter = this.buildUserSearchWhere(filters.search);
+    const communityFilter = filters.communityId
+      ? {
+          OR: [
+            {
+              resident: {
+                residentUnits: {
+                  some: {
+                    unit: {
+                      communityId: filters.communityId,
+                    },
+                  },
+                },
+              },
+            },
+            {
+              ownerUnitContracts: {
+                some: {
+                  unit: {
+                    communityId: filters.communityId,
+                  },
+                },
+              },
+            },
+          ],
+        }
+      : {};
+
+    const where: Prisma.OwnerWhereInput = {
+      user: {
+        ...(filters.status ? { userStatus: filters.status } : {}),
+        ...(searchFilter ?? {}),
+        ...communityFilter,
+      },
+    };
+
+    const [total, rows] = await Promise.all([
+      this.prisma.owner.count({ where }),
+      this.prisma.owner.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { user: { createdAt: 'desc' } },
+        include: {
+          user: {
+            select: {
+              id: true,
+              nameEN: true,
+              nameAR: true,
+              email: true,
+              phone: true,
+              userStatus: true,
+              resident: {
+                select: {
+                  id: true,
+                  residentUnits: {
+                    select: {
+                      isPrimary: true,
+                      unit: {
+                        select: {
+                          id: true,
+                          unitNumber: true,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+              ownerUnitContracts: {
+                where: {
+                  archivedAt: null,
+                  ...(filters.communityId
+                    ? {
+                        unit: { communityId: filters.communityId },
+                      }
+                    : {}),
+                },
+                select: {
+                  unit: {
+                    select: {
+                      id: true,
+                      unitNumber: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+    ]);
+
+    const ownerUserIds = rows.map((row) => row.user.id);
+    const residentIds = rows
+      .map((row) => row.user.resident?.id)
+      .filter((value): value is string => typeof value === 'string');
+
+    const [familyCounts, staffCounts] = await Promise.all([
+      residentIds.length > 0
+        ? this.prisma.familyMember.groupBy({
+            by: ['primaryResidentId'],
+            where: {
+              primaryResidentId: { in: residentIds },
+              status: UserStatusEnum.ACTIVE,
+            },
+            _count: { _all: true },
+          })
+        : Promise.resolve([]),
+      ownerUserIds.length > 0
+        ? this.prisma.homeStaffAccess.groupBy({
+            by: ['ownerUserId'],
+            where: {
+              ownerUserId: { in: ownerUserIds },
+              status: HouseholdRequestStatus.APPROVED,
+            },
+            _count: { _all: true },
+          })
+        : Promise.resolve([]),
+    ]);
+
+    const familyCountByResidentId = new Map<string, number>(
+      familyCounts.map(
+        (entry): [string, number] => [entry.primaryResidentId, entry._count._all],
+      ),
+    );
+    const staffCountByOwnerUserId = new Map<string, number>(
+      staffCounts.map(
+        (entry): [string, number] => [entry.ownerUserId, entry._count._all],
+      ),
+    );
+
+    const items: OwnerListItemDto[] = rows.map((row) => {
+      const unitMap = new Map<string, UnitItemDto>();
+      row.user.resident?.residentUnits.forEach((residentUnit) => {
+        unitMap.set(residentUnit.unit.id, {
+          id: residentUnit.unit.id,
+          unitNumber: residentUnit.unit.unitNumber,
+        });
+      });
+      row.user.ownerUnitContracts.forEach((contract) => {
+        unitMap.set(contract.unit.id, {
+          id: contract.unit.id,
+          unitNumber: contract.unit.unitNumber,
+        });
+      });
+
+      const familyCount = row.user.resident
+        ? (familyCountByResidentId.get(row.user.resident.id) ?? 0)
+        : 0;
+
+      return {
+        userId: row.user.id,
+        name: this.resolveUserName(row.user),
+        email: row.user.email,
+        phone: row.user.phone,
+        status: row.user.userStatus,
+        unitsCount: unitMap.size,
+        unitNumbers: Array.from(unitMap.values()).map((unit) => unit.unitNumber),
+        familyMembersCount: familyCount,
+        homeStaffCount: staffCountByOwnerUserId.get(row.user.id) ?? 0,
+      };
+    });
+
+    return new PaginatedResponseDto<OwnerListItemDto>({
+      items,
+      page,
+      limit,
+      total,
+    });
+  }
+
+  async listFamilyMembers(
+    filters: ListFamilyMembersQueryDto,
+  ): Promise<PaginatedResponseDto<FamilyMemberListItemDto>> {
+    const { page, limit, skip } = this.normalizePagination(
+      filters.page,
+      filters.limit,
+    );
+    const searchFilter = this.buildUserSearchWhere(filters.search);
+
+    const where: Prisma.FamilyMemberWhereInput = {
+      ...(filters.status ? { status: filters.status } : {}),
+      ...(filters.ownerUserId
+        ? { primaryResident: { userId: filters.ownerUserId } }
+        : {}),
+      ...(filters.unitId
+        ? {
+            primaryResident: {
+              residentUnits: {
+                some: {
+                  unitId: filters.unitId,
+                },
+              },
+            },
+          }
+        : {}),
+      ...(searchFilter
+        ? {
+            familyResident: {
+              user: searchFilter,
+            },
+          }
+        : {}),
+    };
+
+    const [total, rows] = await Promise.all([
+      this.prisma.familyMember.count({ where }),
+      this.prisma.familyMember.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          primaryResident: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  nameEN: true,
+                  nameAR: true,
+                  email: true,
+                  phone: true,
+                },
+              },
+              residentUnits: {
+                where: filters.unitId ? { unitId: filters.unitId } : undefined,
+                include: {
+                  unit: {
+                    select: {
+                      id: true,
+                      unitNumber: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+          familyResident: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  nameEN: true,
+                  nameAR: true,
+                  email: true,
+                  phone: true,
+                },
+              },
+            },
+          },
+        },
+      }),
+    ]);
+
+    const items: FamilyMemberListItemDto[] = rows.map((row) => {
+      const unit =
+        row.primaryResident.residentUnits.find((entry) => entry.isPrimary)
+          ?.unit ?? row.primaryResident.residentUnits[0]?.unit;
+
+      return {
+        userId: row.familyResident.user.id,
+        name: this.resolveUserName(row.familyResident.user),
+        email: row.familyResident.user.email,
+        phone: row.familyResident.user.phone,
+        status: row.status,
+        primaryOwnerName: this.resolveUserName(row.primaryResident.user),
+        unitNumber: unit?.unitNumber ?? null,
+        relationshipType: row.relationship,
+        activatedAt: row.activatedAt.toISOString(),
+      };
+    });
+
+    return new PaginatedResponseDto<FamilyMemberListItemDto>({
+      items,
+      page,
+      limit,
+      total,
+    });
+  }
+
+  async listTenants(
+    filters: ListTenantsQueryDto,
+  ): Promise<PaginatedResponseDto<TenantListItemDto>> {
+    const { page, limit, skip } = this.normalizePagination(
+      filters.page,
+      filters.limit,
+    );
+    const searchFilter = this.buildUserSearchWhere(filters.search);
+    const leaseWhere: Prisma.LeaseWhereInput = {
+      ...(filters.communityId
+        ? {
+            unit: { communityId: filters.communityId },
+          }
+        : {}),
+      ...(filters.leaseStatus ? { status: filters.leaseStatus } : {}),
+    };
+    const shouldFilterByLease =
+      Boolean(filters.communityId) || Boolean(filters.leaseStatus);
+
+    const where: Prisma.TenantWhereInput = {
+      user: {
+        ...(filters.status ? { userStatus: filters.status } : {}),
+        ...(searchFilter ?? {}),
+        ...(shouldFilterByLease
+          ? {
+              leasesAsTenant: {
+                some: leaseWhere,
+              },
+            }
+          : {}),
+      },
+    };
+
+    const [total, rows] = await Promise.all([
+      this.prisma.tenant.count({ where }),
+      this.prisma.tenant.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { user: { createdAt: 'desc' } },
+        include: {
+          user: {
+            select: {
+              id: true,
+              nameEN: true,
+              nameAR: true,
+              email: true,
+              phone: true,
+              userStatus: true,
+              leasesAsTenant: {
+                where: leaseWhere,
+                orderBy: [{ endDate: 'desc' }],
+                take: 1,
+                include: {
+                  unit: {
+                    select: {
+                      id: true,
+                      unitNumber: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+    ]);
+
+    const items: TenantListItemDto[] = rows.map((row) => {
+      const lease = row.user.leasesAsTenant[0] ?? null;
+      return {
+        userId: row.user.id,
+        name: this.resolveUserName(row.user),
+        email: row.user.email,
+        phone: row.user.phone,
+        status: row.user.userStatus,
+        unitNumber: lease?.unit.unitNumber ?? null,
+        leaseStart: lease ? lease.startDate.toISOString() : null,
+        leaseEnd: lease ? lease.endDate.toISOString() : null,
+        monthlyRent: lease ? this.decimalToNumber(lease.monthlyRent) : null,
+        leaseStatus: lease?.status ?? null,
+      };
+    });
+
+    return new PaginatedResponseDto<TenantListItemDto>({
+      items,
+      page,
+      limit,
+      total,
+    });
+  }
+
+  async listHomeStaff(
+    filters: ListHomeStaffQueryDto,
+  ): Promise<PaginatedResponseDto<HomeStaffListItemDto>> {
+    const { page, limit, skip } = this.normalizePagination(
+      filters.page,
+      filters.limit,
+    );
+    const search = this.normalizeSearch(filters.search);
+
+    const where: Prisma.HomeStaffAccessWhereInput = {
+      ...(filters.staffType ? { staffType: filters.staffType } : {}),
+      ...(filters.unitId ? { unitId: filters.unitId } : {}),
+      status: filters.status ?? HouseholdRequestStatus.APPROVED,
+      ...(search
+        ? {
+            OR: [
+              {
+                fullName: {
+                  contains: search,
+                  mode: Prisma.QueryMode.insensitive,
+                },
+              },
+              {
+                phone: {
+                  contains: search,
+                  mode: Prisma.QueryMode.insensitive,
+                },
+              },
+              {
+                owner: {
+                  OR: [
+                    {
+                      nameEN: {
+                        contains: search,
+                        mode: Prisma.QueryMode.insensitive,
+                      },
+                    },
+                    {
+                      nameAR: {
+                        contains: search,
+                        mode: Prisma.QueryMode.insensitive,
+                      },
+                    },
+                    {
+                      email: {
+                        contains: search,
+                        mode: Prisma.QueryMode.insensitive,
+                      },
+                    },
+                    {
+                      phone: {
+                        contains: search,
+                        mode: Prisma.QueryMode.insensitive,
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }
+        : {}),
+    };
+
+    const [total, rows] = await Promise.all([
+      this.prisma.homeStaffAccess.count({ where }),
+      this.prisma.homeStaffAccess.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          owner: {
+            select: {
+              id: true,
+              nameEN: true,
+              nameAR: true,
+              email: true,
+              phone: true,
+            },
+          },
+          unit: {
+            select: {
+              id: true,
+              unitNumber: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    const items: HomeStaffListItemDto[] = rows.map((row) => ({
+      id: row.id,
+      fullName: row.fullName,
+      staffType: row.staffType,
+      phone: row.phone,
+      ownerName: this.resolveUserName(row.owner),
+      unitNumber: row.unit?.unitNumber ?? null,
+      employmentFrom: this.toIsoString(row.employmentFrom),
+      employmentTo: this.toIsoString(row.employmentTo),
+      isLiveIn: row.isLiveIn,
+      accessValidFrom: row.accessValidFrom.toISOString(),
+      accessValidTo: row.accessValidTo.toISOString(),
+      status: row.status,
+    }));
+
+    return new PaginatedResponseDto<HomeStaffListItemDto>({
+      items,
+      page,
+      limit,
+      total,
+    });
+  }
+
+  async listDelegates(
+    filters: ListDelegatesQueryDto,
+  ): Promise<PaginatedResponseDto<DelegateListItemDto>> {
+    const { page, limit, skip } = this.normalizePagination(
+      filters.page,
+      filters.limit,
+    );
+    const search = this.normalizeSearch(filters.search);
+
+    const where: Prisma.AuthorizedAccessRequestWhereInput = {
+      ...(filters.ownerUserId ? { ownerUserId: filters.ownerUserId } : {}),
+      status: filters.status ?? HouseholdRequestStatus.APPROVED,
+      ...(search
+        ? {
+            OR: [
+              {
+                fullName: {
+                  contains: search,
+                  mode: Prisma.QueryMode.insensitive,
+                },
+              },
+              {
+                phone: {
+                  contains: search,
+                  mode: Prisma.QueryMode.insensitive,
+                },
+              },
+              {
+                owner: {
+                  OR: [
+                    {
+                      nameEN: {
+                        contains: search,
+                        mode: Prisma.QueryMode.insensitive,
+                      },
+                    },
+                    {
+                      nameAR: {
+                        contains: search,
+                        mode: Prisma.QueryMode.insensitive,
+                      },
+                    },
+                    {
+                      email: {
+                        contains: search,
+                        mode: Prisma.QueryMode.insensitive,
+                      },
+                    },
+                    {
+                      phone: {
+                        contains: search,
+                        mode: Prisma.QueryMode.insensitive,
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          }
+        : {}),
+    };
+
+    const [total, rows] = await Promise.all([
+      this.prisma.authorizedAccessRequest.count({ where }),
+      this.prisma.authorizedAccessRequest.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          owner: {
+            select: {
+              id: true,
+              nameEN: true,
+              nameAR: true,
+              email: true,
+              phone: true,
+            },
+          },
+          unit: {
+            select: {
+              id: true,
+              unitNumber: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    const activatedUserIds = rows
+      .map((row) => row.activatedUserId)
+      .filter((value): value is string => typeof value === 'string');
+    const unitIds = Array.from(new Set(rows.map((row) => row.unitId)));
+
+    const delegateAccessRows =
+      activatedUserIds.length > 0
+        ? await this.prisma.unitAccess.findMany({
+            where: {
+              userId: { in: activatedUserIds },
+              unitId: { in: unitIds },
+              role: UnitAccessRole.DELEGATE,
+              status: AccessStatus.ACTIVE,
+            },
+            select: {
+              userId: true,
+              unitId: true,
+              delegateType: true,
+            },
+          })
+        : [];
+
+    const delegateTypeByUserAndUnit = new Map<string, DelegateType | null>(
+      delegateAccessRows.map((row) => [
+        `${row.userId}:${row.unitId}`,
+        row.delegateType ?? null,
+      ]),
+    );
+
+    const items: DelegateListItemDto[] = rows.map((row) => {
+      const key = row.activatedUserId
+        ? `${row.activatedUserId}:${row.unitId}`
+        : null;
+      const delegateType = key
+        ? delegateTypeByUserAndUnit.get(key) ?? null
+        : null;
+
+      return {
+        id: row.id,
+        fullName: row.fullName,
+        phone: row.phone,
+        ownerName: this.resolveUserName(row.owner),
+        unitNumber: row.unit?.unitNumber ?? null,
+        delegateType: delegateType ?? 'AUTHORIZED',
+        validFrom: row.validFrom.toISOString(),
+        validTo: row.validTo.toISOString(),
+        qrScopes: row.qrScopes,
+        feeMode: row.feeMode,
+      };
+    });
+
+    return new PaginatedResponseDto<DelegateListItemDto>({
+      items,
+      page,
+      limit,
+      total,
+    });
+  }
+
+  async listBrokers(
+    filters: ListBrokersQueryDto,
+  ): Promise<PaginatedResponseDto<BrokerResponseDto>> {
+    const { page, limit, skip } = this.normalizePagination(
+      filters.page,
+      filters.limit,
+    );
+    const searchFilter = this.buildUserSearchWhere(filters.search);
+
+    const where: Prisma.BrokerWhereInput = {
+      ...(filters.status ? { status: filters.status } : {}),
+      ...(searchFilter ? { user: searchFilter } : {}),
+    };
+
+    const [total, rows] = await Promise.all([
+      this.prisma.broker.count({ where }),
+      this.prisma.broker.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          user: {
+            select: {
+              id: true,
+              nameEN: true,
+              nameAR: true,
+              email: true,
+              phone: true,
+            },
+          },
+        },
+      }),
+    ]);
+
+    return new PaginatedResponseDto<BrokerResponseDto>({
+      items: rows.map((row) => this.mapBrokerResponse(row)),
+      page,
+      limit,
+      total,
+    });
+  }
+
+  async listCompoundStaff(query: ListCompoundStaffDto) {
+    return this.compoundStaffService.list(query);
+  }
+
+  async listSystemUsers(
+    filters: ListSystemUsersQueryDto,
+  ): Promise<PaginatedResponseDto<SystemUserListItemDto>> {
+    const { page, limit, skip } = this.normalizePagination(
+      filters.page,
+      filters.limit,
+    );
+    const searchFilter = this.buildUserSearchWhere(filters.search);
+
+    const where: Prisma.UserWhereInput = {
+      ...(filters.status ? { userStatus: filters.status } : {}),
+      ...(searchFilter ?? {}),
+      ...(filters.roleId
+        ? {
+            roles: {
+              some: {
+                roleId: filters.roleId,
+              },
+            },
+          }
+        : {}),
+      OR: filters.roleId
+        ? [
+            {
+              roles: {
+                some: {
+                  roleId: filters.roleId,
+                },
+              },
+            },
+          ]
+        : [{ admin: { isNot: null } }, this.systemRolePredicate()],
+    };
+
+    const [total, rows] = await Promise.all([
+      this.prisma.user.count({ where }),
+      this.prisma.user.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          nameEN: true,
+          nameAR: true,
+          email: true,
+          phone: true,
+          userStatus: true,
+          lastLoginAt: true,
+          roles: {
+            include: {
+              role: {
+                select: {
+                  id: true,
+                  name: true,
+                },
+              },
+            },
+          },
+        },
+      }),
+    ]);
+
+    const items: SystemUserListItemDto[] = rows.map((row) => ({
+      userId: row.id,
+      name: this.resolveUserName(row),
+      email: row.email,
+      roles: row.roles.map((item) => item.role.name),
+      status: row.userStatus,
+      lastLoginAt: this.toIsoString(row.lastLoginAt),
+    }));
+
+    return new PaginatedResponseDto<SystemUserListItemDto>({
+      items,
+      page,
+      limit,
+      total,
+    });
+  }
+
+  async getUserDetail(userId: string): Promise<UserDetailResponseDto> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        owner: true,
+        tenant: true,
+        admin: true,
+        broker: true,
+        profilePhoto: {
+          select: {
+            id: true,
+            key: true,
+          },
+        },
+        roles: {
+          include: {
+            role: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+        },
+        resident: {
+          include: {
+            residentUnits: {
+              include: {
+                unit: {
+                  select: {
+                    id: true,
+                    unitNumber: true,
+                  },
+                },
+              },
+            },
+            familyOf: {
+              include: {
+                primaryResident: {
+                  include: {
+                    user: {
+                      select: {
+                        id: true,
+                        nameEN: true,
+                        nameAR: true,
+                        email: true,
+                        phone: true,
+                      },
+                    },
+                    residentUnits: {
+                      include: {
+                        unit: {
+                          select: {
+                            id: true,
+                            unitNumber: true,
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        leasesAsTenant: {
+          orderBy: { endDate: 'desc' },
+          take: 1,
+          include: {
+            unit: {
+              select: {
+                id: true,
+                unitNumber: true,
+              },
+            },
+          },
+        },
+        leasesAsOwner: {
+          orderBy: { endDate: 'desc' },
+          include: {
+            unit: {
+              select: {
+                id: true,
+                unitNumber: true,
+              },
+            },
+          },
+        },
+        ownerUnitContracts: {
+          where: { archivedAt: null },
+          include: {
+            unit: {
+              select: {
+                id: true,
+                unitNumber: true,
+              },
+            },
+          },
+        },
+        statusLogs: {
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+        },
+        compoundStaffAssignments: {
+          where: {
+            isActive: true,
+            deletedAt: null,
+          },
+          select: {
+            id: true,
+            profession: true,
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException(`User with ID ${userId} not found`);
+    }
+
+    const [delegateRecord, homeStaffRecord, complaintsCount, violationsCount] =
+      await Promise.all([
+        this.prisma.authorizedAccessRequest.findFirst({
+          where: {
+            activatedUserId: userId,
+            status: HouseholdRequestStatus.APPROVED,
+          },
+          include: {
+            owner: {
+              select: {
+                id: true,
+                nameEN: true,
+                nameAR: true,
+                email: true,
+                phone: true,
+              },
+            },
+            unit: {
+              select: {
+                id: true,
+                unitNumber: true,
+              },
+            },
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+        user.phone
+          ? this.prisma.homeStaffAccess.findFirst({
+              where: {
+                phone: user.phone,
+                status: HouseholdRequestStatus.APPROVED,
+              },
+              include: {
+                owner: {
+                  select: {
+                    id: true,
+                    nameEN: true,
+                    nameAR: true,
+                    email: true,
+                    phone: true,
+                  },
+                },
+                unit: {
+                  select: {
+                    id: true,
+                    unitNumber: true,
+                  },
+                },
+              },
+              orderBy: { createdAt: 'desc' },
+            })
+          : Promise.resolve(null),
+        this.prisma.complaint.count({
+          where: {
+            OR: [{ reporterId: userId }, { assignedToId: userId }],
+          },
+        }),
+        this.prisma.violation.count({
+          where: {
+            OR: [{ residentId: userId }, { issuedById: userId }],
+          },
+        }),
+      ]);
+
+    const tenantLease = user.leasesAsTenant[0] ?? null;
+    const familyLink = user.resident?.familyOf ?? null;
+    const ownerUnits = this.collectOwnerUnits(user);
+    const familyCount = user.resident
+      ? await this.prisma.familyMember.count({
+          where: {
+            primaryResidentId: user.resident.id,
+          },
+        })
+      : 0;
+    const staffCount = user.owner
+      ? await this.prisma.homeStaffAccess.count({
+          where: {
+            ownerUserId: user.id,
+            status: HouseholdRequestStatus.APPROVED,
+          },
+        })
+      : 0;
+    const hasSystemRole = user.roles.some((roleRow) =>
+      this.isSystemRoleName(roleRow.role.name),
+    );
+
+    let userType: UserTypeValue = 'SYSTEM_USER';
+    if (user.owner) {
+      userType = 'OWNER';
+    } else if (user.tenant) {
+      userType = 'TENANT';
+    } else if (familyLink) {
+      userType = 'FAMILY';
+    } else if (delegateRecord) {
+      userType = 'DELEGATE';
+    } else if (homeStaffRecord) {
+      userType = 'HOME_STAFF';
+    } else if (user.broker) {
+      userType = 'BROKER';
+    } else if (user.admin || hasSystemRole) {
+      userType = 'SYSTEM_USER';
+    } else if (user.compoundStaffAssignments.length > 0) {
+      userType = 'COMPOUND_STAFF';
+    }
+
+    const unitsMap = new Map<string, UnitItemDto>();
+    ownerUnits.forEach((unit) => unitsMap.set(unit.id, unit));
+    user.resident?.residentUnits.forEach((residentUnit) => {
+      unitsMap.set(residentUnit.unit.id, {
+        id: residentUnit.unit.id,
+        unitNumber: residentUnit.unit.unitNumber,
+      });
+    });
+    user.leasesAsOwner.forEach((lease) => {
+      unitsMap.set(lease.unit.id, {
+        id: lease.unit.id,
+        unitNumber: lease.unit.unitNumber,
+      });
+    });
+    if (tenantLease) {
+      unitsMap.set(tenantLease.unit.id, {
+        id: tenantLease.unit.id,
+        unitNumber: tenantLease.unit.unitNumber,
+      });
+    }
+
+    const linkedLeases: LeaseItemDto[] = [
+      ...user.leasesAsOwner.map((lease) => ({
+        id: lease.id,
+        unitId: lease.unitId,
+        startDate: lease.startDate.toISOString(),
+        endDate: lease.endDate.toISOString(),
+        monthlyRent: this.decimalToNumber(lease.monthlyRent),
+        status: lease.status,
+      })),
+      ...user.leasesAsTenant.map((lease) => ({
+        id: lease.id,
+        unitId: lease.unitId,
+        startDate: lease.startDate.toISOString(),
+        endDate: lease.endDate.toISOString(),
+        monthlyRent: this.decimalToNumber(lease.monthlyRent),
+        status: lease.status,
+      })),
+    ];
+
+    return {
+      id: user.id,
+      name: this.resolveUserName(user),
+      email: user.email,
+      phone: user.phone,
+      status: user.userStatus,
+      userType,
+      profilePhotoUrl: user.profilePhoto?.key ?? null,
+      lastLoginAt: this.toIsoString(user.lastLoginAt),
+      createdAt: user.createdAt.toISOString(),
+      ownerData: user.owner
+        ? {
+            units: ownerUnits,
+            familyCount,
+            staffCount,
+          }
+        : undefined,
+      tenantData: tenantLease
+        ? {
+            lease: {
+              id: tenantLease.id,
+              unitId: tenantLease.unitId,
+              startDate: tenantLease.startDate.toISOString(),
+              endDate: tenantLease.endDate.toISOString(),
+              monthlyRent: this.decimalToNumber(tenantLease.monthlyRent),
+              status: tenantLease.status,
+            },
+            unit: {
+              id: tenantLease.unit.id,
+              unitNumber: tenantLease.unit.unitNumber,
+            },
+          }
+        : undefined,
+      familyData: familyLink
+        ? {
+            primaryOwner: this.mapUserItem(familyLink.primaryResident.user),
+            unit: this.pickPrimaryUnit(familyLink.primaryResident.residentUnits),
+            relationship: familyLink.relationship,
+          }
+        : undefined,
+      delegateData: delegateRecord
+        ? {
+            owner: this.mapUserItem(delegateRecord.owner),
+            unit: {
+              id: delegateRecord.unit.id,
+              unitNumber: delegateRecord.unit.unitNumber,
+            },
+            permissions: delegateRecord.qrScopes,
+          }
+        : undefined,
+      homeStaffData: homeStaffRecord
+        ? {
+            owner: this.mapUserItem(homeStaffRecord.owner),
+            unit: {
+              id: homeStaffRecord.unit.id,
+              unitNumber: homeStaffRecord.unit.unitNumber,
+            },
+            staffType: homeStaffRecord.staffType,
+          }
+        : undefined,
+      brokerData: user.broker
+        ? {
+            agencyName: user.broker.agencyName,
+            licenseNumber: user.broker.licenseNumber,
+          }
+        : undefined,
+      activity: user.statusLogs.map((log) => ({
+        id: log.id,
+        newStatus: log.newStatus,
+        note: log.note,
+        createdAt: log.createdAt.toISOString(),
+      })),
+      linkedRecords: {
+        units: Array.from(unitsMap.values()),
+        leases: linkedLeases,
+        complaints: complaintsCount,
+        violations: violationsCount,
+      },
+    };
+  }
+
+  async suspendUser(
+    userId: string,
+    reason: string,
+  ): Promise<{ success: true; userId: string; status: UserStatusEnum }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+    if (!user) {
+      throw new NotFoundException(`User with ID ${userId} not found`);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: userId },
+        data: { userStatus: UserStatusEnum.SUSPENDED },
+      });
+      await tx.userStatusLog.create({
+        data: {
+          userId,
+          newStatus: UserStatusEnum.SUSPENDED,
+          source: UserStatusLogSource.ADMIN,
+          note: reason,
+        },
+      });
+    });
+
+    return { success: true, userId, status: UserStatusEnum.SUSPENDED };
+  }
+
+  async activateUser(
+    userId: string,
+    note?: string,
+  ): Promise<{ success: true; userId: string; status: UserStatusEnum }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+    if (!user) {
+      throw new NotFoundException(`User with ID ${userId} not found`);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: userId },
+        data: { userStatus: UserStatusEnum.ACTIVE },
+      });
+      await tx.userStatusLog.create({
+        data: {
+          userId,
+          newStatus: UserStatusEnum.ACTIVE,
+          source: UserStatusLogSource.ADMIN,
+          note: note?.trim() || 'Activated by admin',
+        },
+      });
+    });
+
+    return { success: true, userId, status: UserStatusEnum.ACTIVE };
+  }
+
+  async getAllUserStats(): Promise<UserStatsResponseDto> {
+    const systemUserWhere: Prisma.UserWhereInput = {
+      OR: [{ admin: { isNot: null } }, this.systemRolePredicate()],
+    };
+
+    const [
+      totalUsers,
+      totalOwners,
+      totalFamilyMembers,
+      totalTenants,
+      totalHomeStaff,
+      totalDelegates,
+      totalBrokers,
+      totalSystemUsers,
+      pendingFamilyApprovals,
+      pendingDelegateApprovals,
+      pendingHomeStaffApprovals,
+      suspendedUsers,
+    ] = await Promise.all([
+      this.prisma.user.count(),
+      this.prisma.owner.count(),
+      this.prisma.familyMember.count(),
+      this.prisma.tenant.count(),
+      this.prisma.homeStaffAccess.count({
+        where: { status: HouseholdRequestStatus.APPROVED },
+      }),
+      this.prisma.authorizedAccessRequest.count({
+        where: { status: HouseholdRequestStatus.APPROVED },
+      }),
+      this.prisma.broker.count(),
+      this.prisma.user.count({
+        where: systemUserWhere,
+      }),
+      this.prisma.familyAccessRequest.count({
+        where: { status: HouseholdRequestStatus.PENDING },
+      }),
+      this.prisma.authorizedAccessRequest.count({
+        where: { status: HouseholdRequestStatus.PENDING },
+      }),
+      this.prisma.homeStaffAccess.count({
+        where: { status: HouseholdRequestStatus.PENDING },
+      }),
+      this.prisma.user.count({
+        where: { userStatus: UserStatusEnum.SUSPENDED },
+      }),
+    ]);
+
+    return {
+      totalUsers,
+      totalOwners,
+      totalFamilyMembers,
+      totalTenants,
+      totalHomeStaff,
+      totalDelegates,
+      totalBrokers,
+      totalSystemUsers,
+      pendingApprovals:
+        pendingFamilyApprovals +
+        pendingDelegateApprovals +
+        pendingHomeStaffApprovals,
+      suspendedUsers,
+    };
+  }
+
+  async createBroker(dto: CreateBrokerDto): Promise<BrokerResponseDto> {
+    const createdBroker = await this.prisma.$transaction(async (tx) => {
+      let userId = dto.userId;
+      if (userId) {
+        const existingUser = await tx.user.findUnique({
+          where: { id: userId },
+          select: { id: true },
+        });
+        if (!existingUser) {
+          throw new NotFoundException('User not found');
+        }
+
+        if (dto.name || dto.email || dto.phone) {
+          await tx.user.update({
+            where: { id: userId },
+            data: {
+              ...(dto.name !== undefined ? { nameEN: dto.name.trim() } : {}),
+              ...(dto.email !== undefined
+                ? { email: dto.email.trim().toLowerCase() }
+                : {}),
+              ...(dto.phone !== undefined ? { phone: dto.phone.trim() } : {}),
+            },
+          });
+        }
+      } else {
+        if (!dto.name) {
+          throw new BadRequestException('name is required when userId is not provided');
+        }
+        const createdUser = await tx.user.create({
+          data: {
+            nameEN: dto.name.trim(),
+            email: dto.email?.trim().toLowerCase() ?? null,
+            phone: dto.phone?.trim() ?? null,
+            userStatus: UserStatusEnum.ACTIVE,
+            signupSource: 'dashboard',
+          },
+          select: { id: true },
+        });
+        userId = createdUser.id;
+      }
+
+      const existingBroker = await tx.broker.findUnique({
+        where: { userId },
+        select: { id: true },
+      });
+      if (existingBroker) {
+        throw new ConflictException('Broker already exists for this user');
+      }
+
+      return tx.broker.create({
+        data: {
+          userId,
+          agencyName: dto.agencyName?.trim() || null,
+          licenseNumber: dto.licenseNumber?.trim() || null,
+          status: UserStatusEnum.ACTIVE,
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              nameEN: true,
+              nameAR: true,
+              email: true,
+              phone: true,
+            },
+          },
+        },
+      });
+    });
+
+    return this.mapBrokerResponse(createdBroker);
+  }
+
+  async updateBroker(
+    brokerId: string,
+    dto: UpdateBrokerDto,
+  ): Promise<BrokerResponseDto> {
+    const existing = await this.prisma.broker.findUnique({
+      where: { id: brokerId },
+      include: {
+        user: {
+          select: {
+            id: true,
+            nameEN: true,
+            nameAR: true,
+            email: true,
+            phone: true,
+          },
+        },
+      },
+    });
+    if (!existing) {
+      throw new NotFoundException('Broker not found');
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      if (
+        dto.name !== undefined ||
+        dto.email !== undefined ||
+        dto.phone !== undefined
+      ) {
+        await tx.user.update({
+          where: { id: existing.userId },
+          data: {
+            ...(dto.name !== undefined ? { nameEN: dto.name.trim() } : {}),
+            ...(dto.email !== undefined
+              ? { email: dto.email?.trim().toLowerCase() || null }
+              : {}),
+            ...(dto.phone !== undefined ? { phone: dto.phone?.trim() || null } : {}),
+          },
+        });
+      }
+
+      return tx.broker.update({
+        where: { id: brokerId },
+        data: {
+          ...(dto.agencyName !== undefined
+            ? { agencyName: dto.agencyName?.trim() || null }
+            : {}),
+          ...(dto.licenseNumber !== undefined
+            ? { licenseNumber: dto.licenseNumber?.trim() || null }
+            : {}),
+          ...(dto.status !== undefined ? { status: dto.status } : {}),
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              nameEN: true,
+              nameAR: true,
+              email: true,
+              phone: true,
+            },
+          },
+        },
+      });
+    });
+
+    return this.mapBrokerResponse(updated);
+  }
+
+  private normalizePagination(page?: number, limit?: number) {
+    const safePage = Math.max(1, page ?? 1);
+    const safeLimit = Math.min(100, Math.max(1, limit ?? 20));
+    return {
+      page: safePage,
+      limit: safeLimit,
+      skip: (safePage - 1) * safeLimit,
+    };
+  }
+
+  private normalizeSearch(value?: string): string | null {
+    const trimmed = value?.trim();
+    return trimmed && trimmed.length > 0 ? trimmed : null;
+  }
+
+  private buildUserSearchWhere(
+    search?: string,
+  ): Prisma.UserWhereInput | undefined {
+    const query = this.normalizeSearch(search);
+    if (!query) {
+      return undefined;
+    }
+
+    return {
+      OR: [
+        {
+          nameEN: {
+            contains: query,
+            mode: Prisma.QueryMode.insensitive,
+          },
+        },
+        {
+          nameAR: {
+            contains: query,
+            mode: Prisma.QueryMode.insensitive,
+          },
+        },
+        {
+          email: {
+            contains: query,
+            mode: Prisma.QueryMode.insensitive,
+          },
+        },
+        {
+          phone: {
+            contains: query,
+            mode: Prisma.QueryMode.insensitive,
+          },
+        },
+      ],
+    };
+  }
+
+  private resolveUserName(input: {
+    id: string;
+    nameEN: string | null;
+    nameAR: string | null;
+    email: string | null;
+    phone: string | null;
+  }): string {
+    const name = input.nameEN?.trim() || input.nameAR?.trim();
+    if (name) {
+      return name;
+    }
+    if (input.email?.trim()) {
+      return input.email.trim();
+    }
+    if (input.phone?.trim()) {
+      return input.phone.trim();
+    }
+    return input.id;
+  }
+
+  private decimalToNumber(value: Prisma.Decimal | number): number {
+    if (typeof value === 'number') {
+      return value;
+    }
+    return value.toNumber();
+  }
+
+  private toIsoString(value: Date | null | undefined): string | null {
+    return value ? value.toISOString() : null;
+  }
+
+  private mapUserItem(input: {
+    id: string;
+    nameEN: string | null;
+    nameAR: string | null;
+    email: string | null;
+    phone: string | null;
+  }): UserItemDto {
+    return {
+      id: input.id,
+      name: this.resolveUserName(input),
+      email: input.email,
+      phone: input.phone,
+    };
+  }
+
+  private pickPrimaryUnit(
+    residentUnits: Array<{
+      isPrimary: boolean;
+      unit: { id: string; unitNumber: string };
+    }>,
+  ): UnitItemDto | null {
+    const unit =
+      residentUnits.find((entry) => entry.isPrimary)?.unit ??
+      residentUnits[0]?.unit;
+    if (!unit) {
+      return null;
+    }
+
+    return {
+      id: unit.id,
+      unitNumber: unit.unitNumber,
+    };
+  }
+
+  private collectOwnerUnits(input: {
+    resident: {
+      residentUnits: Array<{
+        unit: { id: string; unitNumber: string };
+      }>;
+    } | null;
+    ownerUnitContracts: Array<{
+      unit: { id: string; unitNumber: string };
+    }>;
+  }): UnitItemDto[] {
+    const units = new Map<string, UnitItemDto>();
+    input.resident?.residentUnits.forEach((residentUnit) => {
+      units.set(residentUnit.unit.id, {
+        id: residentUnit.unit.id,
+        unitNumber: residentUnit.unit.unitNumber,
+      });
+    });
+    input.ownerUnitContracts.forEach((contract) => {
+      units.set(contract.unit.id, {
+        id: contract.unit.id,
+        unitNumber: contract.unit.unitNumber,
+      });
+    });
+    return Array.from(units.values());
+  }
+
+  private systemRolePredicate(): Prisma.UserWhereInput {
+    return {
+      roles: {
+        some: {
+          role: {
+            OR: [
+              {
+                name: {
+                  contains: 'admin',
+                  mode: Prisma.QueryMode.insensitive,
+                },
+              },
+              {
+                name: {
+                  contains: 'system',
+                  mode: Prisma.QueryMode.insensitive,
+                },
+              },
+              {
+                permissions: {
+                  some: {
+                    permission: {
+                      key: {
+                        startsWith: 'admin.',
+                      },
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        },
+      },
+    };
+  }
+
+  private isSystemRoleName(roleName: string): boolean {
+    const value = roleName.toLowerCase();
+    return value.includes('admin') || value.includes('system');
+  }
+
+  private mapBrokerResponse(input: {
+    id: string;
+    userId: string;
+    agencyName: string | null;
+    licenseNumber: string | null;
+    status: UserStatusEnum;
+    createdAt: Date;
+    user: {
+      id: string;
+      nameEN: string | null;
+      nameAR: string | null;
+      email: string | null;
+      phone: string | null;
+    };
+  }): BrokerResponseDto {
+    return {
+      id: input.id,
+      userId: input.userId,
+      name: this.resolveUserName(input.user),
+      email: input.user.email,
+      phone: input.user.phone,
+      agencyName: input.agencyName,
+      licenseNumber: input.licenseNumber,
+      status: input.status,
+      createdAt: input.createdAt.toISOString(),
+    };
   }
 }

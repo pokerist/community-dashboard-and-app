@@ -2,16 +2,16 @@
 
 import { Module } from '@nestjs/common';
 import { ServiceRequestService } from './service-request.service';
+import { ServiceRequestScheduler } from './service-request.scheduler';
 import { ServiceRequestController } from './service-request.controller';
 import { PrismaModule } from '../../../prisma/prisma.module'; // Import the Prisma module
 import { AuthModule } from '../auth/auth.module';
 import { InvoicesModule } from '../invoices/invoices.module';
-import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, InvoicesModule, NotificationsModule],
+  imports: [PrismaModule, AuthModule, InvoicesModule],
   controllers: [ServiceRequestController],
-  providers: [ServiceRequestService],
+  providers: [ServiceRequestService, ServiceRequestScheduler],
   exports: [ServiceRequestService],
 })
 export class ServiceRequestModule {}

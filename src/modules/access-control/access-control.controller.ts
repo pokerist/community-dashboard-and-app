@@ -112,7 +112,7 @@ export class AccessControlController {
   checkIn(
     @Param('id') id: string,
     @Req() req: any,
-    @Body() body?: { gateName?: string; notes?: string },
+    @Body() body?: { gateId?: string; gateName?: string; notes?: string },
   ) {
     return this.accessControlService.checkInQr(req.user.id, id, body);
   }
@@ -123,7 +123,7 @@ export class AccessControlController {
   checkOut(
     @Param('id') id: string,
     @Req() req: any,
-    @Body() body?: { notes?: string },
+    @Body() body?: { gateId?: string; notes?: string },
   ) {
     return this.accessControlService.checkOutQr(req.user.id, id, body);
   }
