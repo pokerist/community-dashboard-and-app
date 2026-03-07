@@ -1,26 +1,34 @@
 import {
+  BadRequestException,
+  Body,
   Controller,
   Get,
-  Post,
-  Body,
-  Patch,
   Param,
-  Delete,
+  Patch,
+  Post,
   Query,
-  UseGuards,
   Req,
-  BadRequestException,
+  UseGuards,
 } from '@nestjs/common';
-import { ComplaintsService } from './complaints.service';
-import { CreateComplaintDto, UpdateComplaintDto } from './dto/complaints.dto';
-import { ComplaintsQueryDto } from './dto/complaints-query.dto';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
-import { UpdateComplaintStatusDto } from './dto/update-status.dto';
-import { CreateComplaintCommentDto } from './dto/create-complaint-comment.dto';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import type { Request } from 'express';
+import { Permissions } from '../auth/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
-import { Permissions } from '../auth/decorators/permissions.decorator';
-import type { Request } from 'express';
+import { AddCommentDto } from './dto/add-comment.dto';
+import { AssignComplaintDto } from './dto/assign-complaint.dto';
+import { ComplaintsQueryDto } from './dto/complaints-query.dto';
+import { CreateComplaintDto } from './dto/create-complaint.dto';
+import { UpdateComplaintStatusDto } from './dto/update-status.dto';
+import { ComplaintsService } from './complaints.service';
+
+interface AuthUserContext {
+  id: string;
+}
+
+interface AuthenticatedRequest extends Request {
+  user?: AuthUserContext;
+}
 
 @ApiBearerAuth()
 @ApiTags('Complaints')
@@ -29,118 +37,74 @@ import type { Request } from 'express';
 export class ComplaintsController {
   constructor(private readonly complaintsService: ComplaintsService) {}
 
-  // ---------------------------
-  // RESIDENT: CREATE
-  // ---------------------------
-  @Post()
-  @Permissions('complaint.report')
-  create(@Body() dto: CreateComplaintDto, @Req() req: Request) {
-    const reporterId = (req as any).user?.id;
-    if (!reporterId) throw new BadRequestException('Invalid auth context');
-
-    if (dto.reporterId && dto.reporterId !== reporterId) {
-      throw new BadRequestException('reporterId must match the authenticated user');
-    }
-
-    return this.complaintsService.create({
-      ...dto,
-      reporterId,
-    });
-  }
-
-  // ---------------------------
-  // STAFF: CREATE ON BEHALF (admin/demo tooling)
-  // ---------------------------
-  @Post('admin/create')
-  @Permissions('complaint.manage')
-  createForAdmin(@Body() dto: CreateComplaintDto, @Req() req: Request) {
-    return this.complaintsService.createForAdmin(dto, {
-      actorUserId: (req as any).user?.id,
-    });
-  }
-
-  // ---------------------------
-  // STAFF: VIEW ALL
-  // ---------------------------
   @Get()
   @Permissions('complaint.view_all')
-  findAll(@Query() query: ComplaintsQueryDto) {
-    return this.complaintsService.findAll(query);
+  listComplaints(@Query() query: ComplaintsQueryDto) {
+    return this.complaintsService.listComplaints(query);
   }
 
-  @Get('me')
-  @Permissions('complaint.view_own')
-  findMine(@Req() req: Request) {
-    return this.complaintsService.findMine((req as any).user?.id);
+  @Get('stats')
+  @Permissions('complaint.view_all')
+  getComplaintStats() {
+    return this.complaintsService.getComplaintStats();
   }
 
-  // ---------------------------
-  // RESIDENT OR STAFF: VIEW SPECIFIC
-  // ---------------------------
   @Get(':id')
-  @Permissions('complaint.view_own', 'complaint.view_all')
-  findOne(@Param('id') id: string, @Req() req: Request) {
-    return this.complaintsService.findOneForActor(id, {
-      actorUserId: (req as any).user?.id,
-      permissions: (req as any).user?.permissions ?? [],
-    });
+  @Permissions('complaint.view_all')
+  getComplaintDetail(@Param('id') id: string) {
+    return this.complaintsService.getComplaintDetail(id);
   }
 
-  @Get(':id/comments')
-  @Permissions('complaint.view_own', 'complaint.view_all')
-  listComments(@Param('id') id: string, @Req() req: Request) {
-    return this.complaintsService.listCommentsForActor(id, {
-      actorUserId: (req as any).user?.id,
-      permissions: (req as any).user?.permissions ?? [],
-    });
+  @Post()
+  @Permissions('complaint.report', 'complaint.manage')
+  createComplaint(@Body() dto: CreateComplaintDto, @Req() req: AuthenticatedRequest) {
+    const reporterId = req.user?.id;
+    if (!reporterId) {
+      throw new BadRequestException('Invalid auth context');
+    }
+
+    return this.complaintsService.createComplaint(dto, reporterId);
   }
 
-  @Post(':id/comments')
-  @Permissions('complaint.view_own', 'complaint.view_all')
-  addComment(
-    @Param('id') id: string,
-    @Body() dto: CreateComplaintCommentDto,
-    @Req() req: Request,
-  ) {
-    return this.complaintsService.addCommentForActor(id, dto, {
-      actorUserId: (req as any).user?.id,
-      permissions: (req as any).user?.permissions ?? [],
-    });
-  }
-
-  // ---------------------------
-  // STAFF: UPDATE COMPLAINT DETAILS
-  // (status/assignedTo/notes)
-  // ---------------------------
-  @Patch(':id')
+  @Patch(':id/assign')
   @Permissions('complaint.manage')
-  update(@Param('id') id: string, @Body() dto: UpdateComplaintDto) {
-    return this.complaintsService.update(id, dto);
+  assignComplaint(
+    @Param('id') id: string,
+    @Body() dto: AssignComplaintDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const adminId = req.user?.id;
+    if (!adminId) {
+      throw new BadRequestException('Invalid auth context');
+    }
+
+    return this.complaintsService.assignComplaint(id, dto.assignedToId, adminId);
   }
 
-  // ---------------------------
-  // STAFF: UPDATE STATUS ONLY
-  // ---------------------------
   @Patch(':id/status')
   @Permissions('complaint.manage')
   updateStatus(@Param('id') id: string, @Body() dto: UpdateComplaintStatusDto) {
-    return this.complaintsService.updateStatus(
-      id,
-      dto.status,
-      dto.resolutionNotes,
-    );
+    return this.complaintsService.updateStatus(id, dto.status, dto.resolutionNotes);
   }
 
-  // ---------------------------
-  // RESIDENT: DELETE OWN
-  // ADMIN: DELETE ANY
-  // ---------------------------
-  @Delete(':id')
-  @Permissions('complaint.delete_own', 'complaint.delete_all')
-  remove(@Param('id') id: string, @Req() req: Request) {
-    return this.complaintsService.removeForActor(id, {
-      actorUserId: (req as any).user?.id,
-      permissions: (req as any).user?.permissions ?? [],
-    });
+  @Post(':id/comments')
+  @Permissions('complaint.view_all', 'complaint.view_own', 'complaint.manage')
+  addComment(
+    @Param('id') id: string,
+    @Body() dto: AddCommentDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const authorId = req.user?.id;
+    if (!authorId) {
+      throw new BadRequestException('Invalid auth context');
+    }
+
+    return this.complaintsService.addComment(id, dto, authorId);
+  }
+
+  @Post('check-sla')
+  @Permissions('complaint.manage')
+  checkSlaBreaches() {
+    return this.complaintsService.checkSlaBreaches();
   }
 }

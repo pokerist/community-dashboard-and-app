@@ -9,8 +9,9 @@ import {
   QrCode,
   FileText,
   MessageSquare,
+  AlertTriangle,
   CreditCard,
-  Image,
+  Megaphone,
   Bell,
   Shield,
   DoorOpen,
@@ -21,6 +22,7 @@ import {
   MapPin,
   ScanSearch,
   ChevronRight,
+  Hotel,
 } from "lucide-react";
 import {
   Sidebar,
@@ -36,148 +38,182 @@ import {
 } from "./ui/sidebar";
 import alkarmaLogo from "figma:asset/0c7a0cd1f45864e0108618f40b9f2a75ac95e9dc.png";
 
-const menuItems = [
-  {
-    title: "Dashboard",
-    icon: LayoutDashboard,
-    url: "#dashboard",
-    active: true,
-  },
-  {
-    title: "Communities",
-    icon: Building,
-    url: "#communities",
-  },
-  {
-    title: "Commercial",
-    icon: Building2,
-    url: "#commercial",
-  },
-  {
-    title: "Compound Staff",
-    icon: Users,
-    url: "#compound-staff",
-  },
-  {
-    title: "Blue Collar",
-    icon: ClipboardList,
-    url: "#blue-collar",
-  },
-  {
-    title: "Units",
-    icon: Building2,
-    url: "#units",
-  },
-  {
-    title: "Residents",
-    icon: Users,
-    url: "#residents",
-  },
-  {
-    title: "Users Hub",
-    icon: Users,
-    url: "#users",
-  },
-  {
-    title: "Dashboard Users",
-    icon: Users,
-    url: "#dashboard-users",
-  },
-  {
-    title: "Services",
-    icon: Wrench,
-    url: "#services",
-  },
-  {
-    title: "Permits",
-    icon: ClipboardCheck,
-    url: "#permits",
-  },
-  {
-    title: "Requests",
-    icon: ClipboardList,
-    url: "#requests",
-  },
-  {
-    title: "Tickets Inbox",
-    icon: Inbox,
-    url: "#tickets",
-  },
-  {
-    title: "Access Control",
-    icon: QrCode,
-    url: "#access",
-  },
-  {
-    title: "Rental / Lease",
-    icon: FileText,
-    url: "#rental",
-  },
-];
+interface MenuSection {
+  group: string;
+  items: Array<{
+    title: string;
+    icon: any;
+    url: string;
+    soon?: boolean;
+  }>;
+}
 
-const secondaryItems = [
+const menuSections: MenuSection[] = [
   {
-    title: "Complaints & Violations",
-    icon: MessageSquare,
-    url: "#complaints",
+    group: "OVERVIEW",
+    items: [
+      {
+        title: "Dashboard & Statistics",
+        icon: LayoutDashboard,
+        url: "#dashboard",
+      },
+    ],
   },
   {
-    title: "Billing & Payments",
-    icon: CreditCard,
-    url: "#billing",
+    group: "PROPERTY",
+    items: [
+      {
+        title: "Communities",
+        icon: Building,
+        url: "#communities",
+      },
+      {
+        title: "Units",
+        icon: Building2,
+        url: "#units",
+      },
+    ],
   },
   {
-    title: "Banner Management",
-    icon: Image,
-    url: "#banners",
+    group: "PEOPLE",
+    items: [
+      {
+        title: "Residents & Users",
+        icon: Users,
+        url: "#residents",
+      },
+      {
+        title: "Registrations & Approvals",
+        icon: ClipboardCheck,
+        url: "#approvals",
+      },
+      {
+        title: "Commercial",
+        icon: Building2,
+        url: "#commercial",
+      },
+      {
+        title: "Compound Staff",
+        icon: Users,
+        url: "#compound-staff",
+      },
+    ],
   },
   {
-    title: "Notifications",
-    icon: Bell,
-    url: "#notifications",
+    group: "ACCESS CONTROL",
+    items: [
+      {
+        title: "Gates",
+        icon: DoorOpen,
+        url: "#gates",
+      },
+      {
+        title: "Blue Collar Workers",
+        icon: ClipboardList,
+        url: "#blue-collar",
+      },
+    ],
   },
   {
-    title: "Security",
-    icon: Shield,
-    url: "#security",
+    group: "FINANCIALS",
+    items: [
+      {
+        title: "Rental & Lease",
+        icon: FileText,
+        url: "#rental",
+      },
+      {
+        title: "Payments & Invoices",
+        icon: CreditCard,
+        url: "#billing",
+      },
+    ],
   },
   {
-    title: "Gates",
-    icon: DoorOpen,
-    url: "#gates",
+    group: "OPERATIONS",
+    items: [
+      {
+        title: "Permits & Requests",
+        icon: ClipboardCheck,
+        url: "#permits",
+      },
+      {
+        title: "Services",
+        icon: Wrench,
+        url: "#services",
+      },
+      {
+        title: "Complaints",
+        icon: MessageSquare,
+        url: "#complaints",
+      },
+      {
+        title: "Violations",
+        icon: AlertTriangle,
+        url: "#violations",
+      },
+      {
+        title: "Amenities",
+        icon: Dumbbell,
+        url: "#amenities",
+      },
+      {
+        title: "Ordering",
+        icon: ClipboardList,
+        url: "#ordering",
+      },
+      {
+        title: "Emergency (Gates Live Feed)",
+        icon: ScanSearch,
+        url: "#gate-live",
+      },
+    ],
   },
   {
-    title: "Gate Live Feed",
-    icon: ScanSearch,
-    url: "#gate-live",
+    group: "ENGAGEMENT",
+    items: [
+      {
+        title: "Notifications",
+        icon: Bell,
+        url: "#notifications",
+      },
+      {
+        title: "Marketing",
+        icon: Megaphone,
+        url: "#marketing",
+      },
+      {
+        title: "Surveys",
+        icon: BarChart3,
+        url: "#surveys",
+      },
+    ],
   },
   {
-    title: "Amenities",
-    icon: Dumbbell,
-    url: "#amenities",
-  },
-];
-
-const bottomItems = [
-  {
-    title: "Reports & Analytics",
-    icon: BarChart3,
-    url: "#reports",
+    group: "INSIGHTS",
+    items: [
+      {
+        title: "Reports & Analytics",
+        icon: BarChart3,
+        url: "#reports",
+      },
+    ],
   },
   {
-    title: "Help & Discover",
-    icon: MapPin,
-    url: "#directory",
-  },
-  {
-    title: "Approvals Center",
-    icon: ClipboardCheck,
-    url: "#approvals",
-  },
-  {
-    title: "System Settings",
-    icon: Settings,
-    url: "#settings",
+    group: "SYSTEM",
+    items: [
+      {
+        title: "System Settings",
+        icon: Settings,
+        url: "#settings",
+      },
+      {
+        title: "Hospitality (Coming Soon)",
+        icon: Hotel,
+        url: "#hospitality",
+        soon: true,
+      },
+    ],
   },
 ];
 
@@ -212,88 +248,46 @@ export function AppSidebar({ onNavigate, activeSection }: AppSidebarProps) {
       </SidebarHeader>
       
       <SidebarContent className="px-3">
-        <SidebarGroup>
-          <SidebarGroupLabel className="text-xs text-[#64748B] px-3 mb-2">
-            Main Menu
-          </SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {menuItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  {(() => {
-                    const section = item.url.replace("#", "");
-                    const isActive =
-                      activeSection === section ||
-                      (section === "residents" && activeSection === "residents-create");
-                    return (
-                  <SidebarMenuButton
-                    onClick={() => onNavigate(section)}
-                    isActive={isActive}
-                    className={`rounded-lg transition-all ${
-                      isActive
-                        ? "bg-[#00B386]/10 text-[#00B386] border-l-4 border-[#00B386] pl-3"
-                        : "hover:bg-[#F9FAFB]"
-                    }`}
-                  >
-                    <item.icon className="w-4 h-4" />
-                    <span>{item.title}</span>
-                  </SidebarMenuButton>
-                    );
-                  })()}
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarGroup>
-          <SidebarGroupLabel className="text-xs text-[#64748B] px-3 mb-2">
-            Management
-          </SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {secondaryItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton
-                    onClick={() => onNavigate(item.url.replace("#", ""))}
-                    isActive={activeSection === item.url.replace("#", "")}
-                    className={`rounded-lg transition-all ${
-                      activeSection === item.url.replace("#", "")
-                        ? "bg-[#00B386]/10 text-[#00B386] border-l-4 border-[#00B386] pl-3"
-                        : "hover:bg-[#F9FAFB]"
-                    }`}
-                  >
-                    <item.icon className="w-4 h-4" />
-                    <span>{item.title}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {bottomItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton
-                    onClick={() => onNavigate(item.url.replace("#", ""))}
-                    isActive={activeSection === item.url.replace("#", "")}
-                    className={`rounded-lg transition-all ${
-                      activeSection === item.url.replace("#", "")
-                        ? "bg-[#00B386]/10 text-[#00B386] border-l-4 border-[#00B386] pl-3"
-                        : "hover:bg-[#F9FAFB]"
-                    }`}
-                  >
-                    <item.icon className="w-4 h-4" />
-                    <span>{item.title}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
+        {menuSections.map((section) => (
+          <SidebarGroup key={section.group}>
+            <SidebarGroupLabel className="text-xs text-[#64748B] px-3 mb-2">
+              {section.group}
+            </SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {section.items.map((item) => (
+                  <SidebarMenuItem key={item.title}>
+                    {(() => {
+                      const sectionKey = item.url.replace("#", "");
+                      const isActive =
+                        activeSection === sectionKey ||
+                        (sectionKey === "residents" && activeSection === "residents-create");
+                      return (
+                        <SidebarMenuButton
+                          onClick={() => onNavigate(sectionKey)}
+                          isActive={isActive}
+                          className={`rounded-lg transition-all ${
+                            isActive
+                              ? "bg-[#00B386]/10 text-[#00B386] border-l-4 border-[#00B386] pl-3"
+                              : "hover:bg-[#F9FAFB]"
+                          }`}
+                        >
+                          <item.icon className="w-4 h-4" />
+                          <span>{item.title}</span>
+                          {item.soon ? (
+                            <span className="ml-auto text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded-full">
+                              Soon
+                            </span>
+                          ) : null}
+                        </SidebarMenuButton>
+                      );
+                    })()}
+                  </SidebarMenuItem>
+                ))}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        ))}
       </SidebarContent>
 
       <SidebarFooter className="p-4 border-t border-[#E5E7EB]">

@@ -13,6 +13,7 @@ import {
   Max,
   MaxLength,
   Min,
+  MinLength,
 } from 'class-validator';
 
 export class UpdateGeneralSettingsDto {
@@ -198,12 +199,12 @@ export class UpdateBrandSettingsDto {
   @IsOptional()
   @IsString()
   @MaxLength(200)
-  tagline?: string;
+  logoFileId?: string;
 
   @IsOptional()
   @IsString()
   @MaxLength(200)
-  logoFileId?: string;
+  tagline?: string;
 
   @IsOptional()
   @IsString()
@@ -423,4 +424,134 @@ export class ListSystemSettingsBackupsDto {
 export class ImportSystemSettingsSnapshotDto {
   @IsObject()
   snapshot!: Record<string, unknown>;
+}
+
+// Departments Management DTOs
+export class CreateDepartmentDto {
+  @IsString()
+  @MaxLength(100)
+  name!: string;
+
+  @IsString()
+  @MaxLength(20)
+  code!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^#[0-9A-Fa-f]{6}$/)
+  colorDot?: string;
+}
+
+export class UpdateDepartmentDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  description?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^#[0-9A-Fa-f]{6}$/)
+  colorDot?: string;
+}
+
+export class ListDepartmentsDto {
+  @IsOptional()
+  @IsBoolean()
+  activeOnly?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  search?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  limit?: number;
+}
+
+// System Users Management DTOs
+export class CreateSystemUserDto {
+  @IsString()
+  @MaxLength(255)
+  email!: string;
+
+  @IsString()
+  @MaxLength(100)
+  firstName!: string;
+
+  @IsString()
+  @MaxLength(100)
+  lastName!: string;
+
+  @IsString()
+  @MinLength(8)
+  @MaxLength(128)
+  password!: string;
+
+  @IsOptional()
+  @IsString()
+  roleId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+}
+
+export class UpdateSystemUserDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  firstName?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  lastName?: string;
+
+  @IsOptional()
+  @IsString()
+  roleId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+}
+
+export class ListSystemUsersDto {
+  @IsOptional()
+  @IsBoolean()
+  activeOnly?: boolean;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  search?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  limit?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  offset?: number;
 }

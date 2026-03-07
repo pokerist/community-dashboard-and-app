@@ -13,14 +13,16 @@ import { CompoundStaffManagement } from "./components/pages/CompoundStaffManagem
 import { BlueCollarManagement } from "./components/pages/BlueCollarManagement";
 import { ServiceManagement } from "./components/pages/ServiceManagement";
 import { PermitsManagement } from "./components/pages/PermitsManagement";
-import { RequestsManagement } from "./components/pages/RequestsManagement";
 import { TicketsInbox } from "./components/pages/TicketsInbox";
 import { AccessControl } from "./components/pages/AccessControl";
 import { RentalManagement } from "./components/pages/RentalManagement";
 import { ComplaintsViolations } from "./components/pages/ComplaintsViolations";
+import { ViolationsManagement } from "./components/pages/ViolationsManagement";
 import { BillingPayments } from "./components/pages/BillingPayments";
-import { BannerManagement } from "./components/pages/BannerManagement";
+import { MarketingCenter } from "./components/pages/MarketingCenter";
 import { NotificationCenter } from "./components/pages/NotificationCenter";
+import { OrderingManagement } from "./components/pages/OrderingManagement";
+import { SurveysManagement } from "./components/pages/SurveysManagement";
 import { SecurityEmergency } from "./components/pages/SecurityEmergency";
 import { GateLiveFeed } from "./components/pages/GateLiveFeed";
 import { GatesManagement } from "./components/pages/GatesManagement";
@@ -29,9 +31,11 @@ import { ReportsAnalytics } from "./components/pages/ReportsAnalytics";
 import { SystemSettings } from "./components/pages/SystemSettings";
 import { CommunityDirectory } from "./components/pages/CommunityDirectory";
 import { ApprovalsCenter } from "./components/pages/ApprovalsCenter";
+import { HospitalityPage } from "./components/pages/HospitalityPage";
 import { Toaster } from "./components/ui/sonner";
 import { toast } from "sonner";
 import apiClient, { isAuthenticated, removeAuthToken } from "./lib/api-client";
+import notificationsService from "./lib/notificationsService";
 import { AdminLoginPage } from "./components/auth/AdminLoginPage";
 import {
   Dialog,
@@ -56,15 +60,18 @@ const VALID_SECTIONS = new Set([
   "blue-collar",
   "services",
   "permits",
-  "requests",
   "tickets",
   "access",
   "lease",
   "rental",
   "complaints",
+  "violations",
   "billing",
   "banners",
+  "marketing",
   "notifications",
+  "ordering",
+  "surveys",
   "security",
   "gates",
   "gate-live",
@@ -73,6 +80,7 @@ const VALID_SECTIONS = new Set([
   "settings",
   "directory",
   "approvals",
+  "hospitality",
 ]);
 
 function normalizeSection(value?: string | null): string {
@@ -83,14 +91,31 @@ function normalizeSection(value?: string | null): string {
   return VALID_SECTIONS.has(section) ? section : "dashboard";
 }
 
-function getSectionFromHash(): string {
+function getSectionFromLocation(): string {
   if (typeof window === "undefined") return "dashboard";
-  return normalizeSection(window.location.hash);
+  if (window.location.hash) {
+    return normalizeSection(window.location.hash);
+  }
+
+  const pathSegments = window.location.pathname.split("/").filter(Boolean);
+  const pathSection = pathSegments[pathSegments.length - 1] ?? "";
+  return normalizeSection(pathSection);
 }
 
-function extractRows(payload: any): any[] {
-  if (Array.isArray(payload)) return payload;
-  if (Array.isArray(payload?.data)) return payload.data;
+type LooseRow = Record<string, unknown>;
+
+function toRows(value: unknown): LooseRow[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (entry): entry is LooseRow => Boolean(entry) && typeof entry === "object",
+  );
+}
+
+function extractRows(payload: unknown): LooseRow[] {
+  if (Array.isArray(payload)) return toRows(payload);
+  if (payload && typeof payload === "object" && "data" in payload) {
+    return toRows((payload as { data?: unknown }).data);
+  }
   return [];
 }
 
@@ -102,17 +127,18 @@ function mapNotificationRouteToSection(routeRaw?: string | null): string | null 
     return direct === "dashboard" ? null : direct;
   }
   if (route.includes("gate-live")) return "gate-live";
-  if (route.includes("requests")) return "requests";
   if (route.includes("services")) return "services";
   if (route.includes("permits")) return "permits";
   if (route.includes("commercial")) return "commercial";
   if (route.includes("compound-staff") || route.includes("compound_staff")) return "compound-staff";
   if (route.includes("blue-collar") || route.includes("blue_collar")) return "blue-collar";
   if (route.includes("complaints")) return "complaints";
+  if (route.includes("violations")) return "violations";
   if (route.includes("tickets")) return "tickets";
   if (route.includes("access") || route.includes("qr")) return "access";
   if (route.includes("billing") || route.includes("payment") || route.includes("invoice")) return "billing";
   if (route.includes("security")) return "security";
+  if (route.includes("hospitality")) return "hospitality";
   if (route.includes("gates")) return "gates";
   if (route.includes("gate")) return "gate-live";
   return null;
@@ -126,7 +152,7 @@ type PendingFocusEntity = {
 };
 
 export default function App() {
-  const [activeSection, setActiveSection] = useState<string>(() => getSectionFromHash());
+  const [activeSection, setActiveSection] = useState<string>(() => getSectionFromLocation());
   const [authenticated, setAuthenticated] = useState<boolean>(() => isAuthenticated());
   const [footerPanel, setFooterPanel] = useState<FooterPanel>(null);
   const [unseenAdminNotifications, setUnseenAdminNotifications] = useState(0);
@@ -148,13 +174,18 @@ export default function App() {
     if (typeof window === "undefined") return;
 
     const syncFromHash = () => {
-      const next = getSectionFromHash();
+      const next = getSectionFromLocation();
       setActiveSection((prev) => (prev === next ? prev : next));
     };
 
     // Ensure a stable hash exists for refresh/deep-linking.
     if (!window.location.hash) {
-      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#dashboard`);
+      const initialSection = getSectionFromLocation();
+      window.history.replaceState(
+        null,
+        "",
+        `${window.location.pathname}${window.location.search}#${initialSection}`,
+      );
     }
     syncFromHash();
 
@@ -184,13 +215,14 @@ export default function App() {
 
     const pollNotifications = async (isInitial = false) => {
       try {
-        const response = await apiClient.get("/notifications/admin/all", {
-          params: { page: 1, limit: 25 },
+        const response = await notificationsService.listLegacyAdmin({
+          page: 1,
+          limit: 25,
         });
         if (!mounted) return;
         const rows = extractRows(response.data);
         const nextIds = new Set<string>();
-        const newlyArrived: any[] = [];
+        const newlyArrived: LooseRow[] = [];
 
         for (const row of rows) {
           const id = String(row?.id ?? "").trim();
@@ -351,8 +383,6 @@ export default function App() {
         return <ServiceManagement />;
       case "permits":
         return <PermitsManagement />;
-      case "requests":
-        return <RequestsManagement />;
       case "tickets":
         return <TicketsInbox />;
       case "access":
@@ -362,12 +392,19 @@ export default function App() {
         return <RentalManagement />;
       case "complaints":
         return <ComplaintsViolations />;
+      case "violations":
+        return <ViolationsManagement />;
       case "billing":
         return <BillingPayments />;
       case "banners":
-        return <BannerManagement />;
+      case "marketing":
+        return <MarketingCenter />;
       case "notifications":
         return <NotificationCenter />;
+      case "ordering":
+        return <OrderingManagement />;
+      case "surveys":
+        return <SurveysManagement />;
       case "security":
         return <SecurityEmergency />;
       case "gates":
@@ -384,6 +421,8 @@ export default function App() {
         return <CommunityDirectory />;
       case "approvals":
         return <ApprovalsCenter />;
+      case "hospitality":
+        return <HospitalityPage />;
       default:
         return <DashboardOverview onNavigate={navigateToSection} />;
     }

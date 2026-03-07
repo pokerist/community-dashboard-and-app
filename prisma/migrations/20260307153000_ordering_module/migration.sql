@@ -1,0 +1,2 @@
+-- Ordering objects were moved to 20260307143000_survey_module.
+-- This migration is intentionally a no-op to keep migration history consistent.

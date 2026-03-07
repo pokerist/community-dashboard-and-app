@@ -1,414 +1,361 @@
-import {
-  BadRequestException,
-  Injectable,
-  NotFoundException,
-  ForbiddenException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { PrismaService } from '../../../prisma/prisma.service';
-import { CreateBookingDto } from './dto/create-booking.dto';
-import { UpdateBookingStatusDto } from './dto/update-status.dto';
-import { BookingsQueryDto } from './dto/bookings-query.dto';
 import {
+  BillingCycle,
   BookingStatus,
-  FacilityType,
-  UnitStatus,
-  InvoiceType,
   InvoiceStatus,
-  Channel,
-  Audience,
-  NotificationType,
+  InvoiceType,
+  Prisma,
 } from '@prisma/client';
+import { PrismaService } from '../../../prisma/prisma.service';
 import { BookingApprovedEvent } from '../../events/contracts/booking-approved.event';
 import { BookingCancelledEvent } from '../../events/contracts/booking-cancelled.event';
-import { paginate } from '../../common/utils/pagination.util';
-import { getActiveUnitAccess } from '../../common/utils/unit-access.util';
-import { ClubhouseService } from '../clubhouse/clubhouse.service';
 import { InvoicesService } from '../invoices/invoices.service';
-import { NotificationsService } from '../notifications/notifications.service';
+import { BookingDetailDto, BookingDetailInvoiceDto, BookingListItemDto, BookingListResponseDto } from './dto/booking-response.dto';
+import { BookingsQueryDto } from './dto/bookings-query.dto';
+import { CancelBookingDto } from './dto/cancel-booking.dto';
+import { RejectBookingDto } from './dto/reject-booking.dto';
 
-interface EffectiveSlotConfig {
-  startTime: string;
-  endTime: string;
-  slotDurationMinutes?: number;
-  slotCapacity?: number;
-}
+type BookingListRecord = Prisma.BookingGetPayload<{
+  include: {
+    facility: {
+      select: {
+        id: true;
+        name: true;
+        type: true;
+        requiresPrepayment: true;
+        price: true;
+        billingCycle: true;
+      };
+    };
+    user: { select: { id: true; nameEN: true; nameAR: true; email: true } };
+    unit: { select: { id: true; unitNumber: true } };
+    invoices: {
+      select: { id: true; status: true; type: true };
+      where: { type: 'BOOKING_FEE' };
+      take: 1;
+      orderBy: { createdAt: 'desc' };
+    };
+  };
+}>;
+
+type BookingDetailRecord = Prisma.BookingGetPayload<{
+  include: {
+    facility: {
+      select: {
+        id: true;
+        name: true;
+        description: true;
+        type: true;
+        requiresPrepayment: true;
+        price: true;
+        billingCycle: true;
+        rules: true;
+      };
+    };
+    user: { select: { id: true; nameEN: true; nameAR: true; email: true; phone: true } };
+    unit: { select: { id: true; unitNumber: true } };
+    invoices: {
+      select: {
+        id: true;
+        invoiceNumber: true;
+        amount: true;
+        status: true;
+        dueDate: true;
+        paidDate: true;
+        type: true;
+      };
+      where: { type: 'BOOKING_FEE' };
+      orderBy: { createdAt: 'desc' };
+    };
+  };
+}>;
 
 @Injectable()
 export class BookingsService {
   constructor(
-    private prisma: PrismaService,
-    private eventEmitter: EventEmitter2,
-    private clubhouseService: ClubhouseService,
-    private invoicesService: InvoicesService,
-    private notificationsService: NotificationsService,
+    private readonly prisma: PrismaService,
+    private readonly eventEmitter: EventEmitter2,
+    private readonly invoicesService: InvoicesService,
   ) {}
 
-  private isSuperAdminRole(roles: unknown): boolean {
-    return (
-      Array.isArray(roles) &&
-      roles.some(
-        (r) => typeof r === 'string' && r.toUpperCase() === 'SUPER_ADMIN',
-      )
-    );
+  private toUserName(input: { nameEN: string | null; nameAR: string | null; email: string | null }): string {
+    return input.nameEN ?? input.nameAR ?? input.email ?? 'Unknown User';
   }
 
-  private isUnitDelivered(status: UnitStatus): boolean {
-    return (
-      status === UnitStatus.DELIVERED ||
-      status === UnitStatus.OCCUPIED ||
-      status === UnitStatus.LEASED
-    );
+  private toIso(value: Date | null): string | null {
+    return value ? value.toISOString() : null;
   }
 
-  private async getFacility(dto: CreateBookingDto) {
-    const facility = await this.prisma.facility.findUnique({
-      where: { id: dto.facilityId },
+  private parseTimeToMinutes(value: string): number {
+    const [hours, minutes] = value.split(':').map((part) => Number(part));
+    return hours * 60 + minutes;
+  }
+
+  private calculateTotalAmount(input: {
+    startTime: string;
+    endTime: string;
+    price: number | null;
+    billingCycle: BillingCycle;
+  }): number {
+    const price = input.price ?? 0;
+    if (price <= 0 || input.billingCycle === BillingCycle.NONE) {
+      return 0;
+    }
+
+    if (input.billingCycle === BillingCycle.PER_USE || input.billingCycle === BillingCycle.PER_SLOT) {
+      return Number(price.toFixed(2));
+    }
+
+    if (input.billingCycle === BillingCycle.PER_HOUR) {
+      const durationMinutes = this.parseTimeToMinutes(input.endTime) - this.parseTimeToMinutes(input.startTime);
+      if (durationMinutes <= 0) {
+        throw new BadRequestException('Booking endTime must be after startTime');
+      }
+      return Number(((durationMinutes / 60) * price).toFixed(2));
+    }
+
+    return Number(price.toFixed(2));
+  }
+
+  private toBookingListItem(row: BookingListRecord): BookingListItemDto {
+    return {
+      id: row.id,
+      facilityName: row.facility.name,
+      facilityType: row.facility.type,
+      userName: this.toUserName(row.user),
+      unitNumber: row.unit?.unitNumber ?? null,
+      date: row.date.toISOString(),
+      startTime: row.startTime,
+      endTime: row.endTime,
+      status: row.status,
+      totalAmount: row.totalAmount ? Number(row.totalAmount) : null,
+      requiresPrepayment: row.facility.requiresPrepayment,
+      paymentStatus: row.invoices[0]?.status ?? null,
+      createdAt: row.createdAt.toISOString(),
+    };
+  }
+
+  private toInvoiceDto(row: BookingDetailRecord['invoices'][number]): BookingDetailInvoiceDto {
+    return {
+      id: row.id,
+      invoiceNumber: row.invoiceNumber,
+      amount: Number(row.amount),
+      status: row.status,
+      dueDate: row.dueDate.toISOString(),
+      paidDate: this.toIso(row.paidDate),
+    };
+  }
+
+  private toBookingDetailDto(row: BookingDetailRecord): BookingDetailDto {
+    const listItem = this.toBookingListItem(row);
+
+    return {
+      ...listItem,
+      facilityId: row.facilityId,
+      facilityDescription: row.facility.description,
+      facilityRules: row.facility.rules,
+      userId: row.userId,
+      userPhone: row.user.phone,
+      cancellationReason: row.cancellationReason,
+      rejectionReason: row.rejectionReason,
+      cancelledById: row.cancelledById,
+      rejectedById: row.rejectedById,
+      checkedInAt: this.toIso(row.checkedInAt),
+      cancelledAt: this.toIso(row.cancelledAt),
+      refundRequired:
+        row.status === BookingStatus.CANCELLED &&
+        row.invoices.some((invoice) => invoice.status === InvoiceStatus.PAID),
+      invoices: row.invoices.map((invoice) => this.toInvoiceDto(invoice)),
+      updatedAt: row.updatedAt.toISOString(),
+    };
+  }
+
+  private async getBookingById(id: string): Promise<BookingDetailRecord> {
+    const row = await this.prisma.booking.findUnique({
+      where: { id },
       include: {
-        slotConfig: true,
-        slotExceptions: true,
+        facility: {
+          select: {
+            id: true,
+            name: true,
+            description: true,
+            type: true,
+            requiresPrepayment: true,
+            price: true,
+            billingCycle: true,
+            rules: true,
+          },
+        },
+        user: {
+          select: { id: true, nameEN: true, nameAR: true, email: true, phone: true },
+        },
+        unit: {
+          select: { id: true, unitNumber: true },
+        },
+        invoices: {
+          where: { type: InvoiceType.BOOKING_FEE },
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            invoiceNumber: true,
+            amount: true,
+            status: true,
+            dueDate: true,
+            paidDate: true,
+            type: true,
+          },
+        },
       },
     });
-
-    if (!facility) throw new NotFoundException('Facility not found');
-    if (!facility.isActive) throw new BadRequestException('Facility inactive');
-    if (facility.isBookable === false) {
-      throw new BadRequestException('Facility is not available for booking');
+    if (!row) {
+      throw new NotFoundException(`Booking ${id} not found`);
     }
-
-    return facility;
+    return row;
   }
 
-  private resolveSlotConfig(
-    facility: any,
-    dateStr: string,
-  ): EffectiveSlotConfig | null {
-    const date = new Date(dateStr);
-    const dayIndex = date.getUTCDay();
+  async listBookings(filters: BookingsQueryDto): Promise<BookingListResponseDto> {
+    const page = filters.page ?? 1;
+    const limit = filters.limit ?? 25;
+    const skip = (page - 1) * limit;
+    const search = filters.search?.trim();
 
-    const exception = facility.slotExceptions.find(
-      (e: any) => e.date.toISOString().split('T')[0] === dateStr.split('T')[0],
-    );
-
-    if (exception?.isClosed) return null;
-
-    if (exception) {
-      return {
-        startTime: exception.startTime ?? '00:00',
-        endTime: exception.endTime ?? '23:59',
-        slotDurationMinutes: exception.slotDurationMinutes ?? undefined,
-        slotCapacity: exception.slotCapacity ?? facility.capacity ?? undefined,
-      };
-    } else {
-      const config = facility.slotConfig.find(
-        (c: any) => c.dayOfWeek === dayIndex,
-      );
-      if (!config) return null;
-      return {
-        startTime: config.startTime,
-        endTime: config.endTime,
-        slotDurationMinutes: config.slotDurationMinutes ?? undefined,
-        slotCapacity: config.slotCapacity ?? facility.capacity ?? undefined,
-      };
-    }
-  }
-
-  private validateTime(
-    dto: CreateBookingDto,
-    config: EffectiveSlotConfig,
-  ): boolean {
-    const toMinutes = (t: string) => {
-      const [h, m] = t.split(':').map(Number);
-      return h * 60 + m;
+    const where: Prisma.BookingWhereInput = {
+      facilityId: filters.facilityId,
+      status: filters.status,
+      userId: filters.userId,
+      unitId: filters.unitId,
+      date:
+        filters.dateFrom || filters.dateTo
+          ? {
+              gte: filters.dateFrom ? new Date(filters.dateFrom) : undefined,
+              lte: filters.dateTo ? new Date(filters.dateTo) : undefined,
+            }
+          : undefined,
     };
 
-    const start = toMinutes(dto.startTime);
-    const end = toMinutes(dto.endTime);
-    const open = toMinutes(config.startTime);
-    const close = toMinutes(config.endTime);
-
-    if (start < open || end > close) return false;
-    if (end <= start) return false;
-
-    if (config.slotDurationMinutes) {
-      const diff = end - start;
-      if (diff !== config.slotDurationMinutes) return false;
+    if (search) {
+      where.OR = [
+        { facility: { name: { contains: search, mode: 'insensitive' } } },
+        { user: { nameEN: { contains: search, mode: 'insensitive' } } },
+        { user: { nameAR: { contains: search, mode: 'insensitive' } } },
+        { unit: { unitNumber: { contains: search, mode: 'insensitive' } } },
+      ];
     }
 
-    return true;
-  }
-
-  private async enforceLimits(
-    dto: CreateBookingDto & { userId: string },
-    facility: any,
-  ) {
-    const date = new Date(dto.date);
-
-    // Check maxReservationsPerDay
-    if (facility.maxReservationsPerDay) {
-      const dailyCount = await this.prisma.booking.count({
-        where: {
-          userId: dto.userId,
-          facilityId: dto.facilityId,
-          date,
+    const [rows, total] = await Promise.all([
+      this.prisma.booking.findMany({
+        where,
+        include: {
+          facility: {
+            select: {
+              id: true,
+              name: true,
+              type: true,
+              requiresPrepayment: true,
+              price: true,
+              billingCycle: true,
+            },
+          },
+          user: { select: { id: true, nameEN: true, nameAR: true, email: true } },
+          unit: { select: { id: true, unitNumber: true } },
+          invoices: {
+            where: { type: InvoiceType.BOOKING_FEE },
+            select: { id: true, status: true, type: true },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
         },
-      });
+        orderBy: [{ createdAt: 'desc' }],
+        skip,
+        take: limit,
+      }),
+      this.prisma.booking.count({ where }),
+    ]);
 
-      if (dailyCount >= facility.maxReservationsPerDay)
-        throw new BadRequestException(
-          `Max reservations per day exceeded (${facility.maxReservationsPerDay})`,
-        );
-    }
-
-    // Cooldown check
-    if (facility.cooldownMinutes) {
-      const last = await this.prisma.booking.findFirst({
-        where: {
-          userId: dto.userId,
-          facilityId: dto.facilityId,
-        },
-        orderBy: { createdAt: 'desc' },
-      });
-
-      if (last) {
-        const diff =
-          (Date.now() - new Date(last.createdAt).getTime()) / 1000 / 60;
-
-        if (diff < facility.cooldownMinutes)
-          throw new BadRequestException(
-            `Cooldown active. Wait ${
-              facility.cooldownMinutes - Math.floor(diff)
-            } minutes`,
-          );
-      }
-    }
-  }
-
-  private async checkSlotCapacity(
-    dto: CreateBookingDto,
-    facility: any,
-    config: EffectiveSlotConfig,
-  ) {
-    if (config.slotCapacity) {
-      const slotCount = await this.prisma.booking.count({
-        where: {
-          facilityId: dto.facilityId,
-          date: new Date(dto.date),
-          startTime: dto.startTime,
-          endTime: dto.endTime,
-          status: { in: [BookingStatus.PENDING, BookingStatus.APPROVED] },
-        },
-      });
-
-      if (slotCount >= config.slotCapacity) {
-        throw new BadRequestException(
-          `Slot capacity exceeded (${config.slotCapacity})`,
-        );
-      }
-    }
-  }
-
-  async createForActor(actorUserId: string, dto: CreateBookingDto) {
-    const access = await getActiveUnitAccess(this.prisma, actorUserId, dto.unitId);
-
-    const unit = await this.prisma.unit.findUnique({
-      where: { id: dto.unitId },
-      select: { status: true },
-    });
-    if (!unit) throw new NotFoundException('Unit not found');
-
-    if (!this.isUnitDelivered(unit.status)) {
-      throw new BadRequestException(
-        'Facility bookings are only available after delivery',
-      );
-    }
-
-    if (!access.canBookFacilities) {
-      throw new BadRequestException(
-        'User does not have permission to book facilities',
-      );
-    }
-
-    const resident = await this.prisma.resident.findUnique({
-      where: { userId: actorUserId },
-      select: { id: true },
-    });
-
-    const internalDto = {
-      ...dto,
-      userId: actorUserId,
-      residentId: resident?.id ?? undefined,
+    return {
+      data: rows.map((row) => this.toBookingListItem(row)),
+      total,
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
     };
+  }
 
-    const facility = await this.getFacility(dto);
+  async getBookingDetail(id: string): Promise<BookingDetailDto> {
+    const row = await this.getBookingById(id);
+    return this.toBookingDetailDto(row);
+  }
 
-    // Clubhouse gating: treat MULTIPURPOSE_HALL facilities as clubhouse-managed.
-    // If your project uses a different type for clubhouse, adjust this mapping.
-    if (facility.type === FacilityType.MULTIPURPOSE_HALL) {
-      const hasAccess = await this.clubhouseService.hasClubhouseAccess(
-        actorUserId,
-        dto.unitId,
-      );
-      if (!hasAccess) {
-        throw new ForbiddenException(
-          'Clubhouse access approval is required before booking this facility',
-        );
-      }
+  async approveBooking(id: string, adminId: string): Promise<BookingDetailDto> {
+    if (!adminId) {
+      throw new BadRequestException('Invalid admin context');
     }
 
-    const config = this.resolveSlotConfig(facility, dto.date);
-
-    if (!config)
-      throw new BadRequestException(
-        'Facility closed or no slots configured for this day',
-      );
-
-    if (!this.validateTime(dto, config)) {
-      throw new BadRequestException('Requested time does not match slot rules');
+    const booking = await this.prisma.booking.findUnique({
+      where: { id },
+      include: {
+        facility: {
+          select: {
+            name: true,
+            price: true,
+            billingCycle: true,
+            requiresPrepayment: true,
+          },
+        },
+        invoices: {
+          where: { type: InvoiceType.BOOKING_FEE },
+          select: { id: true },
+          take: 1,
+        },
+      },
+    });
+    if (!booking) {
+      throw new NotFoundException(`Booking ${id} not found`);
     }
 
-    const booking = await this.prisma.$transaction(async (tx) => {
-      await this.enforceLimits(internalDto, facility);
-      await this.checkSlotCapacity(dto, facility, config);
+    if (booking.status === BookingStatus.CANCELLED || booking.status === BookingStatus.REJECTED) {
+      throw new BadRequestException('Cannot approve a cancelled or rejected booking');
+    }
 
-      const booking = await tx.booking.create({
+    const totalAmount = this.calculateTotalAmount({
+      startTime: booking.startTime,
+      endTime: booking.endTime,
+      price: booking.facility.price,
+      billingCycle: booking.facility.billingCycle,
+    });
+
+    const targetStatus =
+      booking.facility.requiresPrepayment && totalAmount > 0
+        ? BookingStatus.PENDING_PAYMENT
+        : BookingStatus.APPROVED;
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.booking.update({
+        where: { id },
         data: {
-          userId: internalDto.userId,
-          facilityId: internalDto.facilityId,
-          residentId: internalDto.residentId,
-          unitId: internalDto.unitId,
-          date: new Date(internalDto.date),
-          startTime: internalDto.startTime,
-          endTime: internalDto.endTime,
-          status: facility.requiresPrepayment
-            ? BookingStatus.PENDING_PAYMENT
-            : BookingStatus.PENDING,
+          status: targetStatus,
+          totalAmount,
         },
       });
 
-      if (facility.requiresPrepayment && Number(facility.price ?? 0) > 0) {
+      if (totalAmount > 0 && booking.invoices.length === 0) {
+        if (!booking.unitId) {
+          throw new BadRequestException('Booking unit is required to generate invoice');
+        }
         await this.invoicesService.generateInvoiceTx(tx, {
-          unitId: internalDto.unitId,
-          residentId: actorUserId,
-          amount: Number(facility.price),
-          dueDate: new Date(internalDto.date),
+          unitId: booking.unitId,
+          residentId: booking.userId,
+          amount: totalAmount,
+          dueDate: booking.date,
           type: InvoiceType.BOOKING_FEE,
           status: InvoiceStatus.PENDING,
-          sources: { bookingIds: [booking.id] },
+          sources: { bookingIds: [id] },
         });
       }
-
-      return booking;
     });
 
-    try {
-      await this.notificationsService.sendNotification({
-        type: NotificationType.EVENT_NOTIFICATION,
-        title: 'Booking request submitted',
-        messageEn: `Your booking for ${facility.name} on ${new Date(booking.date).toDateString()} from ${booking.startTime} to ${booking.endTime} has been submitted.`,
-        channels: [Channel.IN_APP, Channel.PUSH],
-        targetAudience: Audience.SPECIFIC_RESIDENCES,
-        audienceMeta: { userIds: [actorUserId] },
-        payload: {
-          route: '/bookings',
-          entityType: 'BOOKING',
-          entityId: booking.id,
-          eventKey: 'booking.created',
-          status: booking.status,
-        },
-      });
-    } catch (error) {
-      void error;
-    }
-
-    return booking;
-  }
-
-  async findAll(query: BookingsQueryDto) {
-    const {
-      status,
-      facilityId,
-      userId,
-      unitId,
-      dateFrom,
-      dateTo,
-      ...baseQuery
-    } = query;
-
-    const filters: Record<string, any> = {
-      status,
-      facilityId,
-      userId,
-      unitId,
-    };
-
-    if (dateFrom || dateTo) {
-      filters.date = {};
-      if (dateFrom) filters.date.gte = new Date(dateFrom);
-      if (dateTo) filters.date.lte = new Date(dateTo);
-    }
-
-    return paginate(this.prisma.booking, baseQuery, {
-      searchFields: ['facility.name', 'user.nameEN', 'unit.unitNumber'],
-      additionalFilters: filters,
-      include: {
-        facility: { select: { name: true } },
-        user: { select: { nameEN: true, email: true } },
-        resident: { select: { nationalId: true } },
-        unit: { select: { unitNumber: true } },
-      },
-    });
-  }
-
-  async findOne(id: string) {
-    const booking = await this.prisma.booking.findUnique({
-      where: { id },
-      include: { facility: true, user: true, resident: true, unit: true },
-    });
-    if (!booking) throw new NotFoundException('Booking not found');
-    return booking;
-  }
-
-  async findOneForActor(
-    id: string,
-    ctx: { actorUserId: string; permissions: string[]; roles: string[] },
-  ) {
-    const booking = await this.findOne(id);
-
-    const canViewAll =
-      this.isSuperAdminRole(ctx.roles) ||
-      (Array.isArray(ctx.permissions) &&
-        ctx.permissions.includes('booking.view_all'));
-    if (canViewAll) return booking;
-
-    if (!ctx.permissions?.includes('booking.view_own')) {
-      throw new ForbiddenException('You do not have access to this booking');
-    }
-
-    if (booking.userId !== ctx.actorUserId) {
-      throw new ForbiddenException('You do not have access to this booking');
-    }
-
-    return booking;
-  }
-
-  async updateStatus(id: string, dto: UpdateBookingStatusDto) {
-    const booking = await this.prisma.booking.findUnique({
-      where: { id },
-      include: { facility: true },
-    });
-
-    if (!booking) {
-      throw new NotFoundException('Booking not found');
-    }
-
-    const updatedBooking = await this.prisma.booking.update({
-      where: { id },
-      data: { status: dto.status },
-    });
-
-    // Emit events based on status change
-    if (dto.status === BookingStatus.APPROVED) {
+    if (targetStatus === BookingStatus.APPROVED) {
       this.eventEmitter.emit(
         'booking.approved',
         new BookingApprovedEvent(
@@ -420,73 +367,32 @@ export class BookingsService {
           booking.endTime,
         ),
       );
-    } else if (
-      dto.status === BookingStatus.CANCELLED ||
-      dto.status === BookingStatus.REJECTED
-    ) {
-      this.eventEmitter.emit(
-        'booking.cancelled',
-        new BookingCancelledEvent(
-          booking.id,
-          booking.userId,
-          booking.facility.name,
-          booking.date,
-          booking.startTime,
-          booking.endTime,
-        ),
-      );
     }
 
-    return updatedBooking;
+    return this.getBookingDetail(id);
   }
 
-  async findByFacility(facilityId: string) {
-    const facility = await this.prisma.facility.findUnique({
-      where: { id: facilityId },
-    });
-
-    if (!facility) throw new NotFoundException('Facility not found');
-
-    return this.prisma.booking.findMany({
-      where: { facilityId },
-      include: { facility: true, user: true, resident: true, unit: true },
-      orderBy: { date: 'asc' },
-    });
-  }
-
-  async findByUser(userId: string) {
-    return this.prisma.booking.findMany({
-      where: { userId },
-      include: { facility: true, resident: true, unit: true },
-      orderBy: [{ date: 'desc' }, { startTime: 'desc' }],
-    });
-  }
-
-  async cancelOwn(id: string, userId: string) {
+  async rejectBooking(id: string, adminId: string, dto: RejectBookingDto): Promise<BookingDetailDto> {
     const booking = await this.prisma.booking.findUnique({
       where: { id },
-      include: { facility: true },
+      include: { facility: { select: { name: true } } },
     });
-
-    if (!booking) throw new NotFoundException('Booking not found');
-
-    if (booking.userId !== userId) {
-      throw new BadRequestException("You cannot cancel someone else's booking");
+    if (!booking) {
+      throw new NotFoundException(`Booking ${id} not found`);
+    }
+    if (booking.status === BookingStatus.CANCELLED) {
+      throw new BadRequestException('Cannot reject a cancelled booking');
     }
 
-    if (booking.cancelledAt) {
-      throw new BadRequestException('Booking already cancelled');
-    }
-
-    const updatedBooking = await this.prisma.booking.update({
+    await this.prisma.booking.update({
       where: { id },
       data: {
-        status: BookingStatus.CANCELLED,
-        cancelledAt: new Date(),
+        status: BookingStatus.REJECTED,
+        rejectionReason: dto.reason.trim(),
+        rejectedById: adminId,
       },
     });
 
-    // Emit booking cancelled event
     this.eventEmitter.emit(
       'booking.cancelled',
       new BookingCancelledEvent(
@@ -499,12 +405,68 @@ export class BookingsService {
       ),
     );
 
-    return updatedBooking;
+    return this.getBookingDetail(id);
   }
 
-  async remove(id: string) {
-    return this.prisma.booking.delete({
+  async cancelBooking(id: string, cancelledById: string, dto: CancelBookingDto): Promise<BookingDetailDto> {
+    const booking = await this.prisma.booking.findUnique({
       where: { id },
+      include: {
+        facility: { select: { name: true } },
+        invoices: {
+          where: { type: InvoiceType.BOOKING_FEE },
+          select: { id: true, status: true },
+        },
+      },
     });
+    if (!booking) {
+      throw new NotFoundException(`Booking ${id} not found`);
+    }
+    if (booking.status === BookingStatus.CANCELLED) {
+      throw new BadRequestException('Booking is already cancelled');
+    }
+
+    const hasPaidInvoice = booking.invoices.some((invoice) => invoice.status === InvoiceStatus.PAID);
+    const reason = dto.reason.trim();
+    const cancellationReason = hasPaidInvoice
+      ? `${reason} [REFUND_REQUIRED]`
+      : reason;
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.booking.update({
+        where: { id },
+        data: {
+          status: BookingStatus.CANCELLED,
+          cancelledAt: new Date(),
+          cancelledById,
+          cancellationReason,
+        },
+      });
+
+      await tx.invoice.updateMany({
+        where: {
+          bookingId: id,
+          type: InvoiceType.BOOKING_FEE,
+          status: { in: [InvoiceStatus.PENDING, InvoiceStatus.OVERDUE] },
+        },
+        data: {
+          status: InvoiceStatus.CANCELLED,
+        },
+      });
+    });
+
+    this.eventEmitter.emit(
+      'booking.cancelled',
+      new BookingCancelledEvent(
+        booking.id,
+        booking.userId,
+        booking.facility.name,
+        booking.date,
+        booking.startTime,
+        booking.endTime,
+      ),
+    );
+
+    return this.getBookingDetail(id);
   }
 }

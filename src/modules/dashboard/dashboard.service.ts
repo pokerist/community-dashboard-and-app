@@ -43,7 +43,8 @@ export interface DashboardPeriodWindow {
 interface ComplaintActivityRow {
   id: string;
   complaintNumber: string;
-  category: string;
+  categoryLegacy: string | null;
+  category: { name: string } | null;
   createdAt: Date;
   reporter: { nameEN: string | null; nameAR: string | null } | null;
   unit: { unitNumber: string | null } | null;
@@ -59,7 +60,8 @@ interface ServiceRequestActivityRow {
 interface ViolationActivityRow {
   id: string;
   violationNumber: string;
-  type: string;
+  typeLegacy: string | null;
+  category: { name: string } | null;
   createdAt: Date;
   issuedBy: { nameEN: string | null; nameAR: string | null } | null;
   unit: { unitNumber: string | null } | null;
@@ -374,7 +376,12 @@ export class DashboardService {
         select: {
           id: true,
           complaintNumber: true,
-          category: true,
+          categoryLegacy: true,
+          category: {
+            select: {
+              name: true,
+            },
+          },
           createdAt: true,
           reporter: {
             select: { nameEN: true, nameAR: true },
@@ -404,7 +411,10 @@ export class DashboardService {
         select: {
           id: true,
           violationNumber: true,
-          type: true,
+          typeLegacy: true,
+          category: {
+            select: { name: true },
+          },
           createdAt: true,
           issuedBy: {
             select: { nameEN: true, nameAR: true },
@@ -500,7 +510,12 @@ export class DashboardService {
       select: {
         id: true,
         complaintNumber: true,
-        category: true,
+        categoryLegacy: true,
+        category: {
+          select: {
+            name: true,
+          },
+        },
         priority: true,
         status: true,
         createdAt: true,
@@ -517,7 +532,7 @@ export class DashboardService {
     return rows.map((row) => ({
       id: row.id,
       complaintNumber: row.complaintNumber,
-      category: row.category,
+      category: row.category?.name ?? row.categoryLegacy ?? '-',
       priority: row.priority,
       status: row.status,
       unitNumber: row.unit?.unitNumber ?? null,
@@ -618,7 +633,7 @@ export class DashboardService {
     return {
       id: `complaint:${row.id}`,
       type: DashboardActivityType.COMPLAINT,
-      description: `Complaint ${row.complaintNumber} created (${row.category})`,
+      description: `Complaint ${row.complaintNumber} created (${row.category?.name ?? row.categoryLegacy ?? 'General'})`,
       actorName: displayName(row.reporter),
       unitNumber: row.unit?.unitNumber ?? null,
       timestamp: row.createdAt,
@@ -642,7 +657,7 @@ export class DashboardService {
     return {
       id: `violation:${row.id}`,
       type: DashboardActivityType.VIOLATION,
-      description: `Violation ${row.violationNumber} issued (${row.type})`,
+      description: `Violation ${row.violationNumber} issued (${row.category?.name ?? row.typeLegacy ?? 'General'})`,
       actorName: displayName(row.issuedBy),
       unitNumber: row.unit?.unitNumber ?? null,
       timestamp: row.createdAt,
@@ -887,7 +902,7 @@ export class DashboardService {
     }
 
     return paginate(this.prisma.complaint, baseQuery, {
-      searchFields: ['complaintNumber', 'category', 'description'],
+      searchFields: ['complaintNumber', 'categoryLegacy', 'description'],
       additionalFilters: filters,
       include: {
         reporter: {

@@ -24,6 +24,25 @@ const PERMISSIONS = [
   'unit.view_all',
   'unit.view_own',
   'project.view',
+  'complaint.view_all',
+  'complaint.view_own',
+  'complaint.report',
+  'complaint.manage',
+  'violation.view_all',
+  'violation.issue',
+  'violation.update',
+  'violation.cancel',
+  'facility.view_all',
+  'facility.view_own',
+  'facility.create',
+  'facility.update',
+  'booking.view_all',
+  'booking.view_own',
+  'booking.create',
+  'booking.update',
+  'booking.approve',
+  'booking.reject',
+  'booking.cancel',
   'commercial.view_all',
   'commercial.create',
   'commercial.update',
@@ -45,6 +64,18 @@ const ROLES = {
     'user.read',
     'unit.view_all',
     'project.view',
+    'complaint.view_all',
+    'complaint.manage',
+    'violation.view_all',
+    'violation.issue',
+    'violation.update',
+    'facility.view_all',
+    'facility.create',
+    'facility.update',
+    'booking.view_all',
+    'booking.approve',
+    'booking.reject',
+    'booking.cancel',
     'commercial.view_all',
     'commercial.create',
     'commercial.update',
@@ -642,6 +673,220 @@ async function main() {
         },
       ],
     });
+
+    const existingDraftSurvey = await prisma.survey.findFirst({
+      where: {
+        title: 'Maintenance Feedback Draft',
+        createdById: manager.id,
+      },
+      select: { id: true },
+    });
+    if (!existingDraftSurvey) {
+      await prisma.survey.create({
+        data: {
+          title: 'Maintenance Feedback Draft',
+          description: 'Draft survey for next maintenance cycle.',
+          targetType: 'ALL',
+          status: 'DRAFT',
+          createdById: manager.id,
+          questions: {
+            create: [
+              {
+                text: 'What maintenance issue should be prioritized next?',
+                type: 'TEXT',
+                required: true,
+                displayOrder: 0,
+              },
+            ],
+          },
+        },
+      });
+    }
+
+    const existingActiveSurvey = await prisma.survey.findFirst({
+      where: {
+        title: 'Community Satisfaction Pulse',
+        createdById: manager.id,
+      },
+      select: { id: true },
+    });
+    if (!existingActiveSurvey) {
+      const activeSurvey = await prisma.survey.create({
+        data: {
+          title: 'Community Satisfaction Pulse',
+          description: 'Quarterly pulse check for delivered units.',
+          targetType: 'SPECIFIC_UNITS',
+          targetMeta: { unitIds: [unitA.id, unitB.id] },
+          status: 'ACTIVE',
+          publishedAt: new Date(),
+          createdById: manager.id,
+          questions: {
+            create: [
+              {
+                text: 'How satisfied are you with community cleanliness?',
+                type: 'RATING',
+                required: true,
+                displayOrder: 0,
+              },
+              {
+                text: 'Would you recommend the community to a friend?',
+                type: 'YES_NO',
+                required: true,
+                displayOrder: 1,
+              },
+              {
+                text: 'Which service should improve first?',
+                type: 'MULTIPLE_CHOICE',
+                options: { choices: ['Security', 'Landscaping', 'Parking'] },
+                required: true,
+                displayOrder: 2,
+              },
+              {
+                text: 'Any additional comments?',
+                type: 'TEXT',
+                required: false,
+                displayOrder: 3,
+              },
+            ],
+          },
+        },
+        include: {
+          questions: {
+            orderBy: { displayOrder: 'asc' },
+          },
+        },
+      });
+
+      const byOrder = activeSurvey.questions;
+      await prisma.surveyResponse.create({
+        data: {
+          surveyId: activeSurvey.id,
+          userId: residentAUser.id,
+          answers: {
+            create: [
+              {
+                questionId: byOrder[0].id,
+                valueNumber: 4,
+              },
+              {
+                questionId: byOrder[1].id,
+                valueText: 'YES',
+              },
+              {
+                questionId: byOrder[2].id,
+                valueChoice: 'Security',
+              },
+              {
+                questionId: byOrder[3].id,
+                valueText: 'Great progress this quarter.',
+              },
+            ],
+          },
+        },
+      });
+    }
+
+    const restaurant = await prisma.restaurant.upsert({
+      where: { id: 'seed-restaurant-palm-bites' },
+      update: {
+        name: 'Palm Bites',
+        description: 'Neighborhood favorites delivered fast.',
+        category: 'Egyptian',
+        isActive: true,
+      },
+      create: {
+        id: 'seed-restaurant-palm-bites',
+        name: 'Palm Bites',
+        description: 'Neighborhood favorites delivered fast.',
+        category: 'Egyptian',
+        isActive: true,
+        displayOrder: 1,
+      },
+    });
+
+    const [menuItemA, menuItemB] = await Promise.all([
+      prisma.menuItem.upsert({
+        where: { id: 'seed-menu-koshari' },
+        update: {
+          restaurantId: restaurant.id,
+          name: 'Koshari Bowl',
+          category: 'Mains',
+          price: new Prisma.Decimal('85.00'),
+          isAvailable: true,
+          displayOrder: 1,
+        },
+        create: {
+          id: 'seed-menu-koshari',
+          restaurantId: restaurant.id,
+          name: 'Koshari Bowl',
+          description: 'Classic Egyptian koshari with special sauce.',
+          category: 'Mains',
+          price: new Prisma.Decimal('85.00'),
+          isAvailable: true,
+          displayOrder: 1,
+        },
+      }),
+      prisma.menuItem.upsert({
+        where: { id: 'seed-menu-wrap' },
+        update: {
+          restaurantId: restaurant.id,
+          name: 'Chicken Shawarma Wrap',
+          category: 'Sandwiches',
+          price: new Prisma.Decimal('70.00'),
+          isAvailable: true,
+          displayOrder: 2,
+        },
+        create: {
+          id: 'seed-menu-wrap',
+          restaurantId: restaurant.id,
+          name: 'Chicken Shawarma Wrap',
+          description: 'Grilled chicken with garlic sauce and pickles.',
+          category: 'Sandwiches',
+          price: new Prisma.Decimal('70.00'),
+          isAvailable: true,
+          displayOrder: 2,
+        },
+      }),
+    ]);
+
+    const existingOrder = await prisma.order.findUnique({
+      where: { orderNumber: 'ORD-SEED-0001' },
+      select: { id: true },
+    });
+    if (!existingOrder) {
+      const itemOneSubtotal = new Prisma.Decimal('85.00').mul(2);
+      const itemTwoSubtotal = new Prisma.Decimal('70.00').mul(1);
+      const totalAmount = itemOneSubtotal.add(itemTwoSubtotal);
+
+      await prisma.order.create({
+        data: {
+          orderNumber: 'ORD-SEED-0001',
+          userId: residentAUser.id,
+          unitId: unitA.id,
+          restaurantId: restaurant.id,
+          status: 'CONFIRMED',
+          confirmedAt: new Date(),
+          totalAmount,
+          notes: 'No onions please',
+          items: {
+            create: [
+              {
+                menuItemId: menuItemA.id,
+                quantity: 2,
+                unitPrice: new Prisma.Decimal('85.00'),
+                subtotal: itemOneSubtotal,
+              },
+              {
+                menuItemId: menuItemB.id,
+                quantity: 1,
+                unitPrice: new Prisma.Decimal('70.00'),
+                subtotal: itemTwoSubtotal,
+              },
+            ],
+          },
+        },
+      });
+    }
 
     console.log('Fast seed complete.');
     console.log('- Super Admin: test@admin.com / pass123');

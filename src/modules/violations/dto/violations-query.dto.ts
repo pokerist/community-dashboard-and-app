@@ -1,49 +1,69 @@
-import { IsEnum, IsOptional, IsString } from 'class-validator';
-import { ViolationStatus } from '@prisma/client';
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
+import {
+  IsBoolean,
+  IsDateString,
+  IsEnum,
+  IsOptional,
+  IsUUID,
+  Max,
+  Min,
+} from 'class-validator';
 import { BaseQueryDto } from '../../../common/dto/base-query.dto';
+import { ViolationStatus } from '@prisma/client';
 
 export class ViolationsQueryDto extends BaseQueryDto {
-  @ApiPropertyOptional({
-    enum: ViolationStatus,
-    example: ViolationStatus.PENDING,
-  })
+  @ApiPropertyOptional({ enum: ViolationStatus })
   @IsOptional()
   @IsEnum(ViolationStatus)
   status?: ViolationStatus;
 
-  @ApiPropertyOptional({
-    example: 'unit-123',
-  })
+  @ApiPropertyOptional({ format: 'uuid' })
   @IsOptional()
-  @IsString()
+  @IsUUID()
+  categoryId?: string;
+
+  @ApiPropertyOptional({ format: 'uuid' })
+  @IsOptional()
+  @IsUUID()
   unitId?: string;
 
-  @ApiPropertyOptional({
-    example: 'user-123',
-  })
+  @ApiPropertyOptional({ format: 'uuid' })
   @IsOptional()
-  @IsString()
+  @IsUUID()
   residentId?: string;
 
-  @ApiPropertyOptional({
-    example: 'user-456',
-  })
+  @ApiPropertyOptional({ format: 'uuid' })
   @IsOptional()
-  @IsString()
+  @IsUUID()
   issuedById?: string;
 
-  @ApiPropertyOptional({
-    example: '2023-01-01',
-  })
+  @ApiPropertyOptional({ type: String, format: 'date-time' })
   @IsOptional()
-  @IsString()
-  createdAtFrom?: string;
+  @IsDateString()
+  dateFrom?: string;
 
-  @ApiPropertyOptional({
-    example: '2023-01-31',
-  })
+  @ApiPropertyOptional({ type: String, format: 'date-time' })
   @IsOptional()
-  @IsString()
-  createdAtTo?: string;
+  @IsDateString()
+  dateTo?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  hasAppeal?: boolean;
+
+  @ApiPropertyOptional({ default: 1, minimum: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @Min(1)
+  page?: number = 1;
+
+  @ApiPropertyOptional({ default: 25, minimum: 1, maximum: 100 })
+  @IsOptional()
+  @Type(() => Number)
+  @Min(1)
+  @Max(100)
+  limit?: number = 25;
 }

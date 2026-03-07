@@ -1,196 +1,228 @@
+import { BadRequestException } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Test, TestingModule } from '@nestjs/testing';
-import { ViolationsService } from './violations.service';
+import {
+  InvoiceStatus,
+  InvoiceType,
+  ViolationActionStatus,
+  ViolationActionType,
+  ViolationStatus,
+} from '@prisma/client';
+import { Decimal } from '@prisma/client/runtime/library';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { InvoicesService } from '../invoices/invoices.service';
-import { BadRequestException } from '@nestjs/common';
-import { ViolationStatus, InvoiceStatus, InvoiceType } from '@prisma/client';
-import { Decimal } from '@prisma/client/runtime/library';
-import { EventEmitter2 } from '@nestjs/event-emitter';
-
-const mockPrismaService = {
-  violation: {
-    findFirst: jest.fn(),
-    create: jest.fn(),
-    findUnique: jest.fn(),
-    update: jest.fn(),
-    delete: jest.fn(),
-  },
-  invoice: {
-    // Required for $transaction mock in remove()
-    delete: jest.fn(),
-  },
-  $transaction: jest.fn((callback) => callback(mockPrismaService)), // Mock transaction
-};
-
-// Mock InvoicesService to check if generateInvoice is called
-const mockInvoicesService = {
-  generateInvoice: jest.fn(),
-};
+import { ReviewAppealDto } from './dto/review-appeal.dto';
+import { ViolationDetailDto } from './dto/violation-response.dto';
+import { ViolationsService } from './violations.service';
 
 describe('ViolationsService (Unit)', () => {
   let service: ViolationsService;
-  let prisma: typeof mockPrismaService;
-  let invoicesService: InvoicesService;
 
-  const VIO_ID = 'vio-123';
-  const UNIT_ID = 'unit-1';
-  const RES_ID = 'res-1';
-
-  const mockCreateDto = {
-    unitId: UNIT_ID,
-    residentId: RES_ID,
-    type: 'Parking',
-    description: 'Double parked',
-    fineAmount: 50.0,
-    dueDate: new Date(2026, 0, 15),
+  const txMock = {
+    violation: {
+      create: jest.fn(),
+      update: jest.fn(),
+    },
+    invoice: {
+      updateMany: jest.fn(),
+    },
+    violationActionRequest: {
+      update: jest.fn(),
+    },
   };
 
-  const mockViolation = {
-    id: VIO_ID,
-    ...mockCreateDto,
-    fineAmount: new Decimal(mockCreateDto.fineAmount),
-    status: ViolationStatus.PENDING,
+  const prismaMock = {
+    unit: {
+      findUnique: jest.fn(),
+    },
+    user: {
+      findUnique: jest.fn(),
+    },
+    file: {
+      findMany: jest.fn(),
+    },
+    violationCategory: {
+      findUnique: jest.fn(),
+      findMany: jest.fn(),
+    },
+    violation: {
+      findFirst: jest.fn(),
+      findUnique: jest.fn(),
+      findMany: jest.fn(),
+      count: jest.fn(),
+      aggregate: jest.fn(),
+      groupBy: jest.fn(),
+      update: jest.fn(),
+    },
+    violationActionRequest: {
+      findUnique: jest.fn(),
+      findMany: jest.fn(),
+      count: jest.fn(),
+    },
+    invoice: {
+      updateMany: jest.fn(),
+    },
+    $transaction: jest.fn(
+      async (callback: (tx: typeof txMock) => Promise<unknown>) => callback(txMock),
+    ),
+  };
+
+  const invoicesServiceMock = {
+    generateInvoiceTx: jest.fn(),
+  };
+
+  const eventEmitterMock = {
+    emit: jest.fn(),
+  };
+
+  const detailFixture: ViolationDetailDto = {
+    id: 'vio-1',
     violationNumber: 'VIO-00001',
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    invoices: [], // Default empty array for relations
+    categoryId: null,
+    categoryName: null,
+    categoryDescription: null,
+    description: 'fixture',
+    fineAmount: 0,
+    status: ViolationStatus.PENDING,
+    appealStatus: null,
+    appealDeadline: null,
+    closedAt: null,
+    unitId: 'unit-1',
+    unitNumber: 'A-1',
+    residentId: null,
+    residentName: null,
+    issuerId: null,
+    issuerName: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    photoEvidence: [],
+    actionRequests: [],
+    invoices: [],
   };
 
   beforeEach(async () => {
+    jest.clearAllMocks();
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         ViolationsService,
-        { provide: PrismaService, useValue: mockPrismaService },
-        { provide: InvoicesService, useValue: mockInvoicesService },
-        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+        {
+          provide: PrismaService,
+          useValue: prismaMock,
+        },
+        {
+          provide: InvoicesService,
+          useValue: invoicesServiceMock,
+        },
+        {
+          provide: EventEmitter2,
+          useValue: eventEmitterMock,
+        },
       ],
     }).compile();
 
     service = module.get<ViolationsService>(ViolationsService);
-    prisma = module.get<PrismaService>(PrismaService) as any;
-    invoicesService = module.get<InvoicesService>(InvoicesService);
-    jest.clearAllMocks();
   });
 
-  it('should be defined', () => {
-    expect(service).toBeDefined();
-  });
+  it('creates violation and auto-generates fine invoice from category default', async () => {
+    prismaMock.unit.findUnique.mockResolvedValue({ id: 'unit-1' });
+    prismaMock.violationCategory.findUnique.mockResolvedValue({
+      id: 'cat-1',
+      name: 'Parking',
+      defaultFineAmount: new Decimal(500),
+      isActive: true,
+    });
+    prismaMock.violation.findFirst.mockResolvedValue(null);
+    txMock.violation.create.mockResolvedValue({ id: 'vio-1' });
 
-  // [Create] Method Tests (Invoices Integration)
-  describe('create', () => {
-    it('should create a violation and a linked invoice if fineAmount > 0', async () => {
-      // Mock sequential number generation (if it was a separate private function)
-      const generateSpy = jest
-        .spyOn(service as any, 'generateViolationNumber')
-        .mockResolvedValue('VIO-00002');
+    jest.spyOn(service, 'getViolationDetail').mockResolvedValue(detailFixture);
 
-      // Mock the Prisma call to return the created violation
-      prisma.violation.create.mockResolvedValue({
-        ...mockViolation,
-        id: 'new-vio-id',
-        violationNumber: 'VIO-00002',
-      });
+    await service.createViolation(
+      {
+        unitId: 'unit-1',
+        categoryId: 'cat-1',
+        description: 'Double parking',
+      },
+      'admin-1',
+    );
 
-      await service.create(mockCreateDto as any);
-
-      // Check 1: Violation was created with correct data
-      expect(prisma.violation.create).toHaveBeenCalledWith(
-        expect.objectContaining({
-          data: expect.objectContaining({
-            violationNumber: 'VIO-00002',
-            fineAmount: mockCreateDto.fineAmount,
-            status: ViolationStatus.PENDING,
-          }),
+    expect(txMock.violation.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          typeLegacy: 'Parking',
+          fineAmount: 500,
+          status: ViolationStatus.PENDING,
         }),
-      );
+      }),
+    );
 
-      // Check 2: Invoice was created with the correct link and data
-      expect(invoicesService.generateInvoice).toHaveBeenCalledWith({
-        unitId: UNIT_ID,
-        residentId: RES_ID,
+    expect(invoicesServiceMock.generateInvoiceTx).toHaveBeenCalledWith(
+      txMock,
+      expect.objectContaining({
         type: InvoiceType.FINE,
-        amount: mockCreateDto.fineAmount,
-        dueDate: mockCreateDto.dueDate,
-        sources: { violationIds: ['new-vio-id'] }, // CRITICAL: Check the link
+        amount: 500,
         status: InvoiceStatus.PENDING,
-      });
-    });
-
-    it('should create a violation but NOT create an invoice if fineAmount is 0', async () => {
-      const dtoNoFine = { ...mockCreateDto, fineAmount: 0.0 };
-      prisma.violation.create.mockResolvedValue({
-        ...mockViolation,
-        fineAmount: new Decimal(0),
-      });
-
-      await service.create(dtoNoFine as any);
-
-      expect(prisma.violation.create).toHaveBeenCalled();
-      expect(invoicesService.generateInvoice).not.toHaveBeenCalled();
-    });
+        sources: { violationIds: ['vio-1'] },
+      }),
+    );
   });
 
-  // [Remove] Method Tests (Transactional Integrity)
-  describe('remove', () => {
-    const mockInvoiceId = 'inv-456';
-    const mockLinkedInvoice = {
-      id: mockInvoiceId,
-      status: InvoiceStatus.PENDING,
-      invoiceNumber: 'INV-00005',
-    };
-    const mockPaidInvoice = {
-      ...mockLinkedInvoice,
-      status: InvoiceStatus.PAID,
-    };
-
-    // Utility to mock findOne result with specific invoices
-    const mockFindOneWithInvoices = (invoices) => {
-      jest.spyOn(service, 'findOne').mockResolvedValue({
-        ...mockViolation,
-        invoices,
-      } as any);
-    };
-
-    it('should delete violation and its linked PENDING invoice in a transaction', async () => {
-      mockFindOneWithInvoices([mockLinkedInvoice]);
-      prisma.violation.delete.mockResolvedValue(mockViolation);
-
-      await service.remove(VIO_ID);
-
-      expect(prisma.$transaction).toHaveBeenCalled();
-      // Check that the linked invoice was deleted
-      expect(prisma.invoice.delete).toHaveBeenCalledWith({
-        where: { id: mockInvoiceId },
-      });
-      // Check that the violation was deleted
-      expect(prisma.violation.delete).toHaveBeenCalledWith({
-        where: { id: VIO_ID },
-      });
+  it('rejects cancel when violation is paid', async () => {
+    prismaMock.violation.findUnique.mockResolvedValue({
+      id: 'vio-paid',
+      status: ViolationStatus.PAID,
     });
 
-    it('should only delete the violation if no invoice is linked', async () => {
-      mockFindOneWithInvoices([]);
-      prisma.violation.delete.mockResolvedValue(mockViolation);
+    await expect(service.cancelViolation('vio-paid', 'admin-1')).rejects.toThrow(
+      new BadRequestException('Cannot cancel a paid violation'),
+    );
 
-      await service.remove(VIO_ID);
+    expect(prismaMock.$transaction).not.toHaveBeenCalled();
+  });
 
-      expect(prisma.$transaction).toHaveBeenCalled(); // Transaction is still used for simplicity/consistency
-      expect(prisma.invoice.delete).not.toHaveBeenCalled();
-      expect(prisma.violation.delete).toHaveBeenCalled();
+  it('approving an appeal cancels violation and linked pending fine invoice', async () => {
+    prismaMock.violationActionRequest.findUnique.mockResolvedValue({
+      id: 'action-1',
+      type: ViolationActionType.APPEAL,
+      status: ViolationActionStatus.PENDING,
+      violationId: 'vio-1',
+      violation: { id: 'vio-1' },
     });
 
-    it('should throw BadRequestException if the linked invoice is PAID', async () => {
-      mockFindOneWithInvoices([mockPaidInvoice]);
+    jest.spyOn(service, 'getViolationDetail').mockResolvedValue(detailFixture);
 
-      await expect(service.remove(VIO_ID)).rejects.toThrow(
-        new BadRequestException(
-          'Cannot delete a violation that has already been paid.',
-        ),
-      );
+    const dto: ReviewAppealDto = { approved: true };
+    await service.reviewAppeal('action-1', dto, 'admin-1');
 
-      expect(prisma.$transaction).toHaveBeenCalled(); // The error prevents transaction start
-      expect(prisma.invoice.delete).not.toHaveBeenCalled();
-      expect(prisma.violation.delete).not.toHaveBeenCalled();
-    });
+    expect(txMock.violationActionRequest.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'action-1' },
+        data: expect.objectContaining({
+          status: ViolationActionStatus.APPROVED,
+          reviewedById: 'admin-1',
+        }),
+      }),
+    );
+
+    expect(txMock.violation.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'vio-1' },
+        data: expect.objectContaining({
+          status: ViolationStatus.CANCELLED,
+          appealStatus: 'APPROVED',
+        }),
+      }),
+    );
+
+    expect(txMock.invoice.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          violationId: 'vio-1',
+          type: InvoiceType.FINE,
+          status: InvoiceStatus.PENDING,
+        }),
+        data: { status: InvoiceStatus.CANCELLED },
+      }),
+    );
   });
 });

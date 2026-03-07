@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -22,6 +23,7 @@ import {
   ListReportsHistoryDto,
   ListReportSchedulesDto,
   ToggleReportScheduleDto,
+  UpdateReportScheduleDto,
 } from './dto/reports.dto';
 
 @ApiTags('reports')
@@ -34,18 +36,39 @@ export class ReportsController {
     return req?.user?.id ?? null;
   }
 
+  @Get('stats')
+  @Permissions('dashboard.view')
+  @ApiOperation({
+    summary:
+      'Get report statistics - total, this month, active schedules, last generated',
+  })
+  getStats() {
+    return this.reportsService.getReportStats();
+  }
+
+  @Get()
+  @Permissions('dashboard.view')
+  @ApiOperation({
+    summary: 'List generated reports with filters (type, format, date range)',
+  })
+  listReports(@Query() query: ListReportsHistoryDto) {
+    return this.reportsService.listReports(query);
+  }
+
+  @Get(':id')
+  @Permissions('dashboard.view')
+  @ApiOperation({
+    summary: 'Get full generated report detail with paginated rows',
+  })
+  getDetail(@Param('id') id: string) {
+    return this.reportsService.getReportDetail(id);
+  }
+
   @Post('generate')
   @Permissions('dashboard.view')
   @ApiOperation({ summary: 'Generate report and store export snapshot' })
   generate(@Body() dto: GenerateReportDto, @Req() req: any) {
     return this.reportsService.generateReport(dto, this.actorId(req));
-  }
-
-  @Get('history')
-  @Permissions('dashboard.view')
-  @ApiOperation({ summary: 'List generated reports history' })
-  history(@Query() query: ListReportsHistoryDto) {
-    return this.reportsService.getHistory(query);
   }
 
   @Get(':id/download')
@@ -61,21 +84,33 @@ export class ReportsController {
     res.send(file.content);
   }
 
-  @Post('schedule')
+  @Post('schedules')
   @Permissions('dashboard.view')
-  @ApiOperation({ summary: 'Create report schedule definition (demo persistence)' })
+  @ApiOperation({
+    summary: 'Create report schedule definition with recipient emails',
+  })
   createSchedule(@Body() dto: CreateReportScheduleDto, @Req() req: any) {
     return this.reportsService.createSchedule(dto, this.actorId(req));
   }
 
-  @Get('schedules/list')
+  @Get('schedules')
   @Permissions('dashboard.view')
-  @ApiOperation({ summary: 'List report schedule definitions' })
+  @ApiOperation({ summary: 'List report schedule definitions with filters' })
   listSchedules(@Query() query: ListReportSchedulesDto) {
     return this.reportsService.listSchedules(query);
   }
 
   @Patch('schedules/:id')
+  @Permissions('dashboard.view')
+  @ApiOperation({ summary: 'Update report schedule' })
+  updateSchedule(
+    @Param('id') id: string,
+    @Body() dto: UpdateReportScheduleDto,
+  ) {
+    return this.reportsService.updateSchedule(id, dto);
+  }
+
+  @Patch('schedules/:id/toggle')
   @Permissions('dashboard.view')
   @ApiOperation({ summary: 'Enable/disable report schedule' })
   toggleSchedule(
@@ -83,6 +118,13 @@ export class ReportsController {
     @Body() dto: ToggleReportScheduleDto,
   ) {
     return this.reportsService.toggleSchedule(id, dto);
+  }
+
+  @Delete('schedules/:id')
+  @Permissions('dashboard.view')
+  @ApiOperation({ summary: 'Delete report schedule' })
+  deleteSchedule(@Param('id') id: string) {
+    return this.reportsService.deleteSchedule(id);
   }
 
   @Post('schedules/:id/run-now')

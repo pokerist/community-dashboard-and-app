@@ -1,21 +1,29 @@
 import {
-  Controller,
-  Get,
-  Post,
   Body,
-  Param,
-  Patch,
+  Controller,
   Delete,
+  Get,
+  Param,
+  ParseIntPipe,
+  Patch,
+  Post,
+  Put,
+  Query,
   UseGuards,
-  Req,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
-import { FacilitiesService } from './facilities.service';
-import { CreateFacilityDto } from './dto/create-facility.dto';
-import { UpdateFacilityDto } from './dto/update-facility.dto';
+import { ApiTags } from '@nestjs/swagger';
 import { Permissions } from '../auth/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { AddSlotExceptionDto } from './dto/add-slot-exception.dto';
+import { CreateFacilityDto } from './dto/create-facility.dto';
+import {
+  FacilitiesQueryDto,
+  FacilityAvailableSlotsQueryDto,
+} from './dto/facilities-query.dto';
+import { UpdateFacilityDto } from './dto/update-facility.dto';
+import { UpsertSlotConfigDto } from './dto/upsert-slot-config.dto';
+import { FacilitiesService } from './facilities.service';
 
 @ApiTags('Facilities')
 @Controller('facilities')
@@ -23,46 +31,76 @@ import { PermissionsGuard } from '../auth/guards/permissions.guard';
 export class FacilitiesController {
   constructor(private readonly facilitiesService: FacilitiesService) {}
 
-  @Post()
-  @Permissions('facility.create')
-  @ApiOperation({ summary: 'Create a facility with slot config & exceptions' })
-  create(@Body() dto: CreateFacilityDto) {
-    return this.facilitiesService.create(dto);
-  }
-
   @Get()
   @Permissions('facility.view_all', 'facility.view_own')
-  @ApiOperation({ summary: 'Get all facilities with configs' })
-  findAll(@Req() req: any) {
-    return this.facilitiesService.findAllForActor({
-      actorUserId: req.user?.id,
-      permissions: Array.isArray(req.user?.permissions) ? req.user.permissions : [],
-      roles: Array.isArray(req.user?.roles) ? req.user.roles : [],
-    });
+  listFacilities(@Query() query: FacilitiesQueryDto) {
+    return this.facilitiesService.listFacilities(query.includeInactive);
+  }
+
+  @Get('stats')
+  @Permissions('facility.view_all', 'booking.view_all')
+  getAmenityStats() {
+    return this.facilitiesService.getAmenityStats();
   }
 
   @Get(':id')
   @Permissions('facility.view_all', 'facility.view_own')
-  @ApiOperation({ summary: 'Get facility by ID' })
-  findOne(@Param('id') id: string, @Req() req: any) {
-    return this.facilitiesService.findOneForActor(id, {
-      actorUserId: req.user?.id,
-      permissions: Array.isArray(req.user?.permissions) ? req.user.permissions : [],
-      roles: Array.isArray(req.user?.roles) ? req.user.roles : [],
-    });
+  getFacilityDetail(@Param('id') id: string) {
+    return this.facilitiesService.getFacilityDetail(id);
+  }
+
+  @Post()
+  @Permissions('facility.create')
+  createFacility(@Body() dto: CreateFacilityDto) {
+    return this.facilitiesService.createFacility(dto);
   }
 
   @Patch(':id')
   @Permissions('facility.update')
-  @ApiOperation({ summary: 'Update facility settings' })
-  update(@Param('id') id: string, @Body() dto: UpdateFacilityDto) {
-    return this.facilitiesService.update(id, dto);
+  updateFacility(@Param('id') id: string, @Body() dto: UpdateFacilityDto) {
+    return this.facilitiesService.updateFacility(id, dto);
   }
 
-  @Delete(':id')
-  @Permissions('facility.delete')
-  @ApiOperation({ summary: 'Delete a facility' })
-  remove(@Param('id') id: string) {
-    return this.facilitiesService.remove(id);
+  @Patch(':id/toggle')
+  @Permissions('facility.update')
+  toggleFacility(@Param('id') id: string) {
+    return this.facilitiesService.toggleFacility(id);
+  }
+
+  @Put(':id/slots/:dayOfWeek')
+  @Permissions('facility.update')
+  upsertSlotConfig(
+    @Param('id') facilityId: string,
+    @Param('dayOfWeek', ParseIntPipe) dayOfWeek: number,
+    @Body() dto: UpsertSlotConfigDto,
+  ) {
+    return this.facilitiesService.upsertSlotConfig(facilityId, dayOfWeek, dto);
+  }
+
+  @Delete('slots/:id')
+  @Permissions('facility.update')
+  removeSlotConfig(@Param('id') id: string) {
+    return this.facilitiesService.removeSlotConfig(id);
+  }
+
+  @Post(':id/exceptions')
+  @Permissions('facility.update')
+  addSlotException(@Param('id') facilityId: string, @Body() dto: AddSlotExceptionDto) {
+    return this.facilitiesService.addSlotException(facilityId, dto);
+  }
+
+  @Delete('exceptions/:id')
+  @Permissions('facility.update')
+  removeSlotException(@Param('id') id: string) {
+    return this.facilitiesService.removeSlotException(id);
+  }
+
+  @Get(':id/available-slots')
+  @Permissions('facility.view_all', 'facility.view_own', 'booking.create')
+  getAvailableSlots(
+    @Param('id') facilityId: string,
+    @Query() query: FacilityAvailableSlotsQueryDto,
+  ) {
+    return this.facilitiesService.getAvailableSlots(facilityId, query.date);
   }
 }

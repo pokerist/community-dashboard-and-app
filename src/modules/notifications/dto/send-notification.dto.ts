@@ -19,6 +19,10 @@ export class SendNotificationDto {
   title!: string;
 
   @IsString()
+  @IsOptional()
+  titleAr?: string;
+
+  @IsString()
   @IsNotEmpty()
   messageEn!: string;
 
@@ -35,7 +39,12 @@ export class SendNotificationDto {
   targetAudience!: Audience;
 
   @IsOptional()
-  audienceMeta?: any;
+  @IsObject()
+  audienceMeta?: Record<string, unknown>;
+
+  @IsOptional()
+  @IsString()
+  communityId?: string;
 
   @IsOptional()
   @IsObject()
@@ -43,5 +52,5 @@ export class SendNotificationDto {
 
   @IsDateString()
   @IsOptional()
-  scheduledAt?: Date;
+  scheduledAt?: string;
 }

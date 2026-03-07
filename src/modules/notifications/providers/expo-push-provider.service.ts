@@ -69,24 +69,51 @@ export class ExpoPushProviderService {
     });
 
     const text = await response.text();
-    let parsed: any = null;
+    let parsed: Record<string, unknown> | null = null;
     try {
-      parsed = text ? JSON.parse(text) : null;
+      const json = text ? (JSON.parse(text) as unknown) : null;
+      parsed =
+        json && typeof json === 'object' && !Array.isArray(json)
+          ? (json as Record<string, unknown>)
+          : null;
     } catch {
       parsed = { raw: text };
     }
 
     if (!response.ok) {
+      const errors = Array.isArray(parsed?.errors)
+        ? (parsed.errors as unknown[])
+        : [];
+      const firstError =
+        errors.length > 0 && errors[0] && typeof errors[0] === 'object'
+          ? (errors[0] as Record<string, unknown>)
+          : null;
       throw new Error(
-        parsed?.errors?.[0]?.message ||
-          parsed?.message ||
+        (firstError && typeof firstError.message === 'string'
+          ? firstError.message
+          : null) ||
+          (parsed && typeof parsed.message === 'string' ? parsed.message : null) ||
           `Expo push request failed with status ${response.status}`,
       );
     }
 
-    const data = Array.isArray(parsed?.data) ? parsed.data[0] : parsed?.data;
-    if (data?.status && String(data.status).toLowerCase() === 'error') {
-      throw new Error(data.message || 'Expo push ticket error');
+    const dataValue = Array.isArray(parsed?.data)
+      ? parsed.data[0]
+      : parsed?.data;
+    const data =
+      dataValue && typeof dataValue === 'object'
+        ? (dataValue as Record<string, unknown>)
+        : null;
+    if (
+      data &&
+      typeof data.status === 'string' &&
+      data.status.toLowerCase() === 'error'
+    ) {
+      throw new Error(
+        typeof data.message === 'string'
+          ? data.message
+          : 'Expo push ticket error',
+      );
     }
 
     return {

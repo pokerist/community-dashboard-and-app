@@ -1,29 +1,34 @@
-// src/modules/violations/violations.controller.ts
 import {
+  BadRequestException,
+  Body,
   Controller,
   Get,
-  Post,
-  Body,
-  Patch,
   Param,
-  Delete,
-  UseGuards,
+  Patch,
+  Post,
   Query,
   Req,
-  BadRequestException,
+  UseGuards,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { ViolationsService } from './violations.service';
-import { CreateViolationDto, UpdateViolationDto } from './dto/violations.dto';
-import { ViolationsQueryDto } from './dto/violations-query.dto';
-import {
-  CreateViolationActionDto,
-  ReviewViolationActionDto,
-} from './dto/violation-action.dto';
-import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import type { Request } from 'express';
 import { Permissions } from '../auth/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import type { Request } from 'express';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { CreateViolationDto } from './dto/create-violation.dto';
+import { ListAppealRequestsQueryDto } from './dto/list-appeal-requests-query.dto';
+import { ReviewAppealDto } from './dto/review-appeal.dto';
+import { UpdateViolationDto } from './dto/update-violation.dto';
+import { ViolationsQueryDto } from './dto/violations-query.dto';
+import { ViolationsService } from './violations.service';
+
+interface AuthUserContext {
+  id: string;
+}
+
+interface AuthenticatedRequest extends Request {
+  user?: AuthUserContext;
+}
 
 @ApiBearerAuth()
 @ApiTags('Violations')
@@ -32,103 +37,91 @@ import type { Request } from 'express';
 export class ViolationsController {
   constructor(private readonly violationsService: ViolationsService) {}
 
-  @Post()
-  @ApiOperation({
-    summary: 'Issue a new violation and generate a fine invoice.',
-  })
-  @Permissions('violation.issue')
-  create(@Body() dto: CreateViolationDto, @Req() req: Request) {
-    const issuedById = (req as any).user?.id;
-    if (!issuedById) throw new BadRequestException('Invalid auth context');
-
-    if (dto.issuedById && dto.issuedById !== issuedById) {
-      throw new BadRequestException('issuedById must match the authenticated user');
-    }
-
-    return this.violationsService.create({
-      ...dto,
-      issuedById,
-    });
-  }
-
   @Get()
-  @ApiOperation({ summary: 'List all violations.' })
   @Permissions('violation.view_all')
-  findAll(@Query() query: ViolationsQueryDto) {
-    return this.violationsService.findAll(query);
+  listViolations(@Query() query: ViolationsQueryDto) {
+    return this.violationsService.listViolations(query);
   }
 
-  @Get('me')
-  @Permissions('violation.view_own')
-  findMine(@Req() req: Request) {
-    return this.violationsService.findMine((req as any).user?.id);
+  @Get('stats')
+  @Permissions('violation.view_all')
+  getViolationStats() {
+    return this.violationsService.getViolationStats();
+  }
+
+  @Get('appeals')
+  @Permissions('violation.view_all', 'violation.update')
+  listAppealRequests(@Query() query: ListAppealRequestsQueryDto) {
+    return this.violationsService.listAppealRequests(query);
   }
 
   @Get(':id')
-  @Permissions('violation.view_own', 'violation.view_all')
-  findOne(@Param('id') id: string, @Req() req: Request) {
-    return this.violationsService.findOneForActor(id, {
-      actorUserId: (req as any).user?.id,
-      permissions: (req as any).user?.permissions ?? [],
-    });
+  @Permissions('violation.view_all')
+  getViolationDetail(@Param('id') id: string) {
+    return this.violationsService.getViolationDetail(id);
+  }
+
+  @Post()
+  @Permissions('violation.issue')
+  createViolation(@Body() dto: CreateViolationDto, @Req() req: AuthenticatedRequest) {
+    const issuedById = req.user?.id;
+    if (!issuedById) {
+      throw new BadRequestException('Invalid auth context');
+    }
+    return this.violationsService.createViolation(dto, issuedById);
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update violation status (e.g., Appeal).' })
   @Permissions('violation.update')
-  update(
-    @Param('id') id: string,
-    @Body() updateViolationDto: UpdateViolationDto,
-  ) {
-    return this.violationsService.update(id, updateViolationDto);
+  updateViolation(@Param('id') id: string, @Body() dto: UpdateViolationDto) {
+    return this.violationsService.updateViolation(id, dto);
   }
 
-  @Post(':id/actions')
-  @ApiOperation({ summary: 'Submit violation action request (appeal or fix proof)' })
-  @Permissions('violation.view_own', 'violation.view_all')
-  createAction(
-    @Param('id') violationId: string,
-    @Body() dto: CreateViolationActionDto,
-    @Req() req: Request,
-  ) {
-    return this.violationsService.createActionForActor(violationId, {
-      actorUserId: (req as any).user?.id,
-      permissions: (req as any).user?.permissions ?? [],
-      dto,
-    });
-  }
-
-  @Get(':id/actions')
-  @ApiOperation({ summary: 'List violation action requests for this violation' })
-  @Permissions('violation.view_own', 'violation.view_all')
-  listActions(@Param('id') violationId: string, @Req() req: Request) {
-    return this.violationsService.listActionsForActor(violationId, {
-      actorUserId: (req as any).user?.id,
-      permissions: (req as any).user?.permissions ?? [],
-    });
-  }
-
-  @Patch('actions/:actionId/review')
-  @ApiOperation({ summary: 'Admin review violation action request' })
-  @Permissions('violation.update')
-  reviewAction(
-    @Param('actionId') actionId: string,
-    @Body() dto: ReviewViolationActionDto,
-    @Req() req: Request,
-  ) {
-    return this.violationsService.reviewActionRequest(
-      actionId,
-      (req as any).user?.id,
-      dto,
-    );
-  }
-
-  @Delete(':id')
-  @ApiOperation({
-    summary: 'Cancel/Delete a violation and its pending invoice.',
-  })
+  @Patch(':id/cancel')
   @Permissions('violation.cancel')
-  remove(@Param('id') id: string) {
-    return this.violationsService.remove(id);
+  cancelViolation(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+    const adminId = req.user?.id;
+    if (!adminId) {
+      throw new BadRequestException('Invalid auth context');
+    }
+    return this.violationsService.cancelViolation(id, adminId);
+  }
+
+  @Patch(':id/pay')
+  @Permissions('violation.update')
+  markAsPaid(@Param('id') id: string) {
+    return this.violationsService.markAsPaid(id);
+  }
+
+  @Post('appeals/:id/review')
+  @Permissions('violation.update')
+  reviewAppeal(
+    @Param('id') actionRequestId: string,
+    @Body() dto: ReviewAppealDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const reviewerUserId = req.user?.id;
+    if (!reviewerUserId) {
+      throw new BadRequestException('Invalid auth context');
+    }
+    return this.violationsService.reviewAppeal(actionRequestId, dto, reviewerUserId);
+  }
+
+  @Post('fixes/:id/review')
+  @Permissions('violation.update')
+  reviewFixSubmission(
+    @Param('id') actionRequestId: string,
+    @Body() dto: ReviewAppealDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const reviewerUserId = req.user?.id;
+    if (!reviewerUserId) {
+      throw new BadRequestException('Invalid auth context');
+    }
+    return this.violationsService.reviewFixSubmission(
+      actionRequestId,
+      dto,
+      reviewerUserId,
+    );
   }
 }

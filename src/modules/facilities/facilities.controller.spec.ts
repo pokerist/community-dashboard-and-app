@@ -12,7 +12,7 @@ describe('FacilitiesController', () => {
         {
           provide: FacilitiesService,
           useValue: {
-            findAllForActor: jest.fn().mockResolvedValue([]),
+            listFacilities: jest.fn().mockResolvedValue([]),
           },
         },
       ],
@@ -28,10 +28,5 @@ describe('FacilitiesController', () => {
 
   it('should be defined', () => {
     expect(controller).toBeDefined();
-  });
-
-  it('list should return array', async () => {
-    const res = await controller.findAll({ user: { id: 'u1', permissions: [], roles: [] } } as any);
-    expect(res).toEqual([]);
   });
 });

@@ -473,6 +473,121 @@ export class ReportsService {
       }));
   }
 
+  private async buildComplaintsRows(range: DateRange): Promise<ReportRow[]> {
+    const complaints = await this.prisma.complaint.findMany({
+      where: {
+        createdAt: {
+          gte: range.from,
+          lte: range.to,
+        },
+      },
+      include: {
+        unit: { select: { unitNumber: true } },
+        resident: { select: { user: { select: { nameEN: true } } } },
+        assignee: { select: { nameEN: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 5000,
+    });
+
+    return complaints.map((c) => ({
+      complaintNumber: (c as any).complaintNumber || c.id,
+      category: (c as any).category,
+      unit: c.unit?.unitNumber,
+      reporter: c.resident?.user?.nameEN,
+      assignee: c.assignee?.nameEN,
+      priority: (c as any).priority,
+      status: (c as any).status,
+      slaStatus: (c as any).slaStatus,
+      createdAt: c.createdAt.toISOString(),
+      resolvedAt: (c as any).resolvedAt?.toISOString?.() ?? null,
+      description: (c as any).description,
+    }));
+  }
+
+  private async buildViolationsRows(range: DateRange): Promise<ReportRow[]> {
+    const violations = await this.prisma.violation.findMany({
+      where: {
+        createdAt: {
+          gte: range.from,
+          lte: range.to,
+        },
+      },
+      include: {
+        unit: { select: { unitNumber: true } },
+        resident: { select: { user: { select: { nameEN: true } } } },
+        issuedBy: { select: { nameEN: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 5000,
+    });
+
+    return violations.map((v) => ({
+      violationNumber: (v as any).violationNumber || v.id,
+      category: (v as any).category,
+      unit: v.unit?.unitNumber,
+      resident: v.resident?.user?.nameEN,
+      issuer: v.issuedBy?.nameEN,
+      fineAmount: (v as any).fineAmount,
+      status: (v as any).status,
+      appealStatus: (v as any).appealStatus,
+      createdAt: v.createdAt.toISOString(),
+      description: (v as any).description,
+    }));
+  }
+
+  private async buildGateEntryLogRows(range: DateRange): Promise<ReportRow[]> {
+    const entries = await this.prisma.accessQRCode.findMany({
+      where: {
+        lastUsedAt: {
+          gte: range.from,
+          lte: range.to,
+        },
+      },
+      include: {
+        unit: { select: { unitNumber: true } },
+        gate: { select: { name: true } },
+        createdBy: { select: { nameEN: true } },
+      },
+      orderBy: { lastUsedAt: 'desc' },
+      take: 5000,
+    });
+
+    return entries.map((e) => ({
+      date: e.lastUsedAt?.toLocaleDateString?.('en-US'),
+      time: e.lastUsedAt?.toLocaleTimeString?.('en-US'),
+      visitor: e.createdBy?.nameEN,
+      unit: e.unit?.unitNumber,
+      qrType: e.qrType,
+      gate: e.gate?.name,
+      checkIn: e.lastUsedAt?.toISOString?.(),
+      checkOut: null,
+      duration: null,
+      operator: e.createdBy?.nameEN,
+    }));
+  }
+
+  private async buildResidentActivityRows(_range: DateRange): Promise<ReportRow[]> {
+    const residents = await this.prisma.resident.findMany({
+      include: {
+        user: { select: { nameEN: true, email: true, lastLoginAt: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 5000,
+    });
+
+    return residents.map((r) => ({
+      residentName: r.user?.nameEN,
+      email: r.user?.email,
+      complaintsCount: 0,
+      serviceRequestsCount: 0,
+      violationsCount: 0,
+      bookingsCount: 0,
+      lastLogin: r.user?.lastLoginAt?.toISOString?.() ?? null,
+      createdAt: r.createdAt.toISOString(),
+    }));
+  }
+
   private async buildRowsForReport(
     reportType: ReportType,
     range: DateRange,
@@ -490,6 +605,14 @@ export class ReportsService {
         return this.buildVisitorTrafficRows(range);
       case ReportType.MAINTENANCE_COSTS:
         return this.buildMaintenanceCostRows(range);
+      case ReportType.COMPLAINTS:
+        return this.buildComplaintsRows(range);
+      case ReportType.VIOLATIONS:
+        return this.buildViolationsRows(range);
+      case ReportType.GATE_ENTRY_LOG:
+        return this.buildGateEntryLogRows(range);
+      case ReportType.RESIDENT_ACTIVITY:
+        return this.buildResidentActivityRows(range);
       default:
         return [];
     }
@@ -628,6 +751,7 @@ export class ReportsService {
         frequency,
         cronExpr: null,
         nextRunAt: fallbackNextRunAt,
+        recipientEmails: dto.recipientEmails ?? [],
         params: {
           dateFrom: dto.dateFrom ?? null,
           dateTo: dto.dateTo ?? null,
@@ -640,8 +764,18 @@ export class ReportsService {
   }
 
   async listSchedules(query: ListReportSchedulesDto) {
-    const limit = query.limit && query.limit > 0 ? query.limit : 50;
+    const limit = query.limit && query.limit > 0 ? Math.min(query.limit, 200) : 50;
+    const where: Prisma.ReportScheduleWhereInput = {};
+    
+    if (query.reportType) {
+      where.reportType = query.reportType;
+    }
+    if (query.search) {
+      where.label = { contains: query.search, mode: 'insensitive' as any };
+    }
+
     const rows = await this.prisma.reportSchedule.findMany({
+      where,
       orderBy: { createdAt: 'desc' },
       take: limit,
     });
@@ -780,5 +914,142 @@ export class ReportsService {
       failedCount: results.filter((r) => !r.ok).length,
       results,
     };
+  }
+
+  async getReportStats() {
+    const [total, thisMonth, activeSchedules, lastGenerated] = await Promise.all([
+      this.prisma.generatedReport.count(),
+      this.prisma.generatedReport.count({
+        where: {
+          generatedAt: {
+            gte: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+          },
+        },
+      }),
+      this.prisma.reportSchedule.count({
+        where: { isEnabled: true, status: ReportJobStatus.ACTIVE },
+      }),
+      this.prisma.generatedReport.findFirst({
+        orderBy: { generatedAt: 'desc' },
+        select: { generatedAt: true },
+      }),
+    ]);
+
+    return {
+      totalGenerated: total,
+      generatedThisMonth: thisMonth,
+      activeSchedules,
+      lastGeneratedAt: lastGenerated?.generatedAt?.toISOString?.() ?? null,
+    };
+  }
+
+  async listReports(query: ListReportsHistoryDto) {
+    const page = query.page && query.page > 0 ? query.page : 1;
+    const limit = query.limit && query.limit > 0 ? Math.min(query.limit, 200) : 20;
+    const skip = (page - 1) * limit;
+
+    const where: Prisma.GeneratedReportWhereInput = {};
+    if (query.reportType) {
+      where.reportType = query.reportType;
+    }
+    if (query.format) {
+      where.format = query.format;
+    }
+    if (query.dateFrom) {
+      where.generatedAt = { gte: new Date(query.dateFrom) };
+    }
+    if (query.dateTo) {
+      if (where.generatedAt) {
+        (where.generatedAt as any).lte = new Date(query.dateTo);
+      } else {
+        where.generatedAt = { lte: new Date(query.dateTo) };
+      }
+    }
+    if (query.search) {
+      where.label = { contains: query.search, mode: 'insensitive' as any };
+    }
+
+    const [data, total] = await Promise.all([
+      this.prisma.generatedReport.findMany({
+        where,
+        select: {
+          id: true,
+          reportType: true,
+          format: true,
+          label: true,
+          rowCount: true,
+          generatedAt: true,
+          filename: true,
+        },
+        orderBy: { generatedAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.generatedReport.count({ where }),
+    ]);
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit) || 1,
+      },
+    };
+  }
+
+  async getReportDetail(id: string) {
+    const report = await this.prisma.generatedReport.findUnique({ where: { id } });
+    if (!report) throw new NotFoundException('Report not found');
+
+    const rows = Array.isArray(report.rows) ? (report.rows as ReportRow[]) : [];
+    const pageSize = 100;
+    const totalPages = Math.ceil(rows.length / pageSize);
+
+    return {
+      id: report.id,
+      reportType: report.reportType,
+      format: report.format,
+      label: report.label,
+      filename: report.filename,
+      rowCount: report.rowCount,
+      generatedAt: report.generatedAt,
+      summary: report.summary,
+      page: 1,
+      pageSize,
+      totalPages,
+      rows: rows.slice(0, pageSize),
+    };
+  }
+
+  async updateSchedule(id: string, dto: any) {
+    const existing = await this.prisma.reportSchedule.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Report schedule not found');
+
+    const frequency = dto.frequency
+      ? this.normalizeScheduleFrequency(dto.frequency)
+      : existing.frequency;
+
+    return this.prisma.reportSchedule.update({
+      where: { id },
+      data: {
+        label: dto.label,
+        format: dto.format,
+        frequency,
+        params: dto.dateFrom || dto.dateTo ? {
+          dateFrom: dto.dateFrom ?? null,
+          dateTo: dto.dateTo ?? null,
+        } as Prisma.InputJsonValue : undefined,
+        recipientEmails: dto.recipientEmails ?? undefined,
+      },
+    });
+  }
+
+  async deleteSchedule(id: string) {
+    const existing = await this.prisma.reportSchedule.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Report schedule not found');
+
+    return this.prisma.reportSchedule.delete({ where: { id } });
   }
 }

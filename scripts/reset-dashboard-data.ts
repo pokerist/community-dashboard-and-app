@@ -207,7 +207,7 @@ async function seedLoad() {
     const u = pick(residents); const unitId = pick(u.unitAccesses.map((x) => x.unitId)); const createdAt = randDate(30);
     await prisma.complaint.create({ data: {
       complaintNumber: seq('CMP', cmp++), reporterId: u.id, unitId,
-      category: pick(['Noise','Parking','Security','Waste','Landscape']),
+      categoryLegacy: pick(['Noise','Parking','Security','Waste','Landscape']),
       description: 'Resident complaint logged and tracked by management.',
       priority: pick([Priority.LOW, Priority.MEDIUM, Priority.HIGH]),
       status: pick([ComplaintStatus.NEW, ComplaintStatus.IN_PROGRESS, ComplaintStatus.RESOLVED, ComplaintStatus.IN_PROGRESS]),
@@ -221,7 +221,7 @@ async function seedLoad() {
     const fineAmount = String(ri(300, 2500));
     const v = await prisma.violation.create({ data: {
       violationNumber: seq('VIO', vio++), unitId, residentId: u.id, issuedById: admin.id,
-      type: pick(['Noise Violation','Parking Misuse','Unauthorized Alteration','Waste Disposal']),
+      typeLegacy: pick(['Noise Violation','Parking Misuse','Unauthorized Alteration','Waste Disposal']),
       description: 'Violation recorded after inspection by community operations.',
       fineAmount, status, createdAt,
     }, select: { id: true }});

@@ -1,5 +1,25 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarClock, Download, FileText, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import {
+  CalendarClock,
+  Download,
+  FileText,
+  RefreshCw,
+  Building2,
+  DollarSign,
+  MessageCircle,
+  Wrench,
+  AlertTriangle,
+  Users,
+  Activity,
+  DoorOpen,
+  X,
+  Loader,
+  CheckCircle2,
+  Pause,
+  Play,
+  FileIcon,
+  MoreVertical,
+} from "lucide-react";
 import { toast } from "sonner";
 import apiClient from "../../lib/api-client";
 import { errorMessage, extractRows, formatCurrencyEGP, formatDateTime, humanizeEnum } from "../../lib/live-data";
@@ -8,21 +28,8 @@ import { Badge } from "../ui/badge";
 import { Card } from "../ui/card";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 
 type ReportKey =
   | "occupancy"
@@ -30,7 +37,11 @@ type ReportKey =
   | "service_requests"
   | "security_incidents"
   | "visitor_traffic"
-  | "maintenance_costs";
+  | "maintenance_costs"
+  | "complaints"
+  | "violations"
+  | "gate_entry_log"
+  | "resident_activity";
 
 type ExportFormat = "csv" | "json" | "xlsx" | "pdf";
 
@@ -51,61 +62,103 @@ type ScheduleRow = {
   format: string;
   label: string;
   frequency: string;
-  cronExpr?: string | null;
   isEnabled: boolean;
   status: string;
   nextRunAt?: string | null;
   lastRunAt?: string | null;
+  recipientEmails?: string[];
   createdAt: string;
 };
 
-type ScheduleForm = {
-  reportKey: ReportKey;
-  format: ExportFormat;
-  frequency: string;
-  nextRunAt: string;
-};
-
-const REPORT_OPTIONS: Array<{ key: ReportKey; label: string; description: string }> = [
-  { key: "occupancy", label: "Occupancy Report", description: "Unit occupancy and block utilization" },
-  { key: "financial", label: "Financial Summary", description: "Invoices and revenue summary" },
-  { key: "service_requests", label: "Service Request Analysis", description: "Requests grouped by service/status" },
-  { key: "security_incidents", label: "Security Incident Report", description: "Incidents and current statuses" },
-  { key: "visitor_traffic", label: "Visitor Traffic Report", description: "Access QR generation activity" },
-  { key: "maintenance_costs", label: "Maintenance Cost Analysis", description: "Maintenance-related invoices and requests" },
-] as const;
-
-function downloadFile(filename: string, content: string, mimeType: string) {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-function toCsv(rows: Record<string, unknown>[]) {
-  if (rows.length === 0) return "message\nNo rows";
-  const headers = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
-  const escapeValue = (value: unknown) => {
-    const raw =
-      value === null || value === undefined
-        ? ""
-        : typeof value === "object"
-          ? JSON.stringify(value)
-          : String(value);
-    if (/[",\n]/.test(raw)) return `"${raw.replace(/"/g, '""')}"`;
-    return raw;
-  };
-  const lines = [
-    headers.join(","),
-    ...rows.map((row) => headers.map((h) => escapeValue(row[h])).join(",")),
-  ];
-  return lines.join("\n");
-}
+const REPORT_OPTIONS: Array<{
+  key: ReportKey;
+  label: string;
+  description: string;
+  icon: typeof Building2;
+  bgColor: string;
+  textColor: string;
+}> = [
+  {
+    key: "occupancy",
+    label: "Occupancy Report",
+    description: "Unit occupancy and block utilization analysis",
+    icon: Building2,
+    bgColor: "bg-blue-500/10",
+    textColor: "text-blue-400",
+  },
+  {
+    key: "financial",
+    label: "Financial Summary",
+    description: "Invoices, revenue, and payment status overview",
+    icon: DollarSign,
+    bgColor: "bg-emerald-500/10",
+    textColor: "text-emerald-400",
+  },
+  {
+    key: "complaints",
+    label: "Complaints Report",
+    description: "Complaints grouped by category and resolution status",
+    icon: MessageCircle,
+    bgColor: "bg-amber-500/10",
+    textColor: "text-amber-400",
+  },
+  {
+    key: "service_requests",
+    label: "Service Requests Report",
+    description: "Service requests by type, priority, and status",
+    icon: Wrench,
+    bgColor: "bg-purple-500/10",
+    textColor: "text-purple-400",
+  },
+  {
+    key: "violations",
+    label: "Violations Report",
+    description: "Violations and fines tracking by resident",
+    icon: AlertTriangle,
+    bgColor: "bg-red-500/10",
+    textColor: "text-red-400",
+  },
+  {
+    key: "visitor_traffic",
+    label: "Visitor Traffic Report",
+    description: "Access QR generation and gate usage activity",
+    icon: Users,
+    bgColor: "bg-cyan-500/10",
+    textColor: "text-cyan-400",
+  },
+  {
+    key: "maintenance_costs",
+    label: "Maintenance Cost Analysis",
+    description: "Maintenance invoices and cost breakdown",
+    icon: Wrench,
+    bgColor: "bg-orange-500/10",
+    textColor: "text-orange-400",
+  },
+  {
+    key: "security_incidents",
+    label: "Security Incidents Report",
+    description: "Incidents tracking and resolution status",
+    icon: AlertTriangle,
+    bgColor: "bg-red-600/10",
+    textColor: "text-red-500",
+  },
+  {
+    key: "gate_entry_log",
+    label: "Gate Entry Log Report",
+    description: "Access records and gate operations history",
+    icon: DoorOpen,
+    bgColor: "bg-indigo-500/10",
+    textColor: "text-indigo-400",
+  },
+  {
+    key: "resident_activity",
+    label: "Resident Activity Report",
+    description: "Per-resident activity summary and metrics",
+    icon: Activity,
+    bgColor: "bg-pink-500/10",
+    textColor: "text-pink-400",
+  },
+];
 
 function toBackendReportType(key: ReportKey): string {
   switch (key) {
@@ -121,617 +174,528 @@ function toBackendReportType(key: ReportKey): string {
       return "VISITOR_TRAFFIC";
     case "maintenance_costs":
       return "MAINTENANCE_COSTS";
+    case "complaints":
+      return "COMPLAINTS";
+    case "violations":
+      return "VIOLATIONS";
+    case "gate_entry_log":
+      return "GATE_ENTRY_LOG";
+    case "resident_activity":
+      return "RESIDENT_ACTIVITY";
     default:
       return "OCCUPANCY";
   }
 }
 
 export function ReportsAnalytics() {
-  const [reportKey, setReportKey] = useState<ReportKey>("occupancy");
+  const [activeTab, setActiveTab] = useState<"reports" | "schedules">("reports");
+  const [selectedReportType, setSelectedReportType] = useState<ReportKey>("occupancy");
   const [exportFormat, setExportFormat] = useState<ExportFormat>("csv");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [history, setHistory] = useState<HistoryRow[]>([]);
-  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
   const [schedules, setSchedules] = useState<ScheduleRow[]>([]);
-  const [isSchedulesLoading, setIsSchedulesLoading] = useState(false);
-  const [isScheduleSubmitting, setIsScheduleSubmitting] = useState(false);
-  const [togglingScheduleId, setTogglingScheduleId] = useState<string | null>(null);
-  const [runningScheduleId, setRunningScheduleId] = useState<string | null>(null);
-  const [scheduleForm, setScheduleForm] = useState<ScheduleForm>({
-    reportKey: "occupancy",
-    format: "csv",
-    frequency: "DAILY",
-    nextRunAt: "",
-  });
-  const [dataset, setDataset] = useState<{
-    summary: any | null;
-    revenue: any;
-    occupancy: any;
-    invoices: any[];
-    serviceRequests: any[];
-    incidents: any[];
-    accessQrs: any[];
-  }>({
-    summary: null,
-    revenue: null,
-    occupancy: null,
-    invoices: [],
-    serviceRequests: [],
-    incidents: [],
-    accessQrs: [],
-  });
+  const [isGenerating, setIsGenerating] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [stats, setStats] = useState({
+    totalGenerated: 0,
+    generatedThisMonth: 0,
+    activeSchedules: 0,
+    lastGeneratedAt: null as string | null,
+  });
+  const [showGenerateModal, setShowGenerateModal] = useState(false);
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
 
-  const loadReportHistory = useCallback(async () => {
-    setIsHistoryLoading(true);
+  // Load stats
+  const loadStats = useCallback(async () => {
     try {
-      const res = await apiClient.get("/reports/history", { params: { page: 1, limit: 20 } });
-      setHistory(extractRows<HistoryRow>(res.data));
+      const res = await apiClient.get("/reports/stats");
+      setStats(res.data);
     } catch (error) {
-      toast.error("Failed to load report history", { description: errorMessage(error) });
-    } finally {
-      setIsHistoryLoading(false);
+      toast.error("Failed to load stats", { description: errorMessage(error) });
     }
   }, []);
 
-  const loadSchedules = useCallback(async () => {
-    setIsSchedulesLoading(true);
-    try {
-      const res = await apiClient.get("/reports/schedules/list", { params: { limit: 30 } });
-      setSchedules(extractRows<ScheduleRow>(res.data));
-    } catch (error) {
-      toast.error("Failed to load report schedules", { description: errorMessage(error) });
-    } finally {
-      setIsSchedulesLoading(false);
-    }
-  }, []);
-
-  const createSchedule = useCallback(async () => {
-    setIsScheduleSubmitting(true);
-    try {
-      const report = REPORT_OPTIONS.find((r) => r.key === scheduleForm.reportKey);
-      await apiClient.post("/reports/schedule", {
-        reportType: toBackendReportType(scheduleForm.reportKey),
-        format: scheduleForm.format.toUpperCase(),
-        label: report?.label,
-        frequency: scheduleForm.frequency,
-        nextRunAt: scheduleForm.nextRunAt ? new Date(scheduleForm.nextRunAt).toISOString() : undefined,
-        dateFrom: dateFrom ? new Date(`${dateFrom}T00:00:00.000Z`).toISOString() : undefined,
-        dateTo: dateTo ? new Date(`${dateTo}T23:59:59.999Z`).toISOString() : undefined,
-      });
-      toast.success("Report schedule created");
-      await loadSchedules();
-    } catch (error) {
-      toast.error("Failed to create report schedule", { description: errorMessage(error) });
-    } finally {
-      setIsScheduleSubmitting(false);
-    }
-  }, [dateFrom, dateTo, loadSchedules, scheduleForm]);
-
-  const toggleSchedule = useCallback(async (row: ScheduleRow, nextEnabled: boolean) => {
-    setTogglingScheduleId(row.id);
-    try {
-      await apiClient.patch(`/reports/schedules/${row.id}`, { isEnabled: nextEnabled });
-      toast.success(`Schedule ${nextEnabled ? "enabled" : "paused"}`);
-      await loadSchedules();
-    } catch (error) {
-      toast.error("Failed to update schedule", { description: errorMessage(error) });
-    } finally {
-      setTogglingScheduleId(null);
-    }
-  }, [loadSchedules]);
-
-  const runScheduleNow = useCallback(async (row: ScheduleRow) => {
-    setRunningScheduleId(row.id);
-    try {
-      const res = await apiClient.post(`/reports/schedules/${row.id}/run-now`);
-      toast.success("Schedule executed", {
-        description: `Generated report ${res.data?.generatedReportId ?? ""}`.trim(),
-      });
-      await Promise.all([loadSchedules(), loadReportHistory()]);
-    } catch (error) {
-      toast.error("Failed to run schedule", { description: errorMessage(error) });
-    } finally {
-      setRunningScheduleId(null);
-    }
-  }, [loadReportHistory, loadSchedules]);
-
-  const downloadGeneratedReport = useCallback(async (reportId: string, fallbackFilename?: string) => {
-    const response = await apiClient.get(`/reports/${reportId}/download`, { responseType: "blob" });
-    const contentDisposition = String(response.headers?.["content-disposition"] ?? "");
-    const matchedName = /filename=\"?([^\";]+)\"?/i.exec(contentDisposition)?.[1];
-    const filename = matchedName || fallbackFilename || `report-${reportId}.dat`;
-    const blob = response.data instanceof Blob ? response.data : new Blob([response.data]);
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-  }, []);
-
-  const loadReportSources = useCallback(async () => {
+  // Load reports history
+  const loadHistory = useCallback(async () => {
     setIsLoading(true);
-    setLoadError(null);
     try {
-      const [summaryRes, revenueRes, occupancyRes, invoicesRes, serviceReqRes, incidentsRes, accessRes] =
-        await Promise.all([
-          apiClient.get("/dashboard/summary"),
-          apiClient.get("/dashboard/revenue"),
-          apiClient.get("/dashboard/occupancy"),
-          apiClient.get("/invoices"),
-          apiClient.get("/service-requests"),
-          apiClient.get("/incidents/list", { params: { page: 1, limit: 100 } }),
-          apiClient.get("/access-qrcodes"),
-        ]);
-
-      setDataset({
-        summary: summaryRes.data ?? null,
-        revenue: revenueRes.data ?? null,
-        occupancy: occupancyRes.data ?? null,
-        invoices: extractRows(invoicesRes.data),
-        serviceRequests: extractRows(serviceReqRes.data),
-        incidents: extractRows(incidentsRes.data),
-        accessQrs: extractRows(accessRes.data),
-      });
+      const res = await apiClient.get("/reports", { params: { page: 1, limit: 20 } });
+      setHistory(extractRows<HistoryRow>(res.data?.data || []));
     } catch (error) {
-      const msg = errorMessage(error);
-      setLoadError(msg);
-      toast.error("Failed to load report sources", { description: msg });
+      toast.error("Failed to load reports", { description: errorMessage(error) });
     } finally {
       setIsLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    void loadReportSources();
-  }, [loadReportSources]);
+  // Load schedules
+  const loadSchedules = useCallback(async () => {
+    try {
+      const res = await apiClient.get("/reports/schedules", { params: { limit: 30 } });
+      setSchedules(extractRows<ScheduleRow>(res.data?.data || []));
+    } catch (error) {
+      toast.error("Failed to load schedules", { description: errorMessage(error) });
+    }
+  }, []);
 
-  useEffect(() => {
-    void loadReportHistory();
-  }, [loadReportHistory]);
-
-  useEffect(() => {
-    void loadSchedules();
-  }, [loadSchedules]);
-
-  const stats = useMemo(() => {
-    const paidInvoices = dataset.invoices.filter((i: any) => String(i.status).toUpperCase() === "PAID");
-    const totalRevenue = paidInvoices.reduce((sum: number, i: any) => sum + Number(i.amount ?? 0), 0);
-    return {
-      invoices: dataset.invoices.length,
-      serviceRequests: dataset.serviceRequests.length,
-      incidents: dataset.incidents.length,
-      qrs: dataset.accessQrs.length,
-      totalRevenue,
-    };
-  }, [dataset]);
-
-  const withinRange = useCallback(
-    (value?: string | null) => {
-      if (!dateFrom && !dateTo) return true;
-      if (!value) return false;
-      const date = new Date(value);
-      if (Number.isNaN(date.getTime())) return false;
-      if (dateFrom && date < new Date(`${dateFrom}T00:00:00`)) return false;
-      if (dateTo && date > new Date(`${dateTo}T23:59:59.999`)) return false;
-      return true;
-    },
-    [dateFrom, dateTo],
-  );
-
-  const buildRows = useCallback(
-    (key: ReportKey): Record<string, unknown>[] => {
-      switch (key) {
-        case "occupancy": {
-          const byLocation = Array.isArray(dataset.occupancy?.byLocation) ? dataset.occupancy.byLocation : [];
-          return byLocation.map((row: any) => ({
-            projectName: row.projectName ?? "",
-            block: row.block ?? "",
-            totalUnits: Number(row.totalUnits ?? 0),
-            occupiedUnits: Number(row.occupiedUnits ?? 0),
-            vacantUnits: Number(row.vacantUnits ?? 0),
-            occupancyRate: Number(row.occupancyRate ?? 0),
-          }));
-        }
-        case "financial":
-          return dataset.invoices
-            .filter((invoice: any) => withinRange(invoice.paidDate ?? invoice.dueDate ?? invoice.createdAt))
-            .map((invoice: any) => ({
-              invoiceNumber: invoice.invoiceNumber ?? invoice.id,
-              type: invoice.type ?? "",
-              status: invoice.status ?? "",
-              amount: Number(invoice.amount ?? 0),
-              dueDate: invoice.dueDate ?? "",
-              paidDate: invoice.paidDate ?? "",
-              unitId: invoice.unitId ?? "",
-              residentId: invoice.residentId ?? "",
-            }));
-        case "service_requests":
-          return dataset.serviceRequests
-            .filter((request: any) => withinRange(request.createdAt))
-            .map((request: any) => ({
-              id: request.id,
-              serviceName: request.service?.name ?? "",
-              category: request.category ?? "",
-              status: request.status ?? "",
-              priority: request.priority ?? "",
-              createdAt: request.createdAt ?? "",
-              unitId: request.unitId ?? "",
-              requesterId: request.requesterId ?? "",
-            }));
-        case "security_incidents":
-          return dataset.incidents
-            .filter((incident: any) => withinRange(incident.reportedAt ?? incident.createdAt))
-            .map((incident: any) => ({
-              incidentNumber: incident.incidentNumber ?? incident.id,
-              type: incident.type ?? "",
-              status: incident.status ?? "",
-              severity: incident.severity ?? "",
-              reportedAt: incident.reportedAt ?? incident.createdAt ?? "",
-              location: incident.location ?? "",
-            }));
-        case "visitor_traffic":
-          return dataset.accessQrs
-            .filter((qr: any) => withinRange(qr.createdAt ?? qr.generatedAt))
-            .map((qr: any) => ({
-              id: qr.id,
-              type: qr.type ?? qr.accessType ?? "",
-              status: qr.status ?? "",
-              validFrom: qr.validFrom ?? "",
-              validTo: qr.validTo ?? "",
-              createdAt: qr.createdAt ?? qr.generatedAt ?? "",
-              unitId: qr.unitId ?? "",
-            }));
-        case "maintenance_costs": {
-          const maintenanceInvoices = dataset.invoices.filter((invoice: any) => {
-            const type = String(invoice.type ?? "").toUpperCase();
-            return type.includes("MAINTENANCE") || type === "SERVICE_FEE";
-          });
-          return maintenanceInvoices
-            .filter((invoice: any) => withinRange(invoice.paidDate ?? invoice.dueDate ?? invoice.createdAt))
-            .map((invoice: any) => ({
-              invoiceNumber: invoice.invoiceNumber ?? invoice.id,
-              type: invoice.type ?? "",
-              amount: Number(invoice.amount ?? 0),
-              status: invoice.status ?? "",
-              dueDate: invoice.dueDate ?? "",
-              linkedServiceRequestId: invoice.serviceRequestId ?? "",
-            }));
-        }
-      }
-    },
-    [dataset, withinRange],
-  );
-
+  // Generate report
   const generateReport = useCallback(
-    async (key: ReportKey, format: ExportFormat) => {
-      const report = REPORT_OPTIONS.find((r) => r.key === key);
-      const label = report?.label ?? key;
+    async (reportType: ReportKey) => {
       setIsGenerating(true);
       try {
-        const generated = await apiClient.post("/reports/generate", {
-          reportType: toBackendReportType(key),
-          format: format.toUpperCase(),
-          label,
-          dateFrom: dateFrom ? new Date(`${dateFrom}T00:00:00.000Z`).toISOString() : undefined,
-          dateTo: dateTo ? new Date(`${dateTo}T23:59:59.999Z`).toISOString() : undefined,
+        const report = REPORT_OPTIONS.find((r) => r.key === reportType);
+        const res = await apiClient.post("/reports/generate", {
+          reportType: toBackendReportType(reportType),
+          format: exportFormat.toUpperCase(),
+          label: report?.label,
+          dateFrom: dateFrom || undefined,
+          dateTo: dateTo || undefined,
         });
 
-        const data = generated.data ?? {};
-        if (!data.id) {
-          throw new Error("Report generation succeeded but no report ID was returned");
+        const reportId = res.data?.id;
+        if (!reportId) throw new Error("No report ID returned");
+
+        // Download the file
+        try {
+          const downloadRes = await apiClient.get(`/reports/${reportId}/download`, {
+            responseType: "blob",
+          });
+          const blob = new Blob([downloadRes.data]);
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = res.data?.filename || `report.${exportFormat}`;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          URL.revokeObjectURL(url);
+        } catch {
+          // Fallback
         }
 
-        await downloadGeneratedReport(String(data.id), data.filename);
-        await loadReportHistory();
-
-        toast.success("Report generated", {
-          description: `${label} exported as ${String(data.format ?? format).toUpperCase()} (${Number(data.rowCount ?? 0)} rows).`,
-        });
+        await loadHistory();
+        toast.success(`${report?.label} generated successfully!`);
+        setShowGenerateModal(false);
       } catch (error) {
         toast.error("Failed to generate report", { description: errorMessage(error) });
       } finally {
         setIsGenerating(false);
       }
     },
-    [dateFrom, dateTo, downloadGeneratedReport, loadReportHistory],
+    [exportFormat, dateFrom, dateTo, loadHistory],
   );
 
-  const previewRows = useMemo(() => buildRows(reportKey).slice(0, 10), [buildRows, reportKey]);
-  const schedulePreviewLabel = useMemo(
-    () => REPORT_OPTIONS.find((r) => r.key === scheduleForm.reportKey)?.label ?? humanizeEnum(scheduleForm.reportKey),
-    [scheduleForm.reportKey],
+  // Download report
+  const downloadReport = useCallback(async (reportId: string, filename: string) => {
+    try {
+      const res = await apiClient.get(`/reports/${reportId}/download`, {
+        responseType: "blob",
+      });
+      const blob = new Blob([res.data]);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      toast.error("Failed to download report", { description: errorMessage(error) });
+    }
+  }, []);
+
+  // Toggle schedule
+  const toggleSchedule = useCallback(
+    async (scheduleId: string, enable: boolean) => {
+      try {
+        await apiClient.patch(`/reports/schedules/${scheduleId}/toggle`, {
+          isEnabled: enable,
+        });
+        await loadSchedules();
+        toast.success(enable ? "Schedule enabled" : "Schedule paused");
+      } catch (error) {
+        toast.error("Failed to toggle schedule", { description: errorMessage(error) });
+      }
+    },
+    [loadSchedules],
   );
+
+  // Run schedule now
+  const runScheduleNow = useCallback(
+    async (scheduleId: string) => {
+      try {
+        await apiClient.post(`/reports/schedules/${scheduleId}/run-now`);
+        await loadSchedules();
+        await loadHistory();
+        toast.success("Schedule executed successfully");
+      } catch (error) {
+        toast.error("Failed to run schedule", { description: errorMessage(error) });
+      }
+    },
+    [loadSchedules, loadHistory],
+  );
+
+  useEffect(() => {
+    void loadStats();
+    void loadHistory();
+    void loadSchedules();
+  }, [loadStats, loadHistory, loadSchedules]);
+
+  // Get format badge color
+  const getFormatBadgeColor = (format: string) => {
+    const f = format.toLowerCase();
+    if (f === "csv") return "bg-emerald-500/20 text-emerald-300";
+    if (f === "xlsx") return "bg-blue-500/20 text-blue-300";
+    if (f === "pdf") return "bg-red-500/20 text-red-300";
+    return "bg-amber-500/20 text-amber-300";
+  };
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-[#1E293B]">Reports & Analytics</h1>
-          <p className="text-[#64748B] mt-1">
-            Backend-generated reports with stored export history, plus live preview from source endpoints.
-          </p>
-        </div>
-        <Button variant="outline" onClick={() => void loadReportSources()} disabled={isLoading}>
-          <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
-          Refresh Data
-        </Button>
-      </div>
-
-      {loadError ? (
-        <Card className="p-4 border border-[#FECACA] bg-[#FEF2F2] text-[#991B1B]">{loadError}</Card>
-      ) : null}
-
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <Card className="p-4"><p className="text-xs text-[#64748B]">Invoices</p><p className="text-2xl mt-2">{stats.invoices}</p></Card>
-        <Card className="p-4"><p className="text-xs text-[#64748B]">Service Requests</p><p className="text-2xl mt-2">{stats.serviceRequests}</p></Card>
-        <Card className="p-4"><p className="text-xs text-[#64748B]">Incidents</p><p className="text-2xl mt-2">{stats.incidents}</p></Card>
-        <Card className="p-4"><p className="text-xs text-[#64748B]">QR Access Rows</p><p className="text-2xl mt-2">{stats.qrs}</p></Card>
-        <Card className="p-4"><p className="text-xs text-[#64748B]">Paid Revenue</p><p className="text-2xl mt-2">{formatCurrencyEGP(stats.totalRevenue)}</p></Card>
-      </div>
-
-      <Card className="p-6 space-y-4">
-        <h3 className="text-[#1E293B]">Generate Custom Report</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
-          <div className="xl:col-span-2 space-y-2">
-            <Label>Report Type</Label>
-            <Select value={reportKey} onValueChange={(value) => setReportKey(value as ReportKey)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {REPORT_OPTIONS.map((option) => (
-                  <SelectItem key={option.key} value={option.key}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label>From</Label>
-            <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-          </div>
-          <div className="space-y-2">
-            <Label>To</Label>
-            <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-          </div>
-          <div className="space-y-2">
-            <Label>Format</Label>
-            <Select value={exportFormat} onValueChange={(value) => setExportFormat(value as ExportFormat)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="csv">CSV</SelectItem>
-                <SelectItem value="json">JSON</SelectItem>
-                <SelectItem value="xlsx">XLSX</SelectItem>
-                <SelectItem value="pdf">PDF</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white" onClick={() => void generateReport(reportKey, exportFormat)} disabled={isGenerating}>
-            <Download className="w-4 h-4 mr-2" />
-            {isGenerating ? "Generating..." : "Generate & Download"}
-          </Button>
-          {REPORT_OPTIONS.map((option) => (
-            <Button key={option.key} variant="outline" onClick={() => void generateReport(option.key, "csv")} disabled={isGenerating}>
-              <FileText className="w-4 h-4 mr-2" />
-              {option.label}
+    <div className="min-h-screen bg-gradient-to-br from-[#0f1117] to-[#161b22]">
+      {/* Header */}
+      <div className="border-b border-white/10 bg-[#0f1117]/50 backdrop-blur">
+        <div className="max-w-7xl mx-auto px-6 py-8">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h1 className="text-3xl font-bold text-white mb-2">Reports & Analytics</h1>
+              <p className="text-slate-400 text-sm">Generate, download, and schedule automated reports</p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                void loadStats();
+                void loadHistory();
+                void loadSchedules();
+              }}
+              disabled={isLoading}
+              className="border-white/10 text-white hover:bg-white/5"
+            >
+              <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
+              Refresh
             </Button>
-          ))}
-        </div>
-        <p className="text-xs text-[#64748B]">
-          Preview below is generated from live API payloads in this page; actual exports are generated and stored by backend `/reports`.
-        </p>
-      </Card>
-
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <Card className="p-6 xl:col-span-2">
-          <h3 className="text-[#1E293B] mb-1">
-            {REPORT_OPTIONS.find((r) => r.key === reportKey)?.label}
-          </h3>
-          <p className="text-sm text-[#64748B] mb-4">
-            {REPORT_OPTIONS.find((r) => r.key === reportKey)?.description}
-          </p>
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-[#F9FAFB]">
-                  {previewRows[0]
-                    ? Object.keys(previewRows[0]).map((key) => <TableHead key={key}>{humanizeEnum(key)}</TableHead>)
-                    : <TableHead>Preview</TableHead>}
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {previewRows.map((row, index) => (
-                  <TableRow key={index}>
-                    {Object.keys(previewRows[0] ?? { preview: "" }).map((key) => (
-                      <TableCell key={`${index}-${key}`} className="text-xs">
-                        {row[key] === null || row[key] === undefined ? "—" : String(row[key])}
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))}
-                {previewRows.length === 0 ? (
-                  <TableRow>
-                    <TableCell className="py-8 text-center text-[#64748B]">
-                      No rows available for the selected report/date range.
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-              </TableBody>
-            </Table>
           </div>
-        </Card>
 
-        <div className="space-y-6">
-          <Card className="p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-[#1E293B]">Recent Exports</h3>
-              <Button variant="outline" size="sm" onClick={() => void loadReportHistory()} disabled={isHistoryLoading}>
-                {isHistoryLoading ? "Loading..." : "Refresh"}
-              </Button>
-            </div>
-            <div className="space-y-3">
-              {history.map((item) => (
-                <div key={item.id} className="rounded-lg border border-[#E5E7EB] p-3">
-                  <div className="text-sm font-medium text-[#1E293B]">{item.label}</div>
-                  <div className="text-xs text-[#64748B] mt-1">
-                    {item.filename} • {item.rowCount} rows
+          {/* Tabs */}
+          <div className="flex gap-1 border-b border-white/10 -mb-4">
+            <button
+              onClick={() => setActiveTab("reports")}
+              className={`px-4 py-3 text-sm font-medium border-b-2 transition ${
+                activeTab === "reports"
+                  ? "border-blue-500 text-blue-400"
+                  : "border-transparent text-slate-400 hover:text-slate-300"
+              }`}
+            >
+              <FileText className="w-4 h-4 inline mr-2" />
+              Reports
+            </button>
+            <button
+              onClick={() => setActiveTab("schedules")}
+              className={`px-4 py-3 text-sm font-medium border-b-2 transition ${
+                activeTab === "schedules"
+                  ? "border-blue-500 text-blue-400"
+                  : "border-transparent text-slate-400 hover:text-slate-300"
+              }`}
+            >
+              <CalendarClock className="w-4 h-4 inline mr-2" />
+              Schedules
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto px-6 py-8">
+        {activeTab === "reports" ? (
+          <div className="space-y-8">
+            {/* KPI Cards */}
+            <div className="grid grid-cols-4 gap-4">
+              <Card className="bg-[#161b22]/50 border-white/10 p-6 rounded-xl hover:border-white/20 transition">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-slate-500 text-sm font-medium">Total Generated</p>
+                    <p className="text-3xl font-bold text-white mt-2">{stats.totalGenerated}</p>
                   </div>
-                  <div className="text-xs text-[#64748B] mt-1">
-                    {formatDateTime(item.generatedAt)}
-                  </div>
-                  <div className="mt-2 flex items-center justify-between gap-2">
-                    <Badge variant="secondary">{String(item.format).toUpperCase()}</Badge>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => void downloadGeneratedReport(item.id, item.filename)}
-                    >
-                      <Download className="w-4 h-4 mr-2" />
-                      Download
-                    </Button>
-                  </div>
+                  <FileText className="w-10 h-10 text-blue-400/30" />
                 </div>
-              ))}
-              {history.length === 0 ? (
-                <div className="text-sm text-[#64748B]">No exports generated yet.</div>
-              ) : null}
-            </div>
-          </Card>
+              </Card>
 
-          <Card className="p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-[#1E293B]">Report Schedules</h3>
-              <Button variant="outline" size="sm" onClick={() => void loadSchedules()} disabled={isSchedulesLoading}>
-                {isSchedulesLoading ? "Loading..." : "Refresh"}
-              </Button>
+              <Card className="bg-[#161b22]/50 border-white/10 p-6 rounded-xl hover:border-white/20 transition">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-slate-500 text-sm font-medium">This Month</p>
+                    <p className="text-3xl font-bold text-white mt-2">{stats.generatedThisMonth}</p>
+                  </div>
+                  <CalendarClock className="w-10 h-10 text-emerald-400/30" />
+                </div>
+              </Card>
+
+              <Card className="bg-[#161b22]/50 border-white/10 p-6 rounded-xl hover:border-white/20 transition">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-slate-500 text-sm font-medium">Active Schedules</p>
+                    <p className="text-3xl font-bold text-white mt-2">{stats.activeSchedules}</p>
+                  </div>
+                  <CheckCircle2 className="w-10 h-10 text-amber-400/30" />
+                </div>
+              </Card>
+
+              <Card className="bg-[#161b22]/50 border-white/10 p-6 rounded-xl hover:border-white/20 transition">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-slate-500 text-sm font-medium">Last Generated</p>
+                    <p className="text-sm font-medium text-white mt-2">
+                      {stats.lastGeneratedAt ? formatDateTime(stats.lastGeneratedAt) : "—"}
+                    </p>
+                  </div>
+                  <RefreshCw className="w-10 h-10 text-cyan-400/30" />
+                </div>
+              </Card>
             </div>
 
-            <div className="rounded-lg border border-[#E5E7EB] p-4 space-y-3">
-              <div className="flex items-center gap-2 text-sm text-[#1E293B]">
-                <CalendarClock className="w-4 h-4 text-[#0B5FFF]" />
-                Create Schedule
+            {/* Report Type Cards Grid */}
+            <div>
+              <div className="mb-6">
+                <h2 className="text-xl font-bold text-white mb-2">Available Reports</h2>
+                <p className="text-slate-400 text-sm">Click any card to generate an instant report</p>
               </div>
-              <div className="grid grid-cols-1 gap-3">
-                <div className="space-y-2">
-                  <Label>Report</Label>
-                  <Select
-                    value={scheduleForm.reportKey}
-                    onValueChange={(value) => setScheduleForm((s) => ({ ...s, reportKey: value as ReportKey }))}
+              <div className="grid grid-cols-4 gap-4">
+                {REPORT_OPTIONS.map(({ key, label, description, icon: Icon, bgColor, textColor }) => (
+                  <Card
+                    key={key}
+                    className="bg-[#161b22]/50 border-white/10 p-5 rounded-xl hover:border-blue-500/50 hover:bg-blue-500/5 transition cursor-pointer group"
+                    onClick={() => {
+                      setSelectedReportType(key);
+                      setShowGenerateModal(true);
+                    }}
                   >
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {REPORT_OPTIONS.map((option) => (
-                        <SelectItem key={option.key} value={option.key}>{option.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    <div className={`w-10 h-10 rounded-lg ${bgColor} flex items-center justify-center mb-4`}>
+                      <Icon className={`w-5 h-5 ${textColor}`} />
+                    </div>
+                    <p className="text-sm font-semibold text-white mb-1">{label}</p>
+                    <p className="text-xs text-slate-500 line-clamp-2">{description}</p>
+                    <div className="mt-4 flex items-center gap-1 text-blue-400 text-xs opacity-0 group-hover:opacity-100 transition">
+                      <Download className="w-3 h-3" />
+                      <span>Generate</span>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            </div>
+
+            {/* Recent Reports Table */}
+            <div>
+              <h2 className="text-xl font-bold text-white mb-4">Generated Reports</h2>
+              <Card className="bg-[#161b22]/50 border-white/10 rounded-xl overflow-hidden">
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="border-white/10 hover:bg-transparent">
+                        <TableHead className="text-slate-400">Report Name</TableHead>
+                        <TableHead className="text-slate-400">Type</TableHead>
+                        <TableHead className="text-slate-400">Format</TableHead>
+                        <TableHead className="text-slate-400 text-right">Rows</TableHead>
+                        <TableHead className="text-slate-400">Generated</TableHead>
+                        <TableHead className="text-slate-400 text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {history.length === 0 ? (
+                        <TableRow className="border-white/10 hover:bg-white/5">
+                          <TableCell colSpan={6} className="text-center py-12">
+                            <FileText className="w-12 h-12 text-slate-600 mx-auto mb-3 opacity-50" />
+                            <p className="text-slate-400">No reports generated yet</p>
+                          </TableCell>
+                        </TableRow>
+                      ) : (
+                        history.map((report) => (
+                          <TableRow key={report.id} className="border-white/10 hover:bg-white/5 transition">
+                            <TableCell className="text-white font-medium">{report.label}</TableCell>
+                            <TableCell className="text-slate-400 text-sm">{humanizeEnum(report.reportType)}</TableCell>
+                            <TableCell>
+                              <Badge className={getFormatBadgeColor(report.format)}>
+                                {report.format.toUpperCase()}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-slate-400 text-right font-medium">{report.rowCount}</TableCell>
+                            <TableCell className="text-slate-400 text-sm">{formatDateTime(report.generatedAt)}</TableCell>
+                            <TableCell className="text-right">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => void downloadReport(report.id, report.filename)}
+                                className="text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
+                              >
+                                <Download className="w-4 h-4" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
                 </div>
+              </Card>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-xl font-bold text-white">Report Schedules</h2>
+                <p className="text-slate-400 text-sm mt-1">Manage automatic report generation schedules</p>
+              </div>
+              <Button
+                onClick={() => setShowScheduleModal(true)}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                <CalendarClock className="w-4 h-4 mr-2" />
+                Create Schedule
+              </Button>
+            </div>
+
+            <div className="grid gap-4">
+              {schedules.length === 0 ? (
+                <Card className="bg-[#161b22]/50 border-white/10 rounded-xl p-12 text-center">
+                  <CalendarClock className="w-12 h-12 text-slate-600 mx-auto mb-3 opacity-50" />
+                  <p className="text-slate-400">No schedules created yet</p>
+                </Card>
+              ) : (
+                schedules.map((schedule) => (
+                  <Card
+                    key={schedule.id}
+                    className="bg-[#161b22]/50 border-white/10 rounded-xl p-5 hover:border-white/20 transition"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                          <p className="text-white font-semibold">{schedule.label}</p>
+                          <Badge className={schedule.isEnabled ? "bg-green-500/20 text-green-300" : "bg-slate-500/20 text-slate-300"}>
+                            {schedule.isEnabled ? "Active" : "Paused"}
+                          </Badge>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-4 text-xs text-slate-400 mt-2">
+                          <span>{humanizeEnum(schedule.reportType)}</span>
+                          <span>•</span>
+                          <span>{schedule.format.toUpperCase()}</span>
+                          <span>•</span>
+                          <span>{schedule.frequency}</span>
+                          <span>•</span>
+                          <span>Next: {schedule.nextRunAt ? formatDateTime(schedule.nextRunAt) : "—"}</span>
+                        </div>
+                        {schedule.recipientEmails && schedule.recipientEmails.length > 0 && (
+                          <div className="text-xs text-slate-500 mt-2">
+                            📧 {schedule.recipientEmails.join(", ")}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => void runScheduleNow(schedule.id)}
+                          className="text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
+                        >
+                          <Play className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => void toggleSchedule(schedule.id, !schedule.isEnabled)}
+                          className={schedule.isEnabled ? "text-orange-400 hover:text-orange-300 hover:bg-orange-500/10" : "text-green-400 hover:text-green-300 hover:bg-green-500/10"}
+                        >
+                          {schedule.isEnabled ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+                        </Button>
+                      </div>
+                    </div>
+                  </Card>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Generate Report Modal */}
+      {showGenerateModal && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <Card className="bg-[#161b22] border-white/20 rounded-2xl p-8 w-[420px] shadow-2xl">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold text-white">
+                Generate {REPORT_OPTIONS.find((r) => r.key === selectedReportType)?.label}
+              </h2>
+              <button
+                onClick={() => setShowGenerateModal(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label className="text-white">Date Range</Label>
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <Label>Format</Label>
-                    <Select
-                      value={scheduleForm.format}
-                      onValueChange={(value) => setScheduleForm((s) => ({ ...s, format: value as ExportFormat }))}
-                    >
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="csv">CSV</SelectItem>
-                        <SelectItem value="json">JSON</SelectItem>
-                        <SelectItem value="xlsx">XLSX</SelectItem>
-                        <SelectItem value="pdf">PDF</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Frequency</Label>
-                    <Select
-                      value={scheduleForm.frequency}
-                      onValueChange={(value) => setScheduleForm((s) => ({ ...s, frequency: value }))}
-                    >
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="DAILY">Daily</SelectItem>
-                        <SelectItem value="WEEKLY">Weekly</SelectItem>
-                        <SelectItem value="MONTHLY">Monthly</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>Next Run (Optional)</Label>
                   <Input
-                    type="datetime-local"
-                    value={scheduleForm.nextRunAt}
-                    onChange={(e) => setScheduleForm((s) => ({ ...s, nextRunAt: e.target.value }))}
+                    type="date"
+                    value={dateFrom}
+                    onChange={(e) => setDateFrom(e.target.value)}
+                    className="bg-white/5 border-white/10 text-white"
+                    placeholder="From"
+                  />
+                  <Input
+                    type="date"
+                    value={dateTo}
+                    onChange={(e) => setDateTo(e.target.value)}
+                    className="bg-white/5 border-white/10 text-white"
+                    placeholder="To"
                   />
                 </div>
-                <div className="text-xs text-[#64748B]">
-                  Schedule will use current date filters if set. Selected report: {schedulePreviewLabel}
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-white">Export Format</Label>
+                <div className="grid grid-cols-4 gap-2">
+                  {(["csv", "xlsx", "pdf", "json"] as const).map((fmt) => (
+                    <button
+                      key={fmt}
+                      onClick={() => setExportFormat(fmt)}
+                      className={`py-2 px-3 rounded-lg text-xs font-medium transition ${
+                        exportFormat === fmt
+                          ? "bg-blue-600 text-white"
+                          : "bg-white/5 text-slate-300 border border-white/10 hover:bg-white/10"
+                      }`}
+                    >
+                      {fmt.toUpperCase()}
+                    </button>
+                  ))}
                 </div>
-                <Button
-                  className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white"
-                  onClick={() => void createSchedule()}
-                  disabled={isScheduleSubmitting}
-                >
-                  {isScheduleSubmitting ? "Creating..." : "Create Schedule"}
-                </Button>
               </div>
             </div>
 
-            <div className="space-y-2">
-              {schedules.map((row) => (
-                <div key={row.id} className="rounded-lg border border-[#E5E7EB] p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium text-[#1E293B] truncate">{row.label}</div>
-                      <div className="text-xs text-[#64748B] mt-1">
-                        {humanizeEnum(row.reportType)} • {String(row.format).toUpperCase()} • {humanizeEnum(row.frequency)}
-                      </div>
-                      <div className="text-xs text-[#64748B] mt-1">
-                        Next: {formatDateTime(row.nextRunAt)} • Last: {formatDateTime(row.lastRunAt)}
-                      </div>
-                    </div>
-                    <div className="flex flex-col items-end gap-2">
-                      <Badge className={row.isEnabled ? "bg-[#10B981]/10 text-[#10B981]" : "bg-[#F59E0B]/10 text-[#F59E0B]"}>
-                        {row.isEnabled ? "Enabled" : "Paused"}
-                      </Badge>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={runningScheduleId === row.id}
-                          onClick={() => void runScheduleNow(row)}
-                        >
-                          {runningScheduleId === row.id ? "Running..." : "Run Now"}
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={togglingScheduleId === row.id}
-                          onClick={() => void toggleSchedule(row, !row.isEnabled)}
-                        >
-                          {togglingScheduleId === row.id ? "Updating..." : row.isEnabled ? "Pause" : "Enable"}
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-              {schedules.length === 0 ? (
-                <div className="text-sm text-[#64748B]">No schedules created yet.</div>
-              ) : null}
+            <div className="flex justify-end gap-3 mt-8">
+              <Button
+                variant="outline"
+                onClick={() => setShowGenerateModal(false)}
+                className="border-white/10 text-slate-300 hover:bg-white/5"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  void generateReport(selectedReportType);
+                }}
+                disabled={isGenerating}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                {isGenerating ? <Loader className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+                {isGenerating ? "Generating..." : "Generate & Download"}
+              </Button>
             </div>
           </Card>
         </div>
-      </div>
+      )}
     </div>
   );
 }

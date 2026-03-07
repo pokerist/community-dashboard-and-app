@@ -8,16 +8,7 @@ describe('BookingsController', () => {
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [BookingsController],
-      providers: [
-        {
-          provide: BookingsService,
-          useValue: {
-            createForActor: jest.fn().mockResolvedValue({}),
-            findByUser: jest.fn().mockResolvedValue([]),
-            findOneForActor: jest.fn().mockResolvedValue({}),
-          },
-        },
-      ],
+      providers: [{ provide: BookingsService, useValue: {} }],
     })
       .overrideGuard(require('../auth/guards/jwt-auth.guard').JwtAuthGuard)
       .useValue({ canActivate: () => true })

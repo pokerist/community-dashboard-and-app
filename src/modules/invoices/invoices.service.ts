@@ -107,7 +107,13 @@ type InvoiceDetailRow = Prisma.InvoiceGetPayload<{
     };
     resident: { select: { id: true; nameEN: true; phone: true } };
     violation: {
-      select: { id: true; violationNumber: true; type: true; fineAmount: true };
+      select: {
+        id: true;
+        violationNumber: true;
+        typeLegacy: true;
+        fineAmount: true;
+        category: { select: { name: true } };
+      };
     };
     serviceRequest: {
       select: { id: true; service: { select: { name: true } } };
@@ -115,7 +121,14 @@ type InvoiceDetailRow = Prisma.InvoiceGetPayload<{
     booking: {
       select: { id: true; date: true; facility: { select: { name: true } } };
     };
-    complaint: { select: { id: true; complaintNumber: true; category: true } };
+    complaint: {
+      select: {
+        id: true;
+        complaintNumber: true;
+        categoryLegacy: true;
+        category: { select: { name: true } };
+      };
+    };
     unitFees: {
       select: { id: true; type: true; amount: true; billingMonth: true };
       orderBy: { billingMonth: 'desc' };
@@ -252,8 +265,9 @@ export class InvoicesService {
           select: {
             id: true,
             violationNumber: true,
-            type: true,
+            typeLegacy: true,
             fineAmount: true,
+            category: { select: { name: true } },
           },
         },
         serviceRequest: {
@@ -267,7 +281,12 @@ export class InvoicesService {
           },
         },
         complaint: {
-          select: { id: true, complaintNumber: true, category: true },
+          select: {
+            id: true,
+            complaintNumber: true,
+            categoryLegacy: true,
+            category: { select: { name: true } },
+          },
         },
         unitFees: {
           select: { id: true, type: true, amount: true, billingMonth: true },
@@ -1254,7 +1273,7 @@ export class InvoicesService {
         kind: source,
         id: row.violation.id,
         label: row.violation.violationNumber,
-        secondaryLabel: row.violation.type,
+        secondaryLabel: row.violation.category?.name ?? row.violation.typeLegacy,
         amount: Number(row.violation.fineAmount),
       };
     }
@@ -1284,7 +1303,7 @@ export class InvoicesService {
         kind: source,
         id: row.complaint.id,
         label: row.complaint.complaintNumber,
-        secondaryLabel: row.complaint.category,
+        secondaryLabel: row.complaint.category?.name ?? row.complaint.categoryLegacy,
         amount: Number(row.amount),
       };
     }

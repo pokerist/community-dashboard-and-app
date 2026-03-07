@@ -42,6 +42,10 @@ import { GatesModule } from './modules/gates/gates.module';
 import { ApprovalsModule } from './modules/approvals/approvals.module';
 import { RentalModule } from './modules/rental/rental.module';
 import { PermitsModule } from './modules/permits/permits.module';
+import { MarketingModule } from './modules/marketing/marketing.module';
+import { SurveyModule } from './modules/survey/survey.module';
+import { OrderingModule } from './modules/ordering/ordering.module';
+import { HospitalityModule } from './modules/hospitality/hospitality.module';
 
 @Module({
   imports: [
@@ -88,6 +92,10 @@ import { PermitsModule } from './modules/permits/permits.module';
     ApprovalsModule,
     RentalModule,
     PermitsModule,
+    MarketingModule,
+    SurveyModule,
+    OrderingModule,
+    HospitalityModule,
   ],
   controllers: [],
   providers: [],

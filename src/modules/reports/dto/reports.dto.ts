@@ -11,6 +11,11 @@ import {
   MaxLength,
   Min,
   IsBoolean,
+  IsEmail,
+  IsUUID,
+  ArrayMinSize,
+  IsArray,
+  IsNotEmpty,
 } from 'class-validator';
 
 export class GenerateReportDto {
@@ -33,6 +38,14 @@ export class GenerateReportDto {
   @IsOptional()
   @IsDateString()
   dateTo?: string;
+
+  @IsOptional()
+  @IsUUID()
+  communityId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  unitId?: string;
 }
 
 export class ListReportsHistoryDto {
@@ -48,6 +61,26 @@ export class ListReportsHistoryDto {
   @Min(1)
   @Max(200)
   limit?: number;
+
+  @IsOptional()
+  @IsEnum(ReportType)
+  reportType?: ReportType;
+
+  @IsOptional()
+  @IsEnum(ReportFormat)
+  format?: ReportFormat;
+
+  @IsOptional()
+  @IsDateString()
+  dateFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateTo?: string;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
 }
 
 export class CreateReportScheduleDto {
@@ -58,10 +91,10 @@ export class CreateReportScheduleDto {
   @IsEnum(ReportFormat)
   format?: ReportFormat;
 
-  @IsOptional()
   @IsString()
+  @IsNotEmpty()
   @MaxLength(200)
-  label?: string;
+  label!: string;
 
   @IsString()
   @MaxLength(50)
@@ -84,6 +117,11 @@ export class CreateReportScheduleDto {
   @IsOptional()
   @IsDateString()
   dateTo?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsEmail({}, { each: true })
+  recipientEmails?: string[];
 }
 
 export class ListReportSchedulesDto {
@@ -93,9 +131,47 @@ export class ListReportSchedulesDto {
   @Min(1)
   @Max(200)
   limit?: number;
+
+  @IsOptional()
+  @IsEnum(ReportType)
+  reportType?: ReportType;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
 }
 
 export class ToggleReportScheduleDto {
   @IsBoolean()
   isEnabled!: boolean;
+}
+
+export class UpdateReportScheduleDto {
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  label?: string;
+
+  @IsOptional()
+  @IsEnum(ReportFormat)
+  format?: ReportFormat;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['DAILY', 'WEEKLY', 'MONTHLY'])
+  frequency?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  dateTo?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsEmail({}, { each: true })
+  recipientEmails?: string[];
 }
