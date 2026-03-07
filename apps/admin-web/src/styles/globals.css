@@ -8,9 +8,9 @@
   --smart-station-green: #00B386;
   
   /* Background Colors */
-  --background: #FFFFFF;
-  --background-secondary: #F9FAFB;
-  --surface: #F3F4F6;
+  --background: #F5F4F1;
+  --background-secondary: #EBEBEB;
+  --surface: #FFFFFF;
   
   /* Text Colors */
   --foreground: #1E293B;
@@ -45,21 +45,21 @@
   --switch-background: #cbced4;
   --font-weight-medium: 600;
   --font-weight-normal: 400;
-  --ring: #00B386;
-  --chart-1: #00B386;
-  --chart-2: #0B5FFF;
-  --chart-3: #3B82F6;
-  --chart-4: #F59E0B;
-  --chart-5: #EF4444;
-  --radius: 0.75rem;
-  --sidebar: #FFFFFF;
-  --sidebar-foreground: #1E293B;
-  --sidebar-primary: #00B386;
+  --ring: #2563EB;
+  --chart-1: #2563EB;
+  --chart-2: #059669;
+  --chart-3: #D97706;
+  --chart-4: #DC2626;
+  --chart-5: #7C3AED;
+  --radius: 0.25rem;
+  --sidebar: #1A1D23;
+  --sidebar-foreground: #8B8F9A;
+  --sidebar-primary: #2563EB;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #F9FAFB;
-  --sidebar-accent-foreground: #1E293B;
-  --sidebar-border: #E5E7EB;
-  --sidebar-ring: #00B386;
+  --sidebar-accent: rgba(37,99,235,0.15);
+  --sidebar-accent-foreground: #FFFFFF;
+  --sidebar-border: rgba(255,255,255,0.07);
+  --sidebar-ring: #2563EB;
 }
 
 .dark {
@@ -145,7 +145,7 @@
 
   body {
     @apply bg-background text-foreground;
-    font-family: var(--font-family-inter);
+    font-family: 'Work Sans', system-ui, -apple-system, sans-serif;
   }
 }
 

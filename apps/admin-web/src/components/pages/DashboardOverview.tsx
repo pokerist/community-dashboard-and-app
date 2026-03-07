@@ -230,14 +230,11 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
   return (
     <>
       {/* ── Display header — reference style ────────────────────── */}
-      <div className="flex items-start justify-between px-6 pt-8 pb-6 border-b border-[#F0EEE9]">
+      <div className="flex items-start justify-between px-6 pt-8 pb-6 border-b border-[#E5E7EB] bg-white">
         {/* Left: huge title + period row */}
         <div>
           <div className="flex items-center gap-3">
-            <h1
-              className="text-[48px] font-extrabold text-[#111827] leading-none tracking-[-0.03em]"
-              style={{ fontFamily: "'Work Sans', sans-serif" }}
-            >
+            <h1 className="text-[22px] font-bold text-[#111827] mb-1">
               Dashboard
             </h1>
             <LivePulse fetching={statsQuery.isFetching} />
@@ -245,19 +242,17 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
 
           {/* Period selector row */}
           <div className="mt-3 flex items-center gap-3">
-            <div className="flex rounded-[4px] border border-[#E5E7EB] bg-[#F5F4F1] p-[3px] gap-[2px]">
+            <div className="flex items-center gap-1 bg-[#F3F4F6] rounded p-0.5">
               {PERIOD_OPTIONS.map((option) => (
                 <button
                   key={option.value}
                   type="button"
                   onClick={() => setPeriod(option.value)}
-                  className={[
-                    "rounded-[3px] px-3 py-[5px] text-[11.5px] font-semibold transition-all duration-150",
+                  className={
                     period === option.value
-                      ? "bg-[#2563EB] text-white shadow-[0_1px_4px_rgba(37,99,235,0.25)]"
-                      : "text-[#6B7280] hover:text-[#111827]",
-                  ].join(" ")}
-                  style={{ fontFamily: "'Work Sans', sans-serif" }}
+                      ? "px-3 py-1.5 text-[13px] font-medium bg-white text-[#111827] rounded shadow-sm"
+                      : "px-3 py-1.5 text-[13px] font-medium text-[#6B7280] rounded hover:text-[#111827] transition-colors"
+                  }
                 >
                   {option.label}
                 </button>
@@ -348,13 +343,13 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
 
       {/* KPI grid */}
       {showSkeleton ? (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+        <div className="grid grid-cols-4 gap-4 xl:grid-cols-4 lg:grid-cols-2 md:grid-cols-2 sm:grid-cols-1">
           {Array.from({ length: 11 }).map((_, i) => (
             <div key={i} className="h-[108px] animate-pulse rounded-[6px] bg-[#F5F4F1] border border-[#EBEBEB]" />
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+        <div className="grid grid-cols-4 gap-4 xl:grid-cols-4 lg:grid-cols-2 md:grid-cols-2 sm:grid-cols-1">
           {cards.map((card) => (
             <StatCard
               key={card.key}

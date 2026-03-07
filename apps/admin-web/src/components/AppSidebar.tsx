@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { cn } from "./ui/utils";
 import alkarmaLogo from "figma:asset/0c7a0cd1f45864e0108618f40b9f2a75ac95e9dc.png";
-import type { ComponentType } from "react";
+import type { ComponentType, CSSProperties } from "react";
 
 type NavItem = {
   title: string;
@@ -148,28 +148,28 @@ export function AppSidebar({
       style={{
         width: "240px",
         height: "100%",
-        background: "#FAFAF9",
-        borderRight: "1px solid #F0EEE9",
+        background: "#1A1D23",
+        borderRight: "none",
       }}
     >
       {/* ── Logo zone ─────────────────────────────────────────── */}
       <div
-        className="flex items-center gap-3 px-4 flex-shrink-0 border-b border-[#F0EEE9]"
-        style={{ height: "57px" }}
+        className="flex items-center gap-3 px-4 flex-shrink-0"
+        style={{ height: "57px", borderBottom: "1px solid rgba(255,255,255,0.07)" }}
       >
-        <img src={alkarmaLogo} alt="MG" className="h-8 w-auto flex-shrink-0" />
+        <img src={alkarmaLogo} alt="MG" className="h-8 w-8 flex-shrink-0 object-contain" />
         <div className="flex-1 min-w-0">
           <p
-            className="text-[13.5px] font-bold text-[#111827] leading-none truncate"
+            className="text-[13.5px] font-bold text-white leading-none truncate"
             style={{ fontFamily: "'Work Sans', sans-serif", letterSpacing: "-0.01em" }}
           >
             MG Community
           </p>
-          <p className="mt-[3px] text-[10.5px] text-[#9CA3AF] leading-none font-medium">
+          <p className="mt-[3px] text-[10.5px] text-[#8B8F9A] leading-none font-medium">
             Admin Console
           </p>
         </div>
-        <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-[#C4C2BE]" />
+        <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-white/30" />
       </div>
 
       {/* ── Navigation ────────────────────────────────────────── */}
@@ -178,7 +178,7 @@ export function AppSidebar({
           <div key={section.group} style={{ marginBottom: sIdx < menuSections.length - 1 ? "8px" : "0" }}>
             {/* Section group label */}
             <p
-              className="text-[10px] font-semibold uppercase tracking-[0.09em] text-[#C4C2BE] px-2 mb-1"
+              className="text-[10px] font-semibold uppercase tracking-[0.09em] text-[#8B8F9A] px-2 mb-1"
               style={{
                 fontFamily: "'Work Sans', sans-serif",
                 marginTop: sIdx === 0 ? "4px" : "16px",
@@ -192,7 +192,7 @@ export function AppSidebar({
               {/* Vertical tree line connecting items */}
               {section.items.length > 1 && (
                 <div
-                  className="absolute bg-[#ECEAE7] pointer-events-none"
+                  className="absolute bg-white/10 pointer-events-none"
                   style={{
                     left: "18px",
                     top: "18px",
@@ -215,7 +215,7 @@ export function AppSidebar({
                     {/* Horizontal stub from tree line */}
                     {section.items.length > 1 && (
                       <div
-                        className="absolute bg-[#ECEAE7] pointer-events-none"
+                        className="absolute bg-white/10 pointer-events-none"
                         style={{
                           left: "18px",
                           top: "50%",
@@ -229,36 +229,38 @@ export function AppSidebar({
                     <button
                       type="button"
                       onClick={() => onNavigate(item.section)}
-                      className={cn(
-                        "relative flex w-full items-center gap-2 rounded-[5px] py-[5px] text-left transition-all duration-150",
-                        section.items.length > 1 ? "pl-7 pr-2" : "px-2",
-                        isActive
-                          ? "text-[#111827]"
-                          : "text-[#7A7875] hover:text-[#111827]",
-                      )}
-                      style={{ fontFamily: "'Work Sans', sans-serif" }}
+                      className="relative flex w-full items-center gap-2 rounded-[5px] py-[5px] text-left transition-all duration-150"
+                      style={{
+                        fontFamily: "'Work Sans', sans-serif",
+                        paddingLeft: section.items.length > 1 ? "28px" : "8px",
+                        paddingRight: "8px",
+                        color: isActive ? "#FFFFFF" : "#8B8F9A",
+                        background: isActive ? "rgba(37,99,235,0.15)" : "transparent",
+                        borderLeft: isActive ? "2px solid #2563EB" : "2px solid transparent",
+                      }}
                     >
                       {/* Icon — filled background when active */}
                       <div
-                        className={cn(
-                          "flex h-[22px] w-[22px] flex-shrink-0 items-center justify-center rounded-[5px] transition-all duration-150",
-                          isActive ? "bg-[#2563EB]" : "bg-transparent",
-                        )}
+                        className="flex flex-shrink-0 items-center justify-center rounded-[5px] transition-all duration-150"
+                        style={{
+                          width: "22px",
+                          height: "22px",
+                          backgroundColor: isActive ? "#2563EB" : "transparent",
+                        }}
                       >
                         <Icon
-                          className={cn(
-                            "h-3.5 w-3.5",
-                            isActive ? "text-white" : "text-[#B0ADA7]",
-                          )}
+                          className="h-3.5 w-3.5"
+                          style={{ color: isActive ? "#ffffff" : "#8B8F9A" } as CSSProperties}
                         />
                       </div>
 
                       {/* Label */}
                       <span
-                        className={cn(
-                          "flex-1 truncate text-[12.5px]",
-                          isActive ? "font-semibold" : "font-medium",
-                        )}
+                        className="flex-1 truncate"
+                        style={{
+                          fontSize: "12.5px",
+                          fontWeight: isActive ? 600 : 500,
+                        }}
                       >
                         {item.title}
                       </span>
@@ -284,26 +286,26 @@ export function AppSidebar({
       </div>
 
       {/* ── User zone ─────────────────────────────────────────── */}
-      <div className="flex-shrink-0 border-t border-[#F0EEE9] p-3">
-        <div className="flex items-center gap-2.5 rounded-[6px] px-2 py-2 transition-colors hover:bg-[#F0EEE9] cursor-pointer">
+      <div className="flex-shrink-0 p-3" style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }}>
+        <div className="flex items-center gap-2.5 rounded-[6px] px-2 py-2 transition-colors hover:bg-white/[0.06] cursor-pointer">
           <div className="relative flex-shrink-0">
             <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#2563EB] text-[10px] font-bold text-white">
               {initials}
             </div>
-            <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-[#22C55E] border-2 border-[#FAFAF9]" />
+            <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-[#22C55E] border-2 border-[#1A1D23]" />
           </div>
           <div className="flex-1 min-w-0">
             <p
-              className="text-[12px] font-semibold text-[#111827] truncate leading-none"
+              className="text-[12px] font-semibold text-white truncate leading-none"
               style={{ fontFamily: "'Work Sans', sans-serif" }}
             >
               {authName}
             </p>
-            <p className="mt-[3px] text-[10px] text-[#9CA3AF] truncate leading-none">
+            <p className="mt-[3px] text-[10px] text-[#8B8F9A] truncate leading-none">
               {authEmail}
             </p>
           </div>
-          <ChevronDown className="h-3 w-3 text-[#C4C2BE] flex-shrink-0" />
+          <ChevronDown className="h-3 w-3 text-white/30 flex-shrink-0" />
         </div>
       </div>
     </div>

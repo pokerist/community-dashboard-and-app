@@ -8,7 +8,10 @@
       "Bash(pm2 logs community-backend --lines 20 --nostream)",
       "Bash(docker ps --format \"table {{.Names}}\\\\t{{.Status}}\\\\t{{.Ports}}\")",
       "Bash(powershell.exe -Command \"Get-Service -Name postgresql* 2>$null | Select-Object Name,Status; Get-NetTCPConnection -LocalPort 5433 -ErrorAction SilentlyContinue | Select-Object LocalPort,State\")",
-      "Bash(powershell.exe -Command \"Get-NetTCPConnection -LocalPort 5433 -ErrorAction SilentlyContinue | Select-Object LocalPort,State,OwningProcess\")"
+      "Bash(powershell.exe -Command \"Get-NetTCPConnection -LocalPort 5433 -ErrorAction SilentlyContinue | Select-Object LocalPort,State,OwningProcess\")",
+      "Bash(xargs grep -l \"css\\\\|import\")",
+      "Bash(xargs grep -l \"activity\\\\|Activity\\\\|RecentActivity\\\\|feed\\\\|Feed\")",
+      "Bash(xargs grep -l \"QuickAction\\\\|quick.action\\\\|Quick Action\\\\|quickaction\")"
     ]
   }
 }

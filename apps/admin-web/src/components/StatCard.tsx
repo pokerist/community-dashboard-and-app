@@ -52,19 +52,19 @@ const iconMap: Record<StatIcon, ComponentType<{ className?: string }>> = {
 /* Semantic color per stat type */
 const toneMap: Record<
   StatIcon,
-  { accentColor: string; iconBg: string; iconColor: string }
+  { accentColor: string; iconBg: string; iconColor: string; borderClass: string }
 > = {
-  devices:              { accentColor: "#2563EB", iconBg: "bg-blue-50",   iconColor: "text-blue-600"   },
-  "active-users":       { accentColor: "#059669", iconBg: "bg-emerald-50",iconColor: "text-emerald-600"},
-  "complaints-total":   { accentColor: "#6366F1", iconBg: "bg-indigo-50", iconColor: "text-indigo-600" },
-  "complaints-open":    { accentColor: "#D97706", iconBg: "bg-amber-50",  iconColor: "text-amber-600"  },
-  "complaints-closed":  { accentColor: "#059669", iconBg: "bg-emerald-50",iconColor: "text-emerald-600"},
-  tickets:              { accentColor: "#2563EB", iconBg: "bg-blue-50",   iconColor: "text-blue-600"   },
-  revenue:              { accentColor: "#059669", iconBg: "bg-emerald-50",iconColor: "text-emerald-600"},
-  occupancy:            { accentColor: "#8B5CF6", iconBg: "bg-violet-50", iconColor: "text-violet-600" },
-  visitors:             { accentColor: "#0891B2", iconBg: "bg-cyan-50",   iconColor: "text-cyan-600"   },
-  workers:              { accentColor: "#EA580C", iconBg: "bg-orange-50", iconColor: "text-orange-600" },
-  cars:                 { accentColor: "#64748B", iconBg: "bg-slate-50",  iconColor: "text-slate-500"  },
+  devices:              { accentColor: "#2563EB", iconBg: "bg-blue-50",    iconColor: "text-blue-600",    borderClass: "border-l-[#2563EB]" },
+  "active-users":       { accentColor: "#059669", iconBg: "bg-emerald-50", iconColor: "text-emerald-600", borderClass: "border-l-[#059669]" },
+  "complaints-total":   { accentColor: "#6366F1", iconBg: "bg-indigo-50",  iconColor: "text-indigo-600",  borderClass: "border-l-[#D97706]" },
+  "complaints-open":    { accentColor: "#D97706", iconBg: "bg-amber-50",   iconColor: "text-amber-600",   borderClass: "border-l-[#DC2626]" },
+  "complaints-closed":  { accentColor: "#059669", iconBg: "bg-emerald-50", iconColor: "text-emerald-600", borderClass: "border-l-[#059669]" },
+  tickets:              { accentColor: "#2563EB", iconBg: "bg-blue-50",    iconColor: "text-blue-600",    borderClass: "border-l-[#2563EB]" },
+  revenue:              { accentColor: "#059669", iconBg: "bg-emerald-50", iconColor: "text-emerald-600", borderClass: "border-l-[#059669]" },
+  occupancy:            { accentColor: "#8B5CF6", iconBg: "bg-violet-50",  iconColor: "text-violet-600",  borderClass: "border-l-[#7C3AED]" },
+  visitors:             { accentColor: "#0891B2", iconBg: "bg-cyan-50",    iconColor: "text-cyan-600",    borderClass: "border-l-[#0891B2]" },
+  workers:              { accentColor: "#EA580C", iconBg: "bg-orange-50",  iconColor: "text-orange-600",  borderClass: "border-l-[#D97706]" },
+  cars:                 { accentColor: "#64748B", iconBg: "bg-slate-50",   iconColor: "text-slate-500",   borderClass: "border-l-[#64748B]" },
 };
 
 export function StatCard({
@@ -111,31 +111,22 @@ export function StatCard({
   return (
     <div
       className={cn(
-        "group relative overflow-hidden bg-white rounded-[6px] border border-[#EBEBEB]",
+        "group relative bg-white rounded-[6px] border border-[#EBEBEB] border-l-4 shadow-[0_1px_3px_rgba(0,0,0,0.06)]",
         "transition-all duration-200",
+        tone.borderClass,
         onClick
           ? "cursor-pointer hover:shadow-[0_4px_12px_rgba(0,0,0,0.10)] hover:-translate-y-px"
           : "hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)]",
         className,
       )}
-      style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}
       onClick={onClick}
       role={onClick ? "button" : undefined}
       tabIndex={onClick ? 0 : undefined}
     >
-      {/* 4px left accent border */}
-      <div
-        className="absolute inset-y-0 left-0 w-1"
-        style={{ background: tone.accentColor }}
-      />
-
-      <div className="p-4 pl-5">
+      <div className="p-4">
         {/* Header row */}
         <div className="flex items-start justify-between gap-2 mb-3">
-          <p
-            className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#9CA3AF] leading-none mt-0.5"
-            style={{ fontFamily: "'Work Sans', sans-serif" }}
-          >
+          <p className="text-[11px] font-semibold text-[#6B7280] uppercase tracking-[0.06em]">
             {title}
           </p>
           <div
@@ -149,19 +140,13 @@ export function StatCard({
         </div>
 
         {/* Value — DM Mono, 28px bold */}
-        <p
-          className="text-[28px] font-bold leading-none tracking-[-0.025em] text-[#111827]"
-          style={{ fontFamily: "'DM Mono', monospace" }}
-        >
+        <p className="text-[28px] font-bold text-[#111827] font-mono leading-tight mt-2">
           {value}
         </p>
 
         {/* Subtitle */}
         {subtitle && (
-          <p
-            className="mt-2 text-[11px] leading-relaxed text-[#9CA3AF] line-clamp-2"
-            style={{ fontFamily: "'Work Sans', sans-serif" }}
-          >
+          <p className="text-[12px] text-[#6B7280] mt-1.5 line-clamp-2">
             {subtitle}
           </p>
         )}
@@ -169,10 +154,7 @@ export function StatCard({
         {/* Click hint — uniform blue accent */}
         {onClick && (
           <div className="mt-2.5 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-            <span
-              className="text-[11px] font-semibold text-[#2563EB]"
-              style={{ fontFamily: "'Work Sans', sans-serif" }}
-            >
+            <span className="text-[12px] font-medium text-[#2563EB] mt-3 inline-flex items-center gap-1 hover:gap-2 transition-all">
               View details
             </span>
             <svg width="10" height="10" viewBox="0 0 10 10" fill="none" className="text-[#2563EB]">

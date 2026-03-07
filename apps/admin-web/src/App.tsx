@@ -397,16 +397,10 @@ export default function App() {
 
   return (
     <>
-      {/* ── Outer shell: gray bg wrapping white card ────────────── */}
-      <div className="flex h-screen w-full overflow-hidden" style={{ background: "#ECEAE7" }}>
+      {/* ── Outer shell ───────────────────────────────────────────── */}
+      <div className="flex overflow-hidden" style={{ height: "100vh", width: "100%" }}>
 
-        {/* White card — sidebar + content live inside together */}
-        <div className="flex flex-1 overflow-hidden p-3">
-          <div
-            className="flex flex-1 overflow-hidden bg-white"
-            style={{ borderRadius: "14px", boxShadow: "0 2px 24px rgba(0,0,0,0.07)" }}
-          >
-            {/* Light text sidebar inside the white card */}
+            {/* Dark sidebar */}
             <AppSidebar
               onNavigate={navigateToSection}
               activeSection={activeSection}
@@ -414,23 +408,15 @@ export default function App() {
             />
 
             {/* Content column */}
-            <div className="flex flex-1 flex-col overflow-hidden">
+            <div className="flex flex-1 flex-col overflow-hidden" style={{ background: "#F5F4F1" }}>
 
             {/* ── Top bar ────────────────────────────────────── */}
-            <header className="flex-shrink-0 flex items-center justify-between px-6 h-14 border-b border-[#F0EEE9]">
+            <header className="h-16 bg-white border-b border-[#E5E7EB] flex items-center justify-between px-6 sticky top-0 z-50 flex-shrink-0">
               {/* Breadcrumb */}
               <div className="flex items-center gap-2">
-                <span
-                  className="text-[11px] font-semibold tracking-[0.08em] uppercase text-[#B0ADA7]"
-                  style={{ fontFamily: "'Work Sans', sans-serif" }}
-                >MG</span>
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" className="text-[#D5D2CC]">
-                  <path d="M3 2l4 3-4 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                <span
-                  className="text-[13px] font-semibold text-[#111827]"
-                  style={{ fontFamily: "'Work Sans', sans-serif" }}
-                >{sectionLabel}</span>
+                <span className="text-[13px] text-[#6B7280] font-medium">MG</span>
+                <span className="mx-1.5 text-[#D1D5DB]">/</span>
+                <span className="text-[13px] text-[#111827] font-semibold">{sectionLabel}</span>
               </div>
 
               {/* Actions */}
@@ -474,8 +460,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={handleLogout}
-                  className="flex items-center gap-1.5 rounded-[4px] border border-[#E5E7EB] px-3 py-[6px] text-[12px] font-semibold text-[#6B7280] transition-colors hover:border-[#D1D5DB] hover:bg-[#F9FAFB] hover:text-[#111827]"
-                  style={{ fontFamily: "'Work Sans', sans-serif" }}
+                  className="text-[13px] font-medium text-[#374151] border border-[#E5E7EB] rounded px-3 py-1.5 hover:bg-[#F9FAFB] transition-colors"
                 >
                   Sign out
                 </button>
@@ -493,7 +478,7 @@ export default function App() {
               </div>
 
               {/* Footer */}
-              <footer className="border-t border-[#F0EEE9] px-6 py-4 mt-4">
+              <footer className="border-t border-[#E5E7EB] px-6 py-4 mt-4" style={{ background: "#F5F4F1" }}>
                 <div className="flex items-center justify-between">
                   <p className="text-[11px] text-[#B0ADA7]" style={{ fontFamily: "'Work Sans', sans-serif" }}>
                     MG Community — Admin Dashboard © 2025 · Powered by Smart Station Solutions
@@ -515,8 +500,6 @@ export default function App() {
               </footer>
             </main>
             </div>{/* end content column */}
-          </div>{/* end white card */}
-        </div>{/* end p-3 wrapper */}
       </div>{/* end outer shell */}
 
       {/* Footer dialogs */}

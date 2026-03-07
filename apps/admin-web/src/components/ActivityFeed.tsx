@@ -28,42 +28,42 @@ const iconByType: Record<
 > = {
   COMPLAINT: {
     icon: ClipboardList,
-    circleBg: "bg-blue-50",
-    circleIcon: "text-blue-500",
-    badgeBg: "bg-blue-50",
-    badgeText: "text-blue-600",
+    circleBg: "bg-[#FFFBEB]",
+    circleIcon: "text-[#D97706]",
+    badgeBg: "bg-[#FFFBEB]",
+    badgeText: "text-[#92400E]",
     label: "Complaint",
   },
   SERVICE_REQUEST: {
     icon: FilePlus2,
-    circleBg: "bg-emerald-50",
-    circleIcon: "text-emerald-600",
-    badgeBg: "bg-emerald-50",
-    badgeText: "text-emerald-700",
+    circleBg: "bg-[#EFF6FF]",
+    circleIcon: "text-[#2563EB]",
+    badgeBg: "bg-[#EFF6FF]",
+    badgeText: "text-[#1E40AF]",
     label: "Service",
   },
   VIOLATION: {
     icon: AlertTriangle,
-    circleBg: "bg-amber-50",
-    circleIcon: "text-amber-500",
-    badgeBg: "bg-amber-50",
-    badgeText: "text-amber-600",
+    circleBg: "bg-[#FEF2F2]",
+    circleIcon: "text-[#DC2626]",
+    badgeBg: "bg-[#FEF2F2]",
+    badgeText: "text-[#991B1B]",
     label: "Violation",
   },
   INVOICE: {
     icon: Receipt,
-    circleBg: "bg-teal-50",
-    circleIcon: "text-teal-600",
-    badgeBg: "bg-teal-50",
-    badgeText: "text-teal-700",
+    circleBg: "bg-[#ECFDF5]",
+    circleIcon: "text-[#059669]",
+    badgeBg: "bg-[#ECFDF5]",
+    badgeText: "text-[#065F46]",
     label: "Invoice",
   },
   REGISTRATION: {
     icon: UserPlus,
-    circleBg: "bg-violet-50",
-    circleIcon: "text-violet-500",
-    badgeBg: "bg-violet-50",
-    badgeText: "text-violet-600",
+    circleBg: "bg-[#F5F3FF]",
+    circleIcon: "text-[#7C3AED]",
+    badgeBg: "bg-[#F5F3FF]",
+    badgeText: "text-[#5B21B6]",
     label: "Registration",
   },
 };
@@ -144,7 +144,7 @@ export function ActivityFeed({ activities, loading = false }: ActivityFeedProps)
             return (
               <div
                 key={activity.id}
-                className="group flex items-start gap-4 px-5 py-4 transition-colors hover:bg-[#FAFAF9]"
+                className="flex items-start gap-3 px-4 py-3 border-b border-[#F3F4F6] hover:bg-[#F9FAFB] transition-colors"
               >
                 {/* Circle icon */}
                 <div
@@ -156,10 +156,7 @@ export function ActivityFeed({ activities, loading = false }: ActivityFeedProps)
                 {/* Content — two-tier hierarchy */}
                 <div className="min-w-0 flex-1">
                   {/* PRIMARY: description — bold, prominent */}
-                  <p
-                    className="text-[13.5px] font-semibold text-[#111827] leading-snug"
-                    style={{ fontFamily: "'Work Sans', sans-serif" }}
-                  >
+                  <p className="text-[13px] font-semibold text-[#111827]">
                     {activity.description}
                   </p>
 
@@ -167,8 +164,7 @@ export function ActivityFeed({ activities, loading = false }: ActivityFeedProps)
                   <div className="mt-1.5 flex items-center gap-2 flex-wrap">
                     {/* Colored category badge */}
                     <span
-                      className={`inline-flex items-center rounded-[4px] px-2 py-[2px] text-[10.5px] font-semibold ${config.badgeBg} ${config.badgeText}`}
-                      style={{ fontFamily: "'Work Sans', sans-serif" }}
+                      className={`inline px-2 py-0.5 rounded text-[11px] font-semibold uppercase tracking-wide ${config.badgeBg} ${config.badgeText}`}
                     >
                       {config.label}
                     </span>
@@ -194,10 +190,7 @@ export function ActivityFeed({ activities, loading = false }: ActivityFeedProps)
                 </div>
 
                 {/* Timestamp — DM Mono, right-aligned, muted */}
-                <span
-                  className="shrink-0 mt-0.5 text-[11px] text-[#B0ADA7] tabular-nums"
-                  style={{ fontFamily: "'DM Mono', monospace" }}
-                >
+                <span className="ml-auto text-[11px] text-[#9CA3AF] font-mono whitespace-nowrap pt-0.5 flex-shrink-0">
                   {relativeTime(activity.timestamp)}
                 </span>
               </div>

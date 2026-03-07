@@ -102,27 +102,22 @@ export function QuickActions({ onNavigate }: QuickActionsProps) {
               key={action.id}
               type="button"
               onClick={() => onNavigate?.(action.targetSection)}
-              className="group flex flex-col gap-3 rounded-[6px] border border-[#EBEBEB] bg-white p-4 text-left transition-all duration-150 hover:bg-[#EFF6FF] hover:border-[#2563EB] hover:shadow-[0_2px_8px_rgba(37,99,235,0.08)] active:scale-[0.98]"
+              className="bg-white border border-[#EBEBEB] rounded-[6px] p-4 cursor-pointer hover:bg-[#EFF6FF] hover:border-[#2563EB] transition-all duration-150 group text-left flex flex-col gap-3"
             >
               {/* Icon + arrow row */}
               <div className="flex items-start justify-between">
-                <div
-                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[4px] ${action.iconBg} transition-transform duration-150 group-hover:scale-105`}
-                >
-                  <Icon className={`h-4 w-4 ${action.iconFg}`} />
+                <div className="w-9 h-9 bg-[#EFF6FF] rounded flex items-center justify-center text-[#2563EB]">
+                  <Icon className="h-4 w-4" />
                 </div>
-                <ArrowRight className="h-3.5 w-3.5 text-[#D1D5DB] transition-all duration-150 group-hover:text-[#2563EB] group-hover:translate-x-1" />
+                <ArrowRight className="ml-auto text-[#9CA3AF] group-hover:text-[#2563EB] group-hover:translate-x-1 transition-all h-3.5 w-3.5" />
               </div>
 
               {/* Text */}
               <div>
-                <p
-                  className="text-[13px] font-semibold text-[#111827] leading-none"
-                  style={{ fontFamily: "'Work Sans', sans-serif" }}
-                >
+                <p className="text-[14px] font-semibold text-[#111827] mb-0.5">
                   {action.label}
                 </p>
-                <p className="mt-1 text-[11px] text-[#6B7280] leading-snug">
+                <p className="text-[12px] text-[#6B7280]">
                   {action.description}
                 </p>
               </div>
