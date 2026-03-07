@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Database, Link as LinkIcon, RefreshCw, Save, Shield, Bell, Settings, CheckCircle, XCircle, Palette, Upload, Plug, Image as ImageIcon } from "lucide-react";
+import { Database, Link as LinkIcon, RefreshCw, Save, Shield, Bell, Settings, CheckCircle, XCircle, Palette, Upload, Plug, Image as ImageIcon, Plus, Users } from "lucide-react";
 import { toast } from "sonner";
 import apiClient from "../../lib/api-client";
 import { errorMessage, extractRows, formatDateTime } from "../../lib/live-data";
@@ -10,6 +10,37 @@ import { Label } from "../ui/label";
 import { Switch } from "../ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Textarea } from "../ui/textarea";
+
+type Department = {
+  id: string;
+  name: string;
+  code: string;
+  colorDot?: string;
+  staffMembers?: any[];
+};
+
+type SystemUser = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  role?: { name: string };
+  isActive: boolean;
+};
+
+type Role = {
+  id: string;
+  name: string;
+  description?: string;
+  permissionCodes?: string[];
+};
+
+type Permission = {
+  id: string;
+  code: string;
+  name: string;
+  description?: string;
+};
 
 type SettingsState = {
   general: {
@@ -37,19 +68,18 @@ type SettingsState = {
     rateLimitEnabled: boolean;
     rateLimitPerMinute: number;
     minPasswordLength: number;
+    maxLoginAttempts: number;
+    lockoutDurationMinutes: number;
+    ipWhitelistEnabled: boolean;
+    ipWhitelist: string[];
+    auditLoggingEnabled: boolean;
+    requireSecureConnections: boolean;
+    allowConcurrentSessions: number;
   };
   backup: {
     autoBackups: boolean;
     backupTime: string;
     retentionDays: number;
-  };
-  crm: {
-    baseUrl: string;
-    authToken: string;
-    autoSyncResidents: boolean;
-    autoSyncPayments: boolean;
-    autoSyncServiceRequests: boolean;
-    syncIntervalMinutes: number;
   };
   brand: {
     companyName: string;
@@ -61,31 +91,6 @@ type SettingsState = {
     tagline: string;
     supportEmail: string;
     supportPhone: string;
-  };
-  onboarding: {
-    enabled: boolean;
-    slides: Array<{
-      title: string;
-      subtitle: string;
-      description: string;
-      imageUrl: string;
-    }>;
-  };
-  offers: {
-    enabled: boolean;
-    banners: Array<{
-      id: string;
-      title: string;
-      subtitle: string;
-      description: string;
-      imageUrl: string;
-      imageFileId: string;
-      linkUrl: string;
-      priority: number;
-      active: boolean;
-      startAt: string;
-      endAt: string;
-    }>;
   };
   mobileAccess: {
     owner: Record<string, boolean>;
@@ -112,10 +117,6 @@ type DiagnosticsState = {
   backendApiOk?: boolean;
   notificationsAdminOk?: boolean;
   backendError?: string;
-  crmTestOk?: boolean;
-  crmStatusCode?: number;
-  crmError?: string;
-  crmCheckedAt?: string;
 };
 
 type ProviderTestResult = {
@@ -167,6 +168,56 @@ type IntegrationsState = {
     forcePathStyle: boolean;
     supabaseUrl: string;
     supabaseServiceRoleKey: string;
+    lastTest: ProviderTestResult | null;
+  };
+  crm: {
+    enabled: boolean;
+    configured: boolean;
+    baseUrl: string;
+    authToken: string;
+    lastTest: ProviderTestResult | null;
+  };
+  erp: {
+    enabled: boolean;
+    configured: boolean;
+    baseUrl: string;
+    authToken: string;
+    lastTest: ProviderTestResult | null;
+  };
+  hcp: {
+    enabled: boolean;
+    configured: boolean;
+    baseUrl: string;
+    authToken: string;
+    lastTest: ProviderTestResult | null;
+  };
+  paymentGateway: {
+    enabled: boolean;
+    configured: boolean;
+    provider: "STRIPE" | "PAYFORT" | "OTHER";
+    apiKey: string;
+    secretKey: string;
+    lastTest: ProviderTestResult | null;
+  };
+  fireAlarm: {
+    enabled: boolean;
+    configured: boolean;
+    baseUrl: string;
+    apiKey: string;
+    lastTest: ProviderTestResult | null;
+  };
+  smartHome: {
+    enabled: boolean;
+    configured: boolean;
+    baseUrl: string;
+    apiKey: string;
+    lastTest: ProviderTestResult | null;
+  };
+  hikCentral: {
+    enabled: boolean;
+    configured: boolean;
+    baseUrl: string;
+    apiKey: string;
     lastTest: ProviderTestResult | null;
   };
 };
@@ -259,19 +310,18 @@ const defaultSettings: SettingsState = {
     rateLimitEnabled: true,
     rateLimitPerMinute: 100,
     minPasswordLength: 8,
+    maxLoginAttempts: 5,
+    lockoutDurationMinutes: 15,
+    ipWhitelistEnabled: false,
+    ipWhitelist: [],
+    auditLoggingEnabled: true,
+    requireSecureConnections: true,
+    allowConcurrentSessions: 3,
   },
   backup: {
     autoBackups: false,
     backupTime: "02:00",
     retentionDays: 30,
-  },
-  crm: {
-    baseUrl: "",
-    authToken: "",
-    autoSyncResidents: true,
-    autoSyncPayments: true,
-    autoSyncServiceRequests: false,
-    syncIntervalMinutes: 15,
   },
   brand: {
     companyName: "Al Karma Developments",
@@ -283,39 +333,6 @@ const defaultSettings: SettingsState = {
     tagline: "Smart Living",
     supportEmail: "",
     supportPhone: "",
-  },
-  onboarding: {
-    enabled: true,
-    slides: [
-      {
-        title: "Welcome to SSS Community",
-        subtitle: "SMART LIVING",
-        description:
-          "Experience premium living with services, payments, visitors, and community updates in one app.",
-        imageUrl:
-          "https://images.unsplash.com/photo-1560613654-ea1945efc370?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080",
-      },
-      {
-        title: "Manage Your Compound",
-        subtitle: "ALL IN ONE",
-        description:
-          "Access your units, track requests, and stay connected with your management team.",
-        imageUrl:
-          "https://images.unsplash.com/photo-1643892605308-70a6559cfd0a?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080",
-      },
-      {
-        title: "Secure & Connected",
-        subtitle: "ALWAYS INFORMED",
-        description:
-          "Generate QR access, receive announcements, and keep control of daily operations.",
-        imageUrl:
-          "https://images.unsplash.com/photo-1633194883650-df448a10d554?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=1080",
-      },
-    ],
-  },
-  offers: {
-    enabled: false,
-    banners: [],
   },
   mobileAccess: {
     owner: {
@@ -442,6 +459,56 @@ const defaultIntegrations: IntegrationsState = {
     supabaseServiceRoleKey: "",
     lastTest: null,
   },
+  crm: {
+    enabled: false,
+    configured: false,
+    baseUrl: "",
+    authToken: "",
+    lastTest: null,
+  },
+  erp: {
+    enabled: false,
+    configured: false,
+    baseUrl: "",
+    authToken: "",
+    lastTest: null,
+  },
+  hcp: {
+    enabled: false,
+    configured: false,
+    baseUrl: "",
+    authToken: "",
+    lastTest: null,
+  },
+  paymentGateway: {
+    enabled: false,
+    configured: false,
+    provider: "STRIPE",
+    apiKey: "",
+    secretKey: "",
+    lastTest: null,
+  },
+  fireAlarm: {
+    enabled: false,
+    configured: false,
+    baseUrl: "",
+    apiKey: "",
+    lastTest: null,
+  },
+  smartHome: {
+    enabled: false,
+    configured: false,
+    baseUrl: "",
+    apiKey: "",
+    lastTest: null,
+  },
+  hikCentral: {
+    enabled: false,
+    configured: false,
+    baseUrl: "",
+    apiKey: "",
+    lastTest: null,
+  },
 };
 
 function mergeSettings(parsed: any): SettingsState {
@@ -452,35 +519,7 @@ function mergeSettings(parsed: any): SettingsState {
     notifications: { ...defaultSettings.notifications, ...(parsed?.notifications ?? {}) },
     security: { ...defaultSettings.security, ...(parsed?.security ?? {}) },
     backup: { ...defaultSettings.backup, ...(parsed?.backup ?? {}) },
-    crm: { ...defaultSettings.crm, ...(parsed?.crm ?? {}) },
     brand: { ...defaultSettings.brand, ...(parsed?.brand ?? {}) },
-    onboarding: {
-      ...defaultSettings.onboarding,
-      ...(parsed?.onboarding ?? {}),
-      slides:
-        Array.isArray(parsed?.onboarding?.slides) && parsed.onboarding.slides.length > 0
-          ? parsed.onboarding.slides
-          : defaultSettings.onboarding.slides,
-    },
-    offers: {
-      ...defaultSettings.offers,
-      ...(parsed?.offers ?? {}),
-      banners: Array.isArray(parsed?.offers?.banners)
-        ? parsed.offers.banners.map((banner: any, idx: number) => ({
-            id: String(banner?.id ?? `offer-${idx + 1}`),
-            title: String(banner?.title ?? ""),
-            subtitle: String(banner?.subtitle ?? ""),
-            description: String(banner?.description ?? ""),
-            imageUrl: String(banner?.imageUrl ?? ""),
-            imageFileId: String(banner?.imageFileId ?? ""),
-            linkUrl: String(banner?.linkUrl ?? ""),
-            priority: Number(banner?.priority ?? idx + 1),
-            active: banner?.active !== false,
-            startAt: String(banner?.startAt ?? ""),
-            endAt: String(banner?.endAt ?? ""),
-          }))
-        : defaultSettings.offers.banners,
-    },
     mobileAccess: {
       ...defaultSettings.mobileAccess,
       ...(parsed?.mobileAccess ?? {}),
@@ -525,6 +564,13 @@ function mergeIntegrations(parsed: any): IntegrationsState {
     smsOtp: { ...defaultIntegrations.smsOtp, ...(parsed?.smsOtp ?? {}) },
     fcm: { ...defaultIntegrations.fcm, ...(parsed?.fcm ?? {}) },
     s3: { ...defaultIntegrations.s3, ...(parsed?.s3 ?? {}) },
+    crm: { ...defaultIntegrations.crm, ...(parsed?.crm ?? {}) },
+    erp: { ...defaultIntegrations.erp, ...(parsed?.erp ?? {}) },
+    hcp: { ...defaultIntegrations.hcp, ...(parsed?.hcp ?? {}) },
+    paymentGateway: { ...defaultIntegrations.paymentGateway, ...(parsed?.paymentGateway ?? {}) },
+    fireAlarm: { ...defaultIntegrations.fireAlarm, ...(parsed?.fireAlarm ?? {}) },
+    smartHome: { ...defaultIntegrations.smartHome, ...(parsed?.smartHome ?? {}) },
+    hikCentral: { ...defaultIntegrations.hikCentral, ...(parsed?.hikCentral ?? {}) },
   };
 }
 
@@ -552,11 +598,19 @@ export function SystemSettings() {
   const [savingIntegration, setSavingIntegration] = useState<string | null>(null);
   const [testingIntegration, setTestingIntegration] = useState<string | null>(null);
   const [isCheckingBackend, setIsCheckingBackend] = useState(false);
-  const [isTestingCrm, setIsTestingCrm] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
   const [isCreatingBackup, setIsCreatingBackup] = useState(false);
   const [restoringBackupId, setRestoringBackupId] = useState<string | null>(null);
   const restoreInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Departments, System Users, Roles state
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [systemUsers, setSystemUsers] = useState<SystemUser[]>([]);
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [permissions, setPermissions] = useState<Permission[]>([]);
+  const [isLoadingDepartments, setIsLoadingDepartments] = useState(false);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+  const [isLoadingRoles, setIsLoadingRoles] = useState(false);
 
   const setMobileAccessFlag = useCallback(
     (
@@ -583,6 +637,50 @@ export function SystemSettings() {
       params: { limit: 20 },
     });
     setBackupHistory(extractRows<BackupHistoryItem>(response.data));
+  }, []);
+
+  const loadDepartments = useCallback(async () => {
+    setIsLoadingDepartments(true);
+    try {
+      const response = await apiClient.get("/system-settings/departments", {
+        params: { limit: 100 },
+      });
+      setDepartments(extractRows<any>(response.data));
+    } catch (error) {
+      toast.error("Failed to load departments", { description: errorMessage(error) });
+    } finally {
+      setIsLoadingDepartments(false);
+    }
+  }, []);
+
+  const loadSystemUsers = useCallback(async () => {
+    setIsLoadingUsers(true);
+    try {
+      const response = await apiClient.get("/system-settings/users", {
+        params: { limit: 100 },
+      });
+      setSystemUsers(extractRows<any>(response.data));
+    } catch (error) {
+      toast.error("Failed to load system users", { description: errorMessage(error) });
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  }, []);
+
+  const loadRoles = useCallback(async () => {
+    setIsLoadingRoles(true);
+    try {
+      const [rolesRes, permissionsRes] = await Promise.all([
+        apiClient.get("/system-settings/roles"),
+        apiClient.get("/system-settings/permissions"),
+      ]);
+      setRoles(extractRows<any>(rolesRes.data));
+      setPermissions(extractRows<any>(permissionsRes.data));
+    } catch (error) {
+      toast.error("Failed to load roles", { description: errorMessage(error) });
+    } finally {
+      setIsLoadingRoles(false);
+    }
   }, []);
 
   const loadIntegrations = useCallback(async () => {
@@ -618,7 +716,10 @@ export function SystemSettings() {
   useEffect(() => {
     void loadSettings();
     void loadIntegrations();
-  }, [loadIntegrations, loadSettings]);
+    void loadDepartments();
+    void loadSystemUsers();
+    void loadRoles();
+  }, [loadIntegrations, loadSettings, loadDepartments, loadSystemUsers, loadRoles]);
 
   const hasUnsavedChanges = useMemo(
     () => JSON.stringify(saved) !== JSON.stringify(draft),
@@ -633,10 +734,7 @@ export function SystemSettings() {
         apiClient.patch("/system-settings/notifications", draft.notifications),
         apiClient.patch("/system-settings/security", draft.security),
         apiClient.patch("/system-settings/backup", draft.backup),
-        apiClient.patch("/system-settings/crm", draft.crm),
         apiClient.patch("/system-settings/brand", draft.brand),
-        apiClient.patch("/system-settings/onboarding", draft.onboarding),
-        apiClient.patch("/system-settings/offers", draft.offers),
         apiClient.patch("/system-settings/mobile-access", draft.mobileAccess),
       ]);
       setSaved(draft);
@@ -689,51 +787,6 @@ export function SystemSettings() {
     }
   }, []);
 
-  const testCrmConnection = async () => {
-    if (!draft.crm.baseUrl.trim()) {
-      toast.error("CRM Base URL is required");
-      return;
-    }
-    setIsTestingCrm(true);
-    try {
-      const response = await apiClient.post("/system-settings/crm/test", {
-        baseUrl: draft.crm.baseUrl,
-        authToken: draft.crm.authToken || undefined,
-      });
-      const data = response.data ?? {};
-
-      setDiagnostics((prev) => ({
-        ...prev,
-        crmCheckedAt: data.checkedAt ?? new Date().toISOString(),
-        crmTestOk: Boolean(data.ok),
-        crmStatusCode: data.statusCode ?? undefined,
-        crmError: data.ok ? undefined : (data.error ?? (data.statusCode ? `HTTP ${data.statusCode}` : "Connection failed")),
-      }));
-
-      if (data.ok) {
-        toast.success("CRM connection test succeeded", {
-          description: `HTTP ${data.statusCode ?? "200"} from ${data.url ?? draft.crm.baseUrl}`,
-        });
-      } else {
-        toast.error("CRM connection test failed", {
-          description: data.error ?? `HTTP ${data.statusCode ?? "unknown"} from ${data.url ?? draft.crm.baseUrl}`,
-        });
-      }
-    } catch (error) {
-      const msg = errorMessage(error);
-      setDiagnostics((prev) => ({
-        ...prev,
-        crmCheckedAt: new Date().toISOString(),
-        crmTestOk: false,
-        crmStatusCode: undefined,
-        crmError: msg,
-      }));
-      toast.error("CRM connection test failed", { description: msg });
-    } finally {
-      setIsTestingCrm(false);
-    }
-  };
-
   const createLocalBackup = async () => {
     setIsCreatingBackup(true);
     try {
@@ -761,28 +814,6 @@ export function SystemSettings() {
     if (!fileId) throw new Error("Brand logo upload did not return file id");
     setDraft((s) => ({ ...s, brand: { ...s.brand, logoFileId: String(fileId) } }));
     toast.success("Brand logo uploaded", { description: `File ID: ${String(fileId).slice(0, 8)}...` });
-  };
-
-  const uploadOfferBanner = async (file: File, index: number) => {
-    const form = new FormData();
-    form.append("file", file);
-    const response = await apiClient.post("/files/upload/offer-banner", form, {
-      headers: { "Content-Type": "multipart/form-data" },
-    });
-    const fileId = response.data?.id;
-    if (!fileId) throw new Error("Offer banner upload did not return file id");
-    setDraft((s) => ({
-      ...s,
-      offers: {
-        ...s.offers,
-        banners: s.offers.banners.map((row, i) =>
-          i === index ? { ...row, imageFileId: String(fileId) } : row,
-        ),
-      },
-    }));
-    toast.success("Offer image uploaded", {
-      description: `File ID: ${String(fileId).slice(0, 8)}...`,
-    });
   };
 
   const restoreFromBackupFile = async (file: File) => {
@@ -881,20 +912,6 @@ export function SystemSettings() {
     [draft.notifications.enableEmail, draft.notifications.enablePush, draft.notifications.enableSms],
   );
 
-  const offersPreviewBanner = useMemo(() => {
-    const now = Date.now();
-    return draft.offers.banners
-      .filter((row) => row.active !== false)
-      .filter((row) => {
-        const startAt = row.startAt ? Date.parse(row.startAt) : NaN;
-        const endAt = row.endAt ? Date.parse(row.endAt) : NaN;
-        if (Number.isFinite(startAt) && startAt > now) return false;
-        if (Number.isFinite(endAt) && endAt < now) return false;
-        return true;
-      })
-      .sort((a, b) => (a.priority ?? 0) - (b.priority ?? 0))[0] ?? null;
-  }, [draft.offers.banners]);
-
   const settingsTabTriggerClass =
     "gap-2 border border-transparent text-[#475569] data-[state=active]:border-[#0F172A] data-[state=active]:bg-[#0F172A] data-[state=active]:text-white data-[state=active]:shadow-sm data-[state=active]:font-semibold data-[state=active]:after:bg-white data-[state=active]:after:h-[3px]";
 
@@ -957,17 +974,30 @@ export function SystemSettings() {
       </Card>
 
       <Tabs defaultValue="general" className="w-full">
-        <TabsList className="w-full justify-start border rounded-lg p-1 bg-white overflow-x-auto">
+        <TabsList className="w-full justify-start border rounded-lg p-1 bg-white overflow-x-auto flex flex-wrap gap-0">
+          {/* Core Settings */}
           <TabsTrigger value="general" className={settingsTabTriggerClass}><Settings className="w-4 h-4" />General</TabsTrigger>
-          <TabsTrigger value="notifications" className={settingsTabTriggerClass}><Bell className="w-4 h-4" />Notifications</TabsTrigger>
-          <TabsTrigger value="integrations" className={settingsTabTriggerClass}><Plug className="w-4 h-4" />Integrations</TabsTrigger>
           <TabsTrigger value="brand" className={settingsTabTriggerClass}><Palette className="w-4 h-4" />Brand</TabsTrigger>
-          <TabsTrigger value="onboarding" className={settingsTabTriggerClass}><ImageIcon className="w-4 h-4" />Onboarding</TabsTrigger>
-          <TabsTrigger value="offers" className={settingsTabTriggerClass}><ImageIcon className="w-4 h-4" />Offers</TabsTrigger>
-          <TabsTrigger value="mobile-access" className={settingsTabTriggerClass}><Shield className="w-4 h-4" />Mobile Access</TabsTrigger>
-          <TabsTrigger value="security" className={settingsTabTriggerClass}><Shield className="w-4 h-4" />Security</TabsTrigger>
+          
+          {/* Communication */}
+          <div className="w-px h-6 bg-gray-200 mx-1 my-auto" />
+          <TabsTrigger value="notifications" className={settingsTabTriggerClass}><Bell className="w-4 h-4" />Notifications</TabsTrigger>
+          
+          {/* System Integration */}
+          <div className="w-px h-6 bg-gray-200 mx-1 my-auto" />
+          <TabsTrigger value="integrations" className={settingsTabTriggerClass}><Plug className="w-4 h-4" />Integrations</TabsTrigger>
           <TabsTrigger value="backup" className={settingsTabTriggerClass}><Database className="w-4 h-4" />Backup</TabsTrigger>
-          <TabsTrigger value="crm" className={settingsTabTriggerClass}><LinkIcon className="w-4 h-4" />CRM</TabsTrigger>
+          
+          {/* Access Control */}
+          <div className="w-px h-6 bg-gray-200 mx-1 my-auto" />
+          <TabsTrigger value="security" className={settingsTabTriggerClass}><Shield className="w-4 h-4" />Security</TabsTrigger>
+          <TabsTrigger value="mobile-access" className={settingsTabTriggerClass}><Shield className="w-4 h-4" />Mobile Access</TabsTrigger>
+          
+          {/* Organization */}
+          <div className="w-px h-6 bg-gray-200 mx-1 my-auto" />
+          <TabsTrigger value="departments" className={settingsTabTriggerClass}><Settings className="w-4 h-4" />Departments</TabsTrigger>
+          <TabsTrigger value="users" className={settingsTabTriggerClass}><Users className="w-4 h-4" />System Users</TabsTrigger>
+          <TabsTrigger value="roles" className={settingsTabTriggerClass}><Shield className="w-4 h-4" />Roles & Permissions</TabsTrigger>
         </TabsList>
 
         <TabsContent value="general" className="mt-4">
@@ -1026,10 +1056,10 @@ export function SystemSettings() {
               </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="flex items-center justify-between rounded-lg border p-3"><span>Enable In-App</span><Switch checked={draft.notifications.enableInApp} onCheckedChange={(v) => setDraft((s) => ({ ...s, notifications: { ...s.notifications, enableInApp: v === true } }))} /></div>
-              <div className="flex items-center justify-between rounded-lg border p-3"><span>Enable Email</span><Switch checked={draft.notifications.enableEmail} onCheckedChange={(v) => setDraft((s) => ({ ...s, notifications: { ...s.notifications, enableEmail: v === true } }))} /></div>
-              <div className="flex items-center justify-between rounded-lg border p-3"><span>Enable SMS</span><Switch checked={draft.notifications.enableSms} onCheckedChange={(v) => setDraft((s) => ({ ...s, notifications: { ...s.notifications, enableSms: v === true } }))} /></div>
-              <div className="flex items-center justify-between rounded-lg border p-3"><span>Enable Push</span><Switch checked={draft.notifications.enablePush} onCheckedChange={(v) => setDraft((s) => ({ ...s, notifications: { ...s.notifications, enablePush: v === true } }))} /></div>
+              <div className="flex items-center justify-between rounded-lg border p-3"><span>Enable In-App</span><Switch checked={draft.notifications.enableInApp} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, notifications: { ...s.notifications, enableInApp: v === true } }))} /></div>
+              <div className="flex items-center justify-between rounded-lg border p-3"><span>Enable Email</span><Switch checked={draft.notifications.enableEmail} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, notifications: { ...s.notifications, enableEmail: v === true } }))} /></div>
+              <div className="flex items-center justify-between rounded-lg border p-3"><span>Enable SMS</span><Switch checked={draft.notifications.enableSms} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, notifications: { ...s.notifications, enableSms: v === true } }))} /></div>
+              <div className="flex items-center justify-between rounded-lg border p-3"><span>Enable Push</span><Switch checked={draft.notifications.enablePush} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, notifications: { ...s.notifications, enablePush: v === true } }))} /></div>
             </div>
             <div className="space-y-2">
               <h4 className="text-sm font-medium text-[#1E293B]">Provider Readiness Checklist</h4>
@@ -1080,7 +1110,7 @@ export function SystemSettings() {
                   <span className="text-sm">Enable SMTP</span>
                   <Switch
                     checked={integrations.smtp.enabled}
-                    onCheckedChange={(v) =>
+                    onCheckedChange={(v: boolean) =>
                       setIntegrations((s) => ({
                         ...s,
                         smtp: { ...s.smtp, enabled: v === true },
@@ -1120,7 +1150,7 @@ export function SystemSettings() {
                   <span className="text-sm">Enable Firebase OTP Verification</span>
                   <Switch
                     checked={integrations.smsOtp.enabled}
-                    onCheckedChange={(v) =>
+                    onCheckedChange={(v: boolean) =>
                       setIntegrations((s) => ({
                         ...s,
                         smsOtp: { ...s.smsOtp, enabled: v === true },
@@ -1164,7 +1194,7 @@ export function SystemSettings() {
                   <span className="text-sm">Enable Push</span>
                   <Switch
                     checked={integrations.fcm.enabled}
-                    onCheckedChange={(v) =>
+                    onCheckedChange={(v: boolean) =>
                       setIntegrations((s) => ({
                         ...s,
                         fcm: { ...s.fcm, enabled: v === true },
@@ -1220,7 +1250,7 @@ export function SystemSettings() {
                     <span className="text-sm">Enable External Storage</span>
                     <Switch
                       checked={integrations.s3.enabled}
-                      onCheckedChange={(v) =>
+                      onCheckedChange={(v: boolean) =>
                         setIntegrations((s) => ({
                           ...s,
                           s3: { ...s.s3, enabled: v === true },
@@ -1336,448 +1366,6 @@ export function SystemSettings() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="onboarding" className="mt-4">
-          <Card className="p-6 space-y-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-[#1E293B]">Mobile Onboarding Screens</h3>
-                <p className="text-sm text-[#64748B]">
-                  These slides are delivered to mobile via <code>/mobile/app-config</code> with fallback defaults.
-                </p>
-              </div>
-              <div className="flex items-center gap-3 rounded-lg border px-3 py-2">
-                <span className="text-sm text-[#1E293B]">Enable Onboarding</span>
-                <Switch
-                  checked={draft.onboarding.enabled}
-                  onCheckedChange={(v) =>
-                    setDraft((s) => ({
-                      ...s,
-                      onboarding: {
-                        ...s.onboarding,
-                        enabled: v === true,
-                      },
-                    }))
-                  }
-                />
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              {draft.onboarding.slides.map((slide, index) => (
-                <div key={`onboarding-slide-${index}`} className="rounded-xl border p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-semibold text-[#1E293B]">Slide {index + 1}</h4>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={draft.onboarding.slides.length <= 1}
-                      onClick={() =>
-                        setDraft((s) => ({
-                          ...s,
-                          onboarding: {
-                            ...s.onboarding,
-                            slides: s.onboarding.slides.filter((_, i) => i !== index),
-                          },
-                        }))
-                      }
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <Input
-                      placeholder="Title"
-                      value={slide.title}
-                      onChange={(e) =>
-                        setDraft((s) => ({
-                          ...s,
-                          onboarding: {
-                            ...s.onboarding,
-                            slides: s.onboarding.slides.map((row, i) =>
-                              i === index ? { ...row, title: e.target.value } : row,
-                            ),
-                          },
-                        }))
-                      }
-                    />
-                    <Input
-                      placeholder="Subtitle"
-                      value={slide.subtitle}
-                      onChange={(e) =>
-                        setDraft((s) => ({
-                          ...s,
-                          onboarding: {
-                            ...s.onboarding,
-                            slides: s.onboarding.slides.map((row, i) =>
-                              i === index ? { ...row, subtitle: e.target.value } : row,
-                            ),
-                          },
-                        }))
-                      }
-                    />
-                    <Input
-                      className="md:col-span-2"
-                      placeholder="Image URL"
-                      value={slide.imageUrl}
-                      onChange={(e) =>
-                        setDraft((s) => ({
-                          ...s,
-                          onboarding: {
-                            ...s.onboarding,
-                            slides: s.onboarding.slides.map((row, i) =>
-                              i === index ? { ...row, imageUrl: e.target.value } : row,
-                            ),
-                          },
-                        }))
-                      }
-                    />
-                    <Textarea
-                      className="md:col-span-2"
-                      rows={3}
-                      placeholder="Description"
-                      value={slide.description}
-                      onChange={(e) =>
-                        setDraft((s) => ({
-                          ...s,
-                          onboarding: {
-                            ...s.onboarding,
-                            slides: s.onboarding.slides.map((row, i) =>
-                              i === index ? { ...row, description: e.target.value } : row,
-                            ),
-                          },
-                        }))
-                      }
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                onClick={() =>
-                  setDraft((s) => ({
-                    ...s,
-                    onboarding: {
-                      ...s.onboarding,
-                      slides: [
-                        ...s.onboarding.slides,
-                        {
-                          title: `Slide ${s.onboarding.slides.length + 1}`,
-                          subtitle: "",
-                          description: "",
-                          imageUrl: "",
-                        },
-                      ].slice(0, 8),
-                    },
-                  }))
-                }
-                disabled={draft.onboarding.slides.length >= 8}
-              >
-                Add Slide
-              </Button>
-            </div>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="offers" className="mt-4">
-          <Card className="p-6 space-y-5">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-[#1E293B]">Mobile Offers Pop-up</h3>
-                <p className="text-sm text-[#64748B]">
-                  Configure one-time offers shown on mobile app launch.
-                </p>
-              </div>
-              <div className="flex items-center gap-3 rounded-lg border px-3 py-2">
-                <span className="text-sm text-[#1E293B]">Enable Offers</span>
-                <Switch
-                  checked={draft.offers.enabled}
-                  onCheckedChange={(v) =>
-                    setDraft((s) => ({
-                      ...s,
-                      offers: {
-                        ...s.offers,
-                        enabled: v === true,
-                      },
-                    }))
-                  }
-                />
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              {draft.offers.banners.map((banner, index) => (
-                <div key={`offer-banner-${index}`} className="rounded-xl border p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-sm font-semibold text-[#1E293B]">Offer {index + 1}</h4>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() =>
-                        setDraft((s) => ({
-                          ...s,
-                          offers: {
-                            ...s.offers,
-                            banners: s.offers.banners.filter((_, i) => i !== index),
-                          },
-                        }))
-                      }
-                    >
-                      Remove
-                    </Button>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <Input
-                      placeholder="Title"
-                      value={banner.title}
-                      onChange={(e) =>
-                        setDraft((s) => ({
-                          ...s,
-                          offers: {
-                            ...s.offers,
-                            banners: s.offers.banners.map((row, i) =>
-                              i === index ? { ...row, title: e.target.value } : row,
-                            ),
-                          },
-                        }))
-                      }
-                    />
-                    <Input
-                      placeholder="Subtitle"
-                      value={banner.subtitle}
-                      onChange={(e) =>
-                        setDraft((s) => ({
-                          ...s,
-                          offers: {
-                            ...s.offers,
-                            banners: s.offers.banners.map((row, i) =>
-                              i === index ? { ...row, subtitle: e.target.value } : row,
-                            ),
-                          },
-                        }))
-                      }
-                    />
-                    <Input
-                      className="md:col-span-2"
-                      placeholder="Image URL"
-                      value={banner.imageUrl}
-                      onChange={(e) =>
-                        setDraft((s) => ({
-                          ...s,
-                          offers: {
-                            ...s.offers,
-                            banners: s.offers.banners.map((row, i) =>
-                              i === index ? { ...row, imageUrl: e.target.value } : row,
-                            ),
-                          },
-                        }))
-                      }
-                    />
-                    <Input
-                      placeholder="Image File ID (optional)"
-                      value={banner.imageFileId}
-                      onChange={(e) =>
-                        setDraft((s) => ({
-                          ...s,
-                          offers: {
-                            ...s.offers,
-                            banners: s.offers.banners.map((row, i) =>
-                              i === index ? { ...row, imageFileId: e.target.value } : row,
-                            ),
-                          },
-                        }))
-                      }
-                    />
-                    <label className="inline-flex">
-                      <input
-                        type="file"
-                        accept="image/png,image/jpeg,image/jpg"
-                        className="hidden"
-                        onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          if (!file) return;
-                          try {
-                            await uploadOfferBanner(file, index);
-                          } catch (error) {
-                            toast.error("Offer image upload failed", { description: errorMessage(error) });
-                          } finally {
-                            e.currentTarget.value = "";
-                          }
-                        }}
-                      />
-                      <Button type="button" variant="outline" className="w-full">
-                        <Upload className="w-4 h-4 mr-2" />
-                        Upload Offer Image
-                      </Button>
-                    </label>
-                    <Input
-                      placeholder="Link URL"
-                      value={banner.linkUrl}
-                      onChange={(e) =>
-                        setDraft((s) => ({
-                          ...s,
-                          offers: {
-                            ...s.offers,
-                            banners: s.offers.banners.map((row, i) =>
-                              i === index ? { ...row, linkUrl: e.target.value } : row,
-                            ),
-                          },
-                        }))
-                      }
-                    />
-                    <Input
-                      type="datetime-local"
-                      placeholder="Start At"
-                      value={toLocalDateTimeValue(banner.startAt)}
-                      onChange={(e) =>
-                        setDraft((s) => ({
-                          ...s,
-                          offers: {
-                            ...s.offers,
-                            banners: s.offers.banners.map((row, i) =>
-                              i === index
-                                ? { ...row, startAt: fromLocalDateTimeValue(e.target.value) }
-                                : row,
-                            ),
-                          },
-                        }))
-                      }
-                    />
-                    <Input
-                      type="datetime-local"
-                      placeholder="End At"
-                      value={toLocalDateTimeValue(banner.endAt)}
-                      onChange={(e) =>
-                        setDraft((s) => ({
-                          ...s,
-                          offers: {
-                            ...s.offers,
-                            banners: s.offers.banners.map((row, i) =>
-                              i === index
-                                ? { ...row, endAt: fromLocalDateTimeValue(e.target.value) }
-                                : row,
-                            ),
-                          },
-                        }))
-                      }
-                    />
-                    <Input
-                      placeholder="Priority"
-                      type="number"
-                      value={String(banner.priority ?? index + 1)}
-                      onChange={(e) =>
-                        setDraft((s) => ({
-                          ...s,
-                          offers: {
-                            ...s.offers,
-                            banners: s.offers.banners.map((row, i) =>
-                              i === index
-                                ? { ...row, priority: Number(e.target.value || index + 1) }
-                                : row,
-                            ),
-                          },
-                        }))
-                      }
-                    />
-                    <Textarea
-                      className="md:col-span-2"
-                      rows={3}
-                      placeholder="Description"
-                      value={banner.description}
-                      onChange={(e) =>
-                        setDraft((s) => ({
-                          ...s,
-                          offers: {
-                            ...s.offers,
-                            banners: s.offers.banners.map((row, i) =>
-                              i === index ? { ...row, description: e.target.value } : row,
-                            ),
-                          },
-                        }))
-                      }
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between rounded-lg border px-3 py-2">
-                    <span className="text-sm text-[#1E293B]">Active</span>
-                    <Switch
-                      checked={banner.active !== false}
-                      onCheckedChange={(v) =>
-                        setDraft((s) => ({
-                          ...s,
-                          offers: {
-                            ...s.offers,
-                            banners: s.offers.banners.map((row, i) =>
-                              i === index ? { ...row, active: v === true } : row,
-                            ),
-                          },
-                        }))
-                      }
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="rounded-xl border p-4 space-y-2">
-              <div className="text-sm font-medium text-[#1E293B]">Live Mobile Preview</div>
-              {offersPreviewBanner ? (
-                <div className="rounded-lg border p-3 bg-[#F8FAFC]">
-                  <div className="text-sm font-semibold text-[#1E293B]">{offersPreviewBanner.title}</div>
-                  {offersPreviewBanner.description ? (
-                    <div className="text-xs text-[#64748B] mt-1">{offersPreviewBanner.description}</div>
-                  ) : null}
-                  <div className="text-xs text-[#64748B] mt-2">
-                    Priority: {offersPreviewBanner.priority ?? 0}
-                    {offersPreviewBanner.startAt ? ` • Starts: ${formatDateTime(offersPreviewBanner.startAt)}` : ""}
-                    {offersPreviewBanner.endAt ? ` • Ends: ${formatDateTime(offersPreviewBanner.endAt)}` : ""}
-                  </div>
-                </div>
-              ) : (
-                <div className="text-sm text-[#64748B]">
-                  No active offer in current schedule window.
-                </div>
-              )}
-            </div>
-
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                onClick={() =>
-                  setDraft((s) => ({
-                    ...s,
-                    offers: {
-                      ...s.offers,
-                      banners: [
-                        ...s.offers.banners,
-                        {
-                          id: `offer-${Date.now()}`,
-                          title: `Offer ${s.offers.banners.length + 1}`,
-                          subtitle: "",
-                          description: "",
-                          imageUrl: "",
-                          imageFileId: "",
-                          linkUrl: "",
-                          priority: s.offers.banners.length + 1,
-                          active: true,
-                          startAt: "",
-                          endAt: "",
-                        },
-                      ].slice(0, 20),
-                    },
-                  }))
-                }
-                disabled={draft.offers.banners.length >= 20}
-              >
-                Add Offer
-              </Button>
-            </div>
-          </Card>
-        </TabsContent>
-
         <TabsContent value="mobile-access" className="mt-4">
           <Card className="p-6 space-y-6">
             <div>
@@ -1808,7 +1396,7 @@ export function SystemSettings() {
                           </div>
                           <Switch
                             checked={enabled}
-                            onCheckedChange={(v) =>
+                            onCheckedChange={(v: boolean) =>
                               setMobileAccessFlag(persona.key, feature.key, v === true)
                             }
                           />
@@ -1824,10 +1412,10 @@ export function SystemSettings() {
 
         <TabsContent value="security" className="mt-4">
           <Card className="p-6 space-y-4">
-            <h3 className="text-[#1E293B]">Security Settings (Demo Config)</h3>
+            <h3 className="text-[#1E293B]">Security Settings</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="flex items-center justify-between rounded-lg border p-3"><span>Enforce 2FA</span><Switch checked={draft.security.enforce2fa} onCheckedChange={(v) => setDraft((s) => ({ ...s, security: { ...s.security, enforce2fa: v === true } }))} /></div>
-              <div className="flex items-center justify-between rounded-lg border p-3"><span>Auto Logout</span><Switch checked={draft.security.autoLogoutEnabled} onCheckedChange={(v) => setDraft((s) => ({ ...s, security: { ...s.security, autoLogoutEnabled: v === true } }))} /></div>
+              <div className="flex items-center justify-between rounded-lg border p-3"><span>Enforce 2FA</span><Switch checked={draft.security.enforce2fa} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, security: { ...s.security, enforce2fa: v === true } }))} /></div>
+              <div className="flex items-center justify-between rounded-lg border p-3"><span>Auto Logout</span><Switch checked={draft.security.autoLogoutEnabled} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, security: { ...s.security, autoLogoutEnabled: v === true } }))} /></div>
               <div className="space-y-2">
                 <Label>Session Timeout (minutes)</Label>
                 <Input type="number" value={String(draft.security.sessionTimeoutMinutes)} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, sessionTimeoutMinutes: Number(e.target.value || 0) } }))} />
@@ -1836,12 +1424,34 @@ export function SystemSettings() {
                 <Label>Min Password Length</Label>
                 <Input type="number" value={String(draft.security.minPasswordLength)} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, minPasswordLength: Number(e.target.value || 0) } }))} />
               </div>
-              <div className="flex items-center justify-between rounded-lg border p-3"><span>Rate Limiting</span><Switch checked={draft.security.rateLimitEnabled} onCheckedChange={(v) => setDraft((s) => ({ ...s, security: { ...s.security, rateLimitEnabled: v === true } }))} /></div>
+              <div className="space-y-2">
+                <Label>Max Login Attempts</Label>
+                <Input type="number" value={String(draft.security.maxLoginAttempts)} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, maxLoginAttempts: Number(e.target.value || 0) } }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Lockout Duration (minutes)</Label>
+                <Input type="number" value={String(draft.security.lockoutDurationMinutes)} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, lockoutDurationMinutes: Number(e.target.value || 0) } }))} />
+              </div>
+              <div className="space-y-2">
+                <Label>Allowed Concurrent Sessions</Label>
+                <Input type="number" value={String(draft.security.allowConcurrentSessions)} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, allowConcurrentSessions: Number(e.target.value || 1) } }))} />
+              </div>
+              <div className="flex items-center justify-between rounded-lg border p-3"><span>Rate Limiting</span><Switch checked={draft.security.rateLimitEnabled} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, security: { ...s.security, rateLimitEnabled: v === true } }))} /></div>
               <div className="space-y-2">
                 <Label>Requests / Minute</Label>
                 <Input type="number" value={String(draft.security.rateLimitPerMinute)} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, rateLimitPerMinute: Number(e.target.value || 0) } }))} />
               </div>
+              <div className="flex items-center justify-between rounded-lg border p-3"><span>IP Whitelist Enabled</span><Switch checked={draft.security.ipWhitelistEnabled} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, security: { ...s.security, ipWhitelistEnabled: v === true } }))} /></div>
+              <div className="flex items-center justify-between rounded-lg border p-3"><span>Audit Logging</span><Switch checked={draft.security.auditLoggingEnabled} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, security: { ...s.security, auditLoggingEnabled: v === true } }))} /></div>
+              <div className="flex items-center justify-between rounded-lg border p-3"><span>Require Secure Connections (HTTPS)</span><Switch checked={draft.security.requireSecureConnections} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, security: { ...s.security, requireSecureConnections: v === true } }))} /></div>
             </div>
+            {draft.security.ipWhitelistEnabled && (
+              <div className="space-y-2 border-t pt-4">
+                <Label>IP Whitelist (comma-separated)</Label>
+                <Textarea rows={4} placeholder="192.168.1.0/24, 10.0.0.1" value={draft.security.ipWhitelist.join(", ")} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, ipWhitelist: e.target.value.split(",").map((ip) => ip.trim()).filter(Boolean) } }))} />
+                <p className="text-xs text-[#64748B]">Enter IP addresses or CIDR ranges, one per line or comma-separated</p>
+              </div>
+            )}
           </Card>
         </TabsContent>
 
@@ -1849,7 +1459,7 @@ export function SystemSettings() {
           <Card className="p-6 space-y-6">
             <h3 className="text-[#1E293B]">Backup & Restore (Backend Snapshots)</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="flex items-center justify-between rounded-lg border p-3"><span>Auto Backups</span><Switch checked={draft.backup.autoBackups} onCheckedChange={(v) => setDraft((s) => ({ ...s, backup: { ...s.backup, autoBackups: v === true } }))} /></div>
+              <div className="flex items-center justify-between rounded-lg border p-3"><span>Auto Backups</span><Switch checked={draft.backup.autoBackups} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, backup: { ...s.backup, autoBackups: v === true } }))} /></div>
               <div className="space-y-2">
                 <Label>Backup Time</Label>
                 <Input type="time" value={draft.backup.backupTime} onChange={(e) => setDraft((s) => ({ ...s, backup: { ...s.backup, backupTime: e.target.value } }))} />
@@ -1925,59 +1535,142 @@ export function SystemSettings() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="crm" className="mt-4">
+        <TabsContent value="departments" className="mt-4">
           <Card className="p-6 space-y-6">
-            <h3 className="text-[#1E293B]">CRM Integration</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2 md:col-span-2">
-                <Label>CRM Base URL</Label>
-                <Input value={draft.crm.baseUrl} placeholder="https://example-crm.test/api" onChange={(e) => setDraft((s) => ({ ...s, crm: { ...s.crm, baseUrl: e.target.value } }))} />
-              </div>
-              <div className="space-y-2 md:col-span-2">
-                <Label>CRM Auth Token</Label>
-                <Input type="password" value={draft.crm.authToken} onChange={(e) => setDraft((s) => ({ ...s, crm: { ...s.crm, authToken: e.target.value } }))} />
-              </div>
-              <div className="flex items-center justify-between rounded-lg border p-3"><span>Auto-sync Residents</span><Switch checked={draft.crm.autoSyncResidents} onCheckedChange={(v) => setDraft((s) => ({ ...s, crm: { ...s.crm, autoSyncResidents: v === true } }))} /></div>
-              <div className="flex items-center justify-between rounded-lg border p-3"><span>Auto-sync Payments</span><Switch checked={draft.crm.autoSyncPayments} onCheckedChange={(v) => setDraft((s) => ({ ...s, crm: { ...s.crm, autoSyncPayments: v === true } }))} /></div>
-              <div className="flex items-center justify-between rounded-lg border p-3"><span>Auto-sync Service Requests</span><Switch checked={draft.crm.autoSyncServiceRequests} onCheckedChange={(v) => setDraft((s) => ({ ...s, crm: { ...s.crm, autoSyncServiceRequests: v === true } }))} /></div>
-              <div className="space-y-2">
-                <Label>Sync Interval (minutes)</Label>
-                <Input type="number" value={String(draft.crm.syncIntervalMinutes)} onChange={(e) => setDraft((s) => ({ ...s, crm: { ...s.crm, syncIntervalMinutes: Number(e.target.value || 0) } }))} />
-              </div>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={() => void testCrmConnection()} disabled={isTestingCrm}>
-                <LinkIcon className={`w-4 h-4 mr-2 ${isTestingCrm ? "animate-pulse" : ""}`} />
-                {isTestingCrm ? "Testing..." : "Test CRM Connection"}
+            <div className="flex items-center justify-between">
+              <h3 className="text-[#1E293B]">Departments Management</h3>
+              <Button className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white" disabled={isLoadingDepartments}>
+                <Plus className="w-4 h-4 mr-2" />
+                New Department
               </Button>
             </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="rounded-lg border p-3">
-                <div className="text-xs text-[#64748B]">CRM Connection</div>
-                <div className="mt-2 flex items-center gap-2">
-                  {diagnostics.crmTestOk ? <CheckCircle className="w-4 h-4 text-[#10B981]" /> : <XCircle className="w-4 h-4 text-[#EF4444]" />}
-                  <span className="text-sm">{diagnostics.crmTestOk ? "Reachable" : "Unchecked / Failed"}</span>
+            <div className="space-y-2">
+              {isLoadingDepartments ? (
+                <div className="text-sm text-[#64748B]">Loading departments...</div>
+              ) : departments.length === 0 ? (
+                <div className="rounded-lg border p-4 text-center text-sm text-[#64748B]">
+                  No departments created. Create your first department to organize staff.
                 </div>
-              </div>
-              <div className="rounded-lg border p-3">
-                <div className="text-xs text-[#64748B]">Status Code</div>
-                <div className="mt-2 text-sm">{diagnostics.crmStatusCode ?? "—"}</div>
-              </div>
-              <div className="rounded-lg border p-3">
-                <div className="text-xs text-[#64748B]">Last CRM Test</div>
-                <div className="mt-2 text-sm">{formatDateTime(diagnostics.crmCheckedAt)}</div>
-              </div>
+              ) : (
+                <div className="space-y-2">
+                  {departments.map((dept: any) => (
+                    <div key={dept.id} className="flex items-center justify-between rounded-lg border p-3">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="w-3 h-3 rounded-full"
+                          style={{ backgroundColor: dept.colorDot || '#94A3B8' }}
+                        />
+                        <div>
+                          <div className="text-sm font-medium text-[#1E293B]">{dept.name}</div>
+                          <div className="text-xs text-[#64748B]">{dept.code} • {dept.staffMembers?.length || 0} staff</div>
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm">Edit</Button>
+                        <Button variant="outline" size="sm" className="text-[#EF4444]">Delete</Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-            {diagnostics.crmError ? (
-              <div className="rounded-lg border border-[#FECACA] bg-[#FEF2F2] p-3 text-sm text-[#991B1B]">
-                {diagnostics.crmError}
-              </div>
-            ) : null}
           </Card>
         </TabsContent>
-      </Tabs>
-    </div>
-  );
+
+        <TabsContent value="users" className="mt-4">
+          <Card className="p-6 space-y-6">
+            <div className="flex items-center justify-between">
+              <h3 className="text-[#1E293B]">System Users Management</h3>
+              <Button className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white" disabled={isLoadingUsers}>
+                <Plus className="w-4 h-4 mr-2" />
+                New User
+              </Button>
+            </div>
+            <div className="space-y-2">
+              {isLoadingUsers ? (
+                <div className="text-sm text-[#64748B]">Loading users...</div>
+              ) : systemUsers.length === 0 ? (
+                <div className="rounded-lg border p-4 text-center text-sm text-[#64748B]">
+                  No system users created.
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {systemUsers.map((user: any) => (
+                    <div key={user.id} className="flex items-center justify-between rounded-lg border p-3">
+                      <div>
+                        <div className="text-sm font-medium text-[#1E293B]">
+                          {user.firstName} {user.lastName}
+                        </div>
+                        <div className="text-xs text-[#64748B]">
+                          {user.email} • {user.role?.name || 'No role'} • {user.isActive ? 'Active' : 'Inactive'}
+                        </div>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm">Edit</Button>
+                        <Button variant="outline" size="sm" className="text-[#EF4444]">
+                          {user.isActive ? 'Deactivate' : 'Reactivate'}
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="roles" className="mt-4">
+          <Card className="p-6 space-y-6">
+            <div className="flex items-center justify-between">
+              <h3 className="text-[#1E293B]">Roles & Permissions</h3>
+              <Button className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white" disabled={isLoadingRoles}>
+                <Plus className="w-4 h-4 mr-2" />
+                New Role
+              </Button>
+            </div>
+            <div className="space-y-4">
+              {isLoadingRoles ? (
+                <div className="text-sm text-[#64748B]">Loading roles...</div>
+              ) : roles.length === 0 ? (
+                <div className="rounded-lg border p-4 text-center text-sm text-[#64748B]">
+                  No roles created.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {roles.map((role: any) => (
+                    <div key={role.id} className="rounded-lg border p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="text-sm font-medium text-[#1E293B]">{role.name}</div>
+                          {role.description && (
+                            <div className="text-xs text-[#64748B]">{role.description}</div>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          <Button variant="outline" size="sm">Edit</Button>
+                          <Button variant="outline" size="sm" className="text-[#EF4444]">Delete</Button>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {role.permissionCodes?.slice(0, 5).map((perm: string) => (
+                          <span key={perm} className="inline-block px-2 py-1 bg-[#F1F5F9] rounded text-xs text-[#475569]">
+                            {perm}
+                          </span>
+                        ))}
+                        {role.permissionCodes?.length > 5 && (
+                          <span className="inline-block px-2 py-1 bg-[#F1F5F9] rounded text-xs text-[#475569]">
+                            +{role.permissionCodes.length - 5} more
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </Card>
+        </TabsContent>
+        </Tabs>
+        </div>
+);
 }

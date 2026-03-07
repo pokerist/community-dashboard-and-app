@@ -21,13 +21,75 @@ import {
   Channel,
   NotificationLogStatus,
   NotificationStatus,
+  NotificationType,
   Prisma,
 } from '@prisma/client';
+import { ListNotificationsDto } from './dto/list-notifications.dto';
+import { GetNotificationDetailDto } from './dto/get-notification-detail.dto';
+import { ScheduleNotificationDto } from './dto/schedule-notification.dto';
+import {
+  CreateNotificationTemplateDto,
+  NotificationTemplateResponseDto,
+  UpdateNotificationTemplateDto,
+} from './dto/notification-template.dto';
+import {
+  NotificationDetailResponseDto,
+  NotificationListItemDto,
+  NotificationListResponseDto,
+  NotificationStatsResponseDto,
+  ResendFailedResponseDto,
+} from './dto/notification-response.dto';
 
 type DeliveryMode = 'pending' | 'failed';
 type NotificationDedupEntry = {
   notificationId: string;
   expiresAt: number;
+};
+type PushDispatchStatus = {
+  fcm?: {
+    configured?: boolean;
+    mockMode?: boolean;
+    projectId?: string | null;
+  } | null;
+  expo?: {
+    configured?: boolean;
+    mockMode?: boolean;
+  } | null;
+};
+
+type AudienceMeta = {
+  communityIds?: string[];
+  clusterIds?: string[];
+  unitIds?: string[];
+  userIds?: string[];
+  blocks?: string[];
+  block?: string;
+  [key: string]: unknown;
+};
+
+const notificationWithLogsInclude = {
+  logs: true,
+} as const;
+
+type NotificationWithLogs = Prisma.NotificationGetPayload<{
+  include: typeof notificationWithLogsInclude;
+}>;
+
+type PushSendSuccess = {
+  ok: true;
+  tokenId: string;
+  platform: string;
+  provider: string;
+  response: Record<string, unknown>;
+};
+
+type PushSendFailure = {
+  ok: false;
+  tokenId: string;
+  platform: string;
+  provider: string;
+  error: string;
+  reasonCode: string;
 };
 
 @Injectable()
@@ -49,7 +111,7 @@ export class NotificationsService {
   async getProviderStatus() {
     const integrations = await this.integrationConfigService.getResolvedIntegrations();
     const smsOtpDiagnostics = await this.integrationConfigService.getSmsOtpDiagnostics();
-    const pushDispatch = this.pushDispatchRouter.getStatus();
+    const pushDispatch = this.pushDispatchRouter.getStatus() as PushDispatchStatus;
     const capabilities = await this.integrationConfigService.getMobileCapabilities();
     const resendKey = (process.env.RESEND_API_KEY ?? '').trim();
     const resendConfigured = Boolean(resendKey);
@@ -60,10 +122,10 @@ export class NotificationsService {
         ? 'smtp'
         : 'none';
 
-    const fcmConfigured = Boolean((pushDispatch as any)?.fcm?.configured);
-    const fcmMockMode = Boolean((pushDispatch as any)?.fcm?.mockMode);
-    const expoConfigured = Boolean((pushDispatch as any)?.expo?.configured);
-    const expoMockMode = Boolean((pushDispatch as any)?.expo?.mockMode);
+    const fcmConfigured = Boolean(pushDispatch.fcm?.configured);
+    const fcmMockMode = Boolean(pushDispatch.fcm?.mockMode);
+    const expoConfigured = Boolean(pushDispatch.expo?.configured);
+    const expoMockMode = Boolean(pushDispatch.expo?.mockMode);
     const pushConfigured = fcmConfigured || expoConfigured;
     const pushLive =
       (fcmConfigured && !fcmMockMode) || (expoConfigured && !expoMockMode);
@@ -150,8 +212,8 @@ export class NotificationsService {
           mockMode: pushConfigured && !pushLive,
           effectiveProvider,
           router: 'auto',
-          fcm: (pushDispatch as any)?.fcm ?? null,
-          expo: (pushDispatch as any)?.expo ?? null,
+          fcm: pushDispatch.fcm ?? null,
+          expo: pushDispatch.expo ?? null,
         },
         runtime: {
           capabilities,
@@ -197,7 +259,7 @@ export class NotificationsService {
   }
 
   async listDeviceTokens(query: ListDeviceTokensDto) {
-    const where: any = {};
+    const where: Prisma.NotificationDeviceTokenWhereInput = {};
     if (query.userId) where.userId = query.userId;
     if (query.platform) where.platform = query.platform;
     if (typeof query.isActive === 'boolean') where.isActive = query.isActive;
@@ -234,18 +296,264 @@ export class NotificationsService {
     });
   }
 
-  async getAllNotifications(page = 1, limit = 20) {
-    const safePage = Number.isFinite(page) && page > 0 ? page : 1;
-    const safeLimit =
-      Number.isFinite(limit) && limit > 0 && limit <= 100 ? limit : 20;
+  async getNotificationStats(): Promise<NotificationStatsResponseDto> {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const tomorrowStart = new Date(todayStart);
+    tomorrowStart.setDate(tomorrowStart.getDate() + 1);
 
-    const [data, total] = await Promise.all([
-      this.prisma.notification.findMany({
-        include: {
-          sender: {
-            select: { id: true, nameEN: true, nameAR: true, email: true },
+    const [sentAggregate, deliveredToday, failedToday, activeDeviceTokens, byChannelRaw, byTypeRaw] =
+      await Promise.all([
+        this.prisma.notification.aggregate({
+          _sum: { sentCount: true },
+        }),
+        this.prisma.notificationLog.count({
+          where: {
+            createdAt: { gte: todayStart, lt: tomorrowStart },
+            status: {
+              in: [
+                NotificationLogStatus.SENT,
+                NotificationLogStatus.DELIVERED,
+                NotificationLogStatus.READ,
+              ],
+            },
           },
-          logs: true,
+        }),
+        this.prisma.notificationLog.count({
+          where: {
+            createdAt: { gte: todayStart, lt: tomorrowStart },
+            status: NotificationLogStatus.FAILED,
+          },
+        }),
+        this.prisma.notificationDeviceToken.count({ where: { isActive: true } }),
+        this.prisma.notificationLog.groupBy({
+          by: ['channel'],
+          _count: { _all: true },
+        }),
+        this.prisma.notification.groupBy({
+          by: ['type'],
+          _count: { _all: true },
+        }),
+      ]);
+
+    const byChannel = Object.values(Channel).reduce(
+      (acc, channel) => {
+        acc[channel] = 0;
+        return acc;
+      },
+      {} as Record<Channel, number>,
+    );
+    for (const row of byChannelRaw) {
+      byChannel[row.channel] = row._count._all;
+    }
+
+    const byType = Object.values(NotificationType).reduce(
+      (acc, type) => {
+        acc[type] = 0;
+        return acc;
+      },
+      {} as Record<NotificationType, number>,
+    );
+    for (const row of byTypeRaw) {
+      byType[row.type] = row._count._all;
+    }
+
+    return {
+      totalSent: sentAggregate._sum.sentCount ?? 0,
+      deliveredToday,
+      failedToday,
+      activeDeviceTokens,
+      byChannel,
+      byType,
+    };
+  }
+
+  async listNotifications(filters: ListNotificationsDto): Promise<NotificationListResponseDto> {
+    const safePage =
+      Number.isFinite(filters.page) && Number(filters.page) > 0
+        ? Math.floor(Number(filters.page))
+        : 1;
+    const limit = 25;
+    const dateFilter = this.buildNotificationDateFilter(filters);
+    const where: Prisma.NotificationWhereInput = {
+      ...(filters.type ? { type: filters.type } : {}),
+      ...(filters.status ? { status: filters.status } : {}),
+      ...(filters.channel ? { channels: { has: filters.channel } } : {}),
+      ...(filters.communityId ? { communityId: filters.communityId } : {}),
+      ...(dateFilter ? { createdAt: dateFilter } : {}),
+    };
+
+    const [rows, total] = await Promise.all([
+      this.prisma.notification.findMany({
+        where,
+        select: {
+          id: true,
+          title: true,
+          type: true,
+          channels: true,
+          targetAudience: true,
+          sentAt: true,
+          deliveredCount: true,
+          failedCount: true,
+          status: true,
+          communityId: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (safePage - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.notification.count({ where }),
+    ]);
+
+    const data: NotificationListItemDto[] = rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      type: row.type,
+      channels: row.channels,
+      targetAudience: row.targetAudience,
+      sentAt: row.sentAt,
+      deliveredCount: row.deliveredCount ?? 0,
+      failedCount: row.failedCount,
+      status: row.status,
+      communityId: row.communityId,
+      createdAt: row.createdAt,
+    }));
+
+    return {
+      data,
+      meta: {
+        total,
+        page: safePage,
+        limit,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
+  async getNotificationDetail(
+    notificationId: string,
+    query: GetNotificationDetailDto,
+  ): Promise<NotificationDetailResponseDto> {
+    const safePage =
+      Number.isFinite(query.page) && Number(query.page) > 0
+        ? Math.floor(Number(query.page))
+        : 1;
+    const safeLimit =
+      Number.isFinite(query.limit) && Number(query.limit) > 0
+        ? Math.min(Math.floor(Number(query.limit)), 50)
+        : 50;
+
+    const notification = await this.prisma.notification.findUnique({
+      where: { id: notificationId },
+    });
+    if (!notification) {
+      throw new NotFoundException('Notification not found');
+    }
+
+    const [logs, logsTotal, grouped] = await Promise.all([
+      this.prisma.notificationLog.findMany({
+        where: { notificationId },
+        orderBy: { createdAt: 'desc' },
+        skip: (safePage - 1) * safeLimit,
+        take: safeLimit,
+      }),
+      this.prisma.notificationLog.count({ where: { notificationId } }),
+      this.prisma.notificationLog.groupBy({
+        by: ['channel', 'status'],
+        where: { notificationId },
+        _count: { _all: true },
+      }),
+    ]);
+
+    const breakdownBase: Record<
+      Channel,
+      { attempted: number; delivered: number; failed: number; pending: number; read: number }
+    > = Object.values(Channel).reduce(
+      (acc, channel) => {
+        acc[channel] = { attempted: 0, delivered: 0, failed: 0, pending: 0, read: 0 };
+        return acc;
+      },
+      {} as Record<
+        Channel,
+        { attempted: number; delivered: number; failed: number; pending: number; read: number }
+      >,
+    );
+
+    for (const row of grouped) {
+      const entry = breakdownBase[row.channel];
+      const count = row._count._all;
+      entry.attempted += count;
+      if (row.status === NotificationLogStatus.DELIVERED) entry.delivered += count;
+      if (row.status === NotificationLogStatus.FAILED) entry.failed += count;
+      if (row.status === NotificationLogStatus.PENDING) entry.pending += count;
+      if (row.status === NotificationLogStatus.READ) entry.read += count;
+    }
+
+    return {
+      id: notification.id,
+      title: notification.title,
+      titleAr: notification.titleAr,
+      type: notification.type,
+      channels: notification.channels,
+      status: notification.status,
+      communityId: notification.communityId,
+      targetAudience: notification.targetAudience,
+      audienceMeta: this.toJsonObject(notification.audienceMeta),
+      messageEn: notification.messageEn,
+      messageAr: notification.messageAr,
+      scheduledAt: notification.scheduledAt,
+      sentAt: notification.sentAt,
+      sentCount: notification.sentCount,
+      deliveredCount: notification.deliveredCount ?? 0,
+      failedCount: notification.failedCount,
+      readCount: notification.readCount ?? 0,
+      openedCount: notification.openedCount,
+      createdAt: notification.createdAt,
+      logs: logs.map((row) => ({
+        id: row.id,
+        channel: row.channel,
+        recipient: row.recipient,
+        status: row.status,
+        providerResponse: this.toJsonObject(row.providerResponse),
+        createdAt: row.createdAt,
+      })),
+      logsMeta: {
+        total: logsTotal,
+        page: safePage,
+        limit: safeLimit,
+        totalPages: Math.ceil(logsTotal / safeLimit),
+      },
+      deliveryBreakdown: notification.channels.map((channel) => ({
+        channel,
+        attempted: breakdownBase[channel].attempted,
+        delivered: breakdownBase[channel].delivered,
+        failed: breakdownBase[channel].failed,
+        pending: breakdownBase[channel].pending,
+        read: breakdownBase[channel].read,
+      })),
+    };
+  }
+
+  async getAllNotifications(page = 1, limit = 20) {
+    const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
+    const safeLimit =
+      Number.isFinite(limit) && limit > 0 && limit <= 100 ? Math.floor(limit) : 20;
+
+    const [rows, total] = await Promise.all([
+      this.prisma.notification.findMany({
+        select: {
+          id: true,
+          title: true,
+          type: true,
+          channels: true,
+          targetAudience: true,
+          sentAt: true,
+          deliveredCount: true,
+          failedCount: true,
+          status: true,
+          communityId: true,
+          createdAt: true,
         },
         orderBy: { createdAt: 'desc' },
         skip: (safePage - 1) * safeLimit,
@@ -255,7 +563,19 @@ export class NotificationsService {
     ]);
 
     return {
-      data,
+      data: rows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        type: row.type,
+        channels: row.channels,
+        targetAudience: row.targetAudience,
+        sentAt: row.sentAt,
+        deliveredCount: row.deliveredCount ?? 0,
+        failedCount: row.failedCount,
+        status: row.status,
+        communityId: row.communityId,
+        createdAt: row.createdAt,
+      })),
       meta: {
         total,
         page: safePage,
@@ -269,11 +589,13 @@ export class NotificationsService {
     const {
       type,
       title,
+      titleAr,
       messageEn,
       messageAr,
       channels: requestedChannels,
       targetAudience,
       audienceMeta,
+      communityId,
       payload,
       scheduledAt,
     } = dto;
@@ -318,11 +640,13 @@ export class NotificationsService {
       data: {
         type,
         title,
+        titleAr,
         messageEn,
         messageAr,
         channels,
         targetAudience,
-        audienceMeta: normalizedAudienceMeta,
+        audienceMeta: normalizedAudienceMeta as Prisma.InputJsonValue | undefined,
+        communityId: communityId ?? null,
         payload: (payload ?? undefined) as Prisma.InputJsonValue | undefined,
         scheduledAt: scheduledDate,
         senderId,
@@ -346,6 +670,51 @@ export class NotificationsService {
     }
     await this.dispatchNow(notification.id);
     return notification.id;
+  }
+
+  async scheduleNotification(
+    dto: ScheduleNotificationDto,
+    senderId?: string,
+  ): Promise<string> {
+    const scheduledDate = new Date(dto.scheduledAt);
+    if (Number.isNaN(scheduledDate.getTime())) {
+      throw new BadRequestException('scheduledAt must be a valid datetime');
+    }
+    if (scheduledDate.getTime() <= Date.now()) {
+      throw new BadRequestException('scheduledAt must be in the future');
+    }
+    return this.sendNotification(dto, senderId);
+  }
+
+  async cancelScheduled(notificationId: string): Promise<{ success: true; notificationId: string }> {
+    const notification = await this.prisma.notification.findUnique({
+      where: { id: notificationId },
+      select: {
+        id: true,
+        status: true,
+        payload: true,
+      },
+    });
+
+    if (!notification) {
+      throw new NotFoundException('Notification not found');
+    }
+    if (notification.status !== NotificationStatus.SCHEDULED) {
+      throw new BadRequestException('Only scheduled notifications can be cancelled');
+    }
+
+    const payload = this.toJsonObject(notification.payload) ?? {};
+    payload.note = 'Cancelled by admin';
+
+    await this.prisma.notification.update({
+      where: { id: notificationId },
+      data: {
+        status: NotificationStatus.FAILED,
+        payload: payload as Prisma.InputJsonValue,
+      },
+    });
+
+    return { success: true, notificationId };
   }
 
   async dispatchNow(notificationId: string): Promise<void> {
@@ -373,10 +742,13 @@ export class NotificationsService {
     await this.prisma.notification.update({
       where: { id: notification.id },
       data: {
-        status: NotificationStatus.SENT,
+        status: NotificationStatus.PENDING,
         sentAt: new Date(),
       },
     });
+
+    await this.deliverPendingChannels(notification.id, notification.channels);
+    await this.updateNotificationAggregateCounts(notification.id);
 
     this.eventEmitter.emit(
       'notification.created',
@@ -403,11 +775,16 @@ export class NotificationsService {
         case Channel.PUSH:
           await this.deliverPush(notification, 'pending');
           break;
+        case Channel.WHATSAPP:
+          // TODO: Wire WhatsApp provider when credentials and webhook flow are finalized.
+          break;
         case Channel.IN_APP:
         default:
           break;
       }
     }
+
+    await this.updateNotificationAggregateCounts(notification.id);
   }
 
   async dispatchScheduled(): Promise<void> {
@@ -423,55 +800,61 @@ export class NotificationsService {
     }
   }
 
-  private validateAudienceMeta(audience: Audience, audienceMeta: any) {
-    const meta =
-      audienceMeta && typeof audienceMeta === 'object' ? audienceMeta : {};
+  private validateAudienceMeta(
+    audience: Audience,
+    audienceMeta?: Record<string, unknown> | null,
+  ): AudienceMeta | undefined {
+    const meta = this.toJsonObject(audienceMeta) ?? {};
 
     switch (audience) {
       case Audience.ALL:
         return undefined;
       case Audience.SPECIFIC_RESIDENCES: {
-        const userIds = Array.isArray(meta.userIds)
-          ? meta.userIds.filter((v: unknown) => typeof v === 'string' && v.trim())
-          : [];
-        if (userIds.length === 0) {
+        const communityIds = this.getStringArray(meta.communityIds);
+        const legacyUserIds = this.getStringArray(meta.userIds);
+        if (communityIds.length === 0 && legacyUserIds.length === 0) {
           throw new BadRequestException(
-            'audienceMeta.userIds is required for SPECIFIC_RESIDENCES',
+            'audienceMeta.communityIds is required for SPECIFIC_RESIDENCES',
           );
         }
-        return { userIds };
+        if (communityIds.length > 0) {
+          return { ...meta, communityIds };
+        }
+        return { ...meta, userIds: legacyUserIds };
       }
       case Audience.SPECIFIC_BLOCKS: {
+        const clusterIds = this.getStringArray(meta.clusterIds);
         const blocksRaw = meta.blocks ?? meta.block;
-        const blocks = Array.isArray(blocksRaw)
-          ? blocksRaw.filter((v: unknown) => typeof v === 'string' && v.trim())
-          : typeof blocksRaw === 'string' && blocksRaw.trim()
-            ? [blocksRaw.trim()]
-            : [];
-        if (blocks.length === 0) {
+        const legacyBlocks = this.getStringArray(blocksRaw);
+        if (clusterIds.length === 0 && legacyBlocks.length === 0) {
           throw new BadRequestException(
-            'audienceMeta.blocks is required for SPECIFIC_BLOCKS',
+            'audienceMeta.clusterIds is required for SPECIFIC_BLOCKS',
           );
         }
-        return { blocks };
+        if (clusterIds.length > 0) {
+          return { ...meta, clusterIds };
+        }
+        return { ...meta, blocks: legacyBlocks };
       }
       case Audience.SPECIFIC_UNITS: {
-        const unitIds = Array.isArray(meta.unitIds)
-          ? meta.unitIds.filter((v: unknown) => typeof v === 'string' && v.trim())
-          : [];
+        const unitIds = this.getStringArray(meta.unitIds);
         if (unitIds.length === 0) {
           throw new BadRequestException(
             'audienceMeta.unitIds is required for SPECIFIC_UNITS',
           );
         }
-        return { unitIds };
+        return { ...meta, unitIds };
       }
       default:
         return meta;
     }
   }
 
-  private async resolveRecipients(audience: Audience, audienceMeta?: any): Promise<string[]> {
+  private async resolveRecipients(
+    audience: Audience,
+    audienceMeta?: Prisma.JsonValue | Record<string, unknown> | null,
+  ): Promise<string[]> {
+    const meta = this.toJsonObject(audienceMeta) ?? {};
     const recipients: string[] = [];
 
     switch (audience) {
@@ -483,14 +866,29 @@ export class NotificationsService {
         recipients.push(...users.map((u) => u.id));
         break;
       }
-      case Audience.SPECIFIC_RESIDENCES:
-        recipients.push(...(audienceMeta?.userIds ?? []));
-        break;
-      case Audience.SPECIFIC_UNITS:
-        if (audienceMeta?.unitIds?.length) {
+      case Audience.SPECIFIC_RESIDENCES: {
+        const communityIds = this.getStringArray(meta.communityIds);
+        const legacyUserIds = this.getStringArray(meta.userIds);
+        if (communityIds.length > 0) {
           const accesses = await this.prisma.unitAccess.findMany({
             where: {
-              unitId: { in: audienceMeta.unitIds },
+              status: 'ACTIVE',
+              unit: { communityId: { in: communityIds } },
+            },
+            select: { userId: true },
+          });
+          recipients.push(...accesses.map((row) => row.userId).filter(Boolean));
+        } else {
+          recipients.push(...legacyUserIds);
+        }
+        break;
+      }
+      case Audience.SPECIFIC_UNITS:
+        if (this.getStringArray(meta.unitIds).length) {
+          const unitIds = this.getStringArray(meta.unitIds);
+          const accesses = await this.prisma.unitAccess.findMany({
+            where: {
+              unitId: { in: unitIds },
               status: 'ACTIVE',
             },
             select: { userId: true },
@@ -499,30 +897,30 @@ export class NotificationsService {
         }
         break;
       case Audience.SPECIFIC_BLOCKS: {
-        const blocksRaw = audienceMeta?.blocks ?? audienceMeta?.block;
-        const blocks = Array.isArray(blocksRaw)
-          ? blocksRaw
-          : typeof blocksRaw === 'string'
-            ? [blocksRaw]
-            : [];
+        const clusterIds = this.getStringArray(meta.clusterIds);
+        const legacyBlocks = this.getStringArray(meta.blocks ?? meta.block);
 
-        if (blocks.length === 0) break;
+        if (clusterIds.length > 0) {
+          const accesses = await this.prisma.unitAccess.findMany({
+            where: {
+              status: 'ACTIVE',
+              unit: { clusterId: { in: clusterIds } },
+            },
+            select: { userId: true },
+          });
+          recipients.push(...accesses.map((row) => row.userId).filter(Boolean));
+          break;
+        }
 
-        const units = await this.prisma.unit.findMany({
-          where: { block: { in: blocks } },
-          select: { id: true },
-        });
-        if (!units.length) break;
-
+        if (legacyBlocks.length === 0) break;
         const accesses = await this.prisma.unitAccess.findMany({
           where: {
-            unitId: { in: units.map((u) => u.id) },
             status: 'ACTIVE',
+            unit: { block: { in: legacyBlocks } },
           },
           select: { userId: true },
         });
-
-        recipients.push(...accesses.map((r) => r.userId).filter(Boolean));
+        recipients.push(...accesses.map((row) => row.userId).filter(Boolean));
         break;
       }
     }
@@ -557,10 +955,33 @@ export class NotificationsService {
         userId,
         status: 'ACTIVE',
       },
-      select: { unitId: true, unit: { select: { block: true } } },
+      select: {
+        unitId: true,
+        unit: {
+          select: {
+            block: true,
+            clusterId: true,
+            communityId: true,
+          },
+        },
+      },
     });
 
     const unitIds = userUnits.map((u) => u.unitId);
+    const communityIds = [
+      ...new Set(
+        userUnits
+          .map((u) => (u.unit?.communityId ? String(u.unit.communityId) : null))
+          .filter(Boolean),
+      ),
+    ] as string[];
+    const clusterIds = [
+      ...new Set(
+        userUnits
+          .map((u) => (u.unit?.clusterId ? String(u.unit.clusterId) : null))
+          .filter(Boolean),
+      ),
+    ] as string[];
     const blocks = [
       ...new Set(
         userUnits
@@ -569,7 +990,7 @@ export class NotificationsService {
       ),
     ] as string[];
 
-    return { unitIds, blocks };
+    return { unitIds, communityIds, clusterIds, blocks };
   }
 
   private async buildUserNotificationWhereClause(
@@ -584,9 +1005,17 @@ export class NotificationsService {
           targetAudience: Audience.SPECIFIC_RESIDENCES,
           audienceMeta: { path: ['userIds'], array_contains: userId },
         },
+        ...ctx.communityIds.map((communityId) => ({
+          targetAudience: Audience.SPECIFIC_RESIDENCES,
+          audienceMeta: { path: ['communityIds'], array_contains: communityId },
+        })),
         ...ctx.unitIds.map((unitId) => ({
           targetAudience: Audience.SPECIFIC_UNITS,
           audienceMeta: { path: ['unitIds'], array_contains: unitId },
+        })),
+        ...ctx.clusterIds.map((clusterId) => ({
+          targetAudience: Audience.SPECIFIC_BLOCKS,
+          audienceMeta: { path: ['clusterIds'], array_contains: clusterId },
         })),
         ...ctx.blocks.map((block) => ({
           targetAudience: Audience.SPECIFIC_BLOCKS,
@@ -698,13 +1127,19 @@ export class NotificationsService {
 
     await this.prisma.notification.update({
       where: { id: notificationId },
-      data: { readCount: { increment: 1 } },
+      data: {
+        readCount: { increment: 1 },
+        openedCount: { increment: 1 },
+      },
     });
 
     return true;
   }
 
-  async resendFailedNotification(notificationId: string, actorUserId?: string) {
+  async resendFailedNotification(
+    notificationId: string,
+    actorUserId?: string,
+  ): Promise<ResendFailedResponseDto> {
     const notification = await this.prisma.notification.findUnique({
       where: { id: notificationId },
       include: { logs: true },
@@ -732,6 +1167,7 @@ export class NotificationsService {
         sent: 0,
         failed: 0,
         byChannel: {},
+        failureReasons: {},
       };
     }
 
@@ -785,6 +1221,8 @@ export class NotificationsService {
       failureReasons[reasonCode] = (failureReasons[reasonCode] ?? 0) + 1;
     }
 
+    await this.updateNotificationAggregateCounts(notificationId);
+
     return {
       success: true,
       notificationId,
@@ -794,8 +1232,126 @@ export class NotificationsService {
     };
   }
 
+  async listTemplates(): Promise<NotificationTemplateResponseDto[]> {
+    const rows = await this.prisma.notificationTemplate.findMany({
+      orderBy: [{ isActive: 'desc' }, { updatedAt: 'desc' }],
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      type: row.type,
+      titleEn: row.titleEn,
+      titleAr: row.titleAr,
+      messageEn: row.messageEn,
+      messageAr: row.messageAr,
+      channels: row.channels,
+      isActive: row.isActive,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    }));
+  }
+
+  async createTemplate(
+    dto: CreateNotificationTemplateDto,
+  ): Promise<NotificationTemplateResponseDto> {
+    const row = await this.prisma.notificationTemplate.create({
+      data: {
+        name: dto.name.trim(),
+        type: dto.type,
+        titleEn: dto.titleEn.trim(),
+        titleAr: dto.titleAr?.trim() || null,
+        messageEn: dto.messageEn.trim(),
+        messageAr: dto.messageAr?.trim() || null,
+        channels: [...new Set(dto.channels)],
+        isActive: dto.isActive ?? true,
+      },
+    });
+    return {
+      id: row.id,
+      name: row.name,
+      type: row.type,
+      titleEn: row.titleEn,
+      titleAr: row.titleAr,
+      messageEn: row.messageEn,
+      messageAr: row.messageAr,
+      channels: row.channels,
+      isActive: row.isActive,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  async updateTemplate(
+    templateId: string,
+    dto: UpdateNotificationTemplateDto,
+  ): Promise<NotificationTemplateResponseDto> {
+    const existing = await this.prisma.notificationTemplate.findUnique({
+      where: { id: templateId },
+      select: { id: true },
+    });
+    if (!existing) {
+      throw new NotFoundException('Notification template not found');
+    }
+
+    const row = await this.prisma.notificationTemplate.update({
+      where: { id: templateId },
+      data: {
+        ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
+        ...(dto.type !== undefined ? { type: dto.type } : {}),
+        ...(dto.titleEn !== undefined ? { titleEn: dto.titleEn.trim() } : {}),
+        ...(dto.titleAr !== undefined ? { titleAr: dto.titleAr.trim() || null } : {}),
+        ...(dto.messageEn !== undefined ? { messageEn: dto.messageEn.trim() } : {}),
+        ...(dto.messageAr !== undefined ? { messageAr: dto.messageAr.trim() || null } : {}),
+        ...(dto.channels !== undefined ? { channels: [...new Set(dto.channels)] } : {}),
+      },
+    });
+
+    return {
+      id: row.id,
+      name: row.name,
+      type: row.type,
+      titleEn: row.titleEn,
+      titleAr: row.titleAr,
+      messageEn: row.messageEn,
+      messageAr: row.messageAr,
+      channels: row.channels,
+      isActive: row.isActive,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  async toggleTemplate(templateId: string): Promise<NotificationTemplateResponseDto> {
+    const existing = await this.prisma.notificationTemplate.findUnique({
+      where: { id: templateId },
+      select: { id: true, isActive: true },
+    });
+    if (!existing) {
+      throw new NotFoundException('Notification template not found');
+    }
+
+    const row = await this.prisma.notificationTemplate.update({
+      where: { id: templateId },
+      data: { isActive: !existing.isActive },
+    });
+
+    return {
+      id: row.id,
+      name: row.name,
+      type: row.type,
+      titleEn: row.titleEn,
+      titleAr: row.titleAr,
+      messageEn: row.messageEn,
+      messageAr: row.messageAr,
+      channels: row.channels,
+      isActive: row.isActive,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
   private async deliverEmail(
-    notification: any,
+    notification: NotificationWithLogs,
     mode: DeliveryMode,
     actorUserId?: string,
   ): Promise<{ attempted: number; sent: number; failed: number }> {
@@ -805,7 +1361,7 @@ export class NotificationsService {
         : [NotificationLogStatus.FAILED];
 
     const targetLogs = notification.logs.filter(
-      (l: any) => l.channel === Channel.EMAIL && statuses.includes(l.status),
+      (log) => log.channel === Channel.EMAIL && statuses.includes(log.status),
     );
     if (!targetLogs.length) return { attempted: 0, sent: 0, failed: 0 };
 
@@ -838,7 +1394,7 @@ export class NotificationsService {
     }
 
     const recipients: string[] = [
-      ...new Set<string>(targetLogs.map((l: any) => String(l.recipient))),
+      ...new Set<string>(targetLogs.map((log) => String(log.recipient))),
     ];
     const users = await this.prisma.user.findMany({
       where: { id: { in: recipients }, email: { not: null } },
@@ -906,7 +1462,7 @@ export class NotificationsService {
   }
 
   private async deliverSms(
-    notification: any,
+    notification: NotificationWithLogs,
     mode: DeliveryMode,
     actorUserId?: string,
   ): Promise<{ attempted: number; sent: number; failed: number }> {
@@ -916,7 +1472,7 @@ export class NotificationsService {
         : [NotificationLogStatus.FAILED];
 
     const targetLogs = notification.logs.filter(
-      (l: any) => l.channel === Channel.SMS && statuses.includes(l.status),
+      (log) => log.channel === Channel.SMS && statuses.includes(log.status),
     );
     if (!targetLogs.length) return { attempted: 0, sent: 0, failed: 0 };
 
@@ -945,7 +1501,7 @@ export class NotificationsService {
     }
 
     const recipients: string[] = [
-      ...new Set<string>(targetLogs.map((l: any) => String(l.recipient))),
+      ...new Set<string>(targetLogs.map((log) => String(log.recipient))),
     ];
     const users = await this.prisma.user.findMany({
       where: { id: { in: recipients }, phone: { not: null } },
@@ -1023,7 +1579,7 @@ export class NotificationsService {
   }
 
   private async deliverPush(
-    notification: any,
+    notification: NotificationWithLogs,
     mode: DeliveryMode,
     actorUserId?: string,
   ): Promise<{ attempted: number; sent: number; failed: number }> {
@@ -1033,11 +1589,11 @@ export class NotificationsService {
         : [NotificationLogStatus.FAILED];
 
     const targetLogs = notification.logs.filter(
-      (l: any) => l.channel === Channel.PUSH && statuses.includes(l.status),
+      (log) => log.channel === Channel.PUSH && statuses.includes(log.status),
     );
     if (!targetLogs.length) return { attempted: 0, sent: 0, failed: 0 };
 
-    const pushStatus = this.pushDispatchRouter.getStatus() as any;
+    const pushStatus = this.pushDispatchRouter.getStatus() as PushDispatchStatus;
     const fcmConfigured = Boolean(pushStatus?.fcm?.configured);
     const expoConfigured = Boolean(pushStatus?.expo?.configured);
     const pushConfigured = fcmConfigured || expoConfigured;
@@ -1069,7 +1625,7 @@ export class NotificationsService {
     }
 
     const recipients: string[] = [
-      ...new Set<string>(targetLogs.map((l: any) => String(l.recipient))),
+      ...new Set<string>(targetLogs.map((log) => String(log.recipient))),
     ];
     const deviceTokens = await this.prisma.notificationDeviceToken.findMany({
       where: {
@@ -1146,11 +1702,17 @@ export class NotificationsService {
               data: { lastUsedAt: new Date() },
             });
 
+            const responseObj = this.toJsonObject(response);
+            const provider =
+              responseObj && typeof responseObj.provider === 'string'
+                ? responseObj.provider
+                : 'push';
+
             return {
               ok: true as const,
               tokenId: tokenRow.id,
               platform: tokenRow.platform,
-              provider: String((response as any)?.provider ?? 'push'),
+              provider,
               response,
             };
           } catch (error: unknown) {
@@ -1178,8 +1740,12 @@ export class NotificationsService {
         }),
       );
 
-      const successful = results.filter((r) => r.ok);
-      const failedResults = results.filter((r) => !r.ok);
+      const successful = results.filter(
+        (result): result is PushSendSuccess => result.ok,
+      );
+      const failedResults = results.filter(
+        (result): result is PushSendFailure => !result.ok,
+      );
       const deviceResultsJson = results.map((r) =>
         r.ok
           ? {
@@ -1187,7 +1753,7 @@ export class NotificationsService {
               tokenId: r.tokenId,
               platform: r.platform,
               provider: r.provider,
-              response: r.response as Record<string, unknown>,
+              response: this.toJsonObject(r.response),
             }
           : {
               ok: false,
@@ -1230,8 +1796,9 @@ export class NotificationsService {
               deviceResults: deviceResultsJson,
               error: 'All device sends failed',
               reasonCode:
-                String((failedResults[0] as any)?.reasonCode ?? '') ||
-                'PUSH_SEND_FAILED',
+                failedResults.length > 0
+                  ? failedResults[0].reasonCode
+                  : 'PUSH_SEND_FAILED',
             } as Prisma.InputJsonValue),
           },
         });
@@ -1241,7 +1808,7 @@ export class NotificationsService {
     return { attempted: targetLogs.length, sent, failed };
   }
 
-  private buildEmailContent(notification: any): string {
+  private buildEmailContent(notification: NotificationWithLogs): string {
     const messageEn = String(notification.messageEn ?? '').replace(/\n/g, '<br>');
     const messageAr = notification.messageAr
       ? `<div dir="rtl">${String(notification.messageAr).replace(/\n/g, '<br>')}</div>`
@@ -1258,7 +1825,10 @@ export class NotificationsService {
     `;
   }
 
-  private pickLocalizedMessage(notification: any, language?: string) {
+  private pickLocalizedMessage(
+    notification: Pick<NotificationWithLogs, 'messageEn' | 'messageAr'>,
+    language?: string,
+  ) {
     const normalized = String(language ?? '').toLowerCase();
     if (normalized.startsWith('ar')) {
       const ar = String(notification.messageAr ?? '').trim();
@@ -1269,18 +1839,23 @@ export class NotificationsService {
     return String(notification.messageAr ?? '').trim();
   }
 
-  private buildSmsContent(notification: any, language?: string): string {
+  private buildSmsContent(
+    notification: Pick<NotificationWithLogs, 'title' | 'messageEn' | 'messageAr'>,
+    language?: string,
+  ): string {
     const title = String(notification.title ?? '').trim();
     const message = this.pickLocalizedMessage(notification, language);
     const body = title ? `${title}\n${message}` : message;
     return body.slice(0, 1400);
   }
 
-  private buildPushData(notification: any): Record<string, string> {
-    const payload =
-      notification && typeof notification.payload === 'object' && notification.payload
-        ? (notification.payload as Record<string, unknown>)
-        : {};
+  private buildPushData(
+    notification: Pick<
+      NotificationWithLogs,
+      'id' | 'type' | 'targetAudience' | 'createdAt' | 'payload'
+    >,
+  ): Record<string, string> {
+    const payload = this.toJsonObject(notification.payload) ?? {};
     const stringify = (v: unknown): string | undefined => {
       if (v === undefined || v === null) return undefined;
       if (typeof v === 'string') return v;
@@ -1306,6 +1881,51 @@ export class NotificationsService {
       ...(stringify(payload.entityId) ? { entityId: stringify(payload.entityId)! } : {}),
       ...(stringify(payload.eventKey) ? { eventKey: stringify(payload.eventKey)! } : {}),
     };
+  }
+
+  private async updateNotificationAggregateCounts(
+    notificationId: string,
+  ): Promise<void> {
+    const grouped = await this.prisma.notificationLog.groupBy({
+      by: ['status'],
+      where: { notificationId },
+      _count: { _all: true },
+    });
+
+    const byStatus = grouped.reduce(
+      (acc, row) => {
+        acc[row.status] = row._count._all;
+        return acc;
+      },
+      {} as Record<NotificationLogStatus, number>,
+    );
+
+    const sentCount =
+      (byStatus[NotificationLogStatus.SENT] ?? 0) +
+      (byStatus[NotificationLogStatus.DELIVERED] ?? 0) +
+      (byStatus[NotificationLogStatus.READ] ?? 0) +
+      (byStatus[NotificationLogStatus.PENDING] ?? 0);
+    const deliveredCount =
+      (byStatus[NotificationLogStatus.DELIVERED] ?? 0) +
+      (byStatus[NotificationLogStatus.READ] ?? 0);
+    const failedCount = byStatus[NotificationLogStatus.FAILED] ?? 0;
+    const readCount = byStatus[NotificationLogStatus.READ] ?? 0;
+    const openedCount = readCount;
+
+    await this.prisma.notification.update({
+      where: { id: notificationId },
+      data: {
+        status:
+          sentCount > 0
+            ? NotificationStatus.SENT
+            : NotificationStatus.FAILED,
+        sentCount,
+        deliveredCount,
+        failedCount,
+        readCount,
+        openedCount,
+      },
+    });
   }
 
   private async isAdminUser(userId: string): Promise<boolean> {
@@ -1349,12 +1969,10 @@ export class NotificationsService {
       typeof payload.entityId === 'string' ? payload.entityId.trim() : '';
     if (!eventKey || !entityId) return null;
     const audienceMeta = params.audienceMeta ?? {};
-    const userIds = Array.isArray((audienceMeta as any).userIds)
-      ? ((audienceMeta as any).userIds as unknown[])
-          .map((id) => String(id))
-          .sort()
-          .join(',')
-      : '';
+    const userIds = this.getStringArray(audienceMeta.userIds)
+      .map((id) => String(id))
+      .sort()
+      .join(',');
     return [
       eventKey,
       entityId,
@@ -1379,5 +1997,67 @@ export class NotificationsService {
       notificationId,
       expiresAt: Date.now() + this.dedupWindowMs,
     });
+  }
+
+  private buildNotificationDateFilter(
+    filters: ListNotificationsDto,
+  ): Prisma.DateTimeFilter | undefined {
+    const filter: Prisma.DateTimeFilter = {};
+    const fromDate = filters.dateFrom ? new Date(filters.dateFrom) : null;
+    const toDate = filters.dateTo ? new Date(filters.dateTo) : null;
+
+    if (fromDate && !Number.isNaN(fromDate.getTime())) {
+      filter.gte = fromDate;
+    }
+    if (toDate && !Number.isNaN(toDate.getTime())) {
+      const inclusive = new Date(toDate);
+      inclusive.setHours(23, 59, 59, 999);
+      filter.lte = inclusive;
+    }
+
+    if (!filter.gte && !filter.lte && filters.dateRange) {
+      const range = filters.dateRange.trim().toLowerCase();
+      const now = new Date();
+      if (range === 'today') {
+        const start = new Date(now);
+        start.setHours(0, 0, 0, 0);
+        filter.gte = start;
+      } else if (range === '7d' || range === '7days') {
+        const start = new Date(now);
+        start.setDate(start.getDate() - 7);
+        filter.gte = start;
+      } else if (range === '30d' || range === '30days') {
+        const start = new Date(now);
+        start.setDate(start.getDate() - 30);
+        filter.gte = start;
+      }
+    }
+
+    return Object.keys(filter).length > 0 ? filter : undefined;
+  }
+
+  private toJsonObject(
+    value: Prisma.JsonValue | Record<string, unknown> | unknown,
+  ): Record<string, unknown> | null {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      return value as Record<string, unknown>;
+    }
+    return null;
+  }
+
+  private getStringArray(value: unknown): string[] {
+    if (Array.isArray(value)) {
+      return value
+        .filter((entry): entry is string => typeof entry === 'string')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0);
+    }
+
+    if (typeof value === 'string') {
+      const normalized = value.trim();
+      return normalized ? [normalized] : [];
+    }
+
+    return [];
   }
 }

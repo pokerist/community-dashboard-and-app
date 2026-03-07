@@ -29,13 +29,13 @@ import invoiceService, {
 } from '../../lib/invoiceService';
 import { errorMessage } from '../../lib/live-data';
 
-const CARD_CLASS = 'bg-[#181c27] rounded-xl border border-white/5 p-6';
+const CARD_CLASS = 'bg-white rounded-xl border border-gray-200 p-6';
 
 const statusClass: Record<string, string> = {
   PAID: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30',
   PENDING: 'bg-amber-500/15 text-amber-300 border border-amber-500/30',
   OVERDUE: 'bg-red-500/15 text-red-300 border border-red-500/30',
-  CANCELLED: 'bg-slate-500/15 text-slate-300 border border-slate-500/30',
+  CANCELLED: 'bg-gray-100 text-gray-700 border border-slate-500/30',
 };
 
 const categorySwatches: Array<{ value: string; className: string }> = [
@@ -467,16 +467,16 @@ export function BillingPayments() {
     <div className="p-8 space-y-6">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-100">
+          <h1 className="text-2xl font-semibold text-gray-900">
             Payments & Invoices
           </h1>
-          <p className="text-sm text-slate-400 mt-1">
+          <p className="text-sm text-gray-500 mt-1">
             Track invoices, collections, and category settings.
           </p>
         </div>
         <div className="flex items-center gap-2">
           <button
-            className="bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+            className="bg-white/5 hover:bg-gray-100 border border-gray-300 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
             onClick={() => setSettingsOpen(true)}
           >
             <Settings className="w-4 h-4" />
@@ -494,9 +494,9 @@ export function BillingPayments() {
       </div>
 
       <div className="grid grid-cols-4 gap-4">
-        <div className="bg-[#181c27] rounded-xl border border-white/5 p-6 cursor-pointer hover:border-white/10 transition-colors">
+        <div className="bg-white rounded-xl border border-gray-200 p-6 cursor-pointer hover:border-gray-300 transition-colors">
           <div className="flex items-start justify-between mb-4">
-            <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
               Total Revenue
             </p>
             <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center" />
@@ -504,59 +504,59 @@ export function BillingPayments() {
           <p className="text-3xl font-semibold text-emerald-400 font-['DM_Mono']">
             {formatCurrency(stats.totalRevenue)}
           </p>
-          <p className="text-xs text-slate-500 mt-1">Paid invoices</p>
+          <p className="text-xs text-gray-400 mt-1">Paid invoices</p>
         </div>
 
-        <div className="bg-[#181c27] rounded-xl border border-white/5 p-6 cursor-pointer hover:border-white/10 transition-colors">
+        <div className="bg-white rounded-xl border border-gray-200 p-6 cursor-pointer hover:border-gray-300 transition-colors">
           <div className="flex items-start justify-between mb-4">
-            <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
               Pending Amount
             </p>
             <div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center" />
           </div>
-          <p className="text-3xl font-semibold text-slate-100 font-['DM_Mono']">
+          <p className="text-3xl font-semibold text-gray-900 font-['DM_Mono']">
             {formatCurrency(stats.pendingAmount)}
           </p>
-          <p className="text-xs text-slate-500 mt-1">Awaiting payment</p>
+          <p className="text-xs text-gray-400 mt-1">Awaiting payment</p>
         </div>
 
-        <div className="bg-[#181c27] rounded-xl border border-white/5 p-6 cursor-pointer hover:border-white/10 transition-colors">
+        <div className="bg-white rounded-xl border border-gray-200 p-6 cursor-pointer hover:border-gray-300 transition-colors">
           <div className="flex items-start justify-between mb-4">
-            <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
               Overdue Amount
             </p>
             <div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center" />
           </div>
-          <p className="text-3xl font-semibold text-slate-100 font-['DM_Mono']">
+          <p className="text-3xl font-semibold text-gray-900 font-['DM_Mono']">
             {formatCurrency(stats.overdueAmount)}
           </p>
-          <p className="text-xs text-slate-500 mt-1">Past due invoices</p>
+          <p className="text-xs text-gray-400 mt-1">Past due invoices</p>
         </div>
 
-        <div className="bg-[#181c27] rounded-xl border border-white/5 p-6 cursor-pointer hover:border-white/10 transition-colors">
+        <div className="bg-white rounded-xl border border-gray-200 p-6 cursor-pointer hover:border-gray-300 transition-colors">
           <div className="flex items-start justify-between mb-4">
-            <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
               Overdue Count
             </p>
             <div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center" />
           </div>
           <p
-            className={`text-3xl font-semibold font-['DM_Mono'] ${stats.overdueCount > 0 ? 'text-red-400' : 'text-slate-100'}`}
+            className={`text-3xl font-semibold font-['DM_Mono'] ${stats.overdueCount > 0 ? 'text-red-400' : 'text-gray-900'}`}
           >
             {stats.overdueCount.toLocaleString()}
           </p>
-          <p className="text-xs text-slate-500 mt-1">
+          <p className="text-xs text-gray-400 mt-1">
             Current overdue invoices
           </p>
         </div>
       </div>
 
-      <div className="bg-[#181c27] rounded-xl border border-white/5 p-0 overflow-hidden">
-        <div className="p-4 border-b border-white/5 flex items-center gap-3 flex-wrap">
+      <div className="bg-white rounded-xl border border-gray-200 p-0 overflow-hidden">
+        <div className="p-4 border-b border-gray-200 flex items-center gap-3 flex-wrap">
           <div className="relative flex-1 max-w-xs">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
-              className="w-full bg-[#0f1117] border border-white/10 rounded-lg pl-9 pr-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:outline-none focus:border-blue-500/50"
+              className="w-full bg-white border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:border-blue-500/50"
               placeholder="Search..."
               value={filters.search}
               onChange={(event) => {
@@ -567,7 +567,7 @@ export function BillingPayments() {
           </div>
 
           <select
-            className="w-40 bg-[#0f1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-blue-500/50 appearance-none"
+            className="w-40 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50 appearance-none"
             value={filters.status}
             onChange={(event) => {
               setPage(1);
@@ -582,7 +582,7 @@ export function BillingPayments() {
           </select>
 
           <select
-            className="w-48 bg-[#0f1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-blue-500/50 appearance-none"
+            className="w-48 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50 appearance-none"
             value={filters.type}
             onChange={(event) => {
               setPage(1);
@@ -599,7 +599,7 @@ export function BillingPayments() {
 
           <input
             type="date"
-            className="w-36 bg-[#0f1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-blue-500/50"
+            className="w-36 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50"
             value={filters.fromDate}
             onChange={(event) => {
               setPage(1);
@@ -608,7 +608,7 @@ export function BillingPayments() {
           />
           <input
             type="date"
-            className="w-36 bg-[#0f1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-blue-500/50"
+            className="w-36 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50"
             value={filters.toDate}
             onChange={(event) => {
               setPage(1);
@@ -617,7 +617,7 @@ export function BillingPayments() {
           />
 
           <select
-            className="w-48 bg-[#0f1117] border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-blue-500/50 appearance-none"
+            className="w-48 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50 appearance-none"
             value={filters.communityId}
             onChange={(event) => {
               setPage(1);
@@ -637,7 +637,7 @@ export function BillingPayments() {
 
           <div className="ml-auto flex items-center gap-2">
             <button
-              className="bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+              className="bg-white/5 hover:bg-gray-100 border border-gray-300 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
               onClick={() => void bulkMarkOverdue()}
             >
               Mark Overdue
@@ -665,10 +665,10 @@ export function BillingPayments() {
           </div>
         ) : (
           <>
-            <div className="rounded-xl border border-white/5 overflow-hidden">
+            <div className="rounded-xl border border-gray-200 overflow-hidden">
               <table className="w-full">
                 <thead>
-                  <tr className="bg-[#0f1117] border-b border-white/5">
+                  <tr className="bg-white border-b border-gray-200">
                     {[
                       'Invoice #',
                       'Unit',
@@ -682,7 +682,7 @@ export function BillingPayments() {
                     ].map((column) => (
                       <th
                         key={column}
-                        className="py-3 px-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wider"
+                        className="py-3 px-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider"
                       >
                         {column}
                       </th>
@@ -693,44 +693,44 @@ export function BillingPayments() {
                   {rows.map((row) => (
                     <tr
                       key={row.id}
-                      className={`border-b border-white/5 hover:bg-white/[0.02] transition-colors last:border-0 ${row.status === 'OVERDUE' ? 'border-l-2 border-red-500/40' : ''}`}
+                      className={`border-b border-gray-200 hover:bg-white/[0.02] transition-colors last:border-0 ${row.status === 'OVERDUE' ? 'border-l-2 border-red-500/40' : ''}`}
                     >
-                      <td className="py-4 px-4 text-sm text-slate-300 font-['DM_Mono']">
+                      <td className="py-4 px-4 text-sm text-gray-700 font-['DM_Mono']">
                         {row.invoiceNumber}
                       </td>
-                      <td className="py-4 px-4 text-sm text-slate-300">
+                      <td className="py-4 px-4 text-sm text-gray-700">
                         {row.unitNumber}
                       </td>
-                      <td className="py-4 px-4 text-sm text-slate-300">
+                      <td className="py-4 px-4 text-sm text-gray-700">
                         {row.residentName || '--'}
                       </td>
-                      <td className="py-4 px-4 text-sm text-slate-300">
+                      <td className="py-4 px-4 text-sm text-gray-700">
                         {row.categoryLabel || '--'}
                       </td>
-                      <td className="py-4 px-4 text-sm text-slate-300 text-right font-['DM_Mono']">
+                      <td className="py-4 px-4 text-sm text-gray-700 text-right font-['DM_Mono']">
                         {formatCurrency(row.amount)}
                       </td>
-                      <td className="py-4 px-4 text-sm text-slate-300">
+                      <td className="py-4 px-4 text-sm text-gray-700">
                         {formatDate(row.dueDate)}
                       </td>
-                      <td className="py-4 px-4 text-sm text-slate-300">
+                      <td className="py-4 px-4 text-sm text-gray-700">
                         <span
                           className={`text-xs px-2.5 py-1 rounded-full ${statusClass[row.status] || statusClass.CANCELLED}`}
                         >
                           {enumLabel(row.status)}
                         </span>
                       </td>
-                      <td className="py-4 px-4 text-sm text-slate-300">
+                      <td className="py-4 px-4 text-sm text-gray-700">
                         <span
                           className={`text-xs px-2.5 py-1 rounded-full ${SOURCE_BADGE_COLOR[row.source]}`}
                         >
                           {enumLabel(row.source)}
                         </span>
                       </td>
-                      <td className="py-4 px-4 text-sm text-slate-300">
+                      <td className="py-4 px-4 text-sm text-gray-700">
                         <div className="flex items-center gap-2">
                           <button
-                            className="p-2 rounded-lg bg-white/5 hover:bg-white/10"
+                            className="p-2 rounded-lg bg-white/5 hover:bg-gray-100"
                             onClick={() => void openDetail(row.id)}
                           >
                             <Eye className="w-4 h-4" />
@@ -761,19 +761,19 @@ export function BillingPayments() {
               </table>
             </div>
 
-            <div className="px-6 py-4 border-t border-white/5 flex items-center justify-end gap-3">
+            <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3">
               <button
-                className="bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                className="bg-white/5 hover:bg-gray-100 border border-gray-300 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
                 disabled={page <= 1}
                 onClick={() => setPage((prev) => Math.max(1, prev - 1))}
               >
                 Previous
               </button>
-              <span className="text-sm text-slate-400">
+              <span className="text-sm text-gray-500">
                 Page {page} of {totalPages}
               </span>
               <button
-                className="bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                className="bg-white/5 hover:bg-gray-100 border border-gray-300 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
                 disabled={page >= totalPages}
                 onClick={() =>
                   setPage((prev) => Math.min(totalPages, prev + 1))
@@ -800,7 +800,7 @@ export function BillingPayments() {
                 Invoice Detail
               </h2>
               <button
-                className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700"
+                className="p-2 rounded-lg hover:bg-white text-gray-400 hover:text-slate-700"
                 onClick={() => setDetailOpen(false)}
               >
                 <X className="w-4 h-4" />
@@ -831,7 +831,7 @@ export function BillingPayments() {
                   </div>
 
                   <div className="rounded-xl border border-slate-200 bg-white p-6">
-                    <p className="text-xs font-medium text-slate-600 mb-2 uppercase tracking-wider">
+                    <p className="text-xs font-medium text-gray-400 mb-2 uppercase tracking-wider">
                       Parties
                     </p>
                     <p className="text-sm text-slate-800">
@@ -843,13 +843,13 @@ export function BillingPayments() {
                     <p className="text-sm text-slate-800">
                       Phone: {detail.parties.residentPhone || '--'}
                     </p>
-                    <p className="text-sm text-slate-600">
+                    <p className="text-sm text-gray-400">
                       Community: {detail.parties.communityName}
                     </p>
                   </div>
 
                   <div className="rounded-xl border border-slate-200 bg-white p-6">
-                    <p className="text-xs font-medium text-slate-600 mb-2 uppercase tracking-wider">
+                    <p className="text-xs font-medium text-gray-400 mb-2 uppercase tracking-wider">
                       Amount
                     </p>
                     <p className="text-2xl font-semibold text-slate-900 font-['DM_Mono']">
@@ -870,16 +870,16 @@ export function BillingPayments() {
                   </div>
 
                   <div className="rounded-xl border border-slate-200 bg-white p-6">
-                    <p className="text-xs font-medium text-slate-600 mb-2 uppercase tracking-wider">
+                    <p className="text-xs font-medium text-gray-400 mb-2 uppercase tracking-wider">
                       Source Record
                     </p>
                     <p className="text-sm text-slate-800">
                       {detail.sourceRecord.label}
                     </p>
-                    <p className="text-sm text-slate-600">
+                    <p className="text-sm text-gray-400">
                       {detail.sourceRecord.secondaryLabel || 'Manually created'}
                     </p>
-                    <p className="text-sm text-slate-600 mt-1">
+                    <p className="text-sm text-gray-400 mt-1">
                       Amount:{' '}
                       {detail.sourceRecord.amount !== null
                         ? formatCurrency(detail.sourceRecord.amount)
@@ -888,11 +888,11 @@ export function BillingPayments() {
                   </div>
 
                   <div className="rounded-xl border border-slate-200 bg-white p-6">
-                    <p className="text-xs font-medium text-slate-600 mb-2 uppercase tracking-wider">
+                    <p className="text-xs font-medium text-gray-400 mb-2 uppercase tracking-wider">
                       Documents
                     </p>
                     {detail.documents.length === 0 ? (
-                      <p className="text-sm text-slate-500">
+                      <p className="text-sm text-gray-400">
                         No documents attached.
                       </p>
                     ) : (
@@ -902,14 +902,14 @@ export function BillingPayments() {
                             key={document.id}
                             className="flex items-center gap-3 p-3 rounded-lg bg-slate-50 border border-slate-200"
                           >
-                            <div className="w-12 h-12 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-xs text-slate-500">
+                            <div className="w-12 h-12 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-xs text-gray-400">
                               FILE
                             </div>
                             <div>
                               <p className="text-sm text-slate-800">
                                 {document.name}
                               </p>
-                              <p className="text-xs text-slate-500">
+                              <p className="text-xs text-gray-400">
                                 {document.mimeType || 'Unknown type'}
                               </p>
                             </div>
@@ -944,7 +944,7 @@ export function BillingPayments() {
                   Paid on {formatDate(detail.paidDate)}
                 </p>
               ) : (
-                <p className="text-sm text-slate-500">Cancelled</p>
+                <p className="text-sm text-gray-400">Cancelled</p>
               )}
             </div>
           </div>
@@ -965,7 +965,7 @@ export function BillingPayments() {
                 Create Invoice
               </h2>
               <button
-                className="p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700"
+                className="p-2 rounded-lg hover:bg-white text-gray-400 hover:text-slate-700"
                 onClick={() => setCreateOpen(false)}
               >
                 <X className="w-4 h-4" />
@@ -1122,7 +1122,7 @@ export function BillingPayments() {
           onClick={() => setSettingsOpen(false)}
         >
           <div
-            className="w-[960px] max-w-[calc(100vw-48px)] mt-8 rounded-xl border border-white/10 shadow-2xl shadow-black/60 overflow-hidden"
+            className="w-[960px] max-w-[calc(100vw-48px)] mt-8 rounded-xl border border-gray-300 shadow-2xl shadow-black/60 overflow-hidden"
             style={{ backgroundColor: '#ffffff', color: '#0f172a', borderColor: '#e2e8f0' }}
             onClick={(event) => event.stopPropagation()}
           >
@@ -1229,7 +1229,7 @@ export function BillingPayments() {
           onClick={() => setCategoryDrawerOpen(false)}
         >
           <div
-            className="fixed inset-y-0 right-0 w-[480px] border-l border-white/5 flex flex-col z-[61] shadow-2xl shadow-black/50"
+            className="fixed inset-y-0 right-0 w-[480px] border-l border-gray-200 flex flex-col z-[61] shadow-2xl shadow-black/50"
             style={{ backgroundColor: '#ffffff', borderLeftColor: '#e2e8f0' }}
             onClick={(event) => event.stopPropagation()}
           >
@@ -1238,7 +1238,7 @@ export function BillingPayments() {
                 Add Category
               </h2>
               <button
-                className="p-2 rounded-lg hover:bg-slate-100"
+                className="p-2 rounded-lg hover:bg-white"
                 style={{ color: '#475569' }}
                 onClick={() => setCategoryDrawerOpen(false)}
               >

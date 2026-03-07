@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import type { ComponentType } from "react";
 import { Card } from "./ui/card";
+import { cn } from "./ui/utils";
 
 type StatIcon =
   | "devices"
@@ -31,6 +32,8 @@ interface StatCardProps {
   subtitle?: string;
   icon: StatIcon;
   onClick?: () => void;
+  variant?: "light" | "dark";
+  className?: string;
 }
 
 const iconMap: Record<StatIcon, ComponentType<{ className?: string }>> = {
@@ -119,15 +122,52 @@ const toneMap: Record<
   },
 };
 
-export function StatCard({ title, value, subtitle, icon, onClick }: StatCardProps) {
+export function StatCard({
+  title,
+  value,
+  subtitle,
+  icon,
+  onClick,
+  variant = "light",
+  className,
+}: StatCardProps) {
   const IconComponent = iconMap[icon];
   const tone = toneMap[icon];
 
+  if (variant === "dark") {
+    return (
+      <Card
+        className={cn(
+          "bg-[#181c27] rounded-xl border border-white/5 p-6 cursor-pointer hover:border-white/10 transition-colors",
+          onClick ? "cursor-pointer" : "cursor-default",
+          className,
+        )}
+        onClick={onClick}
+      >
+        <div className="flex items-start justify-between mb-4">
+          <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">
+            {title}
+          </p>
+          <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
+            <IconComponent className="w-5 h-5 text-blue-400" />
+          </div>
+        </div>
+        <p className="text-3xl font-semibold text-slate-100 font-['DM_Mono']">
+          {value}
+        </p>
+        <p className="text-xs text-slate-500 mt-1">{subtitle ?? " "}</p>
+      </Card>
+    );
+  }
+
   return (
     <Card
-      className={`relative min-h-[108px] overflow-hidden gap-0 rounded-md border border-[#D6DEE8] bg-white p-4 shadow-[0_8px_20px_-18px_rgba(15,23,42,0.7)] transition hover:-translate-y-[1px] hover:border-[#C7D1DE] hover:shadow-[0_12px_22px_-18px_rgba(15,23,42,0.7)] ${
-        onClick ? "cursor-pointer" : ""
-      }`}
+      className={cn(
+        `relative min-h-[108px] overflow-hidden gap-0 rounded-md border border-[#D6DEE8] bg-white p-4 shadow-[0_8px_20px_-18px_rgba(15,23,42,0.7)] transition hover:-translate-y-[1px] hover:border-[#C7D1DE] hover:shadow-[0_12px_22px_-18px_rgba(15,23,42,0.7)] ${
+          onClick ? "cursor-pointer" : ""
+        }`,
+        className,
+      )}
       onClick={onClick}
     >
       <div className="absolute inset-y-0 left-0 w-1 bg-[#E2E8F0]" />

@@ -86,7 +86,10 @@ export class EmailService {
         `Email sent successfully to ${recipient}: ${info.messageId}`,
       );
     } catch (error: unknown) {
-      this.logger.error(`Failed to send email to ${recipient}`, error as any);
+      this.logger.error(
+        `Failed to send email to ${recipient}`,
+        error instanceof Error ? error.stack : String(error),
+      );
       throw error;
     }
   }
@@ -114,17 +117,21 @@ export class EmailService {
     });
 
     const raw = await response.text();
-    let parsed: any = null;
+    let parsed: Record<string, unknown> | null = null;
     try {
-      parsed = raw ? JSON.parse(raw) : null;
+      const json = raw ? (JSON.parse(raw) as unknown) : null;
+      parsed =
+        json && typeof json === 'object' && !Array.isArray(json)
+          ? (json as Record<string, unknown>)
+          : null;
     } catch {
       parsed = { raw };
     }
 
     if (!response.ok) {
       const msg =
-        parsed?.message ||
-        parsed?.error ||
+        (parsed && typeof parsed.message === 'string' ? parsed.message : null) ||
+        (parsed && typeof parsed.error === 'string' ? parsed.error : null) ||
         `Resend request failed with status ${response.status}`;
       throw new Error(msg);
     }

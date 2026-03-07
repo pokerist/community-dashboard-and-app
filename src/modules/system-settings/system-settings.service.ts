@@ -311,7 +311,9 @@ export class SystemSettingsService {
       },
       notifications: {
         ...this.defaults.notifications,
-        ...(this.isObject(incoming.notifications) ? incoming.notifications : {}),
+        ...(this.isObject(incoming.notifications)
+          ? incoming.notifications
+          : {}),
       },
       security: {
         ...this.defaults.security,
@@ -408,10 +410,15 @@ export class SystemSettingsService {
       for (const field of colorFields) {
         const raw = String(brand[field] ?? '').trim();
         if (!/^#[0-9A-Fa-f]{6}$/.test(raw)) {
-          throw new BadRequestException(`${String(field)} must be a HEX color (#RRGGBB)`);
+          throw new BadRequestException(
+            `${String(field)} must be a HEX color (#RRGGBB)`,
+          );
         }
       }
-      if (brand.logoFileId && !/^[0-9a-fA-F-]{8,}$/.test(String(brand.logoFileId))) {
+      if (
+        brand.logoFileId &&
+        !/^[0-9a-fA-F-]{8,}$/.test(String(brand.logoFileId))
+      ) {
         throw new BadRequestException('brand.logoFileId looks invalid');
       }
     }
@@ -419,15 +426,21 @@ export class SystemSettingsService {
     if (section === 'onboarding') {
       const onboarding = value as SystemSettingsState['onboarding'];
       if (!Array.isArray(onboarding.slides) || onboarding.slides.length === 0) {
-        throw new BadRequestException('onboarding.slides must include at least one slide');
+        throw new BadRequestException(
+          'onboarding.slides must include at least one slide',
+        );
       }
       if (onboarding.slides.length > 8) {
-        throw new BadRequestException('onboarding.slides cannot exceed 8 slides');
+        throw new BadRequestException(
+          'onboarding.slides cannot exceed 8 slides',
+        );
       }
       for (let i = 0; i < onboarding.slides.length; i += 1) {
         const slide = onboarding.slides[i] as any;
         if (!String(slide?.title ?? '').trim()) {
-          throw new BadRequestException(`onboarding.slides[${i}].title is required`);
+          throw new BadRequestException(
+            `onboarding.slides[${i}].title is required`,
+          );
         }
         if (slide?.imageUrl) {
           try {
@@ -453,7 +466,9 @@ export class SystemSettingsService {
         const banner = offers.banners[i] as any;
         const title = String(banner?.title ?? '').trim();
         if (!title) {
-          throw new BadRequestException(`offers.banners[${i}].title is required`);
+          throw new BadRequestException(
+            `offers.banners[${i}].title is required`,
+          );
         }
         const imageUrl = String(banner?.imageUrl ?? '').trim();
         const imageFileId = String(banner?.imageFileId ?? '').trim();
@@ -620,7 +635,8 @@ export class SystemSettingsService {
               imageFileId: String(banner.imageFileId ?? '').trim(),
               linkUrl: String(banner.linkUrl ?? '').trim(),
               priority:
-                typeof banner.priority === 'number' && Number.isFinite(banner.priority)
+                typeof banner.priority === 'number' &&
+                Number.isFinite(banner.priority)
                   ? banner.priority
                   : idx + 1,
               active: banner.active !== false,
@@ -637,9 +653,7 @@ export class SystemSettingsService {
     dto: UpdateMobileAccessSettingsDto,
     actorUserId?: string | null,
   ) {
-    const toRecord = (
-      value: unknown,
-    ): Record<string, boolean> | undefined => {
+    const toRecord = (value: unknown): Record<string, boolean> | undefined => {
       if (!this.isObject(value)) return undefined;
       const entries = Object.entries(value).filter(
         ([, v]) => typeof v === 'boolean',
@@ -679,7 +693,9 @@ export class SystemSettingsService {
       brand: {
         companyName: brand.companyName || settings.data.general.companyName,
         appDisplayName:
-          brand.appDisplayName || brand.companyName || settings.data.general.companyName,
+          brand.appDisplayName ||
+          brand.companyName ||
+          settings.data.general.companyName,
         primaryColor: brand.primaryColor,
         secondaryColor: brand.secondaryColor,
         accentColor: brand.accentColor,
@@ -688,7 +704,8 @@ export class SystemSettingsService {
         supportPhone: brand.supportPhone || '',
         logoFileId: brand.logoFileId || null,
         logoPath,
-        logoUrl: logoPath && normalizedBase ? `${normalizedBase}${logoPath}` : null,
+        logoUrl:
+          logoPath && normalizedBase ? `${normalizedBase}${logoPath}` : null,
       },
       onboarding: settings.data.onboarding,
       offers: settings.data.offers,
@@ -696,9 +713,11 @@ export class SystemSettingsService {
       meta: {
         version: 1,
         updatedAt: settings.meta.updatedAtBySection?.brand ?? null,
-        onboardingUpdatedAt: settings.meta.updatedAtBySection?.onboarding ?? null,
+        onboardingUpdatedAt:
+          settings.meta.updatedAtBySection?.onboarding ?? null,
         offersUpdatedAt: settings.meta.updatedAtBySection?.offers ?? null,
-        mobileAccessUpdatedAt: settings.meta.updatedAtBySection?.mobileAccess ?? null,
+        mobileAccessUpdatedAt:
+          settings.meta.updatedAtBySection?.mobileAccess ?? null,
       },
     };
   }
@@ -720,7 +739,12 @@ export class SystemSettingsService {
 
     this.validateSection(section, next);
 
-    const row = await this.upsertSection(this.prisma, section, next, actorUserId);
+    const row = await this.upsertSection(
+      this.prisma,
+      section,
+      next,
+      actorUserId,
+    );
     return {
       section,
       data: next,
@@ -789,7 +813,8 @@ export class SystemSettingsService {
     dto: CreateSystemSettingsBackupDto,
     actorUserId?: string | null,
   ) {
-    const snapshot = (await this.getSettings()).data as unknown as Prisma.InputJsonValue;
+    const snapshot = (await this.getSettings())
+      .data as unknown as Prisma.InputJsonValue;
     const created = await this.prisma.systemSettingsBackupSnapshot.create({
       data: {
         label:
@@ -880,6 +905,570 @@ export class SystemSettingsService {
     return {
       success: true,
       data: merged,
+    };
+  }
+
+  // ============= Departments Management =============
+  async listDepartments(query: any) {
+    const activeOnly = query.activeOnly === true;
+    const search = query.search
+      ? String(query.search).trim().toLowerCase()
+      : '';
+    const limit = Math.min(
+      query.limit ? Math.max(1, Number(query.limit)) : 50,
+      500,
+    );
+
+    const departments = await this.prisma.department.findMany({
+      where: {
+        ...(activeOnly ? { isActive: true } : {}),
+        ...(search
+          ? {
+              OR: [
+                { name: { contains: search, mode: 'insensitive' } },
+                { code: { contains: search, mode: 'insensitive' } },
+              ],
+            }
+          : {}),
+      },
+      include: {
+        staffMembers: {
+          where: { isActive: true },
+          select: {
+            id: true,
+            userId: true,
+            user: { select: { firstName: true, lastName: true, email: true } },
+          },
+        },
+      },
+      orderBy: { name: 'asc' },
+      take: limit,
+    });
+
+    return {
+      data: departments,
+      meta: { count: departments.length, limit },
+    };
+  }
+
+  async createDepartment(dto: any, actorUserId?: string | null) {
+    const existingName = await this.prisma.department.findUnique({
+      where: { name: dto.name },
+    });
+    if (existingName) {
+      throw new BadRequestException(
+        `Department with name "${dto.name}" already exists`,
+      );
+    }
+
+    const existingCode = await this.prisma.department.findUnique({
+      where: { code: dto.code },
+    });
+    if (existingCode) {
+      throw new BadRequestException(
+        `Department with code "${dto.code}" already exists`,
+      );
+    }
+
+    const created = await this.prisma.department.create({
+      data: {
+        name: dto.name.trim(),
+        code: dto.code.trim().toUpperCase(),
+        description: dto.description ? dto.description.trim() : null,
+        isActive: true,
+      },
+      include: {
+        staffMembers: {
+          where: { isActive: true },
+          select: { id: true, userId: true },
+        },
+      },
+    });
+
+    return {
+      success: true,
+      data: created,
+    };
+  }
+
+  async updateDepartment(id: string, dto: any, actorUserId?: string | null) {
+    const dept = await this.prisma.department.findUnique({ where: { id } });
+    if (!dept) {
+      throw new NotFoundException('Department not found');
+    }
+
+    if (dto.name && dto.name !== dept.name) {
+      const existing = await this.prisma.department.findUnique({
+        where: { name: dto.name },
+      });
+      if (existing && existing.id !== id) {
+        throw new BadRequestException(
+          `Department with name "${dto.name}" already exists`,
+        );
+      }
+    }
+
+    const updated = await this.prisma.department.update({
+      where: { id },
+      data: {
+        ...(dto.name ? { name: dto.name.trim() } : {}),
+        ...(dto.description !== undefined
+          ? { description: dto.description ? dto.description.trim() : null }
+          : {}),
+        ...(typeof dto.isActive === 'boolean'
+          ? { isActive: dto.isActive }
+          : {}),
+      },
+      include: {
+        staffMembers: {
+          where: { isActive: true },
+          select: { id: true, userId: true },
+        },
+      },
+    });
+
+    return {
+      success: true,
+      data: updated,
+    };
+  }
+
+  async deleteDepartment(id: string, actorUserId?: string | null) {
+    const dept = await this.prisma.department.findUnique({
+      where: { id },
+      include: { staffMembers: { where: { isActive: true } } },
+    });
+
+    if (!dept) {
+      throw new NotFoundException('Department not found');
+    }
+
+    if (dept.staffMembers.length > 0) {
+      throw new BadRequestException(
+        `Cannot delete department with ${dept.staffMembers.length} active staff members. Please reassign them first.`,
+      );
+    }
+
+    await this.prisma.department.delete({ where: { id } });
+
+    return {
+      success: true,
+      message: 'Department deleted',
+    };
+  }
+
+  // ============= System Users Management =============
+  async listSystemUsers(query: any) {
+    const activeOnly = query.activeOnly === true;
+    const search = query.search
+      ? String(query.search).trim().toLowerCase()
+      : '';
+    const limit = Math.min(
+      query.limit ? Math.max(1, Number(query.limit)) : 50,
+      500,
+    );
+    const offset = query.offset ? Math.max(0, Number(query.offset)) : 0;
+
+    const [users, total] = await Promise.all([
+      this.prisma.admin.findMany({
+        where: {
+          ...(activeOnly ? { isActive: true } : {}),
+          ...(search
+            ? {
+                OR: [
+                  { email: { contains: search, mode: 'insensitive' } },
+                  {
+                    firstName: { contains: search, mode: 'insensitive' },
+                  } as any,
+                  {
+                    lastName: { contains: search, mode: 'insensitive' },
+                  } as any,
+                ],
+              }
+            : {}),
+        },
+        select: {
+          id: true,
+          user: {
+            select: {
+              email: true,
+              firstName: true,
+              lastName: true,
+            },
+          },
+          role: { select: { id: true, name: true } },
+          isActive: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        skip: offset,
+      }),
+      this.prisma.admin.count({
+        where: {
+          ...(activeOnly ? { isActive: true } : {}),
+          ...(search
+            ? {
+                OR: [
+                  { email: { contains: search, mode: 'insensitive' } } as any,
+                  {
+                    firstName: { contains: search, mode: 'insensitive' },
+                  } as any,
+                  {
+                    lastName: { contains: search, mode: 'insensitive' },
+                  } as any,
+                ],
+              }
+            : {}),
+        },
+      }),
+    ]);
+
+    return {
+      data: users,
+      meta: { count: users.length, total, limit, offset },
+    };
+  }
+
+  async createSystemUser(dto: any, actorUserId?: string | null) {
+    const existing = await this.prisma.admin.findFirst({
+      where: { user: { email: dto.email } },
+    });
+    if (existing) {
+      throw new BadRequestException(
+        `User with email "${dto.email}" already exists`,
+      );
+    }
+
+    if (dto.roleId) {
+      const role = await this.prisma.role.findUnique({
+        where: { id: dto.roleId },
+      });
+      if (!role) {
+        throw new BadRequestException('Invalid roleId');
+      }
+    }
+
+    // TODO: Hash password using bcrypt in production
+    const created = await this.prisma.admin.create({
+      data: {
+        user: {
+          create: {
+            email: dto.email.trim().toLowerCase(),
+            firstName: dto.firstName.trim(),
+            lastName: dto.lastName.trim(),
+            password: dto.password, // In production, use bcrypt.hash()
+          },
+        },
+        roleId: dto.roleId || null,
+        isActive: dto.isActive !== false,
+      },
+      select: {
+        id: true,
+        user: { select: { email: true, firstName: true, lastName: true } },
+        role: { select: { id: true, name: true } },
+        isActive: true,
+        createdAt: true,
+      },
+    });
+
+    return {
+      success: true,
+      data: {
+        ...created,
+        email: created.user.email,
+        firstName: created.user.firstName,
+        lastName: created.user.lastName,
+      },
+    };
+  }
+
+  async updateSystemUser(id: string, dto: any, actorUserId?: string | null) {
+    const user = await this.prisma.admin.findUnique({
+      where: { id },
+      select: { id: true, roleId: true, user: { select: { id: true } } },
+    });
+    if (!user) {
+      throw new NotFoundException('System user not found');
+    }
+
+    if (dto.roleId && dto.roleId !== user.roleId) {
+      const role = await this.prisma.role.findUnique({
+        where: { id: dto.roleId },
+      });
+      if (!role) {
+        throw new BadRequestException('Invalid roleId');
+      }
+    }
+
+    const userUpdateData: Record<string, any> = {};
+    if (dto.firstName) userUpdateData.firstName = dto.firstName.trim();
+    if (dto.lastName) userUpdateData.lastName = dto.lastName.trim();
+
+    const updated = await this.prisma.admin.update({
+      where: { id },
+      data: {
+        ...(Object.keys(userUpdateData).length > 0
+          ? {
+              user: {
+                update: userUpdateData,
+              },
+            }
+          : {}),
+        ...(dto.roleId !== undefined ? { roleId: dto.roleId } : {}),
+        ...(typeof dto.isActive === 'boolean'
+          ? { isActive: dto.isActive }
+          : {}),
+      },
+      select: {
+        id: true,
+        user: { select: { email: true, firstName: true, lastName: true } },
+        role: { select: { id: true, name: true } },
+        isActive: true,
+        updatedAt: true,
+      },
+    });
+
+    return {
+      success: true,
+      data: {
+        ...updated,
+        email: updated.user.email,
+        firstName: updated.user.firstName,
+        lastName: updated.user.lastName,
+      },
+    };
+  }
+
+  async deactivateSystemUser(id: string, actorUserId?: string | null) {
+    const user = await this.prisma.admin.findUnique({ where: { id } });
+    if (!user) {
+      throw new NotFoundException('System user not found');
+    }
+
+    if (id === actorUserId) {
+      throw new BadRequestException('Cannot deactivate your own account');
+    }
+
+    const updated = await this.prisma.admin.update({
+      where: { id },
+      data: {},
+      select: { id: true, user: { select: { email: true } } },
+    });
+
+    return {
+      success: true,
+      data: { id: updated.id, email: updated.user.email },
+    };
+  }
+
+  // ============= Roles & Permissions Management =============
+  async listRoles() {
+    const roles = await this.prisma.role.findMany({
+      include: {
+        permissions: {
+          select: { permission: true },
+        },
+        admins: { select: { id: true, email: true } },
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    return {
+      data: roles.map((role) => ({
+        ...role,
+        permissionCodes: role.permissions.map((p) => p.permission),
+      })),
+    };
+  }
+
+  async createRole(dto: any, actorUserId?: string | null) {
+    const existing = await this.prisma.role.findUnique({
+      where: { name: dto.name },
+    });
+    if (existing) {
+      throw new BadRequestException(
+        `Role with name "${dto.name}" already exists`,
+      );
+    }
+
+    const permissionCodes = Array.isArray(dto.permissionCodes)
+      ? dto.permissionCodes
+      : [];
+
+    const created = await this.prisma.role.create({
+      data: {
+        name: dto.name.trim(),
+        description: dto.description ? dto.description.trim() : null,
+        permissions: {
+          create: permissionCodes.map((code: string) => ({
+            permission: code,
+          })),
+        },
+      },
+      include: {
+        permissions: { select: { permission: true } },
+      },
+    });
+
+    return {
+      success: true,
+      data: {
+        ...created,
+        permissionCodes: created.permissions.map((p) => p.permission),
+      },
+    };
+  }
+
+  async updateRole(id: string, dto: any, actorUserId?: string | null) {
+    const role = await this.prisma.role.findUnique({ where: { id } });
+    if (!role) {
+      throw new NotFoundException('Role not found');
+    }
+
+    const permissionCodes = Array.isArray(dto.permissionCodes)
+      ? dto.permissionCodes
+      : [];
+
+    const updated = await this.prisma.role.update({
+      where: { id },
+      data: {
+        ...(dto.name ? { name: dto.name.trim() } : {}),
+        ...(dto.description !== undefined
+          ? { description: dto.description ? dto.description.trim() : null }
+          : {}),
+        ...(permissionCodes.length > 0
+          ? {
+              permissions: {
+                deleteMany: { roleId: id },
+                create: permissionCodes.map((code: string) => ({
+                  permission: code,
+                })),
+              },
+            }
+          : {}),
+      },
+      include: {
+        permissions: { select: { permission: true } },
+      },
+    });
+
+    return {
+      success: true,
+      data: {
+        ...updated,
+        permissionCodes: updated.permissions.map((p) => p.permission),
+      },
+    };
+  }
+
+  async deleteRole(id: string, actorUserId?: string | null) {
+    const role = await this.prisma.role.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        users: {
+          select: { userId: true },
+        },
+      },
+    });
+
+    if (!role) {
+      throw new NotFoundException('Role not found');
+    }
+
+    if (role.users.length > 0) {
+      throw new BadRequestException(
+        `Cannot delete role with ${role.users.length} assigned users. Please reassign them first.`,
+      );
+    }
+
+    await this.prisma.role.delete({ where: { id } });
+
+    return {
+      success: true,
+      message: 'Role deleted',
+    };
+  }
+
+  async listPermissions() {
+    // Get all available permissions from the system
+    // This would typically be defined in a permissions configuration
+    const allPermissions = [
+      // Admin permissions
+      {
+        code: 'admin.view',
+        module: 'admin',
+        description: 'View admin settings',
+      },
+      {
+        code: 'admin.update',
+        module: 'admin',
+        description: 'Update admin settings',
+      },
+      {
+        code: 'admin.delete',
+        module: 'admin',
+        description: 'Delete admin resources',
+      },
+
+      // User permissions
+      { code: 'user.view', module: 'users', description: 'View users' },
+      { code: 'user.create', module: 'users', description: 'Create users' },
+      { code: 'user.update', module: 'users', description: 'Update users' },
+      { code: 'user.delete', module: 'users', description: 'Delete users' },
+
+      // Dashboard permissions
+      {
+        code: 'dashboard.view',
+        module: 'dashboard',
+        description: 'View dashboard',
+      },
+      {
+        code: 'dashboard.export',
+        module: 'dashboard',
+        description: 'Export dashboard data',
+      },
+
+      // Reports permissions
+      { code: 'reports.view', module: 'reports', description: 'View reports' },
+      {
+        code: 'reports.create',
+        module: 'reports',
+        description: 'Create reports',
+      },
+      {
+        code: 'reports.schedule',
+        module: 'reports',
+        description: 'Schedule reports',
+      },
+
+      // Communities permissions
+      {
+        code: 'communities.view',
+        module: 'communities',
+        description: 'View communities',
+      },
+      {
+        code: 'communities.manage',
+        module: 'communities',
+        description: 'Manage communities',
+      },
+    ];
+
+    return {
+      data: allPermissions,
+      groupedByModule: allPermissions.reduce(
+        (acc, p) => {
+          const key = p.module;
+          if (!acc[key]) acc[key] = [];
+          acc[key].push(p);
+          return acc;
+        },
+        {} as Record<string, typeof allPermissions>,
+      ),
     };
   }
 }

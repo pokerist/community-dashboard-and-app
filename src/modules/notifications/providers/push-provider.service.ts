@@ -119,17 +119,23 @@ export class PushProviderService {
     );
 
     const text = await response.text();
-    let parsed: any = null;
+    let parsed: Record<string, unknown> | null = null;
     try {
-      parsed = text ? JSON.parse(text) : null;
+      const json = text ? (JSON.parse(text) as unknown) : null;
+      parsed = this.toObject(json);
     } catch {
       parsed = { raw: text };
     }
 
     if (!response.ok) {
+      const parsedError = this.toObject(parsed?.error);
       const errMessage =
-        parsed?.error?.message ||
-        parsed?.error?.status ||
+        (parsedError && typeof parsedError.message === 'string'
+          ? parsedError.message
+          : null) ||
+        (parsedError && typeof parsedError.status === 'string'
+          ? parsedError.status
+          : null) ||
         `FCM request failed with status ${response.status}`;
       throw new Error(errMessage);
     }
@@ -181,24 +187,34 @@ export class PushProviderService {
     });
 
     const text = await response.text();
-    let parsed: any = null;
+    let parsed: Record<string, unknown> | null = null;
     try {
-      parsed = text ? JSON.parse(text) : null;
+      const json = text ? (JSON.parse(text) as unknown) : null;
+      parsed = this.toObject(json);
     } catch {
       parsed = { raw: text };
     }
 
-    if (!response.ok || !parsed?.access_token) {
+    if (!response.ok || !parsed || typeof parsed.access_token !== 'string') {
       throw new Error(
-        parsed?.error_description ||
-          parsed?.error ||
+        (parsed && typeof parsed.error_description === 'string'
+          ? parsed.error_description
+          : null) ||
+          (parsed && typeof parsed.error === 'string' ? parsed.error : null) ||
           `Failed to obtain Google OAuth token (${response.status})`,
       );
     }
 
     this.accessTokenCache = {
       token: parsed.access_token,
-      expiresAtEpochMs: Date.now() + Number(parsed.expires_in ?? 3600) * 1000,
+      expiresAtEpochMs:
+        Date.now() +
+        Number(
+          parsed && typeof parsed.expires_in === 'number'
+            ? parsed.expires_in
+            : 3600,
+        ) *
+          1000,
     };
 
     return this.accessTokenCache.token;
@@ -239,5 +255,12 @@ export class PushProviderService {
     const privateKey = String(fcm.privateKey ?? '').replace(/\\n/g, '\n');
     if (!projectId || !clientEmail || !privateKey) return null;
     return { projectId, clientEmail, privateKey };
+  }
+
+  private toObject(value: unknown): Record<string, unknown> | null {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      return value as Record<string, unknown>;
+    }
+    return null;
   }
 }

@@ -1,1275 +1,143 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Card } from "../ui/card";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
-import { Badge } from "../ui/badge";
+import { useEffect, useMemo, useState } from "react";
+import { ComplaintStatus, Priority } from "@prisma/client";
+import { Edit2, Eye, Plus, Search } from "lucide-react";
 import { toast } from "sonner";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogFooter,
-} from "../ui/dialog";
-import { Label } from "../ui/label";
-import { Textarea } from "../ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { Switch } from "../ui/switch";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../ui/table";
-import { Search, AlertTriangle, Ban, Plus, Eye, Send, RefreshCw } from "lucide-react";
+import { DataTable, type DataTableColumn } from "../DataTable";
+import { DrawerForm } from "../DrawerForm";
+import { EmptyState } from "../EmptyState";
+import { PageHeader } from "../PageHeader";
+import { SkeletonTable } from "../SkeletonTable";
+import { StatCard } from "../StatCard";
+import { StatusBadge } from "../StatusBadge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
-import apiClient from "../../lib/api-client";
-import {
-  errorMessage,
-  extractRows,
-  formatCurrencyEGP,
-  formatDate,
-  formatDateTime,
-  getPriorityColorClass,
-  getStatusColorClass,
-  humanizeEnum,
-} from "../../lib/live-data";
-import {
-  adminComplaintStatusLabel,
-  adminPriorityLabel,
-  adminViolationStatusLabel,
-} from "../../lib/status-labels";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
+import { cn } from "../ui/utils";
+import complaintsService, { type ComplaintCategoryItem, type ComplaintDetail, type ComplaintInvoice, type ComplaintListItem, type ComplaintStats } from "../../lib/complaintsService";
 
-interface ComplaintListRow {
-  id: string;
-  complaintNumber?: string | null;
-  reporterId?: string | null;
-  unitId?: string | null;
-  title?: string | null;
-  team?: string | null;
-  category?: string | null;
-  description?: string | null;
-  priority?: string | null;
-  status?: string | null;
-  createdAt?: string | null;
-  updatedAt?: string | null;
-  resolvedAt?: string | null;
-  resolutionNotes?: string | null;
-  reporter?: { id?: string; nameEN?: string | null; email?: string | null; phone?: string | null } | null;
-  unit?: { id?: string; unitNumber?: string | null; block?: string | null; projectName?: string | null } | null;
-  assignedTo?: { id?: string; nameEN?: string | null; email?: string | null } | null;
-}
-
-interface ComplaintCommentRow {
-  id: string;
-  body: string;
-  isInternal?: boolean;
-  createdAt?: string | null;
-  createdById?: string | null;
-  createdBy?: { id?: string; nameEN?: string | null; email?: string | null } | null;
-}
-
-type PendingFocusEntity = {
-  section?: string;
-  entityType?: string | null;
-  entityId?: string | null;
-};
-
-type ComplaintsTab = "complaints" | "violations";
-type ComplaintPreset = "all" | "pending" | "overdue" | "closed";
-
-const COMPLAINT_STATUSES = ["NEW", "IN_PROGRESS", "RESOLVED", "CLOSED"] as const;
+const PRIORITY_DOT: Record<Priority, string> = { CRITICAL: "bg-red-500", HIGH: "bg-orange-500", MEDIUM: "bg-amber-500", LOW: "bg-slate-500" };
+const dot = ["bg-blue-400","bg-emerald-400","bg-amber-400","bg-red-400","bg-violet-400","bg-orange-400","bg-teal-400","bg-rose-400"];
+const fmt = (v?: string | null) => (v ? new Date(v).toLocaleString() : "—");
 
 export function ComplaintsViolations() {
-  const [isCreateComplaintOpen, setIsCreateComplaintOpen] = useState(false);
-  const [isCreateViolationOpen, setIsCreateViolationOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [activeTab, setActiveTab] = useState<ComplaintsTab>("complaints");
-  const [complaintsData, setComplaintsData] = useState<any[]>([]);
-  const [violationsData, setViolationsData] = useState<any[]>([]);
-  const [residentOptions, setResidentOptions] = useState<Array<{ id: string; label: string }>>([]);
-  const [unitOptions, setUnitOptions] = useState<Array<{ id: string; label: string }>>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isSubmittingComplaint, setIsSubmittingComplaint] = useState(false);
-  const [isSubmittingViolation, setIsSubmittingViolation] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [complaintStatusFilter, setComplaintStatusFilter] = useState<string>("all");
-  const [complaintPreset, setComplaintPreset] = useState<ComplaintPreset>("all");
-  const [isComplaintDialogOpen, setIsComplaintDialogOpen] = useState(false);
-  const [activeComplaintId, setActiveComplaintId] = useState<string | null>(null);
-  const [activeComplaint, setActiveComplaint] = useState<ComplaintListRow | null>(null);
-  const [complaintComments, setComplaintComments] = useState<ComplaintCommentRow[]>([]);
-  const [complaintDialogLoading, setComplaintDialogLoading] = useState(false);
-  const [complaintReplyText, setComplaintReplyText] = useState("");
-  const [complaintReplyInternal, setComplaintReplyInternal] = useState(false);
-  const [complaintReplySubmitting, setComplaintReplySubmitting] = useState(false);
-  const [complaintStatusDraft, setComplaintStatusDraft] = useState<string>("");
-  const [complaintStatusUpdating, setComplaintStatusUpdating] = useState(false);
-  const [complaintResolutionNotesDraft, setComplaintResolutionNotesDraft] = useState("");
-  const [complaintTeamDraft, setComplaintTeamDraft] = useState("");
-  const [complaintFormData, setComplaintFormData] = useState({
-    reporterId: "",
-    unitId: "",
-    title: "",
-    team: "",
-    priority: "",
-    description: "",
-  });
-  const [violationFormData, setViolationFormData] = useState({
-    unitId: "",
-    residentId: "",
-    type: "",
-    fineAmount: "",
-    dueDate: "",
-    description: "",
-  });
+  const [tab, setTab] = useState<"complaints" | "settings">("complaints");
+  const [stats, setStats] = useState<ComplaintStats | null>(null);
+  const [resolvedMonth, setResolvedMonth] = useState(0);
+  const [categories, setCategories] = useState<ComplaintCategoryItem[]>([]);
+  const [rows, setRows] = useState<ComplaintListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState("ALL");
+  const [categoryId, setCategoryId] = useState("ALL");
+  const [priority, setPriority] = useState("ALL");
+  const [slaOnly, setSlaOnly] = useState(false);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detail, setDetail] = useState<ComplaintDetail | null>(null);
+  const [detailTab, setDetailTab] = useState<"details" | "comments" | "invoices">("details");
+  const [commentBody, setCommentBody] = useState("");
+  const [categoryOpen, setCategoryOpen] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<ComplaintCategoryItem | null>(null);
+  const [categoryForm, setCategoryForm] = useState({ name: "", slaHours: "24", description: "" });
 
-  const resetComplaintsFilters = useCallback((tab: ComplaintsTab = "complaints") => {
-    setActiveTab(tab);
-    setSearchTerm("");
-    setComplaintStatusFilter("all");
-    setComplaintPreset("all");
-    if (typeof window !== "undefined") {
-      try {
-        window.localStorage.removeItem("admin.complaintsViolations.filters");
-      } catch {
-        // ignore storage failures
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
+  const load = async () => {
+    setLoading(true);
     try {
-      const raw = window.localStorage.getItem("admin.complaintsViolations.filters");
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as {
-        tab?: ComplaintsTab;
-        search?: string;
-        complaintStatusFilter?: string;
-        complaintPreset?: ComplaintPreset;
-      };
-      setActiveTab(parsed.tab === "violations" ? "violations" : "complaints");
-      setSearchTerm(String(parsed.search ?? ""));
-      setComplaintStatusFilter(String(parsed.complaintStatusFilter ?? "all"));
-      setComplaintPreset(
-        parsed.complaintPreset === "pending" ||
-          parsed.complaintPreset === "overdue" ||
-          parsed.complaintPreset === "closed"
-          ? parsed.complaintPreset
-          : "all",
-      );
-    } catch {
-      // ignore malformed cache
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(
-        "admin.complaintsViolations.filters",
-        JSON.stringify({
-          tab: activeTab,
-          search: searchTerm,
-          complaintStatusFilter,
-          complaintPreset,
-        }),
-      );
-    } catch {
-      // ignore storage failures
-    }
-  }, [activeTab, complaintPreset, complaintStatusFilter, searchTerm]);
-
-  const loadData = useCallback(async () => {
-    setIsLoading(true);
-    setLoadError(null);
-    try {
-      const [complaintsRes, violationsRes, residentsRes, unitsRes] = await Promise.all([
-        apiClient.get("/complaints", { params: { page: 1, limit: 100 } }),
-        apiClient.get("/violations", { params: { page: 1, limit: 100 } }),
-        apiClient.get("/admin/users", { params: { userType: "resident", take: 500, skip: 0 } }),
-        apiClient.get("/units", { params: { page: 1, limit: 100 } }),
+      const month = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+      const [st, cats, list, resolved] = await Promise.all([
+        complaintsService.getComplaintStats(),
+        complaintsService.listCategories(true),
+        complaintsService.listComplaints({ page, limit: 25, search: search || undefined, status: status === "ALL" ? undefined : (status as ComplaintStatus), categoryId: categoryId === "ALL" ? undefined : categoryId, priority: priority === "ALL" ? undefined : (priority as Priority), slaBreached: slaOnly || undefined }),
+        complaintsService.listComplaints({ page: 1, limit: 1, status: ComplaintStatus.RESOLVED, dateFrom: month }),
       ]);
-      setComplaintsData(extractRows(complaintsRes.data));
-      setViolationsData(extractRows(violationsRes.data));
-
-      const residents = extractRows(residentsRes.data).map((user: any) => ({
-        id: String(user.id),
-        label: user.nameEN ?? user.nameAR ?? user.email ?? user.phone ?? String(user.id),
-      }));
-      const units = extractRows(unitsRes.data).map((unit: any) => ({
-        id: String(unit.id),
-        label:
-          [unit.projectName, unit.block ? `Block ${unit.block}` : null, unit.unitNumber ? `Unit ${unit.unitNumber}` : null]
-            .filter(Boolean)
-            .join(" - ") || String(unit.id),
-      }));
-
-      setResidentOptions(residents);
-      setUnitOptions(units);
-    } catch (error) {
-      const msg = errorMessage(error);
-      setLoadError(msg);
-      toast.error("Failed to load complaints/violations", { description: msg });
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadData();
-  }, [loadData]);
-
-  const handleCreateComplaint = async () => {
-    if (
-      !complaintFormData.reporterId ||
-      !complaintFormData.title ||
-      !complaintFormData.team ||
-      !complaintFormData.description
-    ) {
-      toast.error("Reporter, title, team, and description are required");
-      return;
-    }
-
-    setIsSubmittingComplaint(true);
-    try {
-      await apiClient.post("/complaints/admin/create", {
-        reporterId: complaintFormData.reporterId,
-        unitId: complaintFormData.unitId || undefined,
-        title: complaintFormData.title,
-        team: complaintFormData.team,
-        category: complaintFormData.team,
-        priority: complaintFormData.priority || undefined,
-        description: complaintFormData.description,
-      });
-
-      toast.success("Complaint created");
-      setIsCreateComplaintOpen(false);
-      setComplaintFormData({
-        reporterId: "",
-        unitId: "",
-        title: "",
-        team: "",
-        priority: "",
-        description: "",
-      });
-      await loadData();
-    } catch (error) {
-      toast.error("Failed to create complaint", { description: errorMessage(error) });
-    } finally {
-      setIsSubmittingComplaint(false);
-    }
+      setStats(st); setCategories(cats); setRows(list.data); setTotal(list.total); setTotalPages(list.totalPages); setResolvedMonth(resolved.total);
+    } catch { toast.error("Failed to load complaints"); }
+    finally { setLoading(false); }
   };
 
-  const handleCreateViolation = async () => {
-    if (!violationFormData.unitId || !violationFormData.type || !violationFormData.description) {
-      toast.error("Unit, type, and description are required");
-      return;
-    }
-    if (!violationFormData.dueDate) {
-      toast.error("Due date is required");
-      return;
-    }
+  useEffect(() => { void load(); }, [page, search, status, categoryId, priority, slaOnly]);
 
-    setIsSubmittingViolation(true);
-    try {
-      await apiClient.post("/violations", {
-        unitId: violationFormData.unitId,
-        residentId: violationFormData.residentId || undefined,
-        type: violationFormData.type,
-        description: violationFormData.description,
-        fineAmount: Number(violationFormData.fineAmount || 0),
-        dueDate: new Date(violationFormData.dueDate).toISOString(),
-      });
+  const cols = useMemo<DataTableColumn<ComplaintListItem>[]>(() => [
+    { key: "n", header: "#", className: "w-[130px]", render: (r) => <span className="font-['DM_Mono']">{r.complaintNumber}</span> },
+    { key: "t", header: "Title", render: (r) => <span>{r.title ?? "Untitled complaint"}</span> },
+    { key: "c", header: "Category", className: "w-[150px]", render: (r) => <span>{r.categoryName ?? "—"}</span> },
+    { key: "u", header: "Unit", className: "w-[110px]", render: (r) => <span>{r.unitNumber ?? "—"}</span> },
+    { key: "r", header: "Reporter", className: "w-[160px]", render: (r) => <span>{r.reporterName}</span> },
+    { key: "a", header: "Assignee", className: "w-[160px]", render: (r) => <span>{r.assigneeName ?? "Unassigned"}</span> },
+    { key: "p", header: "Priority", className: "w-[120px]", render: (r) => <span className="inline-flex items-center gap-2"><span className={cn("w-2 h-2 rounded-full", PRIORITY_DOT[r.priority])} />{r.priority}</span> },
+    { key: "sla", header: "SLA", className: "w-[120px]", render: (r) => r.slaStatus === "ON_TRACK" ? <span className="text-emerald-400">{Math.max(r.hoursRemaining ?? 0, 0)}h left</span> : r.slaStatus === "BREACHED" ? <span className="text-red-400">{Math.abs(r.hoursRemaining ?? 0)}h overdue</span> : <span className="text-[#475569]">—</span> },
+    { key: "s", header: "Status", className: "w-[120px]", render: (r) => <StatusBadge value={r.status} /> },
+    { key: "x", header: "Actions", className: "w-[80px] text-right", render: (r) => <button type="button" onClick={() => void complaintsService.getComplaintDetail(r.id).then((d) => { setDetail(d); setDetailOpen(true); setDetailTab("details"); }).catch(() => toast.error("Failed to load detail"))} className="inline-flex p-2 rounded-lg hover:bg-[#F8FAFC] text-slate-400 hover:text-[#1E293B]"><Eye className="w-4 h-4" /></button> },
+  ], []);
 
-      toast.success("Violation created");
-      setIsCreateViolationOpen(false);
-      setViolationFormData({
-        unitId: "",
-        residentId: "",
-        type: "",
-        fineAmount: "",
-        dueDate: "",
-        description: "",
-      });
-      await loadData();
-    } catch (error) {
-      toast.error("Failed to create violation", { description: errorMessage(error) });
-    } finally {
-      setIsSubmittingViolation(false);
-    }
-  };
+  const invoiceCols = useMemo<DataTableColumn<ComplaintInvoice>[]>(() => [
+    { key: "n", header: "Invoice #", render: (r) => <span className="font-['DM_Mono']">{r.invoiceNumber}</span> },
+    { key: "a", header: "Amount", render: (r) => <span className="font-['DM_Mono']">EGP {r.amount.toLocaleString()}</span> },
+    { key: "t", header: "Type", render: (r) => <span>{r.type}</span> },
+    { key: "s", header: "Status", render: (r) => <StatusBadge value={r.status} /> },
+    { key: "d", header: "Due Date", render: (r) => <span>{fmt(r.dueDate)}</span> },
+  ], []);
 
-  const loadComplaintDetail = useCallback(async (complaintId: string) => {
-    setComplaintDialogLoading(true);
-    try {
-      const [detailRes, commentsRes] = await Promise.all([
-        apiClient.get(`/complaints/${complaintId}`),
-        apiClient.get(`/complaints/${complaintId}/comments`),
-      ]);
-      const detail = detailRes.data as ComplaintListRow;
-      const comments = Array.isArray(commentsRes.data)
-        ? (commentsRes.data as ComplaintCommentRow[])
-        : [];
-      setActiveComplaint(detail);
-      setComplaintComments(comments);
-      setComplaintStatusDraft(String(detail.status ?? "NEW").toUpperCase());
-      setComplaintResolutionNotesDraft(detail.resolutionNotes ?? "");
-      setComplaintTeamDraft(String(detail.team ?? "").trim());
-    } catch (error) {
-      toast.error("Failed to load complaint details", { description: errorMessage(error) });
-      setActiveComplaint(null);
-      setComplaintComments([]);
-    } finally {
-      setComplaintDialogLoading(false);
-    }
-  }, []);
-
-  const openComplaintDialog = useCallback(async (complaint: ComplaintListRow) => {
-    setActiveComplaintId(complaint.id);
-    setIsComplaintDialogOpen(true);
-    setComplaintReplyText("");
-    setComplaintReplyInternal(false);
-    await loadComplaintDetail(complaint.id);
-  }, [loadComplaintDetail]);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || complaintsData.length === 0) return;
-
-    let parsed: PendingFocusEntity | null = null;
-    try {
-      const raw = window.sessionStorage.getItem("admin.focusEntity");
-      if (!raw) return;
-      parsed = JSON.parse(raw) as PendingFocusEntity;
-    } catch {
-      return;
-    }
-
-    const targetSection = String(parsed?.section ?? "").trim().toLowerCase();
-    const targetId = String(parsed?.entityId ?? "").trim();
-    const targetEntityType = String(parsed?.entityType ?? "").trim().toUpperCase();
-    if (!targetId || targetSection !== "complaints") return;
-    if (targetEntityType && targetEntityType !== "COMPLAINT") return;
-
-    const complaint = complaintsData.find((row: any) => String(row?.id) === targetId);
-    if (!complaint) return;
-
-    window.sessionStorage.removeItem("admin.focusEntity");
-    void openComplaintDialog(complaint as ComplaintListRow);
-  }, [complaintsData, openComplaintDialog]);
-
-  const closeComplaintDialog = useCallback(() => {
-    setIsComplaintDialogOpen(false);
-    setActiveComplaintId(null);
-    setActiveComplaint(null);
-    setComplaintComments([]);
-    setComplaintReplyText("");
-    setComplaintReplyInternal(false);
-    setComplaintStatusDraft("");
-    setComplaintResolutionNotesDraft("");
-    setComplaintTeamDraft("");
-  }, []);
-
-  const refreshActiveComplaint = useCallback(async () => {
-    if (!activeComplaintId) return;
-    await loadComplaintDetail(activeComplaintId);
-  }, [activeComplaintId, loadComplaintDetail]);
-
-  const submitComplaintReply = useCallback(async () => {
-    if (!activeComplaintId) return;
-    const body = complaintReplyText.trim();
-    if (!body) return;
-
-    setComplaintReplySubmitting(true);
-    try {
-      await apiClient.post(`/complaints/${activeComplaintId}/comments`, {
-        body,
-        isInternal: complaintReplyInternal,
-      });
-      toast.success(complaintReplyInternal ? "Internal note posted" : "Reply posted");
-      setComplaintReplyText("");
-      setComplaintReplyInternal(false);
-      await refreshActiveComplaint();
-    } catch (error) {
-      toast.error("Failed to post comment", { description: errorMessage(error) });
-    } finally {
-      setComplaintReplySubmitting(false);
-    }
-  }, [activeComplaintId, complaintReplyInternal, complaintReplyText, refreshActiveComplaint]);
-
-  const applyComplaintStatus = useCallback(async () => {
-    if (!activeComplaintId || !complaintStatusDraft) return;
-    const target = String(complaintStatusDraft).toUpperCase();
-    const requiresNotes = target === "RESOLVED" || target === "CLOSED";
-    if (requiresNotes && !complaintResolutionNotesDraft.trim()) {
-      toast.error("Resolution notes required", { description: "Add resolution notes before resolving or closing." });
-      return;
-    }
-
-    setComplaintStatusUpdating(true);
-    try {
-      await apiClient.patch(`/complaints/${activeComplaintId}`, {
-        status: target,
-        resolutionNotes: complaintResolutionNotesDraft.trim() || undefined,
-        team: complaintTeamDraft.trim() || undefined,
-      });
-      toast.success("Complaint status updated");
-      await Promise.all([loadData(), refreshActiveComplaint()]);
-    } catch (error) {
-      toast.error("Failed to update complaint", { description: errorMessage(error) });
-    } finally {
-      setComplaintStatusUpdating(false);
-    }
-  }, [
-    activeComplaintId,
-    complaintStatusDraft,
-    complaintTeamDraft,
-    complaintResolutionNotesDraft,
-    loadData,
-    refreshActiveComplaint,
-  ]);
-
-  const filteredComplaints = useMemo(() => {
-    const q = searchTerm.trim().toLowerCase();
-    const now = Date.now();
-    const overdueThresholdMs = 24 * 60 * 60 * 1000;
-    return complaintsData.filter((c: any) => {
-      const status = String(c.status ?? "").toUpperCase();
-      if (complaintStatusFilter !== "all" && status !== complaintStatusFilter) return false;
-      if (complaintPreset === "pending" && !(status === "NEW" || status === "IN_PROGRESS")) {
-        return false;
-      }
-      if (complaintPreset === "closed" && !(status === "RESOLVED" || status === "CLOSED")) {
-        return false;
-      }
-      if (complaintPreset === "overdue") {
-        if (!(status === "NEW" || status === "IN_PROGRESS")) return false;
-        const createdTs = c.createdAt ? new Date(c.createdAt).getTime() : NaN;
-        if (!Number.isFinite(createdTs) || now - createdTs < overdueThresholdMs) {
-          return false;
-        }
-      }
-      if (!q) return true;
-      return [
-        c.complaintNumber,
-        c.id,
-        c.title,
-        c.team,
-        c.category,
-        c.description,
-        c.status,
-        c.priority,
-        c.reporter?.nameEN,
-        c.reporter?.email,
-        c.unit?.unitNumber,
-      ]
-        .filter(Boolean)
-        .some((v) => String(v).toLowerCase().includes(q));
-    });
-  }, [complaintPreset, complaintsData, complaintStatusFilter, searchTerm]);
-
-  const filteredViolations = useMemo(() => {
-    const q = searchTerm.trim().toLowerCase();
-    return violationsData.filter((v: any) => {
-      if (!q) return true;
-      return [
-        v.violationNumber,
-        v.id,
-        v.type,
-        v.description,
-        v.status,
-        v.resident?.nameEN,
-        v.unit?.unitNumber,
-      ]
-        .filter(Boolean)
-        .some((x) => String(x).toLowerCase().includes(q));
-    });
-  }, [violationsData, searchTerm]);
-
-  const openComplaints = complaintsData.filter((c) =>
-    ["NEW", "OPEN", "IN_PROGRESS", "PENDING"].includes(String(c.status || "").toUpperCase()),
-  );
-  const pendingViolations = violationsData.filter((v) =>
-    ["PENDING", "PENDING_PAYMENT"].includes(String(v.status || "").toUpperCase()),
-  );
-  const finesCollected = violationsData
-    .filter((v) => String(v.status || "").toUpperCase() === "PAID")
-    .reduce((sum, v) => sum + Number(v.fineAmount ?? 0), 0);
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-[#1E293B]">Complaints & Violations</h1>
-          <p className="text-[#64748B] mt-1">Live complaint and violation records from the backend</p>
+  return <div className="min-h-[calc(100vh-140px)] bg-[#F8FAFC] rounded-2xl p-8 space-y-6">
+    <PageHeader variant="light" title="Complaints" description="Complaint operations and category SLA settings." />
+    <Tabs value={tab} onValueChange={(v) => setTab(v as "complaints" | "settings")} className="space-y-6">
+      <TabsList className="bg-white border border-[#E2E8F0] p-1 rounded-lg"><TabsTrigger value="complaints" className="text-[#334155]">Complaints</TabsTrigger><TabsTrigger value="settings" className="text-[#334155]">Settings</TabsTrigger></TabsList>
+      <TabsContent value="complaints" className="space-y-6">
+        <div className="grid grid-cols-4 gap-4"><StatCard variant="light" title="Open Complaints" value={String(stats?.open ?? 0)} subtitle="NEW + IN_PROGRESS" icon="complaints-open" /><StatCard variant="light" title="SLA Breached" value={String(stats?.slaBreached ?? 0)} subtitle="Open complaints only" icon="complaints-total" /><StatCard variant="light" title="Resolved This Month" value={String(resolvedMonth)} subtitle="Current month" icon="complaints-closed" /><StatCard variant="light" title="Avg Resolution Time" value={`${stats?.avgResolutionHours ?? 0}h`} subtitle="Resolved + closed" icon="revenue" /></div>
+        <div className="bg-white rounded-xl border border-[#E2E8F0]">
+          <div className="p-4 border-b border-[#E2E8F0] flex flex-row items-center gap-3 flex-wrap">
+            <div className="relative flex-1 max-w-xs"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" /><input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} className="w-full bg-[#F8FAFC] border border-[#CBD5E1] rounded-lg pl-9 pr-3 py-2 text-sm text-[#1E293B] placeholder:text-[#475569] focus:outline-none focus:border-blue-500/50" placeholder="Search..." /></div>
+            <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} className="w-40 bg-[#F8FAFC] border border-[#CBD5E1] rounded-lg px-3 py-2 text-sm text-[#334155] focus:outline-none focus:border-blue-500/50 appearance-none"><option value="ALL">All Statuses</option><option value="NEW">New</option><option value="IN_PROGRESS">In Progress</option><option value="RESOLVED">Resolved</option><option value="CLOSED">Closed</option></select>
+            <select value={categoryId} onChange={(e) => { setCategoryId(e.target.value); setPage(1); }} className="w-44 bg-[#F8FAFC] border border-[#CBD5E1] rounded-lg px-3 py-2 text-sm text-[#334155] focus:outline-none focus:border-blue-500/50 appearance-none"><option value="ALL">All Categories</option>{categories.filter((c) => c.isActive).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+            <select value={priority} onChange={(e) => { setPriority(e.target.value); setPage(1); }} className="w-36 bg-[#F8FAFC] border border-[#CBD5E1] rounded-lg px-3 py-2 text-sm text-[#334155] focus:outline-none focus:border-blue-500/50 appearance-none"><option value="ALL">Priority</option><option value="CRITICAL">Critical</option><option value="HIGH">High</option><option value="MEDIUM">Medium</option><option value="LOW">Low</option></select>
+            <button type="button" onClick={() => { setSlaOnly((p) => !p); setPage(1); }} className={cn("text-xs px-3 py-1.5 rounded-full border", slaOnly ? "bg-red-500/10 text-red-400 border-red-500/20" : "bg-[#F8FAFC] text-slate-400 border-transparent")}>SLA Breached</button>
+            <div className="ml-auto flex items-center gap-2"><button type="button" onClick={() => void complaintsService.checkSlaBreaches().then(() => load()).then(() => toast.success("SLA checked")).catch(() => toast.error("SLA check failed"))} className="bg-[#F8FAFC] hover:bg-[#E2E8F0] border border-[#CBD5E1] text-[#334155] text-sm font-medium px-4 py-2 rounded-lg">Check SLA</button></div>
+          </div>
+          <div className="p-6">{loading ? <SkeletonTable columns={10} variant="light" /> : <DataTable variant="light" columns={cols} rows={rows} rowKey={(r) => r.id} rowClassName={(r) => r.slaStatus === "BREACHED" ? "border-l-2 border-red-500/30" : ""} emptyTitle="No complaints found" emptyDescription="Try adjusting filters." />}</div>
+          <div className="px-6 pb-6 flex items-center justify-between"><p className="text-xs text-slate-500">Page {page} of {totalPages} ({total} records)</p><div className="flex items-center gap-2"><button type="button" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} className="bg-[#F8FAFC] hover:bg-[#E2E8F0] border border-[#CBD5E1] text-[#334155] text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-50">Previous</button><button type="button" disabled={page >= totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))} className="bg-[#F8FAFC] hover:bg-[#E2E8F0] border border-[#CBD5E1] text-[#334155] text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-50">Next</button></div></div>
         </div>
-        <Button variant="outline" onClick={() => void loadData()} disabled={isLoading}>
-          {isLoading ? "Refreshing..." : "Refresh"}
-        </Button>
-      </div>
+      </TabsContent>
+      <TabsContent value="settings"><div className="bg-white rounded-xl border border-[#E2E8F0] p-6"><PageHeader variant="light" title="Complaint Categories" description="Define categories and SLA targets for complaints" actions={<button type="button" onClick={() => { setEditingCategory(null); setCategoryForm({ name: "", slaHours: "24", description: "" }); setCategoryOpen(true); }} className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-2"><Plus className="w-4 h-4" />Add Category</button>} /><div className="mt-6">{categories.length === 0 ? <EmptyState variant="light" title="No complaint categories" description="Create categories and SLA targets." /> : categories.map((c) => <div key={c.id} className="p-4 rounded-lg bg-[#F8FAFC] mb-2 flex items-center justify-between"><div className="flex items-center gap-3"><span className={cn("w-2.5 h-2.5 rounded-full", dot[Math.abs(c.displayOrder) % dot.length])} /><div className="space-y-1"><p className="text-sm font-medium text-[#1E293B]">{c.name}</p><span className="text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-full">{c.slaHours}h SLA</span></div></div><div className="flex items-center gap-2"><button type="button" onClick={() => void complaintsService.toggleCategory(c.id).then(() => load())} className={cn("relative w-11 h-6 rounded-full border", c.isActive ? "bg-emerald-500/20 border-emerald-500/30" : "bg-[#F8FAFC] border-[#CBD5E1]")}><span className={cn("absolute top-0.5 w-5 h-5 rounded-full", c.isActive ? "left-5 bg-emerald-400" : "left-0.5 bg-slate-500")} /></button><button type="button" onClick={() => { setEditingCategory(c); setCategoryForm({ name: c.name, slaHours: String(c.slaHours), description: c.description ?? "" }); setCategoryOpen(true); }} className="p-2 rounded-lg hover:bg-[#F8FAFC] text-slate-400 hover:text-[#1E293B]"><Edit2 className="w-4 h-4" /></button></div></div>)}</div></div></TabsContent>
+    </Tabs>
 
-      {loadError ? (
-        <Card className="p-4 border border-[#FECACA] bg-[#FEF2F2] text-[#991B1B] rounded-xl">{loadError}</Card>
-      ) : null}
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="p-6 shadow-card rounded-xl">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[#64748B] mb-2">Total Complaints</p>
-              <h3 className="text-[#1E293B]">{complaintsData.length}</h3>
-              <p className="text-xs text-[#64748B] mt-1">Live count</p>
-            </div>
-            <div className="w-12 h-12 rounded-xl bg-[#0B5FFF]/10 flex items-center justify-center">
-              <AlertTriangle className="w-6 h-6 text-[#0B5FFF]" />
+        <Dialog open={categoryOpen} onOpenChange={setCategoryOpen}>
+      <DialogContent className="w-full max-w-[480px] bg-white border border-slate-200 p-0 overflow-hidden">
+        <DialogHeader className="px-6 py-5 border-b border-slate-200">
+          <DialogTitle className="text-base font-semibold text-slate-900">{editingCategory ? "Edit Category" : "Add Category"}</DialogTitle>
+        </DialogHeader>
+        <div className="px-6 py-6 space-y-4">
+          <div>
+            <label className="block text-xs text-[#475569] mb-1.5">Category name</label>
+            <input value={categoryForm.name} onChange={(e) => setCategoryForm((p) => ({ ...p, name: e.target.value }))} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-blue-500" />
+          </div>
+          <div>
+            <label className="block text-xs text-[#475569] mb-1.5">SLA hours</label>
+            <div className="relative">
+              <input type="number" min={1} max={720} value={categoryForm.slaHours} onChange={(e) => setCategoryForm((p) => ({ ...p, slaHours: e.target.value }))} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 pr-16 text-sm text-slate-900 focus:outline-none focus:border-blue-500" />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-slate-500">hours</span>
             </div>
           </div>
-        </Card>
-        <Card className="p-6 shadow-card rounded-xl">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[#64748B] mb-2">Pending / Open</p>
-              <h3 className="text-[#1E293B]">{openComplaints.length}</h3>
-              <p className="text-xs text-[#F59E0B] mt-1">Requires attention</p>
-            </div>
-            <div className="w-12 h-12 rounded-xl bg-[#F59E0B]/10 flex items-center justify-center">
-              <AlertTriangle className="w-6 h-6 text-[#F59E0B]" />
-            </div>
+          <div>
+            <label className="block text-xs text-[#475569] mb-1.5">Description</label>
+            <textarea value={categoryForm.description} onChange={(e) => setCategoryForm((p) => ({ ...p, description: e.target.value }))} className="w-full min-h-[90px] bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500" />
           </div>
-        </Card>
-        <Card className="p-6 shadow-card rounded-xl">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[#64748B] mb-2">Total Violations</p>
-              <h3 className="text-[#1E293B]">{violationsData.length}</h3>
-              <p className="text-xs text-[#64748B] mt-1">{pendingViolations.length} pending</p>
-            </div>
-            <div className="w-12 h-12 rounded-xl bg-[#EF4444]/10 flex items-center justify-center">
-              <Ban className="w-6 h-6 text-[#EF4444]" />
-            </div>
-          </div>
-        </Card>
-        <Card className="p-6 shadow-card rounded-xl">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[#64748B] mb-2">Fines Collected</p>
-              <h3 className="text-[#1E293B]">{formatCurrencyEGP(finesCollected)}</h3>
-              <p className="text-xs text-[#10B981] mt-1">Paid violations only</p>
-            </div>
-            <div className="w-12 h-12 rounded-xl bg-[#10B981]/10 flex items-center justify-center">
-              <Ban className="w-6 h-6 text-[#10B981]" />
-            </div>
-          </div>
-        </Card>
-      </div>
-
-      <Card className="shadow-card rounded-xl overflow-hidden">
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ComplaintsTab)} className="w-full">
-          <TabsList className="w-full justify-start border-b border-[#E5E7EB] rounded-none h-12 bg-transparent px-4">
-            <TabsTrigger value="complaints" className="rounded-lg">Complaints</TabsTrigger>
-            <TabsTrigger value="violations" className="rounded-lg">Violations</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="complaints" className="m-0">
-            <div className="p-4 border-b border-[#E5E7EB] flex flex-col gap-4 lg:flex-row">
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  size="sm"
-                  variant={complaintPreset === "all" ? "default" : "outline"}
-                  className={complaintPreset === "all" ? "bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white" : ""}
-                  onClick={() => setComplaintPreset("all")}
-                >
-                  All
-                </Button>
-                <Button
-                  size="sm"
-                  variant={complaintPreset === "pending" ? "default" : "outline"}
-                  className={complaintPreset === "pending" ? "bg-[#F59E0B] hover:bg-[#D97706] text-white" : ""}
-                  onClick={() => {
-                    setComplaintPreset("pending");
-                    setComplaintStatusFilter("all");
-                  }}
-                >
-                  Pending
-                </Button>
-                <Button
-                  size="sm"
-                  variant={complaintPreset === "overdue" ? "default" : "outline"}
-                  className={complaintPreset === "overdue" ? "bg-[#DC2626] hover:bg-[#B91C1C] text-white" : ""}
-                  onClick={() => {
-                    setComplaintPreset("overdue");
-                    setComplaintStatusFilter("all");
-                  }}
-                >
-                  Overdue
-                </Button>
-                <Button
-                  size="sm"
-                  variant={complaintPreset === "closed" ? "default" : "outline"}
-                  className={complaintPreset === "closed" ? "bg-[#10B981] hover:bg-[#059669] text-white" : ""}
-                  onClick={() => {
-                    setComplaintPreset("closed");
-                    setComplaintStatusFilter("all");
-                  }}
-                >
-                  Closed
-                </Button>
-              </div>
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#64748B]" />
-                <Input
-                  placeholder="Search complaints..."
-                  className="pl-10 rounded-lg"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-              </div>
-              <Select value={complaintStatusFilter} onValueChange={setComplaintStatusFilter}>
-                <SelectTrigger className="w-full lg:w-[220px]">
-                  <SelectValue placeholder="Filter by status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All statuses</SelectItem>
-                  {COMPLAINT_STATUSES.map((status) => (
-                    <SelectItem key={status} value={status}>
-                      {adminComplaintStatusLabel(status)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button variant="outline" onClick={() => void loadData()} disabled={isLoading}>
-                <RefreshCw className="w-4 h-4 mr-2" />
-                Refresh
-              </Button>
-              <Button variant="outline" onClick={() => resetComplaintsFilters("complaints")}>
-                Reset Filters
-              </Button>
-              <Dialog open={isCreateComplaintOpen} onOpenChange={setIsCreateComplaintOpen}>
-                <DialogTrigger asChild>
-                  <Button className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white rounded-lg gap-2">
-                    <Plus className="w-4 h-4" />
-                    File Complaint
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-lg">
-                  <DialogHeader>
-                    <DialogTitle>File New Complaint</DialogTitle>
-                    <DialogDescription>
-                      Admin create-on-behalf flow uses <code>/complaints/admin/create</code>.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div className="space-y-4 py-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="complaintReporter">Reporter (Resident User)</Label>
-                      <Select
-                        value={complaintFormData.reporterId || "none"}
-                        onValueChange={(value) =>
-                          setComplaintFormData((p) => ({
-                            ...p,
-                            reporterId: value === "none" ? "" : value,
-                          }))
-                        }
-                      >
-                        <SelectTrigger id="complaintReporter">
-                          <SelectValue placeholder="Select resident" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Select resident</SelectItem>
-                          {residentOptions.map((resident) => (
-                            <SelectItem key={resident.id} value={resident.id}>
-                              {resident.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="complaintUnit">Unit (optional)</Label>
-                      <Select
-                        value={complaintFormData.unitId || "none"}
-                        onValueChange={(value) =>
-                          setComplaintFormData((p) => ({
-                            ...p,
-                            unitId: value === "none" ? "" : value,
-                          }))
-                        }
-                      >
-                        <SelectTrigger id="complaintUnit">
-                          <SelectValue placeholder="Select unit" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">No unit</SelectItem>
-                          {unitOptions.map((unit) => (
-                            <SelectItem key={unit.id} value={unit.id}>
-                              {unit.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="title">Complaint Title</Label>
-                      <Input
-                        id="title"
-                        placeholder="Short complaint title"
-                        value={complaintFormData.title}
-                        onChange={(e) => setComplaintFormData((p) => ({ ...p, title: e.target.value }))}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="team">Team</Label>
-                      <Input
-                        id="team"
-                        placeholder="Security / Maintenance / Community"
-                        value={complaintFormData.team}
-                        onChange={(e) => setComplaintFormData((p) => ({ ...p, team: e.target.value }))}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="priority">Priority</Label>
-                      <Select
-                        value={complaintFormData.priority}
-                        onValueChange={(value) => setComplaintFormData((p) => ({ ...p, priority: value }))}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select priority" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="LOW">Low</SelectItem>
-                          <SelectItem value="MEDIUM">Medium</SelectItem>
-                          <SelectItem value="HIGH">High</SelectItem>
-                          <SelectItem value="CRITICAL">Critical</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="description">Description</Label>
-                      <Textarea
-                        id="description"
-                        rows={4}
-                        value={complaintFormData.description}
-                        onChange={(e) => setComplaintFormData((p) => ({ ...p, description: e.target.value }))}
-                      />
-                    </div>
-                  </div>
-                  <DialogFooter>
-                    <Button variant="outline" onClick={() => setIsCreateComplaintOpen(false)} disabled={isSubmittingComplaint}>
-                      Cancel
-                    </Button>
-                    <Button
-                      className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white"
-                      onClick={() => void handleCreateComplaint()}
-                      disabled={isSubmittingComplaint}
-                    >
-                      {isSubmittingComplaint ? "Submitting..." : "Submit Complaint"}
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
-            </div>
-
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-[#F9FAFB]">
-                  <TableHead>Complaint ID</TableHead>
-                  <TableHead>Reporter</TableHead>
-                  <TableHead>Unit</TableHead>
-                  <TableHead>Title</TableHead>
-                  <TableHead>Team</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead>Priority</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Assigned To</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredComplaints.map((complaint: any) => (
-                  <TableRow key={complaint.id} className="hover:bg-[#F9FAFB]">
-                    <TableCell className="font-medium text-[#1E293B]">
-                      {complaint.complaintNumber ?? complaint.id}
-                    </TableCell>
-                    <TableCell className="text-[#64748B]">
-                      {complaint.reporter?.nameEN ?? complaint.reporter?.email ?? complaint.reporterId ?? "—"}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary" className="bg-[#F3F4F6] text-[#1E293B]">
-                        {complaint.unit?.unitNumber ?? "—"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-[#1E293B]">{complaint.title ?? "—"}</TableCell>
-                    <TableCell className="text-[#1E293B]">{complaint.team ?? "—"}</TableCell>
-                    <TableCell className="text-[#64748B] max-w-xs truncate">
-                      {complaint.description ?? "—"}
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={getPriorityColorClass(complaint.priority)}>
-                        {adminPriorityLabel(complaint.priority)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={getStatusColorClass(complaint.status)}>
-                        {adminComplaintStatusLabel(complaint.status)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-[#64748B]">
-                      {complaint.assignedTo?.nameEN ?? complaint.assignedToId ?? "Unassigned"}
-                    </TableCell>
-                    <TableCell className="text-[#64748B]">{formatDate(complaint.createdAt)}</TableCell>
-                    <TableCell>
-                      <Button variant="ghost" size="sm" onClick={() => void openComplaintDialog(complaint)}>
-                        <Eye className="w-4 h-4 mr-1" />
-                        Open
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {!isLoading && filteredComplaints.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={11} className="text-center py-10 text-[#64748B]">
-                      No complaints found.
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-              </TableBody>
-            </Table>
-          </TabsContent>
-
-          <TabsContent value="violations" className="m-0">
-            <div className="p-4 border-b border-[#E5E7EB] flex gap-4">
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#64748B]" />
-                <Input
-                  placeholder="Search violations..."
-                  className="pl-10 rounded-lg"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-              </div>
-              <Button variant="outline" onClick={() => resetComplaintsFilters("violations")}>
-                Reset Filters
-              </Button>
-              <Dialog open={isCreateViolationOpen} onOpenChange={setIsCreateViolationOpen}>
-                <DialogTrigger asChild>
-                  <Button className="bg-[#EF4444] hover:bg-[#EF4444]/90 text-white rounded-lg gap-2">
-                    <Plus className="w-4 h-4" />
-                    Issue Violation
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="max-w-lg">
-                  <DialogHeader>
-                    <DialogTitle>Issue New Violation</DialogTitle>
-                    <DialogDescription>
-                      Creates a violation and auto-generates a fine invoice in the backend.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <div className="space-y-4 py-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="vunit">Unit</Label>
-                      <Select
-                        value={violationFormData.unitId || "none"}
-                        onValueChange={(value) =>
-                          setViolationFormData((p) => ({
-                            ...p,
-                            unitId: value === "none" ? "" : value,
-                          }))
-                        }
-                      >
-                        <SelectTrigger id="vunit">
-                          <SelectValue placeholder="Select unit" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Select unit</SelectItem>
-                          {unitOptions.map((unit) => (
-                            <SelectItem key={unit.id} value={unit.id}>
-                              {unit.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="vresident">Resident (optional)</Label>
-                      <Select
-                        value={violationFormData.residentId || "none"}
-                        onValueChange={(value) =>
-                          setViolationFormData((p) => ({
-                            ...p,
-                            residentId: value === "none" ? "" : value,
-                          }))
-                        }
-                      >
-                        <SelectTrigger id="vresident">
-                          <SelectValue placeholder="Select resident" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">No specific resident</SelectItem>
-                          {residentOptions.map((resident) => (
-                            <SelectItem key={resident.id} value={resident.id}>
-                              {resident.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="vtype">Type</Label>
-                      <Input
-                        id="vtype"
-                        value={violationFormData.type}
-                        onChange={(e) => setViolationFormData((p) => ({ ...p, type: e.target.value }))}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="vfine">Fine Amount</Label>
-                      <Input
-                        id="vfine"
-                        type="number"
-                        value={violationFormData.fineAmount}
-                        onChange={(e) => setViolationFormData((p) => ({ ...p, fineAmount: e.target.value }))}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="vdueDate">Due Date</Label>
-                      <Input
-                        id="vdueDate"
-                        type="date"
-                        value={violationFormData.dueDate}
-                        onChange={(e) => setViolationFormData((p) => ({ ...p, dueDate: e.target.value }))}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="vdesc">Description</Label>
-                      <Textarea
-                        id="vdesc"
-                        rows={4}
-                        value={violationFormData.description}
-                        onChange={(e) => setViolationFormData((p) => ({ ...p, description: e.target.value }))}
-                      />
-                    </div>
-                  </div>
-                  <DialogFooter>
-                    <Button variant="outline" onClick={() => setIsCreateViolationOpen(false)} disabled={isSubmittingViolation}>
-                      Cancel
-                    </Button>
-                    <Button
-                      className="bg-[#EF4444] hover:bg-[#EF4444]/90 text-white"
-                      onClick={() => void handleCreateViolation()}
-                      disabled={isSubmittingViolation}
-                    >
-                      {isSubmittingViolation ? "Creating..." : "Create Violation"}
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
-            </div>
-
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-[#F9FAFB]">
-                  <TableHead>Violation ID</TableHead>
-                  <TableHead>Resident</TableHead>
-                  <TableHead>Unit</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead>Fine Amount</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Issued Date</TableHead>
-                  <TableHead>Paid Date</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredViolations.map((violation: any) => (
-                  <TableRow key={violation.id} className="hover:bg-[#F9FAFB]">
-                    <TableCell className="font-medium text-[#1E293B]">
-                      {violation.violationNumber ?? violation.id}
-                    </TableCell>
-                    <TableCell className="text-[#64748B]">
-                      {violation.resident?.nameEN ?? violation.resident?.email ?? violation.residentId ?? "—"}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary" className="bg-[#F3F4F6] text-[#1E293B]">
-                        {violation.unit?.unitNumber ?? "—"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-[#1E293B]">{violation.type ?? "—"}</TableCell>
-                    <TableCell className="text-[#64748B] max-w-xs truncate">
-                      {violation.description ?? "—"}
-                    </TableCell>
-                    <TableCell className="text-[#1E293B]">{formatCurrencyEGP(violation.fineAmount)}</TableCell>
-                    <TableCell>
-                      <Badge className={getStatusColorClass(violation.status)}>
-                        {adminViolationStatusLabel(violation.status)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-[#64748B]">{formatDate(violation.createdAt ?? violation.issuedAt)}</TableCell>
-                    <TableCell className="text-[#64748B]">{formatDate(violation.paidDate)}</TableCell>
-                  </TableRow>
-                ))}
-                {!isLoading && filteredViolations.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={9} className="text-center py-10 text-[#64748B]">
-                      No violations found.
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-              </TableBody>
-            </Table>
-          </TabsContent>
-        </Tabs>
-      </Card>
-
-      <Dialog
-        open={isComplaintDialogOpen}
-        onOpenChange={(open) => {
-          if (!open) closeComplaintDialog();
-          else setIsComplaintDialogOpen(true);
-        }}
-      >
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Complaint Details</DialogTitle>
-            <DialogDescription>
-              Review complaint information, update workflow status, and reply to the resident.
-            </DialogDescription>
-          </DialogHeader>
-
-          {complaintDialogLoading ? (
-            <div className="py-10 flex items-center justify-center">
-              <span className="text-sm text-[#64748B]">Loading complaint...</span>
-            </div>
-          ) : activeComplaint ? (
-            <div className="space-y-6">
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                <Card className="p-4 lg:col-span-2">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <h4 className="text-[#1E293B]">
-                        {activeComplaint.title || activeComplaint.category || "Complaint"}
-                      </h4>
-                      <p className="text-xs text-[#64748B] mt-1">
-                        Complaint ID: {activeComplaint.complaintNumber ?? activeComplaint.id}
-                      </p>
-                    </div>
-                    <Badge className={getStatusColorClass(activeComplaint.status)}>
-                      {adminComplaintStatusLabel(activeComplaint.status || "NEW")}
-                    </Badge>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4 text-sm">
-                    <div>
-                      <p className="text-[#64748B]">Resident</p>
-                      <p className="text-[#1E293B]">{activeComplaint.reporter?.nameEN || "—"}</p>
-                      <p className="text-xs text-[#64748B]">
-                        {activeComplaint.reporter?.email || activeComplaint.reporter?.phone || "—"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[#64748B]">Unit</p>
-                      <p className="text-[#1E293B]">
-                        {activeComplaint.unit?.block ? `${activeComplaint.unit.block} • ` : ""}
-                        {activeComplaint.unit?.unitNumber ?? "—"}
-                      </p>
-                      <p className="text-xs text-[#64748B]">
-                        Priority: {adminPriorityLabel(activeComplaint.priority || "MEDIUM")}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[#64748B]">Submitted</p>
-                      <p className="text-[#1E293B]">{formatDateTime(activeComplaint.createdAt)}</p>
-                    </div>
-                    <div>
-                      <p className="text-[#64748B]">Last Updated</p>
-                      <p className="text-[#1E293B]">{formatDateTime(activeComplaint.updatedAt)}</p>
-                    </div>
-                    <div>
-                      <p className="text-[#64748B]">Team</p>
-                      <p className="text-[#1E293B]">{activeComplaint.team || "Unassigned Team"}</p>
-                    </div>
-                    <div>
-                      <p className="text-[#64748B]">Assigned To</p>
-                      <p className="text-[#1E293B]">
-                        {activeComplaint.assignedTo?.nameEN ||
-                          activeComplaint.assignedTo?.email ||
-                          "Unassigned"}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 pt-4 border-t border-[#E5E7EB] space-y-2">
-                    <p className="text-[#64748B] text-sm">Resident Complaint</p>
-                    <p className="text-sm text-[#1E293B] whitespace-pre-wrap break-words">
-                      {activeComplaint.description || "—"}
-                    </p>
-                  </div>
-
-                  {activeComplaint.resolutionNotes ? (
-                    <div className="mt-4 pt-4 border-t border-[#E5E7EB] space-y-2">
-                      <p className="text-[#64748B] text-sm">Resolution Notes</p>
-                      <p className="text-sm text-[#334155] whitespace-pre-wrap break-words">
-                        {activeComplaint.resolutionNotes}
-                      </p>
-                    </div>
-                  ) : null}
-                </Card>
-
-                <Card className="p-4 space-y-4">
-                  <div>
-                    <Label className="mb-2 block">Update Status</Label>
-                    <Select value={complaintStatusDraft} onValueChange={setComplaintStatusDraft}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Choose status" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {COMPLAINT_STATUSES.map((status) => (
-                          <SelectItem key={status} value={status}>
-                            {adminComplaintStatusLabel(status)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="complaintTeamDraft">Team Assignment</Label>
-                    <Input
-                      id="complaintTeamDraft"
-                      placeholder="Security / Maintenance / Community"
-                      value={complaintTeamDraft}
-                      onChange={(e) => setComplaintTeamDraft(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="complaintResolutionNotes">Resolution Notes</Label>
-                    <Textarea
-                      id="complaintResolutionNotes"
-                      rows={4}
-                      placeholder="Required when resolving or closing the complaint"
-                      value={complaintResolutionNotesDraft}
-                      onChange={(e) => setComplaintResolutionNotesDraft(e.target.value)}
-                    />
-                  </div>
-
-                  <Button
-                    className="w-full bg-[#00B386] hover:bg-[#00B386]/90 text-white"
-                    onClick={() => void applyComplaintStatus()}
-                    disabled={
-                      complaintStatusUpdating ||
-                      !complaintStatusDraft
-                    }
-                  >
-                    {complaintStatusUpdating ? "Updating..." : "Apply Status"}
-                  </Button>
-
-                  <div className="pt-4 border-t border-[#E5E7EB] space-y-2">
-                    <p className="text-sm text-[#64748B]">Quick Actions</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <Button variant="outline" size="sm" onClick={() => setComplaintStatusDraft("IN_PROGRESS")}>
-                        In Progress
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => setComplaintStatusDraft("RESOLVED")}>
-                        Resolved
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => setComplaintStatusDraft("CLOSED")}>
-                        Close
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => void refreshActiveComplaint()}>
-                        Refresh
-                      </Button>
-                    </div>
-                  </div>
-                </Card>
-              </div>
-
-              <Card className="p-4 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="text-[#1E293B]">Conversation</h4>
-                    <p className="text-sm text-[#64748B]">
-                      Public replies are visible to the resident. Internal notes remain staff-only.
-                    </p>
-                  </div>
-                  <Button variant="outline" size="sm" onClick={() => void refreshActiveComplaint()}>
-                    Refresh Thread
-                  </Button>
-                </div>
-
-                <div className="space-y-3 max-h-[340px] overflow-y-auto pr-1">
-                  {complaintComments.length === 0 ? (
-                    <div className="rounded-lg border border-dashed border-[#CBD5E1] p-4 text-sm text-[#64748B]">
-                      No comments yet on this complaint.
-                    </div>
-                  ) : (
-                    complaintComments.map((comment) => (
-                      <div
-                        key={comment.id}
-                        className={`rounded-xl border p-3 ${
-                          comment.isInternal ? "border-[#F59E0B]/20 bg-[#FFFBEB]" : "border-[#E5E7EB] bg-white"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-2">
-                            <p className="text-sm font-medium text-[#1E293B]">
-                              {comment.createdBy?.nameEN || comment.createdBy?.email || "User"}
-                            </p>
-                            {comment.isInternal ? (
-                              <Badge className="bg-[#F59E0B]/10 text-[#F59E0B]">Internal</Badge>
-                            ) : (
-                              <Badge className="bg-[#10B981]/10 text-[#10B981]">Public</Badge>
-                            )}
-                          </div>
-                          <span className="text-xs text-[#64748B]">{formatDateTime(comment.createdAt)}</span>
-                        </div>
-                        <p className="text-sm text-[#334155] whitespace-pre-wrap mt-2">{comment.body}</p>
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                <div className="space-y-3 border-t border-[#E5E7EB] pt-4">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="complaintReplyText">Reply / Note</Label>
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        id="complaintReplyInternal"
-                        checked={complaintReplyInternal}
-                        onCheckedChange={setComplaintReplyInternal}
-                      />
-                      <span className="text-sm text-[#64748B]">Internal note</span>
-                    </div>
-                  </div>
-                  <Textarea
-                    id="complaintReplyText"
-                    rows={4}
-                    placeholder={complaintReplyInternal ? "Visible to staff only..." : "Reply to the resident..."}
-                    value={complaintReplyText}
-                    onChange={(e) => setComplaintReplyText(e.target.value)}
-                  />
-                  <div className="flex justify-end">
-                    <Button
-                      className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white"
-                      onClick={() => void submitComplaintReply()}
-                      disabled={complaintReplySubmitting || !complaintReplyText.trim()}
-                    >
-                      <Send className="w-4 h-4 mr-2" />
-                      {complaintReplySubmitting ? "Sending..." : "Post Reply"}
-                    </Button>
-                  </div>
-                </div>
-              </Card>
-            </div>
-          ) : (
-            <div className="py-8 text-sm text-[#64748B]">Select a complaint to view details.</div>
-          )}
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
+        </div>
+        <DialogFooter className="px-6 py-4 border-t border-slate-200 flex items-center justify-end gap-3">
+          <button type="button" onClick={() => setCategoryOpen(false)} className="bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-sm font-medium px-4 py-2 rounded-lg">Cancel</button>
+          <button type="button" onClick={() => void (async () => { const name = categoryForm.name.trim(); const hrs = Number(categoryForm.slaHours); if (!name || !Number.isInteger(hrs) || hrs < 1 || hrs > 720) { toast.error("Provide valid category and SLA hours"); return; } try { if (editingCategory) await complaintsService.updateCategory(editingCategory.id, { name, slaHours: hrs, description: categoryForm.description.trim() || undefined }); else await complaintsService.createCategory({ name, slaHours: hrs, description: categoryForm.description.trim() || undefined }); setCategoryOpen(false); await load(); toast.success("Category saved"); } catch { toast.error("Failed to save category"); } })()} className="bg-black hover:bg-slate-900 text-white text-sm font-medium px-4 py-2 rounded-lg">Save</button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog><DrawerForm open={detailOpen} onOpenChange={setDetailOpen} title="Complaint Detail" description="View status, comments, invoices and updates" widthClassName="w-full sm:max-w-[560px]" variant="light">
+      {!detail ? <EmptyState variant="light" compact title="No complaint selected" description="Select a complaint from the list." /> : <div className="space-y-4"><div><p className="font-['DM_Mono'] text-2xl text-[#0F172A]">{detail.complaintNumber}</p><div className="mt-3 flex items-center gap-2 flex-wrap"><StatusBadge value={detail.status} /><span className="text-xs px-2 py-1 rounded-full border border-[#CBD5E1] text-[#334155]">{detail.priority}</span>{detail.categoryName ? <span className="text-xs px-2 py-1 rounded-full border border-blue-500/20 bg-blue-500/10 text-blue-400">{detail.categoryName}</span> : null}</div></div><Tabs value={detailTab} onValueChange={(v) => setDetailTab(v as "details" | "comments" | "invoices")} className="space-y-4"><TabsList className="bg-[#F8FAFC] border border-[#E2E8F0] p-1 rounded-lg"><TabsTrigger value="details" className="text-[#334155]">Details</TabsTrigger><TabsTrigger value="comments" className="text-[#334155]">Comments</TabsTrigger><TabsTrigger value="invoices" className="text-[#334155]">Invoices</TabsTrigger></TabsList><TabsContent value="details" className="space-y-4"><div className="bg-white rounded-xl border border-[#E2E8F0] p-6 space-y-3"><p className="text-xs font-medium uppercase tracking-wider text-slate-500">Unit & Reporter</p><p className="text-sm text-[#334155]">Unit: <span className="text-[#0F172A]">{detail.unitNumber ?? "—"}</span></p><p className="text-sm text-[#334155]">Reporter: <span className="text-[#0F172A]">{detail.reporterName}</span></p><p className="text-sm text-[#334155]">Submitted: <span className="text-[#0F172A]">{fmt(detail.createdAt)}</span></p></div><div className="bg-white rounded-xl border border-[#E2E8F0] p-6 space-y-3"><p className="text-xs font-medium uppercase tracking-wider text-slate-500">Status</p><StatusBadge value={detail.status} />{detail.status === ComplaintStatus.NEW ? <button type="button" disabled={!detail.assigneeId} onClick={() => void complaintsService.updateComplaintStatus(detail.id, ComplaintStatus.IN_PROGRESS).then((d) => { setDetail(d); load(); }).catch(() => toast.error("Failed status update"))} className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-50">Mark In Progress</button> : null}{detail.status === ComplaintStatus.RESOLVED ? <button type="button" onClick={() => void complaintsService.updateComplaintStatus(detail.id, ComplaintStatus.CLOSED).then((d) => { setDetail(d); load(); }).catch(() => toast.error("Failed status update"))} className="bg-slate-600 hover:bg-slate-500 text-white text-sm font-medium px-4 py-2 rounded-lg">Close Complaint</button> : null}</div></TabsContent><TabsContent value="comments" className="space-y-4"><div className="bg-white rounded-xl border border-[#E2E8F0] p-6 space-y-4">{detail.comments.length === 0 ? <EmptyState variant="light" compact title="No comments yet" description="Post the first comment or note." /> : detail.comments.map((c) => <div key={c.id} className={cn("pl-3 py-2", c.isInternal ? "border-l-2 border-amber-500/40" : "border-l-2 border-transparent")}><div className="flex items-start gap-3"><div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-xs text-[#1E293B]">{initials(c.authorName)}</div><div className="space-y-1"><div className="flex items-center gap-2"><p className="text-sm text-[#1E293B]">{c.authorName}</p>{c.isInternal ? <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded">Internal</span> : null}</div><p className="text-sm text-[#334155] whitespace-pre-wrap">{c.body}</p></div></div></div>)}<div className="pt-4 border-t border-[#E2E8F0] space-y-3"><textarea value={commentBody} onChange={(e) => setCommentBody(e.target.value)} className="w-full min-h-[80px] bg-[#F8FAFC] border border-[#CBD5E1] rounded-lg px-3 py-2 text-sm text-[#1E293B] focus:outline-none focus:border-blue-500/50" /><div className="flex items-center gap-2"><button type="button" disabled={!commentBody.trim()} onClick={() => void complaintsService.addComment(detail.id, { body: commentBody.trim() }).then(() => complaintsService.getComplaintDetail(detail.id)).then((d) => { setDetail(d); setCommentBody(""); }).catch(() => toast.error("Failed to post"))} className="bg-[#F8FAFC] hover:bg-[#E2E8F0] border border-[#CBD5E1] text-[#334155] text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-50">Post Comment</button><button type="button" disabled={!commentBody.trim()} onClick={() => void complaintsService.addComment(detail.id, { body: commentBody.trim(), isInternal: true }).then(() => complaintsService.getComplaintDetail(detail.id)).then((d) => { setDetail(d); setCommentBody(""); }).catch(() => toast.error("Failed to post"))} className="bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 text-amber-400 text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-50">Internal Note</button></div></div></div></TabsContent><TabsContent value="invoices"><div className="bg-white rounded-xl border border-[#E2E8F0] p-6 space-y-4"><div className="flex items-center justify-end"><button type="button" onClick={() => toast.info("Use Billing for invoice creation until complaint-source invoice posting is enabled.")} className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-2"><Plus className="w-4 h-4" />Create Invoice</button></div><DataTable variant="light" columns={invoiceCols} rows={detail.invoices} rowKey={(r) => r.id} emptyTitle="No linked invoices" emptyDescription="No invoice records linked to this complaint." /></div></TabsContent></Tabs></div>}
+    </DrawerForm>
+  </div>;
 }
+
+
+
+
+
+
+
+

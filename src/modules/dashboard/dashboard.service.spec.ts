@@ -154,7 +154,8 @@ describe('DashboardService', () => {
       {
         id: 'c1',
         complaintNumber: 'CMP-001',
-        category: 'Noise',
+        categoryLegacy: 'Noise',
+        category: null,
         createdAt: new Date('2026-03-06T08:00:00.000Z'),
         reporter: { nameEN: 'Ali', nameAR: null },
         unit: { unitNumber: 'A-101' },
@@ -172,7 +173,8 @@ describe('DashboardService', () => {
       {
         id: 'v1',
         violationNumber: 'V-100',
-        type: 'Parking',
+        typeLegacy: 'Parking',
+        category: null,
         createdAt: new Date('2026-03-06T07:30:00.000Z'),
         issuedBy: { nameEN: 'Security', nameAR: null },
         unit: { unitNumber: 'C-303' },

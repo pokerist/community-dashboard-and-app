@@ -400,7 +400,12 @@ export class UnitsService {
           select: {
             id: true,
             complaintNumber: true,
-            category: true,
+            categoryLegacy: true,
+            category: {
+              select: {
+                name: true,
+              },
+            },
             status: true,
             createdAt: true,
           },
@@ -473,7 +478,7 @@ export class UnitsService {
       recentComplaints: unit.complaints.map((complaint) => ({
         id: complaint.id,
         complaintNumber: complaint.complaintNumber,
-        category: complaint.category,
+        category: complaint.category?.name ?? complaint.categoryLegacy ?? '-',
         status: complaint.status,
         createdAt: complaint.createdAt.toISOString(),
       })),

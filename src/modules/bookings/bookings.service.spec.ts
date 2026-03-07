@@ -1,166 +1,146 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
-import { BookingsService } from './bookings.service';
-import { PrismaService } from '../../../prisma/prisma.service';
-import { getActiveUnitAccess } from '../../common/utils/unit-access.util';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { ClubhouseService } from '../clubhouse/clubhouse.service';
-
-jest.mock('../../common/utils/unit-access.util', () => ({
-  getActiveUnitAccess: jest.fn(),
-}));
-
-const mockPrisma: any = {
-  facility: { findUnique: jest.fn() },
-  unit: { findUnique: jest.fn() },
-  resident: { findUnique: jest.fn() },
-  booking: {
-    create: jest.fn(),
-    findUnique: jest.fn(),
-    count: jest.fn(),
-    findFirst: jest.fn(),
-    update: jest.fn(),
-    findMany: jest.fn(),
-  },
-  $transaction: jest.fn(async (cb: any) => cb(mockPrisma)),
-};
+import { BillingCycle, BookingStatus, InvoiceStatus } from '@prisma/client';
+import { PrismaService } from '../../../prisma/prisma.service';
+import { InvoicesService } from '../invoices/invoices.service';
+import { BookingDetailDto } from './dto/booking-response.dto';
+import { BookingsService } from './bookings.service';
 
 describe('BookingsService', () => {
   let service: BookingsService;
-  let clubhouseService: { hasClubhouseAccess: jest.Mock };
+
+  const txMock = {
+    booking: {
+      update: jest.fn(),
+    },
+    invoice: {
+      updateMany: jest.fn(),
+    },
+  };
+
+  const prismaMock = {
+    booking: {
+      findUnique: jest.fn(),
+      findMany: jest.fn(),
+      count: jest.fn(),
+    },
+    $transaction: jest.fn(
+      async (callback: (tx: typeof txMock) => Promise<unknown>) => callback(txMock),
+    ),
+  };
+
+  const invoicesServiceMock = {
+    generateInvoiceTx: jest.fn(),
+  };
+
+  const detailFixture: BookingDetailDto = {
+    id: 'booking-1',
+    facilityId: 'facility-1',
+    facilityName: 'Main Pool',
+    facilityType: 'POOL',
+    facilityDescription: null,
+    facilityRules: null,
+    userId: 'user-1',
+    userName: 'Resident',
+    userPhone: null,
+    unitNumber: 'A-101',
+    date: new Date().toISOString(),
+    startTime: '10:00',
+    endTime: '11:00',
+    status: BookingStatus.PENDING_PAYMENT,
+    totalAmount: 120,
+    requiresPrepayment: true,
+    paymentStatus: 'PENDING',
+    cancellationReason: null,
+    rejectionReason: null,
+    cancelledById: null,
+    rejectedById: null,
+    checkedInAt: null,
+    cancelledAt: null,
+    refundRequired: false,
+    invoices: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
 
   beforeEach(async () => {
-    clubhouseService = { hasClubhouseAccess: jest.fn().mockResolvedValue(true) };
-
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         BookingsService,
-        { provide: PrismaService, useValue: mockPrisma },
+        { provide: PrismaService, useValue: prismaMock },
+        { provide: InvoicesService, useValue: invoicesServiceMock },
         { provide: EventEmitter2, useValue: { emit: jest.fn() } },
-        { provide: ClubhouseService, useValue: clubhouseService },
       ],
     }).compile();
 
     service = module.get<BookingsService>(BookingsService);
     jest.clearAllMocks();
-
-    (getActiveUnitAccess as jest.Mock).mockResolvedValue({
-      canBookFacilities: true,
-    });
-
-    mockPrisma.booking.count.mockResolvedValue(0);
-    mockPrisma.booking.findFirst.mockResolvedValue(null);
   });
 
-  it('createForActor should create booking with actor userId and resolved residentId', async () => {
-    mockPrisma.unit.findUnique.mockResolvedValue({ status: 'DELIVERED' });
-    mockPrisma.resident.findUnique.mockResolvedValue({ id: 'res-1' });
-
-    mockPrisma.facility.findUnique.mockResolvedValue({
-      id: 'fac-1',
-      isActive: true,
-      type: 'CUSTOM',
-      capacity: 10,
-      slotConfig: [
-        {
-          dayOfWeek: 5,
-          startTime: '18:00',
-          endTime: '19:00',
-          slotDurationMinutes: 60,
-          slotCapacity: 10,
-        },
-      ],
-      slotExceptions: [],
-    });
-
-    mockPrisma.booking.create.mockResolvedValue({ id: 'b1' });
-
-    const res = await service.createForActor('u1', {
-      facilityId: 'fac-1',
+  it('approveBooking creates BOOKING_FEE invoice when amount > 0', async () => {
+    prismaMock.booking.findUnique.mockResolvedValue({
+      id: 'booking-1',
       unitId: 'unit-1',
-      date: '2026-02-20T00:00:00.000Z',
-      startTime: '18:00',
-      endTime: '19:00',
-    } as any);
+      userId: 'user-1',
+      date: new Date('2026-03-09T00:00:00.000Z'),
+      startTime: '10:00',
+      endTime: '11:00',
+      status: BookingStatus.PENDING,
+      facility: {
+        name: 'Main Pool',
+        price: 120,
+        billingCycle: BillingCycle.PER_HOUR,
+        requiresPrepayment: true,
+      },
+      invoices: [],
+    });
+    jest.spyOn(service, 'getBookingDetail').mockResolvedValue(detailFixture);
 
-    expect(mockPrisma.booking.create).toHaveBeenCalledWith(
+    await service.approveBooking('booking-1', 'admin-1');
+
+    expect(txMock.booking.update).toHaveBeenCalledWith(
       expect.objectContaining({
+        where: { id: 'booking-1' },
         data: expect.objectContaining({
-          userId: 'u1',
-          residentId: 'res-1',
-          unitId: 'unit-1',
-          facilityId: 'fac-1',
-          status: 'PENDING',
+          status: BookingStatus.PENDING_PAYMENT,
+          totalAmount: 120,
         }),
       }),
     );
-    expect(res).toEqual({ id: 'b1' });
+    expect(invoicesServiceMock.generateInvoiceTx).toHaveBeenCalled();
   });
 
-  it('createForActor should require clubhouse access for multipurpose hall facilities', async () => {
-    mockPrisma.unit.findUnique.mockResolvedValue({ status: 'DELIVERED' });
-    mockPrisma.resident.findUnique.mockResolvedValue({ id: 'res-1' });
-
-    mockPrisma.facility.findUnique.mockResolvedValue({
-      id: 'fac-1',
-      isActive: true,
-      type: 'MULTIPURPOSE_HALL',
-      capacity: 10,
-      slotConfig: [
-        {
-          dayOfWeek: 5,
-          startTime: '18:00',
-          endTime: '19:00',
-          slotDurationMinutes: 60,
-          slotCapacity: 10,
-        },
-      ],
-      slotExceptions: [],
+  it('cancelBooking flags paid invoices for refund via booking cancellation reason', async () => {
+    prismaMock.booking.findUnique.mockResolvedValue({
+      id: 'booking-1',
+      userId: 'user-1',
+      date: new Date('2026-03-09T00:00:00.000Z'),
+      startTime: '10:00',
+      endTime: '11:00',
+      status: BookingStatus.APPROVED,
+      facility: { name: 'Main Pool' },
+      invoices: [{ id: 'inv-1', status: InvoiceStatus.PAID }],
+    });
+    jest.spyOn(service, 'getBookingDetail').mockResolvedValue({
+      ...detailFixture,
+      status: BookingStatus.CANCELLED,
+      cancellationReason: 'Cancelled [REFUND_REQUIRED]',
+      refundRequired: true,
     });
 
-    clubhouseService.hasClubhouseAccess.mockResolvedValue(false);
-
-    await expect(
-      service.createForActor('u1', {
-        facilityId: 'fac-1',
-        unitId: 'unit-1',
-        date: '2026-02-20T00:00:00.000Z',
-        startTime: '18:00',
-        endTime: '19:00',
-      } as any),
-    ).rejects.toBeInstanceOf(ForbiddenException);
-  });
-
-  it('createForActor should reject when unit is not delivered', async () => {
-    mockPrisma.unit.findUnique.mockResolvedValue({ status: 'NOT_DELIVERED' });
-
-    await expect(
-      service.createForActor('u1', {
-        facilityId: 'fac-1',
-        unitId: 'unit-1',
-        date: '2026-02-20T00:00:00.000Z',
-        startTime: '18:00',
-        endTime: '19:00',
-      } as any),
-    ).rejects.toBeInstanceOf(BadRequestException);
-  });
-
-  it('findOneForActor should forbid viewing another user booking with booking.view_own', async () => {
-    mockPrisma.booking.findUnique.mockResolvedValue({
-      id: 'b1',
-      userId: 'other',
-      facility: {},
-      user: {},
-      resident: null,
-      unit: null,
+    const result = await service.cancelBooking('booking-1', 'admin-1', {
+      reason: 'Cancelled',
     });
 
-    await expect(
-      service.findOneForActor('b1', {
-        actorUserId: 'me',
-        permissions: ['booking.view_own'],
-        roles: [],
+    expect(txMock.booking.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'booking-1' },
+        data: expect.objectContaining({
+          status: BookingStatus.CANCELLED,
+          cancellationReason: expect.stringContaining('[REFUND_REQUIRED]'),
+        }),
       }),
-    ).rejects.toBeInstanceOf(ForbiddenException);
+    );
+    expect(result.refundRequired).toBe(true);
   });
 });

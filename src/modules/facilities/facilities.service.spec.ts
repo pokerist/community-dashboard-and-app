@@ -1,19 +1,32 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { FacilitiesService } from './facilities.service';
 import { PrismaService } from '../../../prisma/prisma.service';
-
-const mockPrisma: any = {
-  facility: { findMany: jest.fn(), findUnique: jest.fn() },
-};
+import { FacilitiesService } from './facilities.service';
 
 describe('FacilitiesService', () => {
   let service: FacilitiesService;
+
+  const prismaMock = {
+    facility: {
+      findUnique: jest.fn(),
+      count: jest.fn(),
+      findMany: jest.fn(),
+    },
+    booking: {
+      findMany: jest.fn(),
+      count: jest.fn(),
+      groupBy: jest.fn(),
+    },
+    invoice: {
+      aggregate: jest.fn(),
+      findMany: jest.fn(),
+    },
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         FacilitiesService,
-        { provide: PrismaService, useValue: mockPrisma },
+        { provide: PrismaService, useValue: prismaMock },
       ],
     }).compile();
 
@@ -21,38 +34,67 @@ describe('FacilitiesService', () => {
     jest.clearAllMocks();
   });
 
-  it('findAllForActor should return all facilities for facility.view_all', async () => {
-    mockPrisma.facility.findMany.mockResolvedValue([{ id: 'f1' }]);
-
-    const res = await service.findAllForActor({
-      actorUserId: 'u1',
-      permissions: ['facility.view_all'],
-      roles: [],
+  it('generates available slots and marks booked slots', async () => {
+    prismaMock.facility.findUnique.mockResolvedValue({
+      id: 'facility-1',
+      slotConfig: [
+        {
+          id: 'cfg-1',
+          dayOfWeek: 1,
+          startTime: '08:00',
+          endTime: '10:00',
+          slotDurationMinutes: 60,
+          slotCapacity: 1,
+        },
+      ],
+      slotExceptions: [],
     });
+    prismaMock.booking.findMany.mockResolvedValue([
+      { id: 'booking-1', startTime: '09:00', endTime: '10:00' },
+    ]);
 
-    expect(mockPrisma.facility.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        include: expect.any(Object),
-      }),
-    );
-    expect(res).toEqual([{ id: 'f1' }]);
+    const result = await service.getAvailableSlots('facility-1', '2026-03-09');
+
+    expect(result.slots).toEqual([
+      { startTime: '08:00', endTime: '09:00', status: 'AVAILABLE', bookingId: null },
+      { startTime: '09:00', endTime: '10:00', status: 'BOOKED', bookingId: 'booking-1' },
+    ]);
   });
 
-  it('findAllForActor should return only active facilities for facility.view_own', async () => {
-    mockPrisma.facility.findMany.mockResolvedValue([{ id: 'f2' }]);
-
-    const res = await service.findAllForActor({
-      actorUserId: 'u1',
-      permissions: ['facility.view_own'],
-      roles: [],
+  it('applies slot exception override to generated slots', async () => {
+    prismaMock.facility.findUnique.mockResolvedValue({
+      id: 'facility-1',
+      slotConfig: [
+        {
+          id: 'cfg-1',
+          dayOfWeek: 1,
+          startTime: '08:00',
+          endTime: '10:00',
+          slotDurationMinutes: 60,
+          slotCapacity: 1,
+        },
+      ],
+      slotExceptions: [
+        {
+          id: 'ex-1',
+          date: new Date('2026-03-09T00:00:00.000Z'),
+          isClosed: false,
+          startTime: '10:00',
+          endTime: '12:00',
+          slotDurationMinutes: 30,
+          slotCapacity: 1,
+        },
+      ],
     });
+    prismaMock.booking.findMany.mockResolvedValue([]);
 
-    expect(mockPrisma.facility.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { isActive: true },
-      }),
-    );
-    expect(res).toEqual([{ id: 'f2' }]);
+    const result = await service.getAvailableSlots('facility-1', '2026-03-09');
+
+    expect(result.slots.map((slot) => `${slot.startTime}-${slot.endTime}`)).toEqual([
+      '10:00-10:30',
+      '10:30-11:00',
+      '11:00-11:30',
+      '11:30-12:00',
+    ]);
   });
 });
-
