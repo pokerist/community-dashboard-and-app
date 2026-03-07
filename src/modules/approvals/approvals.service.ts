@@ -12,6 +12,7 @@ import {
   OwnerPaymentMode,
   Prisma,
   RegistrationStatus,
+  RentRequestStatus,
   UserStatusEnum,
 } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
@@ -267,6 +268,7 @@ export class ApprovalsService {
       pendingFamilyMembers,
       pendingDelegates,
       pendingHomeStaff,
+      pendingTenants,
     ] = await Promise.all([
       this.prisma.pendingRegistration.count({
         where: {
@@ -283,6 +285,9 @@ export class ApprovalsService {
       this.prisma.homeStaffAccess.count({
         where: { status: HouseholdRequestStatus.PENDING },
       }),
+      this.prisma.rentRequest.count({
+        where: { status: RentRequestStatus.PENDING },
+      }),
     ]);
 
     return {
@@ -290,11 +295,13 @@ export class ApprovalsService {
       pendingFamilyMembers,
       pendingDelegates,
       pendingHomeStaff,
+      pendingTenants,
       totalPending:
         pendingOwners +
         pendingFamilyMembers +
         pendingDelegates +
-        pendingHomeStaff,
+        pendingHomeStaff +
+        pendingTenants,
     };
   }
 
@@ -332,10 +339,12 @@ export class ApprovalsService {
       })
       .map((row) => {
         const lookup = this.parseNullableLookup(row.lookupResult);
+        // Prefer dedicated field; fall back to legacy lookupResult for backwards compat
         const nationalIdFileId =
-          lookup && typeof lookup.nationalIdFileId === 'string'
+          row.nationalIdFileId ??
+          (lookup && typeof lookup.nationalIdFileId === 'string'
             ? lookup.nationalIdFileId
-            : null;
+            : null);
         return {
           id: row.id,
           type: 'OWNER',

@@ -17,7 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Tabs, TabsList, TabsTrigger } from "../ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { toast } from "sonner";
-import { AlertTriangle, Eye, RefreshCw, Search, Send } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Clock, Eye, MessageSquare, RefreshCw, Search, Send, UserX, X } from "lucide-react";
 import apiClient from "../../lib/api-client";
 import { errorMessage, extractRows, formatDateTime, getPriorityColorClass, getStatusColorClass, humanizeEnum } from "../../lib/live-data";
 import { adminPriorityLabel, adminTicketStatusLabel } from "../../lib/status-labels";
@@ -32,8 +32,8 @@ type PendingFocusEntity = {
 };
 
 const SERVICE_STATUSES = ["NEW", "IN_PROGRESS", "RESOLVED", "CLOSED", "CANCELLED"] as const;
-const COMPLAINT_STATUSES = ["NEW", "IN_PROGRESS", "RESOLVED", "CLOSED"] as const;
-const STATUS_FILTERS = ["all", "NEW", "IN_PROGRESS", "RESOLVED", "CLOSED", "CANCELLED"] as const;
+const COMPLAINT_STATUSES = ["NEW", "IN_PROGRESS", "PENDING_RESIDENT", "RESOLVED", "CLOSED"] as const;
+const STATUS_FILTERS = ["all", "NEW", "IN_PROGRESS", "PENDING_RESIDENT", "RESOLVED", "CLOSED", "CANCELLED"] as const;
 
 function isRequestCategory(v?: string | null) {
   const x = String(v ?? "").toUpperCase();
@@ -68,6 +68,9 @@ export function TicketsInbox() {
   const [replyInternal, setReplyInternal] = useState(false);
   const [replySubmitting, setReplySubmitting] = useState(false);
   const [statusSubmitting, setStatusSubmitting] = useState(false);
+  const [returnToResidentOpen, setReturnToResidentOpen] = useState(false);
+  const [returnToResidentMsg, setReturnToResidentMsg] = useState("");
+  const [returnToResidentSubmitting, setReturnToResidentSubmitting] = useState(false);
 
   const resetInboxFilters = useCallback(() => {
     setTab("all");
@@ -243,7 +246,7 @@ export function TicketsInbox() {
       if (tab === "requests" && r.kind !== "REQUEST") return false;
       if (tab === "complaints" && r.kind !== "COMPLAINT") return false;
       if (statusFilter !== "all" && r.status !== statusFilter) return false;
-      if (ticketPreset === "pending" && !(r.status === "NEW" || r.status === "IN_PROGRESS")) {
+      if (ticketPreset === "pending" && !(r.status === "NEW" || r.status === "IN_PROGRESS" || r.status === "PENDING_RESIDENT")) {
         return false;
       }
       if (
@@ -253,7 +256,7 @@ export function TicketsInbox() {
         return false;
       }
       if (ticketPreset === "overdue") {
-        if (!(r.status === "NEW" || r.status === "IN_PROGRESS")) return false;
+        if (!(r.status === "NEW" || r.status === "IN_PROGRESS" || r.status === "PENDING_RESIDENT")) return false;
         const createdTs = r.createdAt ? new Date(r.createdAt).getTime() : NaN;
         if (!Number.isFinite(createdTs) || now - createdTs < overdueThresholdMs) {
           return false;
@@ -293,6 +296,8 @@ export function TicketsInbox() {
     setDialogOpen(true);
     setReplyText("");
     setReplyInternal(false);
+    setReturnToResidentOpen(false);
+    setReturnToResidentMsg("");
     try {
       if (row.kind === "COMPLAINT") {
         const [detailRes, commentsRes] = await Promise.all([
@@ -427,6 +432,29 @@ export function TicketsInbox() {
     }
   }, [active, loadAll, refreshActive]);
 
+  const submitReturnToResident = useCallback(async () => {
+    if (!active || active.kind !== "COMPLAINT") return;
+    const msg = returnToResidentMsg.trim();
+    if (!msg) {
+      toast.error("Please enter a message for the resident");
+      return;
+    }
+    setReturnToResidentSubmitting(true);
+    try {
+      await apiClient.patch(`/complaints/${active.id}/return-to-resident`, { message: msg });
+      toast.success("Complaint returned to resident", {
+        description: "The resident has been notified and a comment was added.",
+      });
+      setReturnToResidentOpen(false);
+      setReturnToResidentMsg("");
+      await Promise.all([loadAll(), refreshActive()]);
+    } catch (e) {
+      toast.error("Failed to return complaint to resident", { description: errorMessage(e) });
+    } finally {
+      setReturnToResidentSubmitting(false);
+    }
+  }, [active, loadAll, refreshActive, returnToResidentMsg]);
+
   const activityRows = useMemo(() => {
     if (!active?.detail) return [];
     const createdAt = active.kind === "COMPLAINT" ? active.detail.createdAt : active.detail.requestedAt || active.detail.createdAt;
@@ -470,17 +498,34 @@ export function TicketsInbox() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
-        <Card className="p-4 shadow-card rounded-xl"><p className="text-xs text-[#64748B]">All Tickets</p><p className="text-xl font-semibold text-[#1E293B] mt-1">{counts.all}</p></Card>
-        <Card className="p-4 shadow-card rounded-xl"><p className="text-xs text-[#64748B]">Services</p><p className="text-xl font-semibold text-[#1E293B] mt-1">{counts.services}</p></Card>
-        <Card className="p-4 shadow-card rounded-xl"><p className="text-xs text-[#64748B]">Requests</p><p className="text-xl font-semibold text-[#1E293B] mt-1">{counts.requests}</p></Card>
-        <Card className="p-4 shadow-card rounded-xl"><p className="text-xs text-[#64748B]">Complaints</p><p className="text-xl font-semibold text-[#1E293B] mt-1">{counts.complaints}</p></Card>
-        <Card className="p-4 shadow-card rounded-xl border border-[#FECACA]">
-          <div className="flex items-center gap-2 text-[#B91C1C]">
-            <AlertTriangle className="w-4 h-4" />
-            <p className="text-xs">Urgent Lane</p>
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
+        <Card className="p-4 rounded-xl border border-[#E2E8F0] hover:shadow-md transition-shadow">
+          <p className="text-xs font-medium text-[#64748B] uppercase tracking-wide">Total</p>
+          <p className="text-2xl font-bold text-[#1E293B] mt-1">{counts.all}</p>
+          <p className="text-xs text-[#94A3B8] mt-0.5">All tickets</p>
+        </Card>
+        <Card className="p-4 rounded-xl border border-[#DBEAFE] bg-[#EFF6FF]/50 hover:shadow-md transition-shadow">
+          <p className="text-xs font-medium text-[#3B82F6] uppercase tracking-wide">Services</p>
+          <p className="text-2xl font-bold text-[#1E40AF] mt-1">{counts.services}</p>
+          <p className="text-xs text-[#94A3B8] mt-0.5">Service requests</p>
+        </Card>
+        <Card className="p-4 rounded-xl border border-[#EDE9FE] bg-[#F5F3FF]/50 hover:shadow-md transition-shadow">
+          <p className="text-xs font-medium text-[#7C3AED] uppercase tracking-wide">Requests</p>
+          <p className="text-2xl font-bold text-[#5B21B6] mt-1">{counts.requests}</p>
+          <p className="text-xs text-[#94A3B8] mt-0.5">Admin requests</p>
+        </Card>
+        <Card className="p-4 rounded-xl border border-[#FEE2E2] bg-[#FFF5F5]/50 hover:shadow-md transition-shadow">
+          <p className="text-xs font-medium text-[#EF4444] uppercase tracking-wide">Complaints</p>
+          <p className="text-2xl font-bold text-[#B91C1C] mt-1">{counts.complaints}</p>
+          <p className="text-xs text-[#94A3B8] mt-0.5">Resident complaints</p>
+        </Card>
+        <Card className="p-4 rounded-xl border border-[#FED7AA] bg-[#FFF7ED]/50 hover:shadow-md transition-shadow">
+          <div className="flex items-center gap-1.5">
+            <AlertTriangle className="w-3.5 h-3.5 text-[#EA580C]" />
+            <p className="text-xs font-medium text-[#EA580C] uppercase tracking-wide">Urgent</p>
           </div>
-          <p className="text-xl font-semibold text-[#1E293B] mt-1">{counts.urgent}</p>
+          <p className="text-2xl font-bold text-[#9A3412] mt-1">{counts.urgent}</p>
+          <p className="text-xs text-[#94A3B8] mt-0.5">Needs attention</p>
         </Card>
       </div>
 
@@ -615,7 +660,7 @@ export function TicketsInbox() {
         </Table>
       </Card>
 
-      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) { setDialogOpen(false); setActive(null); } }}>
+      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) { setDialogOpen(false); setActive(null); setReturnToResidentOpen(false); setReturnToResidentMsg(""); } }}>
         <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Ticket Details</DialogTitle>
@@ -665,30 +710,104 @@ export function TicketsInbox() {
                 </Card>
                 <Card className="p-4 space-y-4">
                   <div>
-                    <Label className="mb-2 block">Update Status</Label>
+                    <Label className="mb-2 block text-[#1E293B] font-medium">Update Status</Label>
                     <Select value={active.statusDraft} onValueChange={(v) => setActive((p: any) => p ? { ...p, statusDraft: v } : p)}>
-                      <SelectTrigger><SelectValue placeholder="Choose status" /></SelectTrigger>
+                      <SelectTrigger className="rounded-lg"><SelectValue placeholder="Choose status" /></SelectTrigger>
                       <SelectContent>{(active.kind === "COMPLAINT" ? COMPLAINT_STATUSES : SERVICE_STATUSES).map((s) => <SelectItem key={s} value={s}>{adminTicketStatusLabel(active.kind, s)}</SelectItem>)}</SelectContent>
                     </Select>
-                    {active.kind === "COMPLAINT" ? (
+                    {active.kind === "COMPLAINT" && (active.statusDraft === "RESOLVED" || active.statusDraft === "CLOSED") ? (
                       <div className="mt-3 space-y-2">
-                        <Label htmlFor="unifiedResolutionNotes">Resolution Notes</Label>
-                        <Textarea id="unifiedResolutionNotes" rows={3} value={active.resolutionNotesDraft || ""} onChange={(e) => setActive((p: any) => p ? { ...p, resolutionNotesDraft: e.target.value } : p)} placeholder="Required for resolved/closed complaints" />
+                        <Label htmlFor="unifiedResolutionNotes" className="text-sm text-[#475569]">Resolution Notes <span className="text-red-500">*</span></Label>
+                        <Textarea id="unifiedResolutionNotes" rows={3} value={active.resolutionNotesDraft || ""} onChange={(e) => setActive((p: any) => p ? { ...p, resolutionNotesDraft: e.target.value } : p)} placeholder="Describe how this complaint was resolved..." className="rounded-lg text-sm" />
                       </div>
                     ) : null}
-                    <Button className="w-full mt-3 bg-[#00B386] hover:bg-[#00B386]/90 text-white" onClick={() => void applyStatus()} disabled={statusSubmitting || !active.statusDraft || active.statusDraft === String(active.detail?.status || "").toUpperCase()}>
-                      {statusSubmitting ? "Updating..." : "Apply Status"}
+                    <Button className="w-full mt-3 bg-[#00B386] hover:bg-[#00A07A] text-white rounded-lg font-medium" onClick={() => void applyStatus()} disabled={statusSubmitting || !active.statusDraft || active.statusDraft === String(active.detail?.status || "").toUpperCase()}>
+                      {statusSubmitting ? "Updating..." : "Apply Status Change"}
                     </Button>
                   </div>
+
+                  {/* Quick Actions */}
                   <div className="pt-4 border-t border-[#E5E7EB] space-y-2">
-                    <p className="text-sm text-[#64748B]">Quick Actions</p>
+                    <p className="text-xs font-semibold text-[#64748B] uppercase tracking-wider">Quick Actions</p>
                     <div className="grid grid-cols-2 gap-2">
-                      <Button variant="outline" size="sm" onClick={() => setActive((p: any) => p ? { ...p, statusDraft: "IN_PROGRESS" } : p)}>In Progress</Button>
-                      <Button variant="outline" size="sm" onClick={() => setActive((p: any) => p ? { ...p, statusDraft: "RESOLVED" } : p)}>Resolved</Button>
-                      <Button variant="outline" size="sm" onClick={() => setActive((p: any) => p ? { ...p, statusDraft: "CLOSED" } : p)}>Close</Button>
-                      {active.kind !== "COMPLAINT" ? <Button variant="outline" size="sm" onClick={() => setActive((p: any) => p ? { ...p, statusDraft: "CANCELLED" } : p)}>Cancel</Button> : <div />}
+                      <Button variant="outline" size="sm" className="rounded-lg text-xs" onClick={() => setActive((p: any) => p ? { ...p, statusDraft: "IN_PROGRESS" } : p)}>
+                        <Clock className="w-3 h-3 mr-1" /> In Progress
+                      </Button>
+                      <Button variant="outline" size="sm" className="rounded-lg text-xs" onClick={() => setActive((p: any) => p ? { ...p, statusDraft: "RESOLVED" } : p)}>
+                        Resolved
+                      </Button>
+                      <Button variant="outline" size="sm" className="rounded-lg text-xs" onClick={() => setActive((p: any) => p ? { ...p, statusDraft: "CLOSED" } : p)}>
+                        Close Ticket
+                      </Button>
+                      {active.kind !== "COMPLAINT"
+                        ? <Button variant="outline" size="sm" className="rounded-lg text-xs" onClick={() => setActive((p: any) => p ? { ...p, statusDraft: "CANCELLED" } : p)}><X className="w-3 h-3 mr-1" />Cancel</Button>
+                        : null}
                     </div>
                   </div>
+
+                  {/* Return to Resident — only for IN_PROGRESS complaints */}
+                  {active.kind === "COMPLAINT" && String(active.detail?.status || "").toUpperCase() === "IN_PROGRESS" ? (
+                    <div className="pt-4 border-t border-[#E5E7EB]">
+                      {!returnToResidentOpen ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full rounded-lg text-[#7C3AED] border-[#7C3AED]/30 hover:bg-[#7C3AED]/5 text-xs font-medium"
+                          onClick={() => setReturnToResidentOpen(true)}
+                        >
+                          <ArrowLeft className="w-3 h-3 mr-1.5" />
+                          Return to Resident
+                        </Button>
+                      ) : (
+                        <div className="space-y-3 rounded-xl border border-[#7C3AED]/20 bg-[#F5F3FF] p-3">
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs font-semibold text-[#7C3AED] flex items-center gap-1.5">
+                              <UserX className="w-3.5 h-3.5" />
+                              Return to Resident
+                            </p>
+                            <button
+                              className="text-[#64748B] hover:text-[#1E293B]"
+                              onClick={() => { setReturnToResidentOpen(false); setReturnToResidentMsg(""); }}
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                          <p className="text-xs text-[#64748B]">
+                            This will set status to "Awaiting Resident Response" and send the resident a notification with your message.
+                          </p>
+                          <Textarea
+                            rows={3}
+                            value={returnToResidentMsg}
+                            onChange={(e) => setReturnToResidentMsg(e.target.value)}
+                            placeholder="E.g. We need you to confirm the issue still persists and provide photos..."
+                            className="rounded-lg text-sm bg-white"
+                          />
+                          <Button
+                            size="sm"
+                            className="w-full bg-[#7C3AED] hover:bg-[#6D28D9] text-white rounded-lg text-xs font-medium"
+                            onClick={() => void submitReturnToResident()}
+                            disabled={returnToResidentSubmitting || !returnToResidentMsg.trim()}
+                          >
+                            <Send className="w-3 h-3 mr-1.5" />
+                            {returnToResidentSubmitting ? "Sending..." : "Send & Update Status"}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+
+                  {/* Awaiting Resident banner */}
+                  {active.kind === "COMPLAINT" && String(active.detail?.status || "").toUpperCase() === "PENDING_RESIDENT" ? (
+                    <div className="pt-4 border-t border-[#E5E7EB]">
+                      <div className="rounded-xl border border-[#7C3AED]/30 bg-[#F5F3FF] p-3 flex items-start gap-2">
+                        <MessageSquare className="w-4 h-4 text-[#7C3AED] mt-0.5 shrink-0" />
+                        <div>
+                          <p className="text-xs font-semibold text-[#7C3AED]">Awaiting Resident Response</p>
+                          <p className="text-xs text-[#64748B] mt-1">This complaint was returned to the resident. Once they respond, set status back to "In Progress" to continue handling.</p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                 </Card>
               </div>
 

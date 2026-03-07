@@ -89,6 +89,9 @@ export function getStatusColorClass(status?: string | null): string {
   if (["EXPIRED", "OFFLINE", "CLOSED"].includes(normalized)) {
     return "bg-[#64748B]/10 text-[#64748B] hover:bg-[#64748B]/20";
   }
+  if (normalized === "PENDING_RESIDENT") {
+    return "bg-[#7C3AED]/10 text-[#7C3AED] hover:bg-[#7C3AED]/20";
+  }
   return "bg-[#3B82F6]/10 text-[#3B82F6] hover:bg-[#3B82F6]/20";
 }
 

@@ -31,6 +31,8 @@ export function adminTicketStatusLabel(kind: TicketKind | string, value?: string
       return "Pending Approval";
     case "IN_PROGRESS":
       return ticketKind === "COMPLAINT" ? "Under Review" : "Approved / In Progress";
+    case "PENDING_RESIDENT":
+      return "Awaiting Resident Response";
     case "RESOLVED":
       return "Resolved";
     case "CLOSED":

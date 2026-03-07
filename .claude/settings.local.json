@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pm2 restart community-backend)",
+      "Bash(pm2 show community-backend)",
+      "Bash(pm2 list)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:4003/health)",
+      "Bash(pm2 logs community-backend --lines 20 --nostream)",
+      "Bash(docker ps --format \"table {{.Names}}\\\\t{{.Status}}\\\\t{{.Ports}}\")",
+      "Bash(powershell.exe -Command \"Get-Service -Name postgresql* 2>$null | Select-Object Name,Status; Get-NetTCPConnection -LocalPort 5433 -ErrorAction SilentlyContinue | Select-Object LocalPort,State\")",
+      "Bash(powershell.exe -Command \"Get-NetTCPConnection -LocalPort 5433 -ErrorAction SilentlyContinue | Select-Object LocalPort,State,OwningProcess\")"
+    ]
+  }
+}

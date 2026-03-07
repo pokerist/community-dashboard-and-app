@@ -113,4 +113,24 @@ export class CompoundStaffController {
   ) {
     return this.compoundStaffService.getActivityLogs(id, query);
   }
+
+  @Get(':id/attendance')
+  @Permissions('compound_staff.view_all', 'admin.view')
+  getAttendance(@Param('id') id: string) {
+    return this.compoundStaffService.getAttendance(id);
+  }
+
+  @Post(':id/clock-in')
+  @HttpCode(HttpStatus.CREATED)
+  @Permissions('compound_staff.update', 'admin.update')
+  clockIn(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+    return this.compoundStaffService.clockIn(id, req.user.id);
+  }
+
+  @Post(':id/clock-out')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('compound_staff.update', 'admin.update')
+  clockOut(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+    return this.compoundStaffService.clockOut(id, req.user.id);
+  }
 }

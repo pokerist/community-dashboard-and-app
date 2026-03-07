@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { SidebarProvider, SidebarInset } from "./components/ui/sidebar";
 import { AppSidebar } from "./components/AppSidebar";
 import { DashboardOverview } from "./components/pages/DashboardOverview";
 import { ResidentManagement } from "./components/pages/ResidentManagement";
@@ -44,6 +43,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "./components/ui/dialog";
+import "./styles/design-overrides.css";
 
 type FooterPanel = "documentation" | "support" | "privacy" | null;
 
@@ -96,7 +96,6 @@ function getSectionFromLocation(): string {
   if (window.location.hash) {
     return normalizeSection(window.location.hash);
   }
-
   const pathSegments = window.location.pathname.split("/").filter(Boolean);
   const pathSection = pathSegments[pathSegments.length - 1] ?? "";
   return normalizeSection(pathSection);
@@ -151,6 +150,39 @@ type PendingFocusEntity = {
   serviceCategory?: string | null;
 };
 
+/* ── Section label map ──────────────────────────────────────── */
+const SECTION_LABELS: Record<string, string> = {
+  dashboard: "Dashboard",
+  residents: "Residents & Users",
+  "residents-create": "New Resident",
+  units: "Units",
+  communities: "Communities",
+  commercial: "Commercial",
+  "compound-staff": "Compound Staff",
+  "blue-collar": "Blue Collar Workers",
+  services: "Services",
+  permits: "Permits & Requests",
+  tickets: "Tickets Inbox",
+  access: "Access Control",
+  rental: "Rental & Lease",
+  complaints: "Complaints",
+  violations: "Violations",
+  billing: "Payments & Invoices",
+  marketing: "Marketing",
+  notifications: "Notifications",
+  ordering: "Ordering",
+  surveys: "Surveys",
+  security: "Security & Emergency",
+  gates: "Gates",
+  "gate-live": "Gate Live Feed",
+  amenities: "Amenities",
+  reports: "Reports & Analytics",
+  settings: "System Settings",
+  directory: "Community Directory",
+  approvals: "Registrations & Approvals",
+  hospitality: "Hospitality",
+};
+
 export default function App() {
   const [activeSection, setActiveSection] = useState<string>(() => getSectionFromLocation());
   const [authenticated, setAuthenticated] = useState<boolean>(() => isAuthenticated());
@@ -161,7 +193,6 @@ export default function App() {
   const navigateToSection = useCallback((section: string) => {
     const next = normalizeSection(section);
     setActiveSection((prev) => (prev === next ? prev : next));
-
     if (typeof window !== "undefined") {
       const nextHash = `#${next}`;
       if (window.location.hash !== nextHash) {
@@ -172,13 +203,10 @@ export default function App() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-
     const syncFromHash = () => {
       const next = getSectionFromLocation();
       setActiveSection((prev) => (prev === next ? prev : next));
     };
-
-    // Ensure a stable hash exists for refresh/deep-linking.
     if (!window.location.hash) {
       const initialSection = getSectionFromLocation();
       window.history.replaceState(
@@ -188,7 +216,6 @@ export default function App() {
       );
     }
     syncFromHash();
-
     window.addEventListener("hashchange", syncFromHash);
     return () => window.removeEventListener("hashchange", syncFromHash);
   }, []);
@@ -198,10 +225,8 @@ export default function App() {
       setAuthenticated(false);
       toast.error("Session expired", { description: "Please sign in again." });
     };
-
     window.addEventListener("auth:unauthorized", onUnauthorized as EventListener);
-    return () =>
-      window.removeEventListener("auth:unauthorized", onUnauthorized as EventListener);
+    return () => window.removeEventListener("auth:unauthorized", onUnauthorized as EventListener);
   }, []);
 
   useEffect(() => {
@@ -215,10 +240,7 @@ export default function App() {
 
     const pollNotifications = async (isInitial = false) => {
       try {
-        const response = await notificationsService.listLegacyAdmin({
-          page: 1,
-          limit: 25,
-        });
+        const response = await notificationsService.listLegacyAdmin({ page: 1, limit: 25 });
         if (!mounted) return;
         const rows = extractRows(response.data);
         const nextIds = new Set<string>();
@@ -255,62 +277,29 @@ export default function App() {
                       section,
                       entityType: String(row?.payload?.entityType ?? "").trim() || null,
                       entityId: String(row?.payload?.entityId ?? "").trim() || null,
-                      serviceCategory:
-                        String(row?.payload?.serviceCategory ?? "").trim() || null,
+                      serviceCategory: String(row?.payload?.serviceCategory ?? "").trim() || null,
                     };
                     if (focusEntity.entityId) {
-                      window.sessionStorage.setItem(
-                        "admin.focusEntity",
-                        JSON.stringify(focusEntity),
-                      );
+                      window.sessionStorage.setItem("admin.focusEntity", JSON.stringify(focusEntity));
                     }
-                  } catch {
-                    // ignore focus hint storage failures
-                  }
+                  } catch { /* ignore */ }
                   navigateToSection(section);
                 },
               },
             } : { description });
           });
         }
-      } catch {
-        // Keep silent; notification poll should not break dashboard UX.
-      }
+      } catch { /* Keep silent; notification poll should not break dashboard UX. */ }
     };
 
     void pollNotifications(true);
-    const timer = window.setInterval(() => {
-      void pollNotifications(false);
-    }, 15000);
-
-    return () => {
-      mounted = false;
-      window.clearInterval(timer);
-    };
+    const timer = window.setInterval(() => void pollNotifications(false), 15000);
+    return () => { mounted = false; window.clearInterval(timer); };
   }, [authenticated, navigateToSection]);
 
   useEffect(() => {
-    if (activeSection === "notifications") {
-      setUnseenAdminNotifications(0);
-    }
+    if (activeSection === "notifications") setUnseenAdminNotifications(0);
   }, [activeSection]);
-
-  const currentDateLabel = useMemo(() => {
-    try {
-      return new Intl.DateTimeFormat(undefined, {
-        weekday: "long",
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      }).format(new Date());
-    } catch {
-      return new Date().toLocaleString();
-    }
-  }, [authenticated]);
-
-  const currentAdminEmail = localStorage.getItem("auth_email") || "Admin";
 
   useEffect(() => {
     if (!authenticated || typeof document === "undefined") return;
@@ -329,19 +318,14 @@ export default function App() {
       if (!/^#[0-9a-fA-F]{6}$/.test(color)) return;
       document.documentElement.style.setProperty("--primary", color);
       document.documentElement.style.setProperty("--color-primary", color);
-      document.documentElement.style.setProperty(
-        "--primary-foreground",
-        computeReadableTextColor(color),
-      );
+      document.documentElement.style.setProperty("--primary-foreground", computeReadableTextColor(color));
     };
 
     const loadBranding = async () => {
       try {
         const response = await apiClient.get("/mobile/app-config");
         applyBrandPrimary(response.data?.brand?.primaryColor ?? "");
-      } catch {
-        // Keep defaults if branding is unavailable.
-      }
+      } catch { /* Keep defaults if branding is unavailable. */ }
     };
 
     void loadBranding();
@@ -354,77 +338,51 @@ export default function App() {
     localStorage.removeItem("auth_email");
     setAuthenticated(false);
     navigateToSection("dashboard");
-    toast.message("Signed out");
+    toast.message("Signed out — see you next time.");
   };
+
+  const currentAdminEmail = localStorage.getItem("auth_email") || "Admin";
+  const currentAdminName = localStorage.getItem("auth_name") || currentAdminEmail.split("@")[0] || "Admin";
+  const adminInitials = currentAdminName.split(/[ ._-]+/).filter(Boolean).map((p: string) => p[0]).join("").slice(0, 2).toUpperCase() || "AD";
+
+  const sectionLabel = SECTION_LABELS[activeSection] ?? activeSection;
 
   const renderContent = () => {
     switch (activeSection) {
-      case "dashboard":
-        return <DashboardOverview onNavigate={navigateToSection} />;
-      case "residents":
-        return <ResidentManagement onNavigateToCreate={() => navigateToSection("residents-create")} />;
-      case "users":
-        return <UsersHubPage />;
-      case "dashboard-users":
-        return <DashboardUsersPage />;
-      case "residents-create":
-        return <ResidentCreatePage onBack={() => navigateToSection("residents")} onCreated={() => navigateToSection("residents")} />;
-      case "units":
-        return <UnitsManagement />;
-      case "communities":
-        return <CommunitiesManagement />;
-      case "commercial":
-        return <CommercialManagement />;
-      case "compound-staff":
-        return <CompoundStaffManagement />;
-      case "blue-collar":
-        return <BlueCollarManagement />;
-      case "services":
-        return <ServiceManagement />;
-      case "permits":
-        return <PermitsManagement />;
-      case "tickets":
-        return <TicketsInbox />;
-      case "access":
-        return <AccessControl />;
+      case "dashboard":       return <DashboardOverview onNavigate={navigateToSection} />;
+      case "residents":       return <ResidentManagement onNavigateToCreate={() => navigateToSection("residents-create")} />;
+      case "users":           return <UsersHubPage />;
+      case "dashboard-users": return <DashboardUsersPage />;
+      case "residents-create":return <ResidentCreatePage onBack={() => navigateToSection("residents")} onCreated={() => navigateToSection("residents")} />;
+      case "units":           return <UnitsManagement />;
+      case "communities":     return <CommunitiesManagement />;
+      case "commercial":      return <CommercialManagement />;
+      case "compound-staff":  return <CompoundStaffManagement />;
+      case "blue-collar":     return <BlueCollarManagement />;
+      case "services":        return <ServiceManagement />;
+      case "permits":         return <PermitsManagement />;
+      case "tickets":         return <TicketsInbox />;
+      case "access":          return <AccessControl />;
       case "lease":
-      case "rental":
-        return <RentalManagement />;
-      case "complaints":
-        return <ComplaintsViolations />;
-      case "violations":
-        return <ViolationsManagement />;
-      case "billing":
-        return <BillingPayments />;
+      case "rental":          return <RentalManagement />;
+      case "complaints":      return <ComplaintsViolations />;
+      case "violations":      return <ViolationsManagement />;
+      case "billing":         return <BillingPayments />;
       case "banners":
-      case "marketing":
-        return <MarketingCenter />;
-      case "notifications":
-        return <NotificationCenter />;
-      case "ordering":
-        return <OrderingManagement />;
-      case "surveys":
-        return <SurveysManagement />;
-      case "security":
-        return <SecurityEmergency />;
-      case "gates":
-        return <GatesManagement />;
-      case "gate-live":
-        return <GateLiveFeed />;
-      case "amenities":
-        return <AmenitiesManagement />;
-      case "reports":
-        return <ReportsAnalytics />;
-      case "settings":
-        return <SystemSettings />;
-      case "directory":
-        return <CommunityDirectory />;
-      case "approvals":
-        return <ApprovalsCenter />;
-      case "hospitality":
-        return <HospitalityPage />;
-      default:
-        return <DashboardOverview onNavigate={navigateToSection} />;
+      case "marketing":       return <MarketingCenter />;
+      case "notifications":   return <NotificationCenter />;
+      case "ordering":        return <OrderingManagement />;
+      case "surveys":         return <SurveysManagement />;
+      case "security":        return <SecurityEmergency />;
+      case "gates":           return <GatesManagement />;
+      case "gate-live":       return <GateLiveFeed />;
+      case "amenities":       return <AmenitiesManagement />;
+      case "reports":         return <ReportsAnalytics />;
+      case "settings":        return <SystemSettings />;
+      case "directory":       return <CommunityDirectory />;
+      case "approvals":       return <ApprovalsCenter />;
+      case "hospitality":     return <HospitalityPage />;
+      default:                return <DashboardOverview onNavigate={navigateToSection} />;
     }
   };
 
@@ -438,117 +396,141 @@ export default function App() {
   }
 
   return (
-    <SidebarProvider>
-      <div className="flex h-screen w-full bg-[#F9FAFB]">
-        <AppSidebar onNavigate={navigateToSection} activeSection={activeSection} />
-        <SidebarInset className="flex-1 overflow-hidden">
-          <div className="h-full overflow-y-auto">
-            {/* Header */}
-            <header className="sticky top-0 z-10 bg-white border-b border-[#E5E7EB] px-6 py-4">
-              <div className="flex items-center justify-between">
-                <div className="flex-1">
-                  <p className="text-sm text-[#64748B]">
-                    {currentDateLabel}
-                  </p>
+    <>
+      {/* ── Outer shell: gray bg wrapping white card ────────────── */}
+      <div className="flex h-screen w-full overflow-hidden" style={{ background: "#ECEAE7" }}>
+
+        {/* White card — sidebar + content live inside together */}
+        <div className="flex flex-1 overflow-hidden p-3">
+          <div
+            className="flex flex-1 overflow-hidden bg-white"
+            style={{ borderRadius: "14px", boxShadow: "0 2px 24px rgba(0,0,0,0.07)" }}
+          >
+            {/* Light text sidebar inside the white card */}
+            <AppSidebar
+              onNavigate={navigateToSection}
+              activeSection={activeSection}
+              unseenNotifications={unseenAdminNotifications}
+            />
+
+            {/* Content column */}
+            <div className="flex flex-1 flex-col overflow-hidden">
+
+            {/* ── Top bar ────────────────────────────────────── */}
+            <header className="flex-shrink-0 flex items-center justify-between px-6 h-14 border-b border-[#F0EEE9]">
+              {/* Breadcrumb */}
+              <div className="flex items-center gap-2">
+                <span
+                  className="text-[11px] font-semibold tracking-[0.08em] uppercase text-[#B0ADA7]"
+                  style={{ fontFamily: "'Work Sans', sans-serif" }}
+                >MG</span>
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" className="text-[#D5D2CC]">
+                  <path d="M3 2l4 3-4 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span
+                  className="text-[13px] font-semibold text-[#111827]"
+                  style={{ fontFamily: "'Work Sans', sans-serif" }}
+                >{sectionLabel}</span>
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center gap-2.5">
+                {/* Bell */}
+                <button
+                  type="button"
+                  onClick={() => { setUnseenAdminNotifications(0); navigateToSection("notifications"); }}
+                  className="relative flex h-8 w-8 items-center justify-center rounded-[6px] text-[#9CA3AF] transition-colors hover:bg-[#F5F4F1] hover:text-[#374151]"
+                  aria-label="Notifications"
+                >
+                  <svg className="h-[17px] w-[17px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+                      d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                  </svg>
+                  {unseenAdminNotifications > 0 && (
+                    <span className="absolute -right-0.5 -top-0.5 h-[7px] w-[7px] rounded-full bg-[#2563EB]" />
+                  )}
+                </button>
+
+                <div className="h-5 w-px bg-[#E5E7EB]" />
+
+                {/* User info */}
+                <div className="hidden sm:block text-right">
+                  <p className="text-[11.5px] font-semibold text-[#111827] leading-none"
+                    style={{ fontFamily: "'Work Sans', sans-serif" }}>{currentAdminName}</p>
+                  <p className="mt-[2px] text-[10.5px] leading-none text-[#9CA3AF]">{currentAdminEmail}</p>
                 </div>
-                <div className="flex items-center gap-4">
-                  <div className="hidden text-right sm:block">
-                    <p className="text-xs text-[#64748B]">Signed in as</p>
-                    <p className="text-sm font-medium text-[#0F172A]">{currentAdminEmail}</p>
+
+                {/* Avatar */}
+                <div className="relative">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#2563EB] text-[11px] font-bold text-white">
+                    {adminInitials}
                   </div>
-                  <div className="relative">
-                    <div 
-                      className="w-8 h-8 rounded-full bg-[#F3F4F6] flex items-center justify-center cursor-pointer hover:bg-[#E5E7EB] transition-colors"
-                      onClick={() => {
-                        setUnseenAdminNotifications(0);
-                        navigateToSection("notifications");
-                      }}
-                    >
-                      <svg
-                        className="w-5 h-5 text-[#64748B]"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-                        />
-                      </svg>
-                    </div>
-                    {unseenAdminNotifications > 0 ? (
-                      <span className="absolute -right-1 -top-1 min-w-[18px] h-[18px] rounded-full bg-[#EF4444] px-1 text-[10px] leading-[18px] text-white text-center font-semibold">
-                        {unseenAdminNotifications > 99 ? "99+" : unseenAdminNotifications}
-                      </span>
-                    ) : null}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleLogout}
-                    className="inline-flex items-center justify-center rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs font-medium text-[#334155] transition hover:border-[#CBD5E1] hover:bg-[#F8FAFC]"
-                  >
-                    Logout
-                  </button>
+                  <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-[#22C55E] border-2 border-white" />
                 </div>
+
+                <div className="h-5 w-px bg-[#E5E7EB]" />
+
+                {/* Sign out */}
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="flex items-center gap-1.5 rounded-[4px] border border-[#E5E7EB] px-3 py-[6px] text-[12px] font-semibold text-[#6B7280] transition-colors hover:border-[#D1D5DB] hover:bg-[#F9FAFB] hover:text-[#111827]"
+                  style={{ fontFamily: "'Work Sans', sans-serif" }}
+                >
+                  Sign out
+                </button>
               </div>
             </header>
 
-            {/* Main Content */}
-            <main className="p-6">{renderContent()}</main>
-
-            {/* Footer */}
-            <footer className="border-t border-[#E5E7EB] bg-white px-6 py-4 mt-12">
-              <div className="flex items-center justify-between text-xs text-[#64748B]">
-                <p>Al Karma Developments — Admin Dashboard © 2025 | Powered by Smart Station Solutions (SSS)</p>
-                <div className="flex items-center gap-4">
-                  <button
-                    type="button"
-                    onClick={() => setFooterPanel("documentation")}
-                    className="hover:text-[#00B386] transition-colors"
-                  >
-                    Documentation
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFooterPanel("support")}
-                    className="hover:text-[#00B386] transition-colors"
-                  >
-                    Support
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFooterPanel("privacy")}
-                    className="hover:text-[#00B386] transition-colors"
-                  >
-                    Privacy
-                  </button>
-                </div>
+            {/* ── Page content ─────────────────────────────────── */}
+            <main className="flex-1 overflow-y-auto">
+              <div className="page-enter" key={activeSection}>
+                {/* Dashboard manages its own full-bleed padding; other pages get a p-6 wrapper */}
+                {activeSection === "dashboard"
+                  ? renderContent()
+                  : <div className="p-6">{renderContent()}</div>
+                }
               </div>
-            </footer>
-          </div>
-        </SidebarInset>
-      </div>
+
+              {/* Footer */}
+              <footer className="border-t border-[#F0EEE9] px-6 py-4 mt-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] text-[#B0ADA7]" style={{ fontFamily: "'Work Sans', sans-serif" }}>
+                    MG Community — Admin Dashboard © 2025 · Powered by Smart Station Solutions
+                  </p>
+                  <div className="flex items-center gap-4">
+                    {(["documentation", "support", "privacy"] as FooterPanel[]).map((panel) => (
+                      <button
+                        key={panel}
+                        type="button"
+                        onClick={() => setFooterPanel(panel)}
+                        className="text-[11px] text-[#B0ADA7] capitalize transition-colors hover:text-[#2563EB]"
+                        style={{ fontFamily: "'Work Sans', sans-serif" }}
+                      >
+                        {panel}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </footer>
+            </main>
+            </div>{/* end content column */}
+          </div>{/* end white card */}
+        </div>{/* end p-3 wrapper */}
+      </div>{/* end outer shell */}
+
+      {/* Footer dialogs */}
       <Dialog open={footerPanel !== null} onOpenChange={(open) => !open && setFooterPanel(null)}>
         <DialogContent className="max-w-2xl">
-          {footerPanel === "documentation" ? (
+          {footerPanel === "documentation" && (
             <>
               <DialogHeader>
                 <DialogTitle>Documentation</DialogTitle>
-                <DialogDescription>
-                  This demo uses the local backend and admin web in the same workspace.
-                </DialogDescription>
+                <DialogDescription>This demo uses the local backend and admin web in the same workspace.</DialogDescription>
               </DialogHeader>
               <div className="space-y-3 text-sm text-[#334155]">
-                <p>
-                  Backend API docs (Swagger):{" "}
-                  <a
-                    className="text-[#0B5FFF] underline"
-                    href="http://127.0.0.1:3001/api"
-                    target="_blank"
-                    rel="noreferrer"
-                  >
+                <p>Backend API docs (Swagger):{" "}
+                  <a className="text-[#2563EB] underline" href="http://127.0.0.1:3001/api" target="_blank" rel="noreferrer">
                     http://127.0.0.1:3001/api
                   </a>
                 </p>
@@ -556,24 +538,22 @@ export default function App() {
                 <p>Admin demo audit matrix: <code>documentation/admin-demo-audit-matrix.md</code></p>
               </div>
             </>
-          ) : null}
-
-          {footerPanel === "support" ? (
+          )}
+          {footerPanel === "support" && (
             <>
               <DialogHeader>
                 <DialogTitle>Support</DialogTitle>
                 <DialogDescription>Operational support and demo troubleshooting contacts.</DialogDescription>
               </DialogHeader>
               <div className="space-y-3 text-sm text-[#334155]">
-                <p>Primary support email: <a className="text-[#0B5FFF] underline" href="mailto:support@alkarma.com">support@alkarma.com</a></p>
+                <p>Primary support email: <a className="text-[#2563EB] underline" href="mailto:support@mg.com">support@mg.com</a></p>
                 <p>Backend log file: <code>.local/backend-dev.log</code></p>
                 <p>Frontend log file: <code>.local/admin-web-dev.log</code></p>
                 <p>If login fails, verify backend is reachable at <code>http://127.0.0.1:3001</code>.</p>
               </div>
             </>
-          ) : null}
-
-          {footerPanel === "privacy" ? (
+          )}
+          {footerPanel === "privacy" && (
             <>
               <DialogHeader>
                 <DialogTitle>Privacy Notice (Demo)</DialogTitle>
@@ -586,10 +566,10 @@ export default function App() {
                 <p>Do not reuse demo credentials in production environments.</p>
               </div>
             </>
-          ) : null}
+          )}
         </DialogContent>
       </Dialog>
       <Toaster />
-    </SidebarProvider>
+    </>
   );
 }

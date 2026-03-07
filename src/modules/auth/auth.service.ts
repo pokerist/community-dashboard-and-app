@@ -55,6 +55,10 @@ export class AuthService {
     Number.parseInt(process.env.JWT_REFRESH_EXPIRES_IN_DAYS || '30', 10) || 30,
   );
 
+  // Staff/admin roles are restricted to a single active session.
+  // On new login, all previous refresh tokens for these roles are revoked.
+  private readonly SINGLE_SESSION_ROLES = ['SUPER_ADMIN', 'MANAGER', 'COMPOUND_STAFF'];
+
   constructor(
     private prisma: PrismaService,
     private jwtService: JwtService,
@@ -387,6 +391,16 @@ export class AuthService {
       return this.beginLoginTwoFactorChallenge(authUser);
     }
 
+    const isStaff = authUser.roles.some((ur) =>
+      this.SINGLE_SESSION_ROLES.includes(ur.role.name),
+    );
+    if (isStaff) {
+      await this.prisma.refreshToken.updateMany({
+        where: { userId: authUser.id, revoked: false },
+        data: { revoked: true },
+      });
+    }
+
     const tokens = await this.generateTokens(authUser);
     await this.markSuccessfulLogin(authUser.id);
     return {
@@ -628,6 +642,16 @@ export class AuthService {
           throw new ForbiddenException('Your access has been revoked.');
         }
       }
+    }
+
+    const isStaff = user.roles.some((ur) =>
+      this.SINGLE_SESSION_ROLES.includes(ur.role.name),
+    );
+    if (isStaff) {
+      await this.prisma.refreshToken.updateMany({
+        where: { userId: user.id, revoked: false },
+        data: { revoked: true },
+      });
     }
 
     const tokens = await this.generateTokens(user);

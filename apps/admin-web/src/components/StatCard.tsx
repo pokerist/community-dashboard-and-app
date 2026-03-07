@@ -10,7 +10,6 @@ import {
   Wrench,
 } from "lucide-react";
 import type { ComponentType } from "react";
-import { Card } from "./ui/card";
 import { cn } from "./ui/utils";
 
 type StatIcon =
@@ -50,76 +49,22 @@ const iconMap: Record<StatIcon, ComponentType<{ className?: string }>> = {
   cars: Car,
 };
 
+/* Semantic color per stat type */
 const toneMap: Record<
   StatIcon,
-  { accent: string; accentSoft: string; iconWrap: string; iconColor: string }
+  { accentColor: string; iconBg: string; iconColor: string }
 > = {
-  devices: {
-    accent: "bg-[#1D4ED8]",
-    accentSoft: "bg-[#DBEAFE]",
-    iconWrap: "bg-[#EFF6FF]",
-    iconColor: "text-[#1D4ED8]",
-  },
-  "active-users": {
-    accent: "bg-[#047857]",
-    accentSoft: "bg-[#D1FAE5]",
-    iconWrap: "bg-[#ECFDF5]",
-    iconColor: "text-[#047857]",
-  },
-  "complaints-total": {
-    accent: "bg-[#2563EB]",
-    accentSoft: "bg-[#DBEAFE]",
-    iconWrap: "bg-[#EFF6FF]",
-    iconColor: "text-[#1D4ED8]",
-  },
-  "complaints-open": {
-    accent: "bg-[#B45309]",
-    accentSoft: "bg-[#FDE68A]",
-    iconWrap: "bg-[#FFFBEB]",
-    iconColor: "text-[#B45309]",
-  },
-  "complaints-closed": {
-    accent: "bg-[#047857]",
-    accentSoft: "bg-[#D1FAE5]",
-    iconWrap: "bg-[#ECFDF5]",
-    iconColor: "text-[#047857]",
-  },
-  tickets: {
-    accent: "bg-[#4F46E5]",
-    accentSoft: "bg-[#E0E7FF]",
-    iconWrap: "bg-[#EEF2FF]",
-    iconColor: "text-[#4338CA]",
-  },
-  revenue: {
-    accent: "bg-[#0369A1]",
-    accentSoft: "bg-[#DBEAFE]",
-    iconWrap: "bg-[#F0F9FF]",
-    iconColor: "text-[#0369A1]",
-  },
-  occupancy: {
-    accent: "bg-[#7C3AED]",
-    accentSoft: "bg-[#EDE9FE]",
-    iconWrap: "bg-[#F5F3FF]",
-    iconColor: "text-[#6D28D9]",
-  },
-  visitors: {
-    accent: "bg-[#0F766E]",
-    accentSoft: "bg-[#CCFBF1]",
-    iconWrap: "bg-[#F0FDFA]",
-    iconColor: "text-[#0F766E]",
-  },
-  workers: {
-    accent: "bg-[#B45309]",
-    accentSoft: "bg-[#FDE68A]",
-    iconWrap: "bg-[#FFF7ED]",
-    iconColor: "text-[#B45309]",
-  },
-  cars: {
-    accent: "bg-[#334155]",
-    accentSoft: "bg-[#E2E8F0]",
-    iconWrap: "bg-[#F8FAFC]",
-    iconColor: "text-[#334155]",
-  },
+  devices:              { accentColor: "#2563EB", iconBg: "bg-blue-50",   iconColor: "text-blue-600"   },
+  "active-users":       { accentColor: "#059669", iconBg: "bg-emerald-50",iconColor: "text-emerald-600"},
+  "complaints-total":   { accentColor: "#6366F1", iconBg: "bg-indigo-50", iconColor: "text-indigo-600" },
+  "complaints-open":    { accentColor: "#D97706", iconBg: "bg-amber-50",  iconColor: "text-amber-600"  },
+  "complaints-closed":  { accentColor: "#059669", iconBg: "bg-emerald-50",iconColor: "text-emerald-600"},
+  tickets:              { accentColor: "#2563EB", iconBg: "bg-blue-50",   iconColor: "text-blue-600"   },
+  revenue:              { accentColor: "#059669", iconBg: "bg-emerald-50",iconColor: "text-emerald-600"},
+  occupancy:            { accentColor: "#8B5CF6", iconBg: "bg-violet-50", iconColor: "text-violet-600" },
+  visitors:             { accentColor: "#0891B2", iconBg: "bg-cyan-50",   iconColor: "text-cyan-600"   },
+  workers:              { accentColor: "#EA580C", iconBg: "bg-orange-50", iconColor: "text-orange-600" },
+  cars:                 { accentColor: "#64748B", iconBg: "bg-slate-50",  iconColor: "text-slate-500"  },
 };
 
 export function StatCard({
@@ -136,61 +81,106 @@ export function StatCard({
 
   if (variant === "dark") {
     return (
-      <Card
+      <div
         className={cn(
-          "bg-[#181c27] rounded-xl border border-white/5 p-6 cursor-pointer hover:border-white/10 transition-colors",
-          onClick ? "cursor-pointer" : "cursor-default",
+          "group relative bg-[#1C1B27] rounded-[6px] border border-white/[0.07] p-5 transition-colors",
+          onClick ? "cursor-pointer hover:border-white/[0.12]" : "",
           className,
         )}
         onClick={onClick}
+        role={onClick ? "button" : undefined}
+        tabIndex={onClick ? 0 : undefined}
       >
-        <div className="flex items-start justify-between mb-4">
-          <p className="text-xs font-medium text-slate-400 uppercase tracking-wider">
-            {title}
-          </p>
-          <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
-            <IconComponent className="w-5 h-5 text-blue-400" />
+        <div className="flex items-start justify-between mb-3">
+          <p className="text-[10px] font-bold text-white/38 uppercase tracking-[0.14em]">{title}</p>
+          <div className={cn("w-8 h-8 rounded-[4px] flex items-center justify-center", tone.iconBg, "bg-opacity-10")}>
+            <IconComponent className="w-4 h-4 text-white/50" />
           </div>
         </div>
-        <p className="text-3xl font-semibold text-slate-100 font-['DM_Mono']">
+        <p
+          className="text-[28px] font-bold text-white/92 leading-none tracking-[-0.025em]"
+          style={{ fontFamily: "'DM Mono', monospace" }}
+        >
           {value}
         </p>
-        <p className="text-xs text-slate-500 mt-1">{subtitle ?? " "}</p>
-      </Card>
+        {subtitle && <p className="text-[10.5px] text-white/32 mt-2 leading-relaxed">{subtitle}</p>}
+      </div>
     );
   }
 
   return (
-    <Card
+    <div
       className={cn(
-        `relative min-h-[108px] overflow-hidden gap-0 rounded-md border border-[#D6DEE8] bg-white p-4 shadow-[0_8px_20px_-18px_rgba(15,23,42,0.7)] transition hover:-translate-y-[1px] hover:border-[#C7D1DE] hover:shadow-[0_12px_22px_-18px_rgba(15,23,42,0.7)] ${
-          onClick ? "cursor-pointer" : ""
-        }`,
+        "group relative overflow-hidden bg-white rounded-[6px] border border-[#EBEBEB]",
+        "transition-all duration-200",
+        onClick
+          ? "cursor-pointer hover:shadow-[0_4px_12px_rgba(0,0,0,0.10)] hover:-translate-y-px"
+          : "hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)]",
         className,
       )}
+      style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}
       onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
     >
-      <div className="absolute inset-y-0 left-0 w-1 bg-[#E2E8F0]" />
-      <div className={`absolute inset-y-0 left-0 w-1 ${tone.accent}`} />
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1.5">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[#64748B]">
+      {/* 4px left accent border */}
+      <div
+        className="absolute inset-y-0 left-0 w-1"
+        style={{ background: tone.accentColor }}
+      />
+
+      <div className="p-4 pl-5">
+        {/* Header row */}
+        <div className="flex items-start justify-between gap-2 mb-3">
+          <p
+            className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[#9CA3AF] leading-none mt-0.5"
+            style={{ fontFamily: "'Work Sans', sans-serif" }}
+          >
             {title}
           </p>
-          <h3 className="text-[24px] font-semibold leading-tight text-[#0F172A]">{value}</h3>
-          {subtitle ? (
-            <p className="line-clamp-2 pt-1 text-[11px] leading-relaxed text-[#64748B]">
-              {subtitle}
-            </p>
-          ) : null}
+          <div
+            className={cn(
+              "flex h-7 w-7 shrink-0 items-center justify-center rounded-[4px] transition-transform duration-150 group-hover:scale-110",
+              tone.iconBg,
+            )}
+          >
+            <IconComponent className={cn("h-3.5 w-3.5", tone.iconColor)} />
+          </div>
         </div>
-        <div
-          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-[#D6DEE8] ${tone.iconWrap}`}
+
+        {/* Value — DM Mono, 28px bold */}
+        <p
+          className="text-[28px] font-bold leading-none tracking-[-0.025em] text-[#111827]"
+          style={{ fontFamily: "'DM Mono', monospace" }}
         >
-          <IconComponent className={`h-4 w-4 ${tone.iconColor}`} />
-        </div>
+          {value}
+        </p>
+
+        {/* Subtitle */}
+        {subtitle && (
+          <p
+            className="mt-2 text-[11px] leading-relaxed text-[#9CA3AF] line-clamp-2"
+            style={{ fontFamily: "'Work Sans', sans-serif" }}
+          >
+            {subtitle}
+          </p>
+        )}
+
+        {/* Click hint — uniform blue accent */}
+        {onClick && (
+          <div className="mt-2.5 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+            <span
+              className="text-[11px] font-semibold text-[#2563EB]"
+              style={{ fontFamily: "'Work Sans', sans-serif" }}
+            >
+              View details
+            </span>
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" className="text-[#2563EB]">
+              <path d="M2 5h6M5 2l3 3-3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </div>
+        )}
       </div>
-      <div className={`absolute right-0 top-0 h-14 w-14 -translate-y-6 translate-x-6 rounded-full ${tone.accentSoft} opacity-50`} />
-    </Card>
+    </div>
   );
 }

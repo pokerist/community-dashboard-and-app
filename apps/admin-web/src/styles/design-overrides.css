@@ -1,0 +1,133 @@
+/* ─────────────────────────────────────────────────────────────────
+   DESIGN SYSTEM OVERRIDES
+   Enterprise redesign — Work Sans + DM Mono + Professional Blue
+   ───────────────────────────────────────────────────────────────── */
+
+/* ── Google Fonts ─────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Work+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;0,800;1,400&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,400&display=swap');
+
+/* ── CSS Token Overrides ──────────────────────────────────────── */
+:root {
+  /* Primary accent — professional blue */
+  --primary:            #2563EB;
+  --primary-foreground: #ffffff;
+  --ring:               #2563EB;
+
+  /* Backgrounds — warm off-white base, white surfaces */
+  --background:           #F5F4F1;
+  --background-secondary: #EBEBEB;
+  --surface:              #FFFFFF;
+
+  /* Text */
+  --foreground:     #111827;
+  --text-secondary: #6B7280;
+
+  /* Cards */
+  --card:            #FFFFFF;
+  --card-foreground: #111827;
+
+  /* Popover */
+  --popover:            #FFFFFF;
+  --popover-foreground: #111827;
+
+  /* Semantic */
+  --muted:            #F3F4F6;
+  --muted-foreground: #6B7280;
+  --accent:           #EFF6FF;
+  --accent-foreground: #2563EB;
+  --secondary:         #F3F4F6;
+  --secondary-foreground: #111827;
+
+  /* Destructive */
+  --destructive:            #DC2626;
+  --destructive-foreground: #ffffff;
+
+  /* Border + Input */
+  --border:           #E5E7EB;
+  --input:            transparent;
+  --input-background: #F3F4F6;
+  --switch-background: #CBD5E1;
+
+  /* Border radius — sharp enterprise (4px global) */
+  --radius: 0.25rem;
+
+  /* ── Sidebar — warm off-white matching page bg ────────────── */
+  --sidebar:                    #F5F4F1;
+  --sidebar-foreground:         #374151;
+  --sidebar-primary:            #2563EB;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent:             #EFF6FF;
+  --sidebar-accent-foreground:  #2563EB;
+  --sidebar-border:             #E5E7EB;
+  --sidebar-ring:               #2563EB;
+}
+
+/* ── Global Font ──────────────────────────────────────────────── */
+body {
+  font-family: 'Work Sans', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: var(--background);
+}
+
+/* Mono data font helper class */
+.font-data {
+  font-family: 'DM Mono', 'JetBrains Mono', monospace;
+}
+
+/* ── Typography overrides ─────────────────────────────────────── */
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Work Sans', system-ui, sans-serif;
+  letter-spacing: -0.02em;
+}
+
+/* ── Scrollbar — refined ──────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #9CA3AF; }
+* { scrollbar-width: thin; scrollbar-color: #D1D5DB transparent; }
+
+/* ── Page transition ──────────────────────────────────────────── */
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.page-enter {
+  animation: page-enter 220ms ease-out forwards;
+}
+
+/* ── Badge/chip base — sharp rectangular, no pills ───────────── */
+.ds-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* ── KPI number style ─────────────────────────────────────────── */
+.kpi-number {
+  font-family: 'DM Mono', monospace;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+/* ── Card elevation system ────────────────────────────────────── */
+.card-default {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.card-hover {
+  transition: box-shadow 200ms ease, transform 200ms ease;
+}
+
+.card-hover:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.10);
+  transform: translateY(-1px);
+}

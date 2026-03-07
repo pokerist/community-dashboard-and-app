@@ -90,6 +90,7 @@ export class ApprovalStatsResponseDto {
   pendingFamilyMembers!: number;
   pendingDelegates!: number;
   pendingHomeStaff!: number;
+  pendingTenants!: number;
   totalPending!: number;
 }
 

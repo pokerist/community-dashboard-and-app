@@ -924,4 +924,96 @@ export class CompoundStaffService {
   private toInputJson(value: Record<string, unknown>): Prisma.InputJsonValue {
     return value as Prisma.InputJsonValue;
   }
+
+  async getAttendance(staffId: string) {
+    await this.findStaffForMutation(staffId);
+    const logs = await this.prisma.attendanceLog.findMany({
+      where: { staffId },
+      orderBy: { clockInAt: 'desc' },
+      take: 50,
+      select: {
+        id: true,
+        clockInAt: true,
+        clockOutAt: true,
+        durationMin: true,
+        notes: true,
+        recordedById: true,
+        createdAt: true,
+      },
+    });
+    return { data: logs, total: logs.length };
+  }
+
+  async clockIn(staffId: string, adminUserId: string) {
+    await this.findStaffForMutation(staffId);
+
+    // Check no open session exists
+    const openSession = await this.prisma.attendanceLog.findFirst({
+      where: { staffId, clockOutAt: null },
+      select: { id: true, clockInAt: true },
+    });
+    if (openSession) {
+      throw new BadRequestException(
+        `Staff already has an open clock-in session since ${openSession.clockInAt.toISOString()}. Clock out first.`,
+      );
+    }
+
+    const log = await this.prisma.attendanceLog.create({
+      data: {
+        staffId,
+        recordedById: adminUserId,
+      },
+      select: {
+        id: true,
+        staffId: true,
+        clockInAt: true,
+        clockOutAt: true,
+        durationMin: true,
+        notes: true,
+        recordedById: true,
+        createdAt: true,
+      },
+    });
+
+    return log;
+  }
+
+  async clockOut(staffId: string, adminUserId: string) {
+    await this.findStaffForMutation(staffId);
+
+    const openSession = await this.prisma.attendanceLog.findFirst({
+      where: { staffId, clockOutAt: null },
+      orderBy: { clockInAt: 'desc' },
+      select: { id: true, clockInAt: true },
+    });
+    if (!openSession) {
+      throw new BadRequestException('No open clock-in session found for this staff member.');
+    }
+
+    const now = new Date();
+    const durationMin = Math.round(
+      (now.getTime() - openSession.clockInAt.getTime()) / (1000 * 60),
+    );
+
+    const log = await this.prisma.attendanceLog.update({
+      where: { id: openSession.id },
+      data: {
+        clockOutAt: now,
+        durationMin,
+        recordedById: adminUserId,
+      },
+      select: {
+        id: true,
+        staffId: true,
+        clockInAt: true,
+        clockOutAt: true,
+        durationMin: true,
+        notes: true,
+        recordedById: true,
+        createdAt: true,
+      },
+    });
+
+    return log;
+  }
 }

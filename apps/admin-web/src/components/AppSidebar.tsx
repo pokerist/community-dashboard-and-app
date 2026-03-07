@@ -1,218 +1,117 @@
 import {
   LayoutDashboard,
   Users,
-  Building2,
   Building,
+  Building2,
   Wrench,
   ClipboardList,
-  Inbox,
-  QrCode,
   FileText,
   MessageSquare,
   AlertTriangle,
   CreditCard,
   Megaphone,
   Bell,
-  Shield,
   DoorOpen,
   Dumbbell,
   Settings,
   BarChart3,
   ClipboardCheck,
-  MapPin,
   ScanSearch,
-  ChevronRight,
   Hotel,
+  ChevronDown,
+  ShoppingCart,
+  BookOpen,
+  Shield,
+  Ticket,
 } from "lucide-react";
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarHeader,
-  SidebarFooter,
-} from "./ui/sidebar";
+import { cn } from "./ui/utils";
 import alkarmaLogo from "figma:asset/0c7a0cd1f45864e0108618f40b9f2a75ac95e9dc.png";
+import type { ComponentType } from "react";
 
-interface MenuSection {
+type NavItem = {
+  title: string;
+  icon: ComponentType<{ className?: string }>;
+  section: string;
+  match?: string[];
+  soon?: boolean;
+};
+
+type NavSection = {
   group: string;
-  items: Array<{
-    title: string;
-    icon: any;
-    url: string;
-    soon?: boolean;
-  }>;
-}
+  items: NavItem[];
+};
 
-const menuSections: MenuSection[] = [
+const menuSections: NavSection[] = [
   {
-    group: "OVERVIEW",
+    group: "Overview",
     items: [
-      {
-        title: "Dashboard & Statistics",
-        icon: LayoutDashboard,
-        url: "#dashboard",
-      },
+      { title: "Dashboard", icon: LayoutDashboard, section: "dashboard" },
     ],
   },
   {
-    group: "PROPERTY",
+    group: "Property",
     items: [
-      {
-        title: "Communities",
-        icon: Building,
-        url: "#communities",
-      },
-      {
-        title: "Units",
-        icon: Building2,
-        url: "#units",
-      },
+      { title: "Communities", icon: Building, section: "communities" },
+      { title: "Units", icon: Building2, section: "units" },
+      { title: "Commercial", icon: Building2, section: "commercial" },
     ],
   },
   {
-    group: "PEOPLE",
+    group: "People",
     items: [
-      {
-        title: "Residents & Users",
-        icon: Users,
-        url: "#residents",
-      },
-      {
-        title: "Registrations & Approvals",
-        icon: ClipboardCheck,
-        url: "#approvals",
-      },
-      {
-        title: "Commercial",
-        icon: Building2,
-        url: "#commercial",
-      },
-      {
-        title: "Compound Staff",
-        icon: Users,
-        url: "#compound-staff",
-      },
+      { title: "Residents & Users", icon: Users, section: "residents", match: ["residents", "residents-create", "users"] },
+      { title: "Registrations", icon: ClipboardCheck, section: "approvals" },
+      { title: "Compound Staff", icon: Users, section: "compound-staff" },
+      { title: "Blue Collar", icon: Wrench, section: "blue-collar" },
     ],
   },
   {
-    group: "ACCESS CONTROL",
+    group: "Access",
     items: [
-      {
-        title: "Gates",
-        icon: DoorOpen,
-        url: "#gates",
-      },
-      {
-        title: "Blue Collar Workers",
-        icon: ClipboardList,
-        url: "#blue-collar",
-      },
+      { title: "Gates", icon: DoorOpen, section: "gates", match: ["gates", "gate-live"] },
+      { title: "Access Control", icon: ScanSearch, section: "access" },
     ],
   },
   {
-    group: "FINANCIALS",
+    group: "Financials",
     items: [
-      {
-        title: "Rental & Lease",
-        icon: FileText,
-        url: "#rental",
-      },
-      {
-        title: "Payments & Invoices",
-        icon: CreditCard,
-        url: "#billing",
-      },
+      { title: "Rental & Lease", icon: FileText, section: "rental" },
+      { title: "Payments & Invoices", icon: CreditCard, section: "billing" },
     ],
   },
   {
-    group: "OPERATIONS",
+    group: "Operations",
     items: [
-      {
-        title: "Permits & Requests",
-        icon: ClipboardCheck,
-        url: "#permits",
-      },
-      {
-        title: "Services",
-        icon: Wrench,
-        url: "#services",
-      },
-      {
-        title: "Complaints",
-        icon: MessageSquare,
-        url: "#complaints",
-      },
-      {
-        title: "Violations",
-        icon: AlertTriangle,
-        url: "#violations",
-      },
-      {
-        title: "Amenities",
-        icon: Dumbbell,
-        url: "#amenities",
-      },
-      {
-        title: "Ordering",
-        icon: ClipboardList,
-        url: "#ordering",
-      },
-      {
-        title: "Emergency (Gates Live Feed)",
-        icon: ScanSearch,
-        url: "#gate-live",
-      },
+      { title: "Complaints", icon: MessageSquare, section: "complaints" },
+      { title: "Violations", icon: AlertTriangle, section: "violations" },
+      { title: "Tickets Inbox", icon: Ticket, section: "tickets" },
+      { title: "Services", icon: Wrench, section: "services" },
+      { title: "Permits & Requests", icon: ClipboardCheck, section: "permits" },
+      { title: "Amenities", icon: Dumbbell, section: "amenities" },
+      { title: "Ordering", icon: ShoppingCart, section: "ordering" },
     ],
   },
   {
-    group: "ENGAGEMENT",
+    group: "Engagement",
     items: [
-      {
-        title: "Notifications",
-        icon: Bell,
-        url: "#notifications",
-      },
-      {
-        title: "Marketing",
-        icon: Megaphone,
-        url: "#marketing",
-      },
-      {
-        title: "Surveys",
-        icon: BarChart3,
-        url: "#surveys",
-      },
+      { title: "Notifications", icon: Bell, section: "notifications" },
+      { title: "Marketing", icon: Megaphone, section: "marketing" },
+      { title: "Surveys", icon: BarChart3, section: "surveys" },
     ],
   },
   {
-    group: "INSIGHTS",
+    group: "Insights",
     items: [
-      {
-        title: "Reports & Analytics",
-        icon: BarChart3,
-        url: "#reports",
-      },
+      { title: "Reports & Analytics", icon: BarChart3, section: "reports" },
+      { title: "Community Directory", icon: BookOpen, section: "directory" },
     ],
   },
   {
-    group: "SYSTEM",
+    group: "System",
     items: [
-      {
-        title: "System Settings",
-        icon: Settings,
-        url: "#settings",
-      },
-      {
-        title: "Hospitality (Coming Soon)",
-        icon: Hotel,
-        url: "#hospitality",
-        soon: true,
-      },
+      { title: "Security", icon: Shield, section: "security" },
+      { title: "System Settings", icon: Settings, section: "settings" },
+      { title: "Hospitality", icon: Hotel, section: "hospitality", soon: true },
     ],
   },
 ];
@@ -220,12 +119,17 @@ const menuSections: MenuSection[] = [
 interface AppSidebarProps {
   onNavigate: (section: string) => void;
   activeSection: string;
+  unseenNotifications?: number;
 }
 
-export function AppSidebar({ onNavigate, activeSection }: AppSidebarProps) {
+export function AppSidebar({
+  onNavigate,
+  activeSection,
+  unseenNotifications = 0,
+}: AppSidebarProps) {
   const authEmail =
     (typeof window !== "undefined" ? localStorage.getItem("auth_email") : null) ||
-    "admin@alkarma.com";
+    "admin@mg.com";
   const authName =
     (typeof window !== "undefined" ? localStorage.getItem("auth_name") : null) ||
     authEmail.split("@")[0] ||
@@ -233,75 +137,175 @@ export function AppSidebar({ onNavigate, activeSection }: AppSidebarProps) {
   const initials = authName
     .split(/[ ._-]+/)
     .filter(Boolean)
-    .map((part) => part[0])
+    .map((p: string) => p[0])
     .join("")
     .slice(0, 2)
     .toUpperCase() || "AD";
 
   return (
-    <Sidebar className="border-r border-[#E5E7EB]">
-      <SidebarHeader className="p-6 border-b border-[#E5E7EB]">
-        <div className="flex items-center gap-3">
-          <img src={alkarmaLogo} alt="Al Karma" className="h-8" />
+    <div
+      className="flex flex-shrink-0 flex-col overflow-hidden"
+      style={{
+        width: "240px",
+        height: "100%",
+        background: "#FAFAF9",
+        borderRight: "1px solid #F0EEE9",
+      }}
+    >
+      {/* ── Logo zone ─────────────────────────────────────────── */}
+      <div
+        className="flex items-center gap-3 px-4 flex-shrink-0 border-b border-[#F0EEE9]"
+        style={{ height: "57px" }}
+      >
+        <img src={alkarmaLogo} alt="MG" className="h-8 w-auto flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p
+            className="text-[13.5px] font-bold text-[#111827] leading-none truncate"
+            style={{ fontFamily: "'Work Sans', sans-serif", letterSpacing: "-0.01em" }}
+          >
+            MG Community
+          </p>
+          <p className="mt-[3px] text-[10.5px] text-[#9CA3AF] leading-none font-medium">
+            Admin Console
+          </p>
         </div>
-        <p className="text-xs text-[#64748B] mt-2">Admin Dashboard</p>
-      </SidebarHeader>
-      
-      <SidebarContent className="px-3">
-        {menuSections.map((section) => (
-          <SidebarGroup key={section.group}>
-            <SidebarGroupLabel className="text-xs text-[#64748B] px-3 mb-2">
-              {section.group}
-            </SidebarGroupLabel>
-            <SidebarGroupContent>
-              <SidebarMenu>
-                {section.items.map((item) => (
-                  <SidebarMenuItem key={item.title}>
-                    {(() => {
-                      const sectionKey = item.url.replace("#", "");
-                      const isActive =
-                        activeSection === sectionKey ||
-                        (sectionKey === "residents" && activeSection === "residents-create");
-                      return (
-                        <SidebarMenuButton
-                          onClick={() => onNavigate(sectionKey)}
-                          isActive={isActive}
-                          className={`rounded-lg transition-all ${
-                            isActive
-                              ? "bg-[#00B386]/10 text-[#00B386] border-l-4 border-[#00B386] pl-3"
-                              : "hover:bg-[#F9FAFB]"
-                          }`}
-                        >
-                          <item.icon className="w-4 h-4" />
-                          <span>{item.title}</span>
-                          {item.soon ? (
-                            <span className="ml-auto text-[10px] bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded-full">
-                              Soon
-                            </span>
-                          ) : null}
-                        </SidebarMenuButton>
-                      );
-                    })()}
-                  </SidebarMenuItem>
-                ))}
-              </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-        ))}
-      </SidebarContent>
+        <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-[#C4C2BE]" />
+      </div>
 
-      <SidebarFooter className="p-4 border-t border-[#E5E7EB]">
-        <div className="flex items-center gap-3 p-3 rounded-lg bg-[#F9FAFB] cursor-pointer hover:bg-[#F3F4F6] transition-colors">
-          <div className="w-10 h-10 rounded-full bg-[#00B386] flex items-center justify-center text-white">
-            {initials}
+      {/* ── Navigation ────────────────────────────────────────── */}
+      <div className="flex-1 overflow-y-auto px-3 py-3">
+        {menuSections.map((section, sIdx) => (
+          <div key={section.group} style={{ marginBottom: sIdx < menuSections.length - 1 ? "8px" : "0" }}>
+            {/* Section group label */}
+            <p
+              className="text-[10px] font-semibold uppercase tracking-[0.09em] text-[#C4C2BE] px-2 mb-1"
+              style={{
+                fontFamily: "'Work Sans', sans-serif",
+                marginTop: sIdx === 0 ? "4px" : "16px",
+              }}
+            >
+              {section.group}
+            </p>
+
+            {/* Items with tree structure lines */}
+            <div className="relative">
+              {/* Vertical tree line connecting items */}
+              {section.items.length > 1 && (
+                <div
+                  className="absolute bg-[#ECEAE7] pointer-events-none"
+                  style={{
+                    left: "18px",
+                    top: "18px",
+                    bottom: "18px",
+                    width: "1px",
+                  }}
+                />
+              )}
+
+              {section.items.map((item) => {
+                const Icon = item.icon;
+                const isActive =
+                  activeSection === item.section ||
+                  (item.match?.includes(activeSection) ?? false);
+                const hasBadge =
+                  item.section === "notifications" && unseenNotifications > 0;
+
+                return (
+                  <div key={item.section} className="relative">
+                    {/* Horizontal stub from tree line */}
+                    {section.items.length > 1 && (
+                      <div
+                        className="absolute bg-[#ECEAE7] pointer-events-none"
+                        style={{
+                          left: "18px",
+                          top: "50%",
+                          width: "8px",
+                          height: "1px",
+                          transform: "translateY(-50%)",
+                        }}
+                      />
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => onNavigate(item.section)}
+                      className={cn(
+                        "relative flex w-full items-center gap-2 rounded-[5px] py-[5px] text-left transition-all duration-150",
+                        section.items.length > 1 ? "pl-7 pr-2" : "px-2",
+                        isActive
+                          ? "text-[#111827]"
+                          : "text-[#7A7875] hover:text-[#111827]",
+                      )}
+                      style={{ fontFamily: "'Work Sans', sans-serif" }}
+                    >
+                      {/* Icon — filled background when active */}
+                      <div
+                        className={cn(
+                          "flex h-[22px] w-[22px] flex-shrink-0 items-center justify-center rounded-[5px] transition-all duration-150",
+                          isActive ? "bg-[#2563EB]" : "bg-transparent",
+                        )}
+                      >
+                        <Icon
+                          className={cn(
+                            "h-3.5 w-3.5",
+                            isActive ? "text-white" : "text-[#B0ADA7]",
+                          )}
+                        />
+                      </div>
+
+                      {/* Label */}
+                      <span
+                        className={cn(
+                          "flex-1 truncate text-[12.5px]",
+                          isActive ? "font-semibold" : "font-medium",
+                        )}
+                      >
+                        {item.title}
+                      </span>
+
+                      {/* Badges */}
+                      {hasBadge && (
+                        <span className="ml-auto flex h-4 min-w-[16px] items-center justify-center rounded-[4px] bg-[#2563EB] px-1 text-[9px] font-bold text-white tabular-nums">
+                          {unseenNotifications > 99 ? "99+" : unseenNotifications}
+                        </span>
+                      )}
+                      {item.soon && (
+                        <span className="ml-auto text-[9px] font-bold uppercase tracking-[0.06em] text-[#C4C2BE]">
+                          Soon
+                        </span>
+                      )}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── User zone ─────────────────────────────────────────── */}
+      <div className="flex-shrink-0 border-t border-[#F0EEE9] p-3">
+        <div className="flex items-center gap-2.5 rounded-[6px] px-2 py-2 transition-colors hover:bg-[#F0EEE9] cursor-pointer">
+          <div className="relative flex-shrink-0">
+            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#2563EB] text-[10px] font-bold text-white">
+              {initials}
+            </div>
+            <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-[#22C55E] border-2 border-[#FAFAF9]" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-[#1E293B] truncate">{authName}</p>
-            <p className="text-xs text-[#64748B] truncate">{authEmail}</p>
+            <p
+              className="text-[12px] font-semibold text-[#111827] truncate leading-none"
+              style={{ fontFamily: "'Work Sans', sans-serif" }}
+            >
+              {authName}
+            </p>
+            <p className="mt-[3px] text-[10px] text-[#9CA3AF] truncate leading-none">
+              {authEmail}
+            </p>
           </div>
-          <ChevronRight className="w-4 h-4 text-[#64748B]" />
+          <ChevronDown className="h-3 w-3 text-[#C4C2BE] flex-shrink-0" />
         </div>
-      </SidebarFooter>
-    </Sidebar>
+      </div>
+    </div>
   );
 }
