@@ -4,14 +4,7 @@ import { Input } from "../ui/input";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { toast } from "sonner";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../ui/table";
+import { DataTable, type DataTableColumn } from "../DataTable";
 import apiClient from "../../lib/api-client";
 import { errorMessage, formatDateTime, humanizeEnum } from "../../lib/live-data";
 
@@ -132,79 +125,25 @@ export function GateLiveFeed() {
         </div>
       </Card>
 
-      <Card className="shadow-card rounded-xl overflow-hidden">
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-[#F9FAFB]">
-              <TableHead>QR</TableHead>
-              <TableHead>Unit</TableHead>
-              <TableHead>Visitor</TableHead>
-              <TableHead>Requester</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Check-In</TableHead>
-              <TableHead>Check-Out</TableHead>
-              <TableHead>Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filtered.map((row) => (
-              <TableRow key={row.id}>
-                <TableCell className="text-[#334155]">{row.qrId}</TableCell>
-                <TableCell className="text-[#334155]">
-                  {[row.forUnit?.projectName, row.forUnit?.block, row.forUnit?.unitNumber].filter(Boolean).join(" • ") || "—"}
-                </TableCell>
-                <TableCell className="text-[#334155]">{row.visitorName || "—"}</TableCell>
-                <TableCell className="text-[#334155]">
-                  {row.requesterNameSnapshot || "—"}
-                  {row.requesterPhoneSnapshot ? (
-                    <div className="text-xs text-[#64748B]">{row.requesterPhoneSnapshot}</div>
-                  ) : null}
-                </TableCell>
-                <TableCell>
-                  <Badge variant="secondary" className="bg-[#EEF2FF] text-[#3730A3]">
-                    {humanizeEnum(row.type)}
-                  </Badge>
-                </TableCell>
-                <TableCell>
-                  <Badge className={statusClass(row)}>
-                    {row.checkedOutAt ? "Checked Out" : row.checkedInAt ? "Checked In" : humanizeEnum(row.status)}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-[#64748B]">{formatDateTime(row.checkedInAt || row.createdAt)}</TableCell>
-                <TableCell className="text-[#64748B]">{formatDateTime(row.checkedOutAt)}</TableCell>
-                <TableCell>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => void checkIn(row.id)}
-                      disabled={!!row.checkedInAt || busyId === row.id}
-                    >
-                      Arrived
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => void checkOut(row.id)}
-                      disabled={!row.checkedInAt || !!row.checkedOutAt || busyId === row.id}
-                    >
-                      Exit
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
-            {!loading && filtered.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={9} className="text-center py-10 text-[#64748B]">
-                  No gate feed records found.
-                </TableCell>
-              </TableRow>
-            ) : null}
-          </TableBody>
-        </Table>
-      </Card>
+      {(() => {
+        const cols: DataTableColumn<GateFeedRow>[] = [
+          { key: "qr", header: "QR", render: (r) => <span className="text-[#334155]">{r.qrId}</span> },
+          { key: "unit", header: "Unit", render: (r) => <span className="text-[#334155]">{[r.forUnit?.projectName, r.forUnit?.block, r.forUnit?.unitNumber].filter(Boolean).join(" • ") || "—"}</span> },
+          { key: "visitor", header: "Visitor", render: (r) => <span className="text-[#334155]">{r.visitorName || "—"}</span> },
+          { key: "requester", header: "Requester", render: (r) => <div className="text-[#334155]">{r.requesterNameSnapshot || "—"}{r.requesterPhoneSnapshot ? <div className="text-xs text-[#64748B]">{r.requesterPhoneSnapshot}</div> : null}</div> },
+          { key: "type", header: "Type", render: (r) => <Badge variant="secondary" className="bg-[#EEF2FF] text-[#3730A3]">{humanizeEnum(r.type)}</Badge> },
+          { key: "status", header: "Status", render: (r) => <Badge className={statusClass(r)}>{r.checkedOutAt ? "Checked Out" : r.checkedInAt ? "Checked In" : humanizeEnum(r.status)}</Badge> },
+          { key: "checkin", header: "Check-In", render: (r) => <span className="text-[#64748B]">{formatDateTime(r.checkedInAt || r.createdAt)}</span> },
+          { key: "checkout", header: "Check-Out", render: (r) => <span className="text-[#64748B]">{formatDateTime(r.checkedOutAt)}</span> },
+          { key: "actions", header: "Actions", render: (r) => (
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" onClick={() => void checkIn(r.id)} disabled={!!r.checkedInAt || busyId === r.id}>Arrived</Button>
+              <Button size="sm" variant="outline" onClick={() => void checkOut(r.id)} disabled={!r.checkedInAt || !!r.checkedOutAt || busyId === r.id}>Exit</Button>
+            </div>
+          )},
+        ];
+        return <DataTable columns={cols} rows={filtered} rowKey={(r) => r.id} loading={loading} emptyTitle="No gate feed records found" />;
+      })()}
     </div>
   );
 }

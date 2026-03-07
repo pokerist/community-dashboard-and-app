@@ -1,5 +1,4 @@
 import { ReactNode } from "react";
-import { cn } from "./ui/utils";
 
 interface PageHeaderProps {
   title: string;
@@ -16,19 +15,65 @@ export function PageHeader({
   variant = "light",
   className,
 }: PageHeaderProps) {
+  const isDark = variant === "dark";
+
   return (
-    <div className={cn("flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between", className)}>
-      <div>
-        <h1 className={cn("text-2xl font-semibold", variant === "dark" ? "text-slate-100" : "text-[#0F172A]")}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "row",
+        alignItems: "flex-start",
+        justifyContent: "space-between",
+        gap: "16px",
+        marginBottom: "24px",
+        fontFamily: "'Work Sans', sans-serif",
+      }}
+      className={className}
+    >
+      {/* Left: title + description */}
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <h1
+          style={{
+            fontSize: "18px",
+            fontWeight: 700,
+            color: isDark ? "#F9FAFB" : "#111827",
+            lineHeight: 1.2,
+            letterSpacing: "-0.02em",
+            margin: 0,
+            fontFamily: "'Work Sans', sans-serif",
+          }}
+        >
           {title}
         </h1>
-        {description ? (
-          <p className={cn("mt-1 text-sm", variant === "dark" ? "text-slate-400" : "text-[#64748B]")}>
+
+        {description && (
+          <p
+            style={{
+              marginTop: "4px",
+              fontSize: "13px",
+              color: isDark ? "#9CA3AF" : "#6B7280",
+              lineHeight: 1.5,
+              fontWeight: 400,
+            }}
+          >
             {description}
           </p>
-        ) : null}
+        )}
       </div>
-      {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
+
+      {/* Right: action buttons */}
+      {actions && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            flexShrink: 0,
+          }}
+        >
+          {actions}
+        </div>
+      )}
     </div>
   );
 }

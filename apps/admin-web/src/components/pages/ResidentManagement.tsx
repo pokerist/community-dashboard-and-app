@@ -14,14 +14,7 @@ import {
   DialogTrigger,
 } from "../ui/dialog";
 import { Label } from "../ui/label";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../ui/table";
+import { DataTable, type DataTableColumn } from "../DataTable";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Search, Plus, Trash2, Ban, User } from "lucide-react";
 import { Avatar, AvatarFallback } from "../ui/avatar";
@@ -1064,107 +1057,59 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
         </div>
       </Card>
 
-      <Card className="shadow-card rounded-xl overflow-hidden">
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-[#F9FAFB]">
-              <TableHead>Resident</TableHead>
-              <TableHead>National ID</TableHead>
-              <TableHead>Contact</TableHead>
-              <TableHead>Unit(s)</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Registration Date</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredRows.map((resident) => (
-              <TableRow key={resident.id} className="hover:bg-[#F9FAFB]">
-                <TableCell>
-                  <div className="flex items-center gap-3">
-                    <Avatar>
-                      <AvatarFallback className="bg-[#0B5FFF] text-white">{resident.avatar}</AvatarFallback>
-                    </Avatar>
-                    <div>
-                      <div className="font-medium text-[#1E293B]">{resident.name}</div>
-                      <div className="text-xs text-[#64748B]">{resident.nameAr}</div>
-                    </div>
-                  </div>
-                </TableCell>
-                <TableCell className="text-[#64748B]">{resident.nationalId}</TableCell>
-                <TableCell>
-                  <div className="text-sm">
-                    <div className="text-[#1E293B]">{resident.mobile}</div>
-                    <div className="text-xs text-[#64748B]">{resident.email}</div>
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <div className="flex flex-wrap gap-1">
-                    {resident.units.map((unit) => (
-                      <Badge key={`${resident.id}-${unit}`} variant="secondary" className="bg-[#F3F4F6] text-[#1E293B]">
-                        {unit}
-                      </Badge>
-                    ))}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <Badge className={getStatusColorClass(resident.status)}>{resident.status}</Badge>
-                </TableCell>
-                <TableCell className="text-[#64748B]">{resident.registrationDate}</TableCell>
-                <TableCell className="text-right">
-                  <div className="inline-flex items-center gap-2">
-                    {canSuspend(resident.rawStatus) || canActivate(resident.rawStatus) ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="!text-[#0F172A] !border-[#CBD5E1] !bg-white hover:!bg-[#F8FAFC]"
-                        onClick={() => void handleToggleSuspend(resident.id, resident.name)}
-                      >
-                        <Ban className="w-4 h-4 mr-1" />
-                        {canActivate(resident.rawStatus) ? "Activate" : "Suspend"}
-                      </Button>
-                    ) : null}
-                    {canDeactivate(resident.rawStatus) ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="!text-[#B91C1C] !border-[#FECACA] !bg-[#FEF2F2] hover:!bg-[#FEE2E2]"
-                        onClick={() => void handleDeleteResident(resident.id, resident.name)}
-                      >
-                        <Trash2 className="w-4 h-4 mr-1" />
-                        Deactivate
-                      </Button>
-                    ) : null}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="!text-[#0F172A] !border-[#CBD5E1] !bg-white hover:!bg-[#F8FAFC]"
-                      onClick={() => void loadResidentOverview(resident.id)}
-                    >
-                      Open 360
-                    </Button>
-                    <Button
-                      size="sm"
-                      className="!bg-[#7F1D1D] hover:!bg-[#7F1D1D]/90 !text-white"
-                      onClick={() => void handleHardDeleteResident(resident.id, resident.name)}
-                    >
-                      <Trash2 className="w-4 h-4 mr-1" />
-                      Delete Permanently
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
-            {!isLoading && filteredRows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center py-10 text-[#64748B]">
-                  No residents found for the current filters.
-                </TableCell>
-              </TableRow>
-            ) : null}
-          </TableBody>
-        </Table>
-      </Card>
+      {(() => {
+        const cols: DataTableColumn<ResidentRow>[] = [
+          { key: "resident", header: "Resident", render: (r) => (
+            <div className="flex items-center gap-3">
+              <Avatar><AvatarFallback className="bg-[#0B5FFF] text-white">{r.avatar}</AvatarFallback></Avatar>
+              <div>
+                <div className="font-medium text-[#1E293B]">{r.name}</div>
+                <div className="text-xs text-[#64748B]">{r.nameAr}</div>
+              </div>
+            </div>
+          )},
+          { key: "nationalId", header: "National ID", render: (r) => <span className="text-[#64748B]">{r.nationalId}</span> },
+          { key: "contact", header: "Contact", render: (r) => (
+            <div className="text-sm">
+              <div className="text-[#1E293B]">{r.mobile}</div>
+              <div className="text-xs text-[#64748B]">{r.email}</div>
+            </div>
+          )},
+          { key: "units", header: "Unit(s)", render: (r) => (
+            <div className="flex flex-wrap gap-1">
+              {r.units.map((unit) => (
+                <Badge key={`${r.id}-${unit}`} variant="secondary" className="bg-[#F3F4F6] text-[#1E293B]">{unit}</Badge>
+              ))}
+            </div>
+          )},
+          { key: "status", header: "Status", render: (r) => <Badge className={getStatusColorClass(r.status)}>{r.status}</Badge> },
+          { key: "regDate", header: "Registration Date", render: (r) => <span className="text-[#64748B]">{r.registrationDate}</span> },
+          { key: "actions", header: "Actions", render: (r) => (
+            <div className="inline-flex items-center gap-2">
+              {canSuspend(r.rawStatus) || canActivate(r.rawStatus) ? (
+                <Button variant="outline" size="sm" className="!text-[#0F172A] !border-[#CBD5E1] !bg-white hover:!bg-[#F8FAFC]" onClick={() => void handleToggleSuspend(r.id, r.name)}>
+                  <Ban className="w-4 h-4 mr-1" />
+                  {canActivate(r.rawStatus) ? "Activate" : "Suspend"}
+                </Button>
+              ) : null}
+              {canDeactivate(r.rawStatus) ? (
+                <Button variant="outline" size="sm" className="!text-[#B91C1C] !border-[#FECACA] !bg-[#FEF2F2] hover:!bg-[#FEE2E2]" onClick={() => void handleDeleteResident(r.id, r.name)}>
+                  <Trash2 className="w-4 h-4 mr-1" />Deactivate
+                </Button>
+              ) : null}
+              <Button variant="outline" size="sm" className="!text-[#0F172A] !border-[#CBD5E1] !bg-white hover:!bg-[#F8FAFC]" onClick={() => void loadResidentOverview(r.id)}>Open 360</Button>
+              <Button size="sm" className="!bg-[#7F1D1D] hover:!bg-[#7F1D1D]/90 !text-white" onClick={() => void handleHardDeleteResident(r.id, r.name)}>
+                <Trash2 className="w-4 h-4 mr-1" />Delete Permanently
+              </Button>
+            </div>
+          )},
+        ];
+        return (
+          <Card className="shadow-card rounded-xl overflow-hidden">
+            <DataTable columns={cols} rows={filteredRows} rowKey={(r) => r.id} loading={isLoading} emptyTitle="No residents found for the current filters" />
+          </Card>
+        );
+      })()}
 
       <Sheet open={!!selectedResidentId} onOpenChange={(open) => (!open ? closeResidentOverview() : undefined)}>
         <SheetContent side="right" className="w-[92vw] sm:max-w-[980px] overflow-y-auto">

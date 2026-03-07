@@ -481,7 +481,7 @@ export default function App() {
               <footer className="border-t border-[#E5E7EB] px-6 py-4 mt-4" style={{ background: "#F5F4F1" }}>
                 <div className="flex items-center justify-between">
                   <p className="text-[11px] text-[#B0ADA7]" style={{ fontFamily: "'Work Sans', sans-serif" }}>
-                    MG Community — Admin Dashboard © 2025 · Powered by Smart Station Solutions
+                    MG Developments — Admin Dashboard © 2025 · Powered by Smart Station Solutions
                   </p>
                   <div className="flex items-center gap-4">
                     {(["documentation", "support", "privacy"] as FooterPanel[]).map((panel) => (

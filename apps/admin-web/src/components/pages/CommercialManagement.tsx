@@ -15,14 +15,7 @@ import {
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../ui/table";
+import { DataTable, type DataTableColumn } from "../DataTable";
 import { Textarea } from "../ui/textarea";
 import commercialService, {
   COMMERCIAL_MEMBER_ROLES,
@@ -646,74 +639,31 @@ export function CommercialManagement() {
             {loading ? <span className="text-xs text-[#64748B]">Loading...</span> : null}
           </div>
 
-          <div className="max-h-[520px] overflow-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-[#F8FAFC]">
-                  <TableHead>Name</TableHead>
-                  <TableHead>Community</TableHead>
-                  <TableHead>Owner</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredEntities.map((entity) => {
-                  const isSelected = selectedEntityId === entity.id;
-                  const ownerLabel = entity.owner ? usersById.get(entity.owner.userId) ?? entity.owner.userId : "No owner";
-
-                  return (
-                    <TableRow
-                      key={entity.id}
-                      className={`cursor-pointer ${isSelected ? "bg-[#EFF6FF]" : ""}`}
-                      onClick={() => setSelectedEntityId(entity.id)}
-                    >
-                      <TableCell className="font-medium text-[#0F172A]">{entity.name}</TableCell>
-                      <TableCell>{communityById.get(entity.communityId) ?? entity.communityId}</TableCell>
-                      <TableCell>{ownerLabel}</TableCell>
-                      <TableCell>
-                        <Badge className={getStatusColorClass(entity.isActive ? "ACTIVE" : "INACTIVE")}>
-                          {entity.isActive ? "Active" : "Inactive"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              openEditEntity(entity);
-                            }}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              void removeEntity(entity);
-                            }}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-
-                {!loading && filteredEntities.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="py-8 text-center text-[#64748B]">
-                      No commercial entities found.
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-              </TableBody>
-            </Table>
-          </div>
+          {(() => {
+            const cols: DataTableColumn<CommercialEntity>[] = [
+              { key: "name", header: "Name", render: (e) => <span className="font-medium text-[#0F172A]">{e.name}</span> },
+              { key: "community", header: "Community", render: (e) => <span>{communityById.get(e.communityId) ?? e.communityId}</span> },
+              { key: "owner", header: "Owner", render: (e) => <span>{e.owner ? usersById.get(e.owner.userId) ?? e.owner.userId : "No owner"}</span> },
+              { key: "status", header: "Status", render: (e) => <Badge className={getStatusColorClass(e.isActive ? "ACTIVE" : "INACTIVE")}>{e.isActive ? "Active" : "Inactive"}</Badge> },
+              { key: "actions", header: "Actions", render: (e) => (
+                <div className="flex items-center justify-end gap-2">
+                  <Button variant="outline" size="sm" onClick={(ev: React.MouseEvent) => { ev.stopPropagation(); openEditEntity(e); }}><Pencil className="h-4 w-4" /></Button>
+                  <Button variant="outline" size="sm" onClick={(ev: React.MouseEvent) => { ev.stopPropagation(); void removeEntity(e); }}><Trash2 className="h-4 w-4" /></Button>
+                </div>
+              )},
+            ];
+            return (
+              <DataTable
+                columns={cols}
+                rows={filteredEntities}
+                rowKey={(e) => e.id}
+                loading={loading}
+                emptyTitle="No commercial entities found"
+                rowClassName={(e) => selectedEntityId === e.id ? "bg-[#EFF6FF]" : ""}
+                onRowClick={(e) => setSelectedEntityId(e.id)}
+              />
+            );
+          })()}
         </Card>
 
         <Card className="space-y-4 p-4">

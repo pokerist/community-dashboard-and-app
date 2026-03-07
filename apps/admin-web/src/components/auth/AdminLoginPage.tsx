@@ -243,7 +243,7 @@ export function AdminLoginPage({ onLoginSuccess }: AdminLoginPageProps) {
           <div className="admin-login__heroTop">
             <div className="admin-login__badge">
               <span className="admin-login__badgePulse" />
-              MG COMMUNITY ADMIN
+              MG DEVELOPMENTS ADMIN
             </div>
 
             <h1 className="admin-login__heroTitle">

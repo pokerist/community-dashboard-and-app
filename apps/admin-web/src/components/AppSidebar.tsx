@@ -4,7 +4,6 @@ import {
   Building,
   Building2,
   Wrench,
-  ClipboardList,
   FileText,
   MessageSquare,
   AlertTriangle,
@@ -24,13 +23,12 @@ import {
   Shield,
   Ticket,
 } from "lucide-react";
-import { cn } from "./ui/utils";
-import alkarmaLogo from "figma:asset/0c7a0cd1f45864e0108618f40b9f2a75ac95e9dc.png";
-import type { ComponentType, CSSProperties } from "react";
+import logo from "../assets/0c7a0cd1f45864e0108618f40b9f2a75ac95e9dc.png";
+import type { ComponentType } from "react";
 
 type NavItem = {
   title: string;
-  icon: ComponentType<{ className?: string }>;
+  icon: ComponentType<{ style?: React.CSSProperties; className?: string }>;
   section: string;
   match?: string[];
   soon?: boolean;
@@ -122,162 +120,166 @@ interface AppSidebarProps {
   unseenNotifications?: number;
 }
 
-export function AppSidebar({
-  onNavigate,
-  activeSection,
-  unseenNotifications = 0,
-}: AppSidebarProps) {
+export function AppSidebar({ onNavigate, activeSection, unseenNotifications = 0 }: AppSidebarProps) {
   const authEmail =
-    (typeof window !== "undefined" ? localStorage.getItem("auth_email") : null) ||
-    "admin@mg.com";
+    (typeof window !== "undefined" ? localStorage.getItem("auth_email") : null) || "admin@mg.com";
   const authName =
     (typeof window !== "undefined" ? localStorage.getItem("auth_name") : null) ||
-    authEmail.split("@")[0] ||
-    "Admin";
+    authEmail.split("@")[0] || "Admin";
   const initials = authName
-    .split(/[ ._-]+/)
-    .filter(Boolean)
-    .map((p: string) => p[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase() || "AD";
+    .split(/[ ._-]+/).filter(Boolean)
+    .map((p: string) => p[0]).join("").slice(0, 2).toUpperCase() || "AD";
 
   return (
-    <div
-      className="flex flex-shrink-0 flex-col overflow-hidden"
-      style={{
-        width: "240px",
-        height: "100%",
-        background: "#1A1D23",
-        borderRight: "none",
-      }}
-    >
-      {/* ── Logo zone ─────────────────────────────────────────── */}
-      <div
-        className="flex items-center gap-3 px-4 flex-shrink-0"
-        style={{ height: "57px", borderBottom: "1px solid rgba(255,255,255,0.07)" }}
-      >
-        <img src={alkarmaLogo} alt="MG" className="h-8 w-8 flex-shrink-0 object-contain" />
-        <div className="flex-1 min-w-0">
-          <p
-            className="text-[13.5px] font-bold text-white leading-none truncate"
-            style={{ fontFamily: "'Work Sans', sans-serif", letterSpacing: "-0.01em" }}
-          >
-            MG Community
-          </p>
-          <p className="mt-[3px] text-[10.5px] text-[#8B8F9A] leading-none font-medium">
+    <div style={{
+      width: "240px", height: "100%",
+      background: "#FAFAFA",
+      borderRight: "1px solid #EBEBEB",
+      display: "flex", flexDirection: "column",
+      flexShrink: 0, overflow: "hidden",
+      fontFamily: "'Work Sans', sans-serif",
+    }}>
+
+      {/* ── Logo zone ──────────────────────────────────────────── */}
+      <div style={{
+        height: "60px", padding: "0 14px",
+        display: "flex", alignItems: "center", gap: "10px",
+        borderBottom: "1px solid #EBEBEB", flexShrink: 0,
+        paddingTop: "8px",
+        paddingBottom: "8px",
+      }}>
+
+        {/* Circle logo — dark bg, white logo, Codename-style */}
+        <div style={{
+          width: "40px", height: "40px",
+          borderRadius: "50%",
+          background: "#111827",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          flexShrink: 0, overflow: "hidden",
+          boxShadow: "0 2px 6px rgba(0,0,0,0.20)",
+        }}>
+          <img
+            src={logo}
+            alt="MG"
+            style={{
+              width: "100px", height: "100px",
+              objectFit: "contain",
+              // Forces logo to render white on the dark circle
+              filter: "brightness(0) invert(1)",
+              display: "block",
+            }}
+          />
+        </div>
+
+        {/* Brand name + chevron */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+            <p style={{
+              fontSize: "13.5px", fontWeight: 700,
+              color: "#111827", lineHeight: 1,
+              letterSpacing: "-0.015em",
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            }}>
+              MG Developments
+            </p>
+            <ChevronDown style={{ width: "13px", height: "13px", color: "#C4C4C4", flexShrink: 0, marginTop: "1px" }} />
+          </div>
+          <p style={{
+            marginTop: "3px", fontSize: "10.5px",
+            color: "#9CA3AF", lineHeight: 1, fontWeight: 500,
+          }}>
             Admin Console
           </p>
         </div>
-        <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-white/30" />
       </div>
 
-      {/* ── Navigation ────────────────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto px-3 py-3">
+      {/* ── Navigation ─────────────────────────────────────────── */}
+      <div style={{ flex: 1, overflowY: "auto", padding: "8px", scrollbarWidth: "none" }}>
         {menuSections.map((section, sIdx) => (
-          <div key={section.group} style={{ marginBottom: sIdx < menuSections.length - 1 ? "8px" : "0" }}>
-            {/* Section group label */}
-            <p
-              className="text-[10px] font-semibold uppercase tracking-[0.09em] text-[#8B8F9A] px-2 mb-1"
-              style={{
-                fontFamily: "'Work Sans', sans-serif",
-                marginTop: sIdx === 0 ? "4px" : "16px",
-              }}
-            >
+          <div key={section.group} style={{ marginBottom: "2px" }}>
+
+            {/* Group label */}
+            <p style={{
+              fontSize: "10px", fontWeight: 600,
+              textTransform: "uppercase", letterSpacing: "0.08em",
+              color: "#C4C4C4",
+              padding: "0 8px",
+              marginTop: sIdx === 0 ? "4px" : "20px",
+              marginBottom: "4px",
+            }}>
               {section.group}
             </p>
 
-            {/* Items with tree structure lines */}
-            <div className="relative">
-              {/* Vertical tree line connecting items */}
-              {section.items.length > 1 && (
-                <div
-                  className="absolute bg-white/10 pointer-events-none"
-                  style={{
-                    left: "18px",
-                    top: "18px",
-                    bottom: "18px",
-                    width: "1px",
-                  }}
-                />
-              )}
-
+            {/* Items */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "1px" }}>
               {section.items.map((item) => {
                 const Icon = item.icon;
-                const isActive =
-                  activeSection === item.section ||
-                  (item.match?.includes(activeSection) ?? false);
-                const hasBadge =
-                  item.section === "notifications" && unseenNotifications > 0;
+                const isActive = activeSection === item.section || (item.match?.includes(activeSection) ?? false);
+                const hasBadge = item.section === "notifications" && unseenNotifications > 0;
 
                 return (
-                  <div key={item.section} className="relative">
-                    {/* Horizontal stub from tree line */}
-                    {section.items.length > 1 && (
-                      <div
-                        className="absolute bg-white/10 pointer-events-none"
-                        style={{
-                          left: "18px",
-                          top: "50%",
-                          width: "8px",
-                          height: "1px",
-                          transform: "translateY(-50%)",
-                        }}
-                      />
+                  <button
+                    key={item.section}
+                    type="button"
+                    onClick={() => onNavigate(item.section)}
+                    style={{
+                      display: "flex", alignItems: "center", gap: "8px",
+                      width: "100%", padding: "6px 8px",
+                      borderRadius: "6px", border: "none",
+                      cursor: "pointer", textAlign: "left",
+                      background: isActive ? "#EFEFEF" : "transparent",
+                      transition: "background 120ms ease",
+                      fontFamily: "'Work Sans', sans-serif",
+                    }}
+                    onMouseEnter={(e) => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.background = "#F5F5F5"; }}
+                    onMouseLeave={(e) => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.background = "transparent"; }}
+                  >
+                    {/* Icon */}
+                    <div style={{
+                      width: "20px", height: "20px", flexShrink: 0,
+                      borderRadius: "4px",
+                      background: isActive ? "#111827" : "transparent",
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                      transition: "background 120ms ease",
+                    }}>
+                      <Icon style={{ width: "12px", height: "12px", color: isActive ? "#ffffff" : "#9CA3AF" }} />
+                    </div>
+
+                    {/* Label */}
+                    <span style={{
+                      flex: 1, fontSize: "13px",
+                      fontWeight: isActive ? 600 : 400,
+                      color: isActive ? "#111827" : "#6B7280",
+                      whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                      letterSpacing: "-0.005em",
+                    }}>
+                      {item.title}
+                    </span>
+
+                    {/* Notification badge */}
+                    {hasBadge && (
+                      <span style={{
+                        marginLeft: "auto",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        minWidth: "18px", height: "18px", borderRadius: "9px",
+                        background: "#EF4444", color: "#fff",
+                        fontSize: "9px", fontWeight: 700, padding: "0 4px",
+                        fontFamily: "'DM Mono', monospace",
+                      }}>
+                        {unseenNotifications > 99 ? "99+" : unseenNotifications}
+                      </span>
                     )}
 
-                    <button
-                      type="button"
-                      onClick={() => onNavigate(item.section)}
-                      className="relative flex w-full items-center gap-2 rounded-[5px] py-[5px] text-left transition-all duration-150"
-                      style={{
-                        fontFamily: "'Work Sans', sans-serif",
-                        paddingLeft: section.items.length > 1 ? "28px" : "8px",
-                        paddingRight: "8px",
-                        color: isActive ? "#FFFFFF" : "#8B8F9A",
-                        background: isActive ? "rgba(37,99,235,0.15)" : "transparent",
-                        borderLeft: isActive ? "2px solid #2563EB" : "2px solid transparent",
-                      }}
-                    >
-                      {/* Icon — filled background when active */}
-                      <div
-                        className="flex flex-shrink-0 items-center justify-center rounded-[5px] transition-all duration-150"
-                        style={{
-                          width: "22px",
-                          height: "22px",
-                          backgroundColor: isActive ? "#2563EB" : "transparent",
-                        }}
-                      >
-                        <Icon
-                          className="h-3.5 w-3.5"
-                          style={{ color: isActive ? "#ffffff" : "#8B8F9A" } as CSSProperties}
-                        />
-                      </div>
-
-                      {/* Label */}
-                      <span
-                        className="flex-1 truncate"
-                        style={{
-                          fontSize: "12.5px",
-                          fontWeight: isActive ? 600 : 500,
-                        }}
-                      >
-                        {item.title}
+                    {/* Soon badge */}
+                    {item.soon && (
+                      <span style={{
+                        marginLeft: "auto", fontSize: "9px", fontWeight: 700,
+                        textTransform: "uppercase", letterSpacing: "0.06em", color: "#D1D5DB",
+                      }}>
+                        Soon
                       </span>
-
-                      {/* Badges */}
-                      {hasBadge && (
-                        <span className="ml-auto flex h-4 min-w-[16px] items-center justify-center rounded-[4px] bg-[#2563EB] px-1 text-[9px] font-bold text-white tabular-nums">
-                          {unseenNotifications > 99 ? "99+" : unseenNotifications}
-                        </span>
-                      )}
-                      {item.soon && (
-                        <span className="ml-auto text-[9px] font-bold uppercase tracking-[0.06em] text-[#C4C2BE]">
-                          Soon
-                        </span>
-                      )}
-                    </button>
-                  </div>
+                    )}
+                  </button>
                 );
               })}
             </div>
@@ -285,29 +287,55 @@ export function AppSidebar({
         ))}
       </div>
 
-      {/* ── User zone ─────────────────────────────────────────── */}
-      <div className="flex-shrink-0 p-3" style={{ borderTop: "1px solid rgba(255,255,255,0.07)" }}>
-        <div className="flex items-center gap-2.5 rounded-[6px] px-2 py-2 transition-colors hover:bg-white/[0.06] cursor-pointer">
-          <div className="relative flex-shrink-0">
-            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#2563EB] text-[10px] font-bold text-white">
+      {/* ── User zone ──────────────────────────────────────────── */}
+      <div style={{ flexShrink: 0, padding: "8px", borderTop: "1px solid #EBEBEB" }}>
+        <div
+          style={{
+            display: "flex", alignItems: "center", gap: "10px",
+            padding: "8px", borderRadius: "8px",
+            cursor: "pointer", transition: "background 120ms ease",
+          }}
+          onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "#F5F5F5"; }}
+          onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
+        >
+          {/* Avatar — circular dark, mirrors logo language */}
+          <div style={{ position: "relative", flexShrink: 0 }}>
+            <div style={{
+              width: "30px", height: "30px", borderRadius: "50%",
+              background: "#111827",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              fontSize: "10.5px", fontWeight: 700, color: "#fff",
+              letterSpacing: "0.02em", fontFamily: "'Work Sans', sans-serif",
+            }}>
               {initials}
             </div>
-            <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-[#22C55E] border-2 border-[#1A1D23]" />
+            <span style={{
+              position: "absolute", bottom: "0", right: "0",
+              width: "8px", height: "8px", borderRadius: "50%",
+              background: "#22C55E", border: "2px solid #FAFAFA",
+            }} />
           </div>
-          <div className="flex-1 min-w-0">
-            <p
-              className="text-[12px] font-semibold text-white truncate leading-none"
-              style={{ fontFamily: "'Work Sans', sans-serif" }}
-            >
+
+          {/* Info */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p style={{
+              fontSize: "12px", fontWeight: 600, color: "#111827", lineHeight: 1,
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            }}>
               {authName}
             </p>
-            <p className="mt-[3px] text-[10px] text-[#8B8F9A] truncate leading-none">
+            <p style={{
+              marginTop: "3px", fontSize: "10px", color: "#9CA3AF", lineHeight: 1,
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            }}>
               {authEmail}
             </p>
           </div>
-          <ChevronDown className="h-3 w-3 text-white/30 flex-shrink-0" />
+
+          <ChevronDown style={{ width: "12px", height: "12px", color: "#D1D5DB", flexShrink: 0 }} />
         </div>
       </div>
+
     </div>
   );
 }

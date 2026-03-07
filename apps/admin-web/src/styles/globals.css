@@ -223,6 +223,8 @@ html {
   }
 }
 
+@source "../**/*.{tsx,ts,jsx,js}";
+
 /* Custom Scrollbar Styles */
 @layer base {
   /* For WebKit browsers (Chrome, Safari, Edge) */

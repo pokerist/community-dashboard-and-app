@@ -7,14 +7,7 @@ import { Label } from "../ui/label";
 import { Badge } from "../ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../ui/table";
+import { DataTable, type DataTableColumn } from "../DataTable";
 import apiClient from "../../lib/api-client";
 import { errorMessage } from "../../lib/live-data";
 import { toast } from "sonner";
@@ -293,47 +286,26 @@ export function DashboardUsersPage() {
             </Button>
           </Card>
 
-          <Card className="shadow-card rounded-xl overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-[#F9FAFB]">
-                  <TableHead>Name</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Phone</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Roles</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredUsers.map((u) => (
-                  <TableRow key={u.id}>
-                    <TableCell className="text-[#1E293B]">{u.nameEN || "—"}</TableCell>
-                    <TableCell className="text-[#334155]">{u.email || "—"}</TableCell>
-                    <TableCell className="text-[#64748B]">{u.phone || "—"}</TableCell>
-                    <TableCell>
-                      <Badge className="bg-[#E2E8F0] text-[#334155]">{u.userStatus || "—"}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        {(u.roles ?? []).map((r) => (
-                          <Badge key={`${u.id}-${r.role?.id}`} className="bg-[#DBEAFE] text-[#1D4ED8]">
-                            {r.role?.name || "—"}
-                          </Badge>
-                        ))}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {!loading && filteredUsers.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="text-center py-10 text-[#64748B]">
-                      No dashboard users found.
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-              </TableBody>
-            </Table>
-          </Card>
+          {(() => {
+            const cols: DataTableColumn<DashboardUserRow>[] = [
+              { key: "name", header: "Name", render: (u) => <span className="text-[#1E293B]">{u.nameEN || "—"}</span> },
+              { key: "email", header: "Email", render: (u) => <span className="text-[#334155]">{u.email || "—"}</span> },
+              { key: "phone", header: "Phone", render: (u) => <span className="text-[#64748B]">{u.phone || "—"}</span> },
+              { key: "status", header: "Status", render: (u) => <Badge className="bg-[#E2E8F0] text-[#334155]">{u.userStatus || "—"}</Badge> },
+              { key: "roles", header: "Roles", render: (u) => (
+                <div className="flex flex-wrap gap-1">
+                  {(u.roles ?? []).map((r) => (
+                    <Badge key={`${u.id}-${r.role?.id}`} className="bg-[#DBEAFE] text-[#1D4ED8]">{r.role?.name || "—"}</Badge>
+                  ))}
+                </div>
+              )},
+            ];
+            return (
+              <Card className="shadow-card rounded-xl overflow-hidden">
+                <DataTable columns={cols} rows={filteredUsers} rowKey={(u) => u.id} loading={loading} emptyTitle="No dashboard users found" />
+              </Card>
+            );
+          })()}
         </TabsContent>
 
         <TabsContent value="roles" className="space-y-4">
@@ -346,75 +318,46 @@ export function DashboardUsersPage() {
             </Button>
           </Card>
 
-          <Card className="shadow-card rounded-xl overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-[#F9FAFB]">
-                  <TableHead>Role</TableHead>
-                  <TableHead>Users</TableHead>
-                  <TableHead>Permissions</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {roles.map((r) => (
-                  <TableRow key={r.id}>
-                    <TableCell className="text-[#1E293B]">{r.name}</TableCell>
-                    <TableCell className="text-[#334155]">{r.users?.length || 0}</TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        {(r.permissions ?? []).slice(0, 6).map((p) => (
-                          <Badge key={`${r.id}-${p.permission?.key}`} className="bg-[#F1F5F9] text-[#334155]">
-                            {p.permission?.key}
-                          </Badge>
-                        ))}
-                        {(r.permissions?.length || 0) > 6 ? (
-                          <Badge className="bg-[#E2E8F0] text-[#475569]">+{(r.permissions?.length || 0) - 6}</Badge>
-                        ) : null}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Button variant="outline" size="sm" onClick={() => openEditRole(r)}>
-                        Edit
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {!loading && roles.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={4} className="text-center py-10 text-[#64748B]">No roles found.</TableCell>
-                  </TableRow>
-                ) : null}
-              </TableBody>
-            </Table>
-          </Card>
+          {(() => {
+            const roleCols: DataTableColumn<RoleRow>[] = [
+              { key: "name", header: "Role", render: (r) => <span className="text-[#1E293B]">{r.name}</span> },
+              { key: "users", header: "Users", render: (r) => <span className="text-[#334155]">{r.users?.length || 0}</span> },
+              { key: "permissions", header: "Permissions", render: (r) => (
+                <div className="flex flex-wrap gap-1">
+                  {(r.permissions ?? []).slice(0, 6).map((p) => (
+                    <Badge key={`${r.id}-${p.permission?.key}`} className="bg-[#F1F5F9] text-[#334155]">{p.permission?.key}</Badge>
+                  ))}
+                  {(r.permissions?.length || 0) > 6 ? <Badge className="bg-[#E2E8F0] text-[#475569]">+{(r.permissions?.length || 0) - 6}</Badge> : null}
+                </div>
+              )},
+              { key: "actions", header: "Actions", render: (r) => <Button variant="outline" size="sm" onClick={() => openEditRole(r)}>Edit</Button> },
+            ];
+            return (
+              <Card className="shadow-card rounded-xl overflow-hidden">
+                <DataTable columns={roleCols} rows={roles} rowKey={(r) => r.id} loading={loading} emptyTitle="No roles found" />
+              </Card>
+            );
+          })()}
 
           <Card className="p-4 space-y-3">
             <h3 className="text-sm font-semibold text-[#1E293B]">Permission Matrix Preview</h3>
-            <div className="overflow-auto rounded-md border border-[#E2E8F0]">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-[#F8FAFC]">
-                    <TableHead className="min-w-[180px]">Role</TableHead>
-                    <TableHead>Total</TableHead>
-                    {permissionModules.map((moduleName) => (
-                      <TableHead key={moduleName}>{moduleName}</TableHead>
-                    ))}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rolePermissionMatrix.map((row) => (
-                    <TableRow key={`matrix-${row.roleId}`}>
-                      <TableCell className="font-medium text-[#1E293B]">{row.roleName}</TableCell>
-                      <TableCell>{row.total}</TableCell>
-                      {permissionModules.map((moduleName) => (
-                        <TableCell key={`${row.roleId}-${moduleName}`}>{row.byModule.get(moduleName) ?? 0}</TableCell>
-                      ))}
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+            {(() => {
+              type MatrixRow = { roleId: string; roleName: string; total: number; byModule: Map<string, number> };
+              const matrixCols: DataTableColumn<MatrixRow>[] = [
+                { key: "role", header: "Role", render: (r) => <span className="font-medium text-[#1E293B]">{r.roleName}</span> },
+                { key: "total", header: "Total", render: (r) => <span>{r.total}</span> },
+                ...permissionModules.map((mod) => ({
+                  key: mod,
+                  header: mod,
+                  render: (r: MatrixRow) => <span>{r.byModule.get(mod) ?? 0}</span>,
+                })),
+              ];
+              return (
+                <div className="overflow-auto rounded-md border border-[#E2E8F0]">
+                  <DataTable columns={matrixCols} rows={rolePermissionMatrix} rowKey={(r) => r.roleId} />
+                </div>
+              );
+            })()}
           </Card>
         </TabsContent>
       </Tabs>

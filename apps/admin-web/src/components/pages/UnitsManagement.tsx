@@ -14,7 +14,7 @@ import {
 } from "../ui/dialog";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
+import { DataTable, type DataTableColumn } from "../DataTable";
 import communityService, { type ClusterItem, type CommunityListItem, type GateItem } from "../../lib/community-service";
 import { handleApiError } from "../../lib/api-client";
 import unitService, {
@@ -361,61 +361,35 @@ export function UnitsManagement() {
         </div>
       </Card>
 
-      <Card className="rounded-md border border-[#D6DEE8] p-0">
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-[#F8FAFC]">
-                <TableHead>Unit</TableHead>
-                <TableHead>Community</TableHead>
-                <TableHead>Cluster</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Display Status</TableHead>
-                <TableHead>Size</TableHead>
-                <TableHead>Price</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="w-[220px]">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                <TableRow><TableCell colSpan={9} className="text-center text-[#64748B]">Loading units...</TableCell></TableRow>
-              ) : null}
-              {!loading && units.length === 0 ? (
-                <TableRow><TableCell colSpan={9} className="text-center text-[#64748B]">No units found.</TableCell></TableRow>
-              ) : null}
-              {units.map((unit) => (
-                <TableRow key={unit.id}>
-                  <TableCell className="font-medium text-[#0F172A]">{unit.unitNumber}</TableCell>
-                  <TableCell>{unit.communityName}</TableCell>
-                  <TableCell>{unit.clusterName ?? "-"}</TableCell>
-                  <TableCell>{unit.type}</TableCell>
-                  <TableCell><Badge className={displayStatusClass(unit.displayStatus)}>{unit.displayStatus}</Badge></TableCell>
-                  <TableCell>{unit.sizeSqm ?? "-"}</TableCell>
-                  <TableCell>{unit.price !== null ? `EGP ${unit.price.toLocaleString()}` : "-"}</TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      <Badge variant="outline">{unit.status}</Badge>
-                      {!unit.isActive ? <Badge className="bg-slate-200 text-slate-700">Inactive</Badge> : null}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <Button variant="outline" size="sm" onClick={() => void openDetail(unit)}><Eye className="h-4 w-4" /></Button>
-                      <Button variant="outline" size="sm" onClick={() => void openEdit(unit)}><Pencil className="h-4 w-4" /></Button>
-                      {unit.isActive ? (
-                        <Button variant="outline" size="sm" className="text-red-600" onClick={() => askDeactivate(unit)}><Power className="h-4 w-4" /></Button>
-                      ) : (
-                        <Button variant="outline" size="sm" className="text-emerald-600" onClick={() => void reactivate(unit)}><RotateCcw className="h-4 w-4" /></Button>
-                      )}
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      </Card>
+      {(() => {
+        const cols: DataTableColumn<UnitListItem>[] = [
+          { key: "unit", header: "Unit", render: (u) => <span className="font-medium text-[#0F172A]">{u.unitNumber}</span> },
+          { key: "community", header: "Community", render: (u) => <span>{u.communityName}</span> },
+          { key: "cluster", header: "Cluster", render: (u) => <span>{u.clusterName ?? "-"}</span> },
+          { key: "type", header: "Type", render: (u) => <span>{u.type}</span> },
+          { key: "displayStatus", header: "Display Status", render: (u) => <Badge className={displayStatusClass(u.displayStatus)}>{u.displayStatus}</Badge> },
+          { key: "size", header: "Size", render: (u) => <span>{u.sizeSqm ?? "-"}</span> },
+          { key: "price", header: "Price", render: (u) => <span>{u.price !== null ? `EGP ${u.price.toLocaleString()}` : "-"}</span> },
+          { key: "status", header: "Status", render: (u) => (
+            <div className="flex flex-wrap gap-1">
+              <Badge variant="outline">{u.status}</Badge>
+              {!u.isActive ? <Badge className="bg-slate-200 text-slate-700">Inactive</Badge> : null}
+            </div>
+          )},
+          { key: "actions", header: "Actions", render: (u) => (
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={() => void openDetail(u)}><Eye className="h-4 w-4" /></Button>
+              <Button variant="outline" size="sm" onClick={() => void openEdit(u)}><Pencil className="h-4 w-4" /></Button>
+              {u.isActive ? (
+                <Button variant="outline" size="sm" className="text-red-600" onClick={() => askDeactivate(u)}><Power className="h-4 w-4" /></Button>
+              ) : (
+                <Button variant="outline" size="sm" className="text-emerald-600" onClick={() => void reactivate(u)}><RotateCcw className="h-4 w-4" /></Button>
+              )}
+            </div>
+          )},
+        ];
+        return <DataTable columns={cols} rows={units} rowKey={(u) => u.id} loading={loading} emptyTitle="No units found" />;
+      })()}
 
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
         <DialogContent className="max-w-3xl">

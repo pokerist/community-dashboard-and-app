@@ -17,14 +17,7 @@ import {
 import { QrCode, Plus, Download, Ban, CheckCheck, Clock3, ShieldCheck } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../ui/table";
+import { DataTable, type DataTableColumn } from "../DataTable";
 import apiClient from "../../lib/api-client";
 import { errorMessage, formatDateTime, getStatusColorClass, humanizeEnum } from "../../lib/live-data";
 

@@ -19,7 +19,7 @@ import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Switch } from '../ui/switch';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
+import { DataTable, type DataTableColumn } from '../DataTable';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Textarea } from '../ui/textarea';
 import { DrawerForm } from '../DrawerForm';
@@ -493,29 +493,28 @@ export function ServiceManagement({ mode = 'services' }: ServiceManagementProps)
               <button type="button" className={`text-xs px-3 py-1.5 rounded-full ${slaBreachedOnly ? 'bg-red-500/10 text-red-400 border border-red-500/20' : 'bg-white/5 text-slate-400'}`} onClick={() => setSlaBreachedOnly((prev) => !prev)}>SLA Breached</button>
             </div>
           </Card>
-          <Card className="overflow-hidden">
-            <Table>
-              <TableHeader><TableRow><TableHead>ID</TableHead><TableHead>Service</TableHead><TableHead>Unit</TableHead><TableHead>Requester</TableHead><TableHead>Assigned To</TableHead><TableHead>Priority</TableHead><TableHead>SLA Status</TableHead><TableHead>Status</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
-              <TableBody>
-                {requests.map((request) => (
-                  <TableRow key={request.id} className={request.slaStatus === 'BREACHED' ? 'border-l-2 border-red-500/30' : ''}>
-                    <TableCell>{request.requestNumber}</TableCell>
-                    <TableCell>{request.serviceName}</TableCell>
-                    <TableCell>{request.unitNumber}</TableCell>
-                    <TableCell>{request.requesterName}</TableCell>
-                    <TableCell>{request.assigneeName ?? 'Unassigned'}</TableCell>
-                    <TableCell><span className="inline-flex items-center gap-2 text-sm text-slate-300"><span className={`h-2 w-2 rounded-full ${priorityDot(request.priority)}`} />{humanizeEnum(request.priority)}</span></TableCell>
-                    <TableCell className={request.slaStatus === 'BREACHED' ? 'text-red-400' : request.slaStatus === 'ON_TRACK' ? 'text-emerald-400' : request.slaStatus === 'RESOLVED' ? 'text-slate-500' : 'text-slate-600'}>
-                      {getSlaStatusLabel(request.slaStatus, request.hoursRemaining)}
-                    </TableCell>
-                    <TableCell><Badge className="bg-white/5 text-slate-200">{humanizeEnum(request.status)}</Badge></TableCell>
-                    <TableCell><Button variant="ghost" size="icon" onClick={() => void openRequest(request.id)}><Eye className="h-4 w-4" /></Button></TableCell>
-                  </TableRow>
-                ))}
-                {!loading && requests.length === 0 ? <TableRow><TableCell colSpan={9} className="py-10 text-center text-sm text-slate-500">No requests found.</TableCell></TableRow> : null}
-              </TableBody>
-            </Table>
-          </Card>
+          {(() => {
+            const cols: DataTableColumn<ServiceRequestListItem>[] = [
+              { key: "id", header: "ID", render: (r) => <span>{r.requestNumber}</span> },
+              { key: "service", header: "Service", render: (r) => <span>{r.serviceName}</span> },
+              { key: "unit", header: "Unit", render: (r) => <span>{r.unitNumber}</span> },
+              { key: "requester", header: "Requester", render: (r) => <span>{r.requesterName}</span> },
+              { key: "assignee", header: "Assigned To", render: (r) => <span>{r.assigneeName ?? 'Unassigned'}</span> },
+              { key: "priority", header: "Priority", render: (r) => <span className="inline-flex items-center gap-2 text-sm text-slate-300"><span className={`h-2 w-2 rounded-full ${priorityDot(r.priority)}`} />{humanizeEnum(r.priority)}</span> },
+              { key: "sla", header: "SLA Status", render: (r) => (
+                <span className={r.slaStatus === 'BREACHED' ? 'text-red-400' : r.slaStatus === 'ON_TRACK' ? 'text-emerald-400' : r.slaStatus === 'RESOLVED' ? 'text-slate-500' : 'text-slate-600'}>
+                  {getSlaStatusLabel(r.slaStatus, r.hoursRemaining)}
+                </span>
+              )},
+              { key: "status", header: "Status", render: (r) => <Badge className="bg-white/5 text-slate-200">{humanizeEnum(r.status)}</Badge> },
+              { key: "actions", header: "Actions", render: (r) => <Button variant="ghost" size="icon" onClick={() => void openRequest(r.id)}><Eye className="h-4 w-4" /></Button> },
+            ];
+            return (
+              <Card className="overflow-hidden">
+                <DataTable columns={cols} rows={requests} rowKey={(r) => r.id} loading={loading} emptyTitle="No requests found" rowClassName={(r) => r.slaStatus === 'BREACHED' ? 'border-l-2 border-red-500/30' : ''} />
+              </Card>
+            );
+          })()}
         </TabsContent>
       </Tabs>
 
@@ -684,7 +683,15 @@ export function ServiceManagement({ mode = 'services' }: ServiceManagementProps)
               <div className="flex items-center gap-2"><Button onClick={() => void servicesService.postComment(activeRequest.id, { body: commentBody, isInternal: false }).then(async () => { await refreshActiveRequest(activeRequest.id); setCommentBody(''); })}>Post Comment</Button><Button variant="outline" onClick={() => void servicesService.postComment(activeRequest.id, { body: commentBody, isInternal: true }).then(async () => { await refreshActiveRequest(activeRequest.id); setCommentBody(''); })}>Internal Note</Button></div>
             </TabsContent>
             <TabsContent value="invoices" className="space-y-3">
-              <Table><TableHeader><TableRow><TableHead>Invoice #</TableHead><TableHead>Amount</TableHead><TableHead>Status</TableHead><TableHead>Due</TableHead></TableRow></TableHeader><TableBody>{activeRequest.invoices.map((invoice) => <TableRow key={invoice.id}><TableCell>{invoice.invoiceNumber}</TableCell><TableCell>{formatCurrency(invoice.amount)}</TableCell><TableCell>{invoice.status}</TableCell><TableCell>{formatDateTime(invoice.dueDate)}</TableCell></TableRow>)}{activeRequest.invoices.length === 0 ? <TableRow><TableCell colSpan={4} className="py-6 text-center text-sm text-slate-500">No invoices.</TableCell></TableRow> : null}</TableBody></Table>
+              {(() => {
+                const invCols: DataTableColumn<any>[] = [
+                  { key: "num", header: "Invoice #", render: (i) => <span>{i.invoiceNumber}</span> },
+                  { key: "amount", header: "Amount", render: (i) => <span>{formatCurrency(i.amount)}</span> },
+                  { key: "status", header: "Status", render: (i) => <span>{i.status}</span> },
+                  { key: "due", header: "Due", render: (i) => <span>{formatDateTime(i.dueDate)}</span> },
+                ];
+                return <DataTable columns={invCols} rows={activeRequest.invoices} rowKey={(i) => i.id} emptyTitle="No invoices" />;
+              })()}
               <Card className="p-3">
                 <p className="text-xs text-slate-500">Create Invoice</p>
                 <div className="mt-2 grid grid-cols-2 gap-2">

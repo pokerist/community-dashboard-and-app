@@ -4,14 +4,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Badge } from "../ui/badge";
 import { toast } from "sonner";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../ui/table";
+import { DataTable, type DataTableColumn } from "../DataTable";
 import {
   Dialog,
   DialogContent,
@@ -486,62 +479,19 @@ export function LeaseManagement() {
             />
           </div>
         </div>
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-[#F9FAFB]">
-              <TableHead>Lease ID</TableHead>
-              <TableHead>Unit</TableHead>
-              <TableHead>Owner</TableHead>
-              <TableHead>Tenant</TableHead>
-              <TableHead>Lease Period</TableHead>
-              <TableHead>Monthly Rent</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Payment Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredLeases.map((lease) => (
-              <TableRow key={lease.id} className="hover:bg-[#F9FAFB]">
-                <TableCell className="font-medium text-[#1E293B]">
-                  {lease.leaseNumber ?? lease.id}
-                </TableCell>
-                <TableCell>
-                  <Badge variant="secondary" className="bg-[#F3F4F6] text-[#1E293B]">
-                    {lease.unit?.unitNumber ?? lease.unitId ?? "—"}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-[#64748B]">
-                  {lease.owner?.nameEN ?? lease.owner?.email ?? lease.ownerId ?? "—"}
-                </TableCell>
-                <TableCell className="text-[#1E293B]">
-                  {lease.tenant?.nameEN ?? lease.tenantEmail ?? lease.tenantId ?? "—"}
-                </TableCell>
-                <TableCell className="text-[#64748B]">
-                  <div className="text-sm">
-                    <div>{formatDate(lease.startDate)}</div>
-                    <div className="text-xs">to {formatDate(lease.endDate)}</div>
-                  </div>
-                </TableCell>
-                <TableCell className="text-[#1E293B]">{formatCurrencyEGP(lease.monthlyRent)}</TableCell>
-                <TableCell>
-                  <Badge className={getStatusColorClass(lease.status)}>{humanizeEnum(lease.status)}</Badge>
-                </TableCell>
-                <TableCell>
-                  <Badge className={getStatusColorClass(lease.paymentStatus ?? "UNKNOWN")}>
-                    {humanizeEnum(lease.paymentStatus ?? "Unknown")}
-                  </Badge>
-                </TableCell>
-              </TableRow>
-            ))}
-            {!isLoading && filteredLeases.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={8} className="text-center py-10 text-[#64748B]">
-                  No leases found.
-                </TableCell>
-              </TableRow>
-            ) : null}
-          </TableBody>
-        </Table>
+        {(() => {
+          const cols: DataTableColumn<any>[] = [
+            { key: "id", header: "Lease ID", render: (l) => <span className="font-medium text-[#1E293B]">{l.leaseNumber ?? l.id}</span> },
+            { key: "unit", header: "Unit", render: (l) => <Badge variant="secondary" className="bg-[#F3F4F6] text-[#1E293B]">{l.unit?.unitNumber ?? l.unitId ?? "—"}</Badge> },
+            { key: "owner", header: "Owner", render: (l) => <span className="text-[#64748B]">{l.owner?.nameEN ?? l.owner?.email ?? l.ownerId ?? "—"}</span> },
+            { key: "tenant", header: "Tenant", render: (l) => <span className="text-[#1E293B]">{l.tenant?.nameEN ?? l.tenantEmail ?? l.tenantId ?? "—"}</span> },
+            { key: "period", header: "Lease Period", render: (l) => <div className="text-[#64748B] text-sm"><div>{formatDate(l.startDate)}</div><div className="text-xs">to {formatDate(l.endDate)}</div></div> },
+            { key: "rent", header: "Monthly Rent", render: (l) => <span className="text-[#1E293B]">{formatCurrencyEGP(l.monthlyRent)}</span> },
+            { key: "status", header: "Status", render: (l) => <Badge className={getStatusColorClass(l.status)}>{humanizeEnum(l.status)}</Badge> },
+            { key: "payStatus", header: "Payment Status", render: (l) => <Badge className={getStatusColorClass(l.paymentStatus ?? "UNKNOWN")}>{humanizeEnum(l.paymentStatus ?? "Unknown")}</Badge> },
+          ];
+          return <DataTable columns={cols} rows={filteredLeases} rowKey={(l) => l.id} loading={isLoading} emptyTitle="No leases found" />;
+        })()}
       </Card>
     </div>
   );

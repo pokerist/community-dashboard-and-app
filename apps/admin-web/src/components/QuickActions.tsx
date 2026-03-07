@@ -1,12 +1,12 @@
 import {
   Bell,
-  ArrowRight,
   ClipboardPlus,
   FileText,
   ShieldAlert,
   UserRoundPlus,
   Zap,
 } from "lucide-react";
+import { useState } from "react";
 import type { ComponentType } from "react";
 
 interface QuickActionsProps {
@@ -17,10 +17,12 @@ type ActionItem = {
   id: string;
   label: string;
   description: string;
-  icon: ComponentType<{ className?: string }>;
+  icon: ComponentType<{ style?: React.CSSProperties }>;
   targetSection: string;
   iconBg: string;
-  iconFg: string;
+  iconColor: string;
+  hoverBorder: string;
+  hoverBg: string;
 };
 
 const actions: ActionItem[] = [
@@ -30,8 +32,10 @@ const actions: ActionItem[] = [
     description: "Log a resident complaint",
     icon: ClipboardPlus,
     targetSection: "complaints",
-    iconBg: "bg-blue-50",
-    iconFg: "text-blue-600",
+    iconBg: "#EFF6FF",
+    iconColor: "#2563EB",
+    hoverBorder: "#BFDBFE",
+    hoverBg: "#F5F9FF",
   },
   {
     id: "new-service-request",
@@ -39,8 +43,10 @@ const actions: ActionItem[] = [
     description: "Create a service ticket",
     icon: FileText,
     targetSection: "services",
-    iconBg: "bg-emerald-50",
-    iconFg: "text-emerald-700",
+    iconBg: "#ECFDF5",
+    iconColor: "#059669",
+    hoverBorder: "#A7F3D0",
+    hoverBg: "#F0FDF9",
   },
   {
     id: "new-violation",
@@ -48,8 +54,10 @@ const actions: ActionItem[] = [
     description: "Report a community violation",
     icon: ShieldAlert,
     targetSection: "violations",
-    iconBg: "bg-amber-50",
-    iconFg: "text-amber-600",
+    iconBg: "#FFFBEB",
+    iconColor: "#D97706",
+    hoverBorder: "#FDE68A",
+    hoverBg: "#FFFDF0",
   },
   {
     id: "send-notification",
@@ -57,8 +65,10 @@ const actions: ActionItem[] = [
     description: "Broadcast to residents",
     icon: Bell,
     targetSection: "notifications",
-    iconBg: "bg-violet-50",
-    iconFg: "text-violet-600",
+    iconBg: "#F5F3FF",
+    iconColor: "#7C3AED",
+    hoverBorder: "#DDD6FE",
+    hoverBg: "#FAF8FF",
   },
   {
     id: "add-resident",
@@ -66,64 +76,126 @@ const actions: ActionItem[] = [
     description: "Register a new resident",
     icon: UserRoundPlus,
     targetSection: "residents-create",
-    iconBg: "bg-teal-50",
-    iconFg: "text-teal-700",
+    iconBg: "#ECFDF5",
+    iconColor: "#0891B2",
+    hoverBorder: "#A5F3FC",
+    hoverBg: "#F0FFFE",
   },
 ];
 
+// ─── Single action card ───────────────────────────────────────
+function ActionCard({ action, onNavigate }: { action: ActionItem; onNavigate?: (s: string) => void }) {
+  const [hovered, setHovered] = useState(false);
+  const Icon = action.icon;
+
+  return (
+    <button
+      type="button"
+      onClick={() => onNavigate?.(action.targetSection)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "12px",
+        padding: "14px",
+        background: hovered ? action.hoverBg : "#FFFFFF",
+        border: `1px solid ${hovered ? action.hoverBorder : "#EBEBEB"}`,
+        borderRadius: "8px",
+        cursor: "pointer",
+        textAlign: "left",
+        transition: "background 150ms ease, border-color 150ms ease, box-shadow 150ms ease",
+        boxShadow: hovered ? "0 2px 8px rgba(0,0,0,0.06)" : "none",
+        fontFamily: "'Work Sans', sans-serif",
+      }}
+    >
+      {/* Icon + arrow row */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+        <div style={{
+          width: "32px", height: "32px",
+          borderRadius: "7px",
+          background: action.iconBg,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          flexShrink: 0,
+          transition: "transform 150ms ease",
+          transform: hovered ? "scale(1.08)" : "scale(1)",
+        }}>
+          <Icon style={{ width: "14px", height: "14px", color: action.iconColor }} />
+        </div>
+
+        {/* Arrow */}
+        <svg
+          width="14" height="14" viewBox="0 0 24 24"
+          fill="none" stroke={hovered ? action.iconColor : "#D1D5DB"}
+          strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+          style={{ transition: "stroke 150ms ease, transform 150ms ease", transform: hovered ? "translateX(2px)" : "translateX(0)", flexShrink: 0 }}
+        >
+          <line x1="5" y1="12" x2="19" y2="12" />
+          <polyline points="12 5 19 12 12 19" />
+        </svg>
+      </div>
+
+      {/* Text */}
+      <div>
+        <p style={{
+          fontSize: "13px", fontWeight: 700,
+          color: "#111827", lineHeight: 1.2,
+          letterSpacing: "-0.01em", marginBottom: "3px",
+        }}>
+          {action.label}
+        </p>
+        <p style={{ fontSize: "11.5px", color: "#9CA3AF", lineHeight: 1.4 }}>
+          {action.description}
+        </p>
+      </div>
+    </button>
+  );
+}
+
+// ─── Panel ────────────────────────────────────────────────────
 export function QuickActions({ onNavigate }: QuickActionsProps) {
   return (
-    <div
-      className="flex flex-col bg-white rounded-[6px] overflow-hidden"
-      style={{ border: "1px solid #EBEBEB", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}
-    >
+    <div style={{
+      background: "#FFFFFF",
+      borderRadius: "10px",
+      border: "1px solid #EBEBEB",
+      boxShadow: "0 1px 4px rgba(0,0,0,0.05)",
+      overflow: "hidden",
+      fontFamily: "'Work Sans', sans-serif",
+    }}>
       {/* Panel header */}
-      <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-[#F3F4F6]">
-        <div className="flex h-7 w-7 items-center justify-center rounded-[5px] bg-[#F5F4F1] border border-[#E5E7EB]">
-          <Zap className="h-3.5 w-3.5 text-[#6B7280]" />
+      <div style={{
+        display: "flex", alignItems: "center", gap: "10px",
+        padding: "14px 16px",
+        borderBottom: "1px solid #F3F4F6",
+      }}>
+        <div style={{
+          width: "28px", height: "28px", borderRadius: "7px",
+          background: "#F5F5F5", border: "1px solid #EBEBEB",
+          display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+        }}>
+          <Zap style={{ width: "13px", height: "13px", color: "#6B7280" }} />
         </div>
         <div>
-          <h3
-            className="text-[13px] font-bold text-[#111827] leading-none"
-            style={{ fontFamily: "'Work Sans', sans-serif" }}
-          >
+          <h3 style={{ fontSize: "13px", fontWeight: 700, color: "#111827", lineHeight: 1, letterSpacing: "-0.01em" }}>
             Quick Actions
           </h3>
-          <p className="text-[10.5px] text-[#9CA3AF] mt-0.5">Common tasks at a click</p>
+          <p style={{ marginTop: "3px", fontSize: "10.5px", color: "#9CA3AF", lineHeight: 1 }}>
+            Common tasks at a click
+          </p>
         </div>
       </div>
 
-      {/* 2-column action card grid */}
-      <div className="grid grid-cols-2 gap-3 p-4">
-        {actions.map((action) => {
-          const Icon = action.icon;
-          return (
-            <button
-              key={action.id}
-              type="button"
-              onClick={() => onNavigate?.(action.targetSection)}
-              className="bg-white border border-[#EBEBEB] rounded-[6px] p-4 cursor-pointer hover:bg-[#EFF6FF] hover:border-[#2563EB] transition-all duration-150 group text-left flex flex-col gap-3"
-            >
-              {/* Icon + arrow row */}
-              <div className="flex items-start justify-between">
-                <div className="w-9 h-9 bg-[#EFF6FF] rounded flex items-center justify-center text-[#2563EB]">
-                  <Icon className="h-4 w-4" />
-                </div>
-                <ArrowRight className="ml-auto text-[#9CA3AF] group-hover:text-[#2563EB] group-hover:translate-x-1 transition-all h-3.5 w-3.5" />
-              </div>
-
-              {/* Text */}
-              <div>
-                <p className="text-[14px] font-semibold text-[#111827] mb-0.5">
-                  {action.label}
-                </p>
-                <p className="text-[12px] text-[#6B7280]">
-                  {action.description}
-                </p>
-              </div>
-            </button>
-          );
-        })}
+      {/* 2-col grid */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "1fr 1fr",
+        gap: "8px",
+        padding: "12px",
+      }}>
+        {actions.map((action) => (
+          <ActionCard key={action.id} action={action} onNavigate={onNavigate} />
+        ))}
       </div>
     </div>
   );
