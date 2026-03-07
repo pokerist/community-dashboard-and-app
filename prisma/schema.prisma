@@ -162,6 +162,7 @@ enum InvoiceType {
 enum ComplaintStatus {
   NEW
   IN_PROGRESS
+  PENDING_RESIDENT  // Returned to resident awaiting their response/action
   RESOLVED
   CLOSED
 }
@@ -625,9 +626,13 @@ model User {
   invoices Invoice[] @relation("user_invoices")
 
   // Service Requests
-  serviceRequests        ServiceRequest[]        @relation("creator_requests")
-  serviceRequestComments ServiceRequestComment[]
-  complaintComments      ComplaintComment[]
+  serviceRequests         ServiceRequest[] @relation("creator_requests")
+  assignedServiceRequests ServiceRequest[] @relation("assigned_to_service_requests")
+  serviceRequestComments  ServiceRequestComment[]
+  complaintComments       ComplaintComment[]
+
+  // Attendance
+  attendanceLogsRecorded AttendanceLog[] @relation("attendance_recorded_by")
 
   // Access QRCodes
   qrCodesGenerated AccessQRCode[] @relation("generated_by")
@@ -1432,6 +1437,7 @@ model CompoundStaff {
   schedules          CompoundStaffSchedule[]
   gateAccesses       CompoundStaffGateAccess[]
   activityLogs       CompoundStaffActivityLog[]
+  attendanceLogs     AttendanceLog[]
   createdAt          DateTime                   @default(now())
   updatedAt          DateTime                   @updatedAt
   deletedAt          DateTime?
@@ -1527,6 +1533,25 @@ model CompoundStaffActivityLog {
   @@index([createdAt])
 }
 
+model AttendanceLog {
+  id          String    @id @default(uuid())
+  staffId     String
+  clockInAt   DateTime  @default(now())
+  clockOutAt  DateTime?
+  durationMin Int?      // calculated on clock-out
+  notes       String?
+  recordedById String?  // admin user who recorded (null = self-clock)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  staff      CompoundStaff @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  recordedBy User?         @relation("attendance_recorded_by", fields: [recordedById], references: [id], onDelete: SetNull)
+
+  @@index([staffId, clockInAt])
+  @@index([clockInAt])
+  @@index([recordedById])
+}
+
 model File {
   id        String       @id @default(uuid())
   key       String       @unique // storage path or supabase file key
@@ -1543,7 +1568,8 @@ model File {
   attachments          Attachment[]
   leaseContract        Lease?         @relation("lease_contract")
 
-  pendingRegistrations   PendingRegistration[]
+  pendingRegistrationPhotos      PendingRegistration[] @relation("pending_reg_photo")
+  pendingRegistrationNationalIds PendingRegistration[] @relation("pending_reg_national_id")
   documents              ResidentDocument[]    @relation("file_documents")
   ownerUnitContracts     OwnerUnitContract[]   @relation("owner_unit_contract_file")
   ownerInstallments      OwnerInstallment[]    @relation("owner_installment_reference_file")
@@ -1701,6 +1727,7 @@ model ServiceRequest {
   unitId         String?
   createdBy      User                       @relation("creator_requests", fields: [createdById], references: [id])
   createdById    String
+  assignedTo     User?                      @relation("assigned_to_service_requests", fields: [assignedToId], references: [id])
   assignedToId   String?
   status         ServiceRequestStatus       @default(NEW)
   priority       Priority                   @default(MEDIUM)
@@ -2590,9 +2617,11 @@ model PendingRegistration {
   name            String?
   passwordHash    String?
   origin          String  @default("community")
-  nationalId      String // PIC
-  personalPhotoId String // File ID (stored in File table)
-  personalPhoto   File    @relation(fields: [personalPhotoId], references: [id])
+  nationalId        String  // PIC
+  personalPhotoId   String  // File ID (stored in File table)
+  personalPhoto     File    @relation("pending_reg_photo", fields: [personalPhotoId], references: [id])
+  nationalIdFileId  String? // National ID document file ID
+  nationalIdFile    File?   @relation("pending_reg_national_id", fields: [nationalIdFileId], references: [id])
 
   roleIntent String? // OWNER, TENANT, FAMILY
 

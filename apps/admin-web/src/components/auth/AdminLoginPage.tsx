@@ -25,6 +25,155 @@ function decodeJwtPayload(token: string): Record<string, unknown> | null {
   }
 }
 
+/* ── Illustration ─────────────────────────────────────────────── */
+function LoginIllustration() {
+  return (
+    <div className="admin-login__illustration">
+      <svg
+        viewBox="0 0 520 310"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+        className="admin-login__illustrationSvg"
+      >
+        <defs>
+          <pattern id="illusGrid" width="26" height="26" patternUnits="userSpaceOnUse">
+            <path d="M 26 0 L 0 0 0 26" fill="none" stroke="rgba(255,255,255,0.035)" strokeWidth="0.75" />
+          </pattern>
+          <linearGradient id="towerGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="rgba(255,255,255,0.14)" />
+            <stop offset="100%" stopColor="rgba(255,255,255,0.03)" />
+          </linearGradient>
+          <linearGradient id="accentBar" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stopColor="#5B4FE9" />
+            <stop offset="100%" stopColor="#7C6FFF" />
+          </linearGradient>
+          <filter id="cardGlow">
+            <feDropShadow dx="0" dy="4" stdDeviation="10" floodColor="#5B4FE9" floodOpacity="0.18" />
+          </filter>
+          <filter id="amberGlow">
+            <feDropShadow dx="0" dy="2" stdDeviation="8" floodColor="#F5A623" floodOpacity="0.22" />
+          </filter>
+          <filter id="greenPulse">
+            <feDropShadow dx="0" dy="0" stdDeviation="4" floodColor="#22C55E" floodOpacity="0.6" />
+          </filter>
+        </defs>
+
+        {/* Grid background */}
+        <rect width="520" height="310" fill="url(#illusGrid)" />
+
+        {/* Ambient glow blob */}
+        <ellipse cx="260" cy="155" rx="160" ry="110" fill="rgba(91,79,233,0.06)" />
+
+        {/* ── Buildings ── */}
+        {/* Left secondary building */}
+        <rect x="68" y="155" width="76" height="115" fill="rgba(255,255,255,0.045)" stroke="rgba(255,255,255,0.08)" strokeWidth="1" rx="1" />
+        {[170, 188, 206, 224, 242].map((y, i) => (
+          <g key={i}>
+            <rect x="80" y={y} width="11" height="9" fill="rgba(255,255,255,0.07)" rx="1" />
+            <rect x="97" y={y} width="11" height="9" fill="rgba(255,255,255,0.05)" rx="1" />
+            <rect x="114" y={y} width="11" height="9" fill="rgba(255,255,255,0.07)" rx="1" />
+          </g>
+        ))}
+
+        {/* Center main tower */}
+        <rect x="200" y="75" width="120" height="195" fill="url(#towerGrad)" stroke="rgba(255,255,255,0.10)" strokeWidth="1" rx="1" />
+        {/* Tower windows — some lit with indigo (occupied/active) */}
+        {[90, 108, 126, 144, 162, 180, 198, 216, 234].map((y, i) => (
+          <g key={i}>
+            <rect x="212" y={y} width="12" height="10"
+              fill={i % 4 === 0 || i % 3 === 0 ? "rgba(91,79,233,0.52)" : "rgba(255,255,255,0.06)"} rx="1" />
+            <rect x="232" y={y} width="12" height="10"
+              fill={i % 3 === 1 ? "rgba(91,79,233,0.38)" : "rgba(255,255,255,0.05)"} rx="1" />
+            <rect x="252" y={y} width="12" height="10"
+              fill={i % 5 === 0 || i % 4 === 2 ? "rgba(91,79,233,0.44)" : "rgba(255,255,255,0.06)"} rx="1" />
+          </g>
+        ))}
+        {/* Tower top accent bar */}
+        <rect x="200" y="73" width="120" height="3" fill="url(#accentBar)" rx="1" />
+
+        {/* Right secondary building */}
+        <rect x="376" y="132" width="76" height="138" fill="rgba(255,255,255,0.045)" stroke="rgba(255,255,255,0.08)" strokeWidth="1" rx="1" />
+        {[148, 166, 184, 202, 220, 238].map((y, i) => (
+          <g key={i}>
+            <rect x="388" y={y} width="11" height="9" fill="rgba(255,255,255,0.06)" rx="1" />
+            <rect x="405" y={y} width="11" height="9" fill="rgba(255,255,255,0.05)" rx="1" />
+            <rect x="422" y={y} width="11" height="9" fill="rgba(255,255,255,0.07)" rx="1" />
+          </g>
+        ))}
+
+        {/* Ground */}
+        <line x1="0" y1="272" x2="520" y2="272" stroke="rgba(255,255,255,0.055)" strokeWidth="1" />
+        <ellipse cx="260" cy="275" rx="185" ry="10" fill="rgba(0,0,0,0.14)" />
+
+        {/* ── Floating metric cards ── */}
+
+        {/* OCCUPANCY — top left, indigo glow */}
+        <g className="al-float-a" filter="url(#cardGlow)">
+          <rect x="0" y="28" width="138" height="66" rx="4"
+            fill="rgba(91,79,233,0.22)" stroke="rgba(91,79,233,0.42)" strokeWidth="1" />
+          <text x="14" y="50" fontSize="8.5" fill="rgba(255,255,255,0.46)"
+            letterSpacing="0.14em" fontFamily="'DM Mono',monospace" fontWeight="500">OCCUPANCY</text>
+          <text x="14" y="78" fontSize="28" fontWeight="500"
+            fill="rgba(255,255,255,0.95)" fontFamily="'DM Mono',monospace">94%</text>
+          <circle cx="124" cy="44" r="5" fill="#22C55E" filter="url(#greenPulse)" />
+          {/* Sparkline */}
+          <polyline points="14,90 28,87 42,88 56,84 70,81 84,78 98,79 112,75"
+            stroke="rgba(91,79,233,0.55)" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+        </g>
+
+        {/* RESIDENTS — top right */}
+        <g className="al-float-b">
+          <rect x="382" y="18" width="138" height="66" rx="4"
+            fill="rgba(255,255,255,0.07)" stroke="rgba(255,255,255,0.11)" strokeWidth="1" />
+          <text x="396" y="40" fontSize="8.5" fill="rgba(255,255,255,0.44)"
+            letterSpacing="0.14em" fontFamily="'DM Mono',monospace" fontWeight="500">RESIDENTS</text>
+          <text x="396" y="68" fontSize="28" fontWeight="500"
+            fill="rgba(255,255,255,0.94)" fontFamily="'DM Mono',monospace">1,842</text>
+        </g>
+
+        {/* VISITORS — bottom left */}
+        <g className="al-float-c">
+          <rect x="0" y="196" width="138" height="66" rx="4"
+            fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.10)" strokeWidth="1" />
+          <text x="14" y="218" fontSize="8.5" fill="rgba(255,255,255,0.44)"
+            letterSpacing="0.14em" fontFamily="'DM Mono',monospace" fontWeight="500">VISITORS NOW</text>
+          <text x="14" y="246" fontSize="28" fontWeight="500"
+            fill="rgba(255,255,255,0.94)" fontFamily="'DM Mono',monospace">47</text>
+        </g>
+
+        {/* OPEN TICKETS — bottom right, amber */}
+        <g className="al-float-d" filter="url(#amberGlow)">
+          <rect x="382" y="210" width="138" height="66" rx="4"
+            fill="rgba(245,166,35,0.13)" stroke="rgba(245,166,35,0.32)" strokeWidth="1" />
+          <text x="396" y="232" fontSize="8.5" fill="rgba(255,255,255,0.44)"
+            letterSpacing="0.14em" fontFamily="'DM Mono',monospace" fontWeight="500">OPEN TICKETS</text>
+          <text x="396" y="260" fontSize="28" fontWeight="500"
+            fill="rgba(245,166,35,0.92)" fontFamily="'DM Mono',monospace">23</text>
+        </g>
+
+        {/* Connection lines from cards to tower */}
+        <line x1="138" y1="61" x2="200" y2="148" stroke="rgba(91,79,233,0.22)" strokeWidth="0.75" strokeDasharray="4 6" />
+        <line x1="382" y1="51" x2="320" y2="140" stroke="rgba(255,255,255,0.08)" strokeWidth="0.75" strokeDasharray="4 6" />
+        <line x1="138" y1="229" x2="200" y2="222" stroke="rgba(255,255,255,0.07)" strokeWidth="0.75" strokeDasharray="4 6" />
+        <line x1="382" y1="243" x2="320" y2="230" stroke="rgba(245,166,35,0.18)" strokeWidth="0.75" strokeDasharray="4 6" />
+
+        {/* Connection dots */}
+        <circle cx="138" cy="61" r="3" fill="rgba(91,79,233,0.65)" />
+        <circle cx="382" cy="51" r="3" fill="rgba(255,255,255,0.22)" />
+        <circle cx="138" cy="229" r="3" fill="rgba(255,255,255,0.18)" />
+        <circle cx="382" cy="243" r="3" fill="rgba(245,166,35,0.55)" />
+
+        {/* Decorative dots */}
+        <circle cx="170" cy="45" r="2" fill="rgba(91,79,233,0.5)" />
+        <circle cx="345" cy="62" r="1.5" fill="rgba(255,255,255,0.2)" />
+        <circle cx="455" cy="140" r="2" fill="rgba(91,79,233,0.3)" />
+        <circle cx="62" cy="185" r="1.5" fill="rgba(255,255,255,0.15)" />
+      </svg>
+    </div>
+  );
+}
+
+/* ── Component ────────────────────────────────────────────────── */
 export function AdminLoginPage({ onLoginSuccess }: AdminLoginPageProps) {
   const [email, setEmail] = useState("test@admin.com");
   const [password, setPassword] = useState("pass123");
@@ -81,36 +230,34 @@ export function AdminLoginPage({ onLoginSuccess }: AdminLoginPageProps) {
 
   return (
     <div className="admin-login">
-      <div className="admin-login__orb admin-login__orb--one" />
-      <div className="admin-login__orb admin-login__orb--two" />
-      <div className="admin-login__orb admin-login__orb--three" />
+      {/* Noise texture overlay */}
+      <div className="admin-login__noiseBg" />
+      {/* Ambient glow blobs */}
+      <div className="admin-login__glowA" />
+      <div className="admin-login__glowB" />
 
       <div className="admin-login__shell">
+
+        {/* ── LEFT PANEL ── */}
         <section className="admin-login__hero" aria-label="Platform overview">
           <div className="admin-login__heroTop">
-            <div className="admin-login__badge">ALKARMA ADMIN</div>
-            <h1 className="admin-login__heroTitle">
-              Community operations in one control panel
-            </h1>
-            <p className="admin-login__heroText">
-              Manage residents, units, service requests, complaints, invoices and access activity from the current backend.
-            </p>
-
-            <div className="admin-login__featureList">
-              <div className="admin-login__featureItem">
-                <span className="admin-login__featureDot" />
-                <span>Live backend authentication and role-based access control</span>
-              </div>
-              <div className="admin-login__featureItem">
-                <span className="admin-login__featureDot" />
-                <span>Admin modules for operations, finance, service and incidents</span>
-              </div>
-              <div className="admin-login__featureItem">
-                <span className="admin-login__featureDot" />
-                <span>Seeded local admin account ready for development testing</span>
-              </div>
+            <div className="admin-login__badge">
+              <span className="admin-login__badgePulse" />
+              MG COMMUNITY ADMIN
             </div>
+
+            <h1 className="admin-login__heroTitle">
+              Every unit. Every resident.<br />
+              <em>One command center.</em>
+            </h1>
+
+            <p className="admin-login__heroText">
+              Community operations don't clock out at 5 PM — and neither does this dashboard.
+              Everything happening in your compound, live, in one place.
+            </p>
           </div>
+
+          <LoginIllustration />
 
           <div className="admin-login__heroBottom">
             <div className="admin-login__heroCard">
@@ -133,24 +280,40 @@ export function AdminLoginPage({ onLoginSuccess }: AdminLoginPageProps) {
                 <div className="admin-login__heroValue">pass123</div>
               </div>
             </div>
+
+            <div className="admin-login__featureList">
+              <div className="admin-login__featureItem">
+                <span className="admin-login__featureDot" />
+                <span>Live backend auth with role-based access — you only see what you should.</span>
+              </div>
+              <div className="admin-login__featureItem">
+                <span className="admin-login__featureDot" />
+                <span>Operations, finance, service tickets, gate access, incidents — all wired up.</span>
+              </div>
+              <div className="admin-login__featureItem">
+                <span className="admin-login__featureDot" />
+                <span>Development seed account pre-loaded. Sign in and start exploring immediately.</span>
+              </div>
+            </div>
           </div>
         </section>
 
+        {/* ── RIGHT PANEL ── */}
         <section className="admin-login__panel">
           <div className="admin-login__card">
             <div className="admin-login__header">
-              <div className="admin-login__chip">SIGN IN</div>
-              <h2 className="admin-login__title">Welcome back</h2>
+              <div className="admin-login__chip">MG COMMAND CENTER</div>
+              <h2 className="admin-login__title">Welcome back.</h2>
               <p className="admin-login__subtitle">
-                Sign in to the admin dashboard using your account credentials.
+                Your community is waiting. Sign in with your admin credentials to get in.
               </p>
             </div>
 
             <div className="admin-login__demo">
               <div>
-                <div className="admin-login__demoTitle">Development account</div>
+                <div className="admin-login__demoTitle">Dev Account Ready</div>
                 <div className="admin-login__demoText">
-                  Seeded credentials are prefilled and ready to use.
+                  Seed credentials are prefilled. Just hit sign in.
                 </div>
               </div>
               <button
@@ -158,7 +321,7 @@ export function AdminLoginPage({ onLoginSuccess }: AdminLoginPageProps) {
                 className="admin-login__ghostBtn"
                 onClick={fillSeedCredentials}
               >
-                Fill Demo
+                Autofill
               </button>
             </div>
 
@@ -169,7 +332,7 @@ export function AdminLoginPage({ onLoginSuccess }: AdminLoginPageProps) {
                 </label>
                 <div className="admin-login__inputWrap">
                   <span className="admin-login__icon">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
                       <path d="M4 6h16v12H4z" />
                       <path d="m4 7 8 6 8-6" />
                     </svg>
@@ -203,7 +366,7 @@ export function AdminLoginPage({ onLoginSuccess }: AdminLoginPageProps) {
 
                 <div className="admin-login__inputWrap">
                   <span className="admin-login__icon">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
                       <path d="M6 10V8a6 6 0 1 1 12 0v2" />
                       <rect x="4" y="10" width="16" height="10" rx="2" />
                     </svg>
@@ -232,7 +395,7 @@ export function AdminLoginPage({ onLoginSuccess }: AdminLoginPageProps) {
                 <div className="admin-login__alert admin-login__alert--info">
                   <div className="admin-login__alertContent">
                     <div className="admin-login__alertTitle">
-                      Backend is not running (development setup)
+                      Backend is offline (development setup)
                     </div>
                     <div>
                       1){" "}
@@ -250,7 +413,7 @@ export function AdminLoginPage({ onLoginSuccess }: AdminLoginPageProps) {
                 className="admin-login__submit"
               >
                 {isSubmitting && <span className="admin-login__spinner" />}
-                <span>{isSubmitting ? "Signing in..." : "Sign in to Dashboard"}</span>
+                <span>{isSubmitting ? "Signing in..." : "Access Command Center"}</span>
               </button>
 
               <div className="admin-login__meta">
@@ -260,6 +423,7 @@ export function AdminLoginPage({ onLoginSuccess }: AdminLoginPageProps) {
             </form>
           </div>
         </section>
+
       </div>
     </div>
   );

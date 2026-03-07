@@ -20,6 +20,7 @@ import { AssignComplaintDto } from './dto/assign-complaint.dto';
 import { ComplaintsQueryDto } from './dto/complaints-query.dto';
 import { CreateComplaintDto } from './dto/create-complaint.dto';
 import { UpdateComplaintStatusDto } from './dto/update-status.dto';
+import { ReturnToResidentDto } from './dto/return-to-resident.dto';
 import { ComplaintsService } from './complaints.service';
 
 interface AuthUserContext {
@@ -100,6 +101,21 @@ export class ComplaintsController {
     }
 
     return this.complaintsService.addComment(id, dto, authorId);
+  }
+
+  @Patch(':id/return-to-resident')
+  @Permissions('complaint.manage')
+  returnToResident(
+    @Param('id') id: string,
+    @Body() dto: ReturnToResidentDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const adminId = req.user?.id;
+    if (!adminId) {
+      throw new BadRequestException('Invalid auth context');
+    }
+
+    return this.complaintsService.returnToResident(id, dto.message, adminId);
   }
 
   @Post('check-sla')

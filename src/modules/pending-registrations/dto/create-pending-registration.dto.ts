@@ -29,6 +29,10 @@ export class CreatePendingRegistrationDto {
   personalPhotoId!: string; // uploaded file ID
 
   @IsOptional()
+  @IsString()
+  nationalIdFileId?: string; // uploaded national ID document file ID
+
+  @IsOptional()
   @IsIn(['OWNER', 'TENANT', 'FAMILY'])
   roleIntent?: string; // role intent
 

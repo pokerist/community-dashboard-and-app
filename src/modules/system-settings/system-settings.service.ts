@@ -3,7 +3,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, PrismaClient } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
+import { Prisma, PrismaClient, UserStatusEnum } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import {
   CreateSystemSettingsBackupDto,
@@ -937,7 +938,7 @@ export class SystemSettingsService {
           select: {
             id: true,
             userId: true,
-            user: { select: { firstName: true, lastName: true, email: true } },
+            user: { select: { nameEN: true, email: true } },
           },
         },
       },
@@ -1060,207 +1061,223 @@ export class SystemSettingsService {
   // ============= System Users Management =============
   async listSystemUsers(query: any) {
     const activeOnly = query.activeOnly === true;
-    const search = query.search
-      ? String(query.search).trim().toLowerCase()
-      : '';
-    const limit = Math.min(
-      query.limit ? Math.max(1, Number(query.limit)) : 50,
-      500,
-    );
+    const search = query.search ? String(query.search).trim().toLowerCase() : '';
+    const limit = Math.min(query.limit ? Math.max(1, Number(query.limit)) : 50, 500);
     const offset = query.offset ? Math.max(0, Number(query.offset)) : 0;
 
+    const userWhere: Prisma.UserWhereInput = {
+      admin: { isNot: null },
+      ...(activeOnly ? { userStatus: UserStatusEnum.ACTIVE } : {}),
+      ...(search
+        ? {
+            OR: [
+              { email: { contains: search, mode: 'insensitive' } },
+              { nameEN: { contains: search, mode: 'insensitive' } },
+              { nameAR: { contains: search, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
+
     const [users, total] = await Promise.all([
-      this.prisma.admin.findMany({
-        where: {
-          ...(activeOnly ? { isActive: true } : {}),
-          ...(search
-            ? {
-                OR: [
-                  { email: { contains: search, mode: 'insensitive' } },
-                  {
-                    firstName: { contains: search, mode: 'insensitive' },
-                  } as any,
-                  {
-                    lastName: { contains: search, mode: 'insensitive' },
-                  } as any,
-                ],
-              }
-            : {}),
-        },
+      this.prisma.user.findMany({
+        where: userWhere,
         select: {
           id: true,
-          user: {
-            select: {
-              email: true,
-              firstName: true,
-              lastName: true,
-            },
-          },
-          role: { select: { id: true, name: true } },
-          isActive: true,
+          email: true,
+          nameEN: true,
+          nameAR: true,
+          phone: true,
+          userStatus: true,
           createdAt: true,
           updatedAt: true,
+          admin: { select: { id: true, status: true } },
+          roles: { select: { role: { select: { id: true, name: true } } } },
         },
         orderBy: { createdAt: 'desc' },
         take: limit,
         skip: offset,
       }),
-      this.prisma.admin.count({
-        where: {
-          ...(activeOnly ? { isActive: true } : {}),
-          ...(search
-            ? {
-                OR: [
-                  { email: { contains: search, mode: 'insensitive' } } as any,
-                  {
-                    firstName: { contains: search, mode: 'insensitive' },
-                  } as any,
-                  {
-                    lastName: { contains: search, mode: 'insensitive' },
-                  } as any,
-                ],
-              }
-            : {}),
-        },
-      }),
+      this.prisma.user.count({ where: userWhere }),
     ]);
 
     return {
-      data: users,
+      data: users.map((u) => ({
+        id: u.admin?.id ?? u.id,
+        userId: u.id,
+        email: u.email,
+        name: u.nameEN ?? u.nameAR ?? null,
+        phone: u.phone ?? null,
+        status: u.userStatus,
+        isActive: u.userStatus === UserStatusEnum.ACTIVE,
+        roles: u.roles.map((r) => r.role),
+        createdAt: u.createdAt,
+        updatedAt: u.updatedAt,
+      })),
       meta: { count: users.length, total, limit, offset },
     };
   }
 
   async createSystemUser(dto: any, actorUserId?: string | null) {
-    const existing = await this.prisma.admin.findFirst({
-      where: { user: { email: dto.email } },
-    });
-    if (existing) {
-      throw new BadRequestException(
-        `User with email "${dto.email}" already exists`,
-      );
+    if (!dto.email?.trim()) throw new BadRequestException('Email is required');
+    if (!dto.password?.trim()) throw new BadRequestException('Password is required');
+    const nameInput = (dto.nameEN ?? dto.name ?? '').trim();
+    if (!nameInput) throw new BadRequestException('Name is required');
+
+    const email = dto.email.trim().toLowerCase();
+    const existingUser = await this.prisma.user.findUnique({ where: { email } });
+    if (existingUser) {
+      throw new BadRequestException(`A user with email "${email}" already exists`);
     }
 
     if (dto.roleId) {
-      const role = await this.prisma.role.findUnique({
-        where: { id: dto.roleId },
-      });
-      if (!role) {
-        throw new BadRequestException('Invalid roleId');
-      }
+      const role = await this.prisma.role.findUnique({ where: { id: dto.roleId } });
+      if (!role) throw new BadRequestException('Invalid roleId — role not found');
     }
 
-    // TODO: Hash password using bcrypt in production
-    const created = await this.prisma.admin.create({
-      data: {
-        user: {
-          create: {
-            email: dto.email.trim().toLowerCase(),
-            firstName: dto.firstName.trim(),
-            lastName: dto.lastName.trim(),
-            password: dto.password, // In production, use bcrypt.hash()
-          },
+    const passwordHash = await bcrypt.hash(dto.password, 12);
+
+    const created = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          email,
+          nameEN: nameInput,
+          phone: dto.phone ? String(dto.phone).trim() : undefined,
+          passwordHash,
+          userStatus: UserStatusEnum.ACTIVE,
+          signupSource: 'dashboard',
+          admin: { create: { status: UserStatusEnum.ACTIVE } },
+          ...(dto.roleId
+            ? { roles: { create: { roleId: dto.roleId } } }
+            : {}),
         },
-        roleId: dto.roleId || null,
-        isActive: dto.isActive !== false,
-      },
-      select: {
-        id: true,
-        user: { select: { email: true, firstName: true, lastName: true } },
-        role: { select: { id: true, name: true } },
-        isActive: true,
-        createdAt: true,
-      },
+        select: {
+          id: true,
+          email: true,
+          nameEN: true,
+          nameAR: true,
+          phone: true,
+          userStatus: true,
+          createdAt: true,
+          admin: { select: { id: true } },
+          roles: { select: { role: { select: { id: true, name: true } } } },
+        },
+      });
+      return user;
     });
 
     return {
       success: true,
       data: {
-        ...created,
-        email: created.user.email,
-        firstName: created.user.firstName,
-        lastName: created.user.lastName,
+        id: created.admin?.id ?? created.id,
+        userId: created.id,
+        email: created.email,
+        name: created.nameEN,
+        phone: created.phone ?? null,
+        status: created.userStatus,
+        isActive: true,
+        roles: created.roles.map((r) => r.role),
+        createdAt: created.createdAt,
       },
     };
   }
 
   async updateSystemUser(id: string, dto: any, actorUserId?: string | null) {
-    const user = await this.prisma.admin.findUnique({
+    const admin = await this.prisma.admin.findUnique({
       where: { id },
-      select: { id: true, roleId: true, user: { select: { id: true } } },
+      select: { id: true, userId: true, status: true },
     });
-    if (!user) {
-      throw new NotFoundException('System user not found');
+    if (!admin) throw new NotFoundException('System user not found');
+
+    if (dto.roleId) {
+      const role = await this.prisma.role.findUnique({ where: { id: dto.roleId } });
+      if (!role) throw new BadRequestException('Invalid roleId — role not found');
     }
 
-    if (dto.roleId && dto.roleId !== user.roleId) {
-      const role = await this.prisma.role.findUnique({
-        where: { id: dto.roleId },
-      });
-      if (!role) {
-        throw new BadRequestException('Invalid roleId');
+    const userUpdateData: Prisma.UserUpdateInput = {};
+    if (dto.nameEN ?? dto.name) userUpdateData.nameEN = (dto.nameEN ?? dto.name).trim();
+    if (dto.phone !== undefined) userUpdateData.phone = dto.phone ? String(dto.phone).trim() : null;
+    if (dto.password) userUpdateData.passwordHash = await bcrypt.hash(dto.password, 12);
+    if (typeof dto.isActive === 'boolean') {
+      userUpdateData.userStatus = dto.isActive ? UserStatusEnum.ACTIVE : UserStatusEnum.SUSPENDED;
+    }
+
+    const updatedUser = await this.prisma.$transaction(async (tx) => {
+      if (Object.keys(userUpdateData).length > 0) {
+        await tx.user.update({ where: { id: admin.userId }, data: userUpdateData });
       }
-    }
-
-    const userUpdateData: Record<string, any> = {};
-    if (dto.firstName) userUpdateData.firstName = dto.firstName.trim();
-    if (dto.lastName) userUpdateData.lastName = dto.lastName.trim();
-
-    const updated = await this.prisma.admin.update({
-      where: { id },
-      data: {
-        ...(Object.keys(userUpdateData).length > 0
-          ? {
-              user: {
-                update: userUpdateData,
-              },
-            }
-          : {}),
-        ...(dto.roleId !== undefined ? { roleId: dto.roleId } : {}),
-        ...(typeof dto.isActive === 'boolean'
-          ? { isActive: dto.isActive }
-          : {}),
-      },
-      select: {
-        id: true,
-        user: { select: { email: true, firstName: true, lastName: true } },
-        role: { select: { id: true, name: true } },
-        isActive: true,
-        updatedAt: true,
-      },
+      if (typeof dto.isActive === 'boolean') {
+        await tx.admin.update({
+          where: { id },
+          data: { status: dto.isActive ? UserStatusEnum.ACTIVE : UserStatusEnum.SUSPENDED },
+        });
+      }
+      if (dto.roleId !== undefined) {
+        await tx.userRole.deleteMany({ where: { userId: admin.userId } });
+        if (dto.roleId) {
+          await tx.userRole.create({ data: { userId: admin.userId, roleId: dto.roleId } });
+        }
+      }
+      return tx.user.findUnique({
+        where: { id: admin.userId },
+        select: {
+          id: true,
+          email: true,
+          nameEN: true,
+          nameAR: true,
+          phone: true,
+          userStatus: true,
+          updatedAt: true,
+          admin: { select: { id: true } },
+          roles: { select: { role: { select: { id: true, name: true } } } },
+        },
+      });
     });
 
     return {
       success: true,
       data: {
-        ...updated,
-        email: updated.user.email,
-        firstName: updated.user.firstName,
-        lastName: updated.user.lastName,
+        id: updatedUser?.admin?.id ?? updatedUser?.id,
+        userId: updatedUser?.id,
+        email: updatedUser?.email,
+        name: updatedUser?.nameEN,
+        phone: updatedUser?.phone ?? null,
+        status: updatedUser?.userStatus,
+        isActive: updatedUser?.userStatus === UserStatusEnum.ACTIVE,
+        roles: updatedUser?.roles.map((r) => r.role) ?? [],
+        updatedAt: updatedUser?.updatedAt,
       },
     };
   }
 
   async deactivateSystemUser(id: string, actorUserId?: string | null) {
-    const user = await this.prisma.admin.findUnique({ where: { id } });
-    if (!user) {
-      throw new NotFoundException('System user not found');
-    }
+    const admin = await this.prisma.admin.findUnique({
+      where: { id },
+      select: { id: true, userId: true },
+    });
+    if (!admin) throw new NotFoundException('System user not found');
 
-    if (id === actorUserId) {
+    if (admin.id === actorUserId || admin.userId === actorUserId) {
       throw new BadRequestException('Cannot deactivate your own account');
     }
 
-    const updated = await this.prisma.admin.update({
-      where: { id },
-      data: {},
-      select: { id: true, user: { select: { email: true } } },
+    await this.prisma.$transaction([
+      this.prisma.admin.update({
+        where: { id },
+        data: { status: UserStatusEnum.SUSPENDED },
+      }),
+      this.prisma.user.update({
+        where: { id: admin.userId },
+        data: { userStatus: UserStatusEnum.SUSPENDED },
+      }),
+    ]);
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: admin.userId },
+      select: { email: true },
     });
 
-    return {
-      success: true,
-      data: { id: updated.id, email: updated.user.email },
-    };
+    return { success: true, data: { id, email: user?.email } };
   }
 
   // ============= Roles & Permissions Management =============
@@ -1268,194 +1285,139 @@ export class SystemSettingsService {
     const roles = await this.prisma.role.findMany({
       include: {
         permissions: {
-          select: { permission: true },
+          include: { permission: { select: { id: true, key: true } } },
         },
-        admins: { select: { id: true, email: true } },
+        users: { select: { userId: true } },
       },
       orderBy: { name: 'asc' },
     });
 
     return {
       data: roles.map((role) => ({
-        ...role,
-        permissionCodes: role.permissions.map((p) => p.permission),
+        id: role.id,
+        name: role.name,
+        userCount: role.users.length,
+        permissionCodes: role.permissions.map((p) => p.permission.key),
       })),
     };
   }
 
   async createRole(dto: any, actorUserId?: string | null) {
-    const existing = await this.prisma.role.findUnique({
-      where: { name: dto.name },
-    });
+    if (!dto.name?.trim()) throw new BadRequestException('Role name is required');
+
+    const existing = await this.prisma.role.findUnique({ where: { name: dto.name.trim() } });
     if (existing) {
-      throw new BadRequestException(
-        `Role with name "${dto.name}" already exists`,
-      );
+      throw new BadRequestException(`Role "${dto.name.trim()}" already exists`);
     }
 
-    const permissionCodes = Array.isArray(dto.permissionCodes)
-      ? dto.permissionCodes
-      : [];
+    const permissionCodes: string[] = Array.isArray(dto.permissionCodes) ? dto.permissionCodes : [];
 
-    const created = await this.prisma.role.create({
-      data: {
-        name: dto.name.trim(),
-        description: dto.description ? dto.description.trim() : null,
-        permissions: {
-          create: permissionCodes.map((code: string) => ({
-            permission: code,
-          })),
-        },
-      },
-      include: {
-        permissions: { select: { permission: true } },
-      },
+    const role = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.role.create({ data: { name: dto.name.trim() } });
+      for (const code of permissionCodes) {
+        let perm = await tx.permission.findUnique({ where: { key: code } });
+        if (!perm) perm = await tx.permission.create({ data: { key: code } });
+        await tx.rolePermission.create({ data: { roleId: created.id, permissionId: perm.id } });
+      }
+      return created;
     });
 
-    return {
-      success: true,
-      data: {
-        ...created,
-        permissionCodes: created.permissions.map((p) => p.permission),
-      },
-    };
+    return { success: true, data: { id: role.id, name: role.name, permissionCodes } };
   }
 
   async updateRole(id: string, dto: any, actorUserId?: string | null) {
     const role = await this.prisma.role.findUnique({ where: { id } });
-    if (!role) {
-      throw new NotFoundException('Role not found');
-    }
+    if (!role) throw new NotFoundException('Role not found');
 
-    const permissionCodes = Array.isArray(dto.permissionCodes)
-      ? dto.permissionCodes
-      : [];
+    const permissionCodes: string[] = Array.isArray(dto.permissionCodes) ? dto.permissionCodes : [];
 
-    const updated = await this.prisma.role.update({
-      where: { id },
-      data: {
-        ...(dto.name ? { name: dto.name.trim() } : {}),
-        ...(dto.description !== undefined
-          ? { description: dto.description ? dto.description.trim() : null }
-          : {}),
-        ...(permissionCodes.length > 0
-          ? {
-              permissions: {
-                deleteMany: { roleId: id },
-                create: permissionCodes.map((code: string) => ({
-                  permission: code,
-                })),
-              },
-            }
-          : {}),
-      },
-      include: {
-        permissions: { select: { permission: true } },
-      },
+    await this.prisma.$transaction(async (tx) => {
+      if (dto.name) await tx.role.update({ where: { id }, data: { name: dto.name.trim() } });
+      if (permissionCodes.length > 0) {
+        await tx.rolePermission.deleteMany({ where: { roleId: id } });
+        for (const code of permissionCodes) {
+          let perm = await tx.permission.findUnique({ where: { key: code } });
+          if (!perm) perm = await tx.permission.create({ data: { key: code } });
+          await tx.rolePermission.create({ data: { roleId: id, permissionId: perm.id } });
+        }
+      }
     });
 
     return {
       success: true,
-      data: {
-        ...updated,
-        permissionCodes: updated.permissions.map((p) => p.permission),
-      },
+      data: { id, name: dto.name ?? role.name, permissionCodes },
     };
   }
 
   async deleteRole(id: string, actorUserId?: string | null) {
     const role = await this.prisma.role.findUnique({
       where: { id },
-      select: {
-        id: true,
-        name: true,
-        users: {
-          select: { userId: true },
-        },
-      },
+      select: { id: true, name: true, users: { select: { userId: true } } },
     });
-
-    if (!role) {
-      throw new NotFoundException('Role not found');
-    }
+    if (!role) throw new NotFoundException('Role not found');
 
     if (role.users.length > 0) {
       throw new BadRequestException(
-        `Cannot delete role with ${role.users.length} assigned users. Please reassign them first.`,
+        `Cannot delete role with ${role.users.length} assigned users. Reassign them first.`,
       );
     }
 
     await this.prisma.role.delete({ where: { id } });
-
-    return {
-      success: true,
-      message: 'Role deleted',
-    };
+    return { success: true, message: 'Role deleted' };
   }
 
   async listPermissions() {
-    // Get all available permissions from the system
-    // This would typically be defined in a permissions configuration
+    // Canonical permission definitions for the system
     const allPermissions = [
-      // Admin permissions
-      {
-        code: 'admin.view',
-        module: 'admin',
-        description: 'View admin settings',
-      },
-      {
-        code: 'admin.update',
-        module: 'admin',
-        description: 'Update admin settings',
-      },
-      {
-        code: 'admin.delete',
-        module: 'admin',
-        description: 'Delete admin resources',
-      },
-
-      // User permissions
-      { code: 'user.view', module: 'users', description: 'View users' },
-      { code: 'user.create', module: 'users', description: 'Create users' },
-      { code: 'user.update', module: 'users', description: 'Update users' },
-      { code: 'user.delete', module: 'users', description: 'Delete users' },
-
-      // Dashboard permissions
-      {
-        code: 'dashboard.view',
-        module: 'dashboard',
-        description: 'View dashboard',
-      },
-      {
-        code: 'dashboard.export',
-        module: 'dashboard',
-        description: 'Export dashboard data',
-      },
-
-      // Reports permissions
-      { code: 'reports.view', module: 'reports', description: 'View reports' },
-      {
-        code: 'reports.create',
-        module: 'reports',
-        description: 'Create reports',
-      },
-      {
-        code: 'reports.schedule',
-        module: 'reports',
-        description: 'Schedule reports',
-      },
-
-      // Communities permissions
-      {
-        code: 'communities.view',
-        module: 'communities',
-        description: 'View communities',
-      },
-      {
-        code: 'communities.manage',
-        module: 'communities',
-        description: 'Manage communities',
-      },
+      // Dashboard
+      { code: 'dashboard.view', module: 'Dashboard', description: 'View dashboard stats and KPIs' },
+      { code: 'dashboard.export', module: 'Dashboard', description: 'Export dashboard data' },
+      // Users / Residents
+      { code: 'user.view', module: 'Users', description: 'View users and residents' },
+      { code: 'user.create', module: 'Users', description: 'Create users and residents' },
+      { code: 'user.update', module: 'Users', description: 'Update user profiles' },
+      { code: 'user.delete', module: 'Users', description: 'Deactivate users' },
+      // Admin
+      { code: 'admin.view', module: 'Admin', description: 'View admin settings' },
+      { code: 'admin.update', module: 'Admin', description: 'Update admin settings' },
+      { code: 'admin.delete', module: 'Admin', description: 'Delete admin resources' },
+      // Communities
+      { code: 'communities.view', module: 'Communities', description: 'View communities' },
+      { code: 'communities.manage', module: 'Communities', description: 'Create and manage communities' },
+      // Units
+      { code: 'units.view', module: 'Units', description: 'View units' },
+      { code: 'units.manage', module: 'Units', description: 'Create and manage units' },
+      // Approvals
+      { code: 'pending_registration.view_all', module: 'Approvals', description: 'View all pending registrations' },
+      { code: 'pending_registration.approve', module: 'Approvals', description: 'Approve pending registrations' },
+      { code: 'pending_registration.reject', module: 'Approvals', description: 'Reject pending registrations' },
+      { code: 'pending_registration.update', module: 'Approvals', description: 'Update pending registrations' },
+      // Complaints
+      { code: 'complaint.view_all', module: 'Complaints', description: 'View all complaints' },
+      { code: 'complaint.manage', module: 'Complaints', description: 'Manage and assign complaints' },
+      { code: 'complaint.report', module: 'Complaints', description: 'Submit complaints' },
+      // Violations
+      { code: 'violation.view_all', module: 'Violations', description: 'View all violations' },
+      { code: 'violation.manage', module: 'Violations', description: 'Create and manage violations' },
+      // Invoices
+      { code: 'invoice.view_all', module: 'Invoices', description: 'View all invoices' },
+      { code: 'invoice.manage', module: 'Invoices', description: 'Create and manage invoices' },
+      // Service Requests
+      { code: 'service_request.view_all', module: 'Services', description: 'View all service requests' },
+      { code: 'service_request.manage', module: 'Services', description: 'Manage service requests' },
+      // Gates
+      { code: 'gates.view', module: 'Gates', description: 'View gates and entry logs' },
+      { code: 'gates.manage', module: 'Gates', description: 'Manage gates and access' },
+      // Reports
+      { code: 'reports.view', module: 'Reports', description: 'View reports' },
+      { code: 'reports.create', module: 'Reports', description: 'Generate reports' },
+      { code: 'reports.schedule', module: 'Reports', description: 'Schedule recurring reports' },
+      // Incidents
+      { code: 'incidents.view', module: 'Security', description: 'View security incidents' },
+      { code: 'incidents.manage', module: 'Security', description: 'Manage security incidents' },
+      // Notifications
+      { code: 'notifications.send', module: 'Notifications', description: 'Send notifications' },
+      { code: 'notifications.view', module: 'Notifications', description: 'View notification history' },
     ];
 
     return {

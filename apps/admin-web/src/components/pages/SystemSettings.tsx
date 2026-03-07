@@ -913,92 +913,125 @@ export function SystemSettings() {
   );
 
   const settingsTabTriggerClass =
-    "gap-2 border border-transparent text-[#475569] data-[state=active]:border-[#0F172A] data-[state=active]:bg-[#0F172A] data-[state=active]:text-white data-[state=active]:shadow-sm data-[state=active]:font-semibold data-[state=active]:after:bg-white data-[state=active]:after:h-[3px]";
+    "relative flex items-center gap-1.5 rounded-none border-b-2 border-transparent px-4 py-3 text-[13px] font-medium text-[#64748B] transition-colors duration-150 hover:text-[#1E293B] data-[state=active]:border-[#0F172A] data-[state=active]:text-[#0F172A] data-[state=active]:font-semibold";
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+    <div className="space-y-5">
+      {/* Page Header */}
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
-          <h1 className="text-[#1E293B]">System Settings</h1>
-          <p className="text-[#64748B] mt-1">
-            Backend-backed system settings with runtime diagnostics, CRM connectivity checks, and backup snapshots.
+          <div className="flex items-center gap-2">
+            <h1 className="text-[#1E293B]">System Settings</h1>
+            {hasUnsavedChanges ? (
+              <span className="rounded-full border border-[#FDE68A] bg-[#FFFBEB] px-2 py-0.5 text-[10px] font-semibold text-[#B45309]">
+                Unsaved changes
+              </span>
+            ) : null}
+          </div>
+          <p className="mt-0.5 text-sm text-[#64748B]">
+            Manage backend-backed configuration, integrations, access policies, and system health.
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" onClick={resetDraft} disabled={!hasUnsavedChanges || isSaving}>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={resetDraft} disabled={!hasUnsavedChanges || isSaving} className="rounded-lg">
             Cancel
           </Button>
-          <Button className="bg-[#00B386] hover:bg-[#00B386]/90 text-white" onClick={() => void saveDraft()} disabled={isSaving || isLoadingSettings}>
-            <Save className="w-4 h-4 mr-2" />
+          <Button
+            size="sm"
+            className="rounded-lg bg-[#0F172A] text-white hover:bg-[#1E293B]"
+            onClick={() => void saveDraft()}
+            disabled={isSaving || isLoadingSettings}
+          >
+            <Save className="w-3.5 h-3.5 mr-1.5" />
             {isLoadingSettings ? "Loading..." : isSaving ? "Saving..." : "Save Settings"}
           </Button>
         </div>
       </div>
 
-      <Card className="p-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h3 className="text-[#1E293B]">Runtime Diagnostics</h3>
-            <p className="text-sm text-[#64748B]">Checks the current backend endpoints and optional CRM base URL.</p>
+      {/* Runtime Diagnostics */}
+      <Card className="overflow-hidden rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
+        <div className="flex flex-col gap-3 border-b border-[#F1F5F9] px-5 py-4 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-2">
+            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#F8FAFC]">
+              <LinkIcon className="h-3.5 w-3.5 text-[#64748B]" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-[#1E293B]">Runtime Diagnostics</h3>
+              <p className="text-[11px] text-[#94A3B8]">Live connectivity checks for backend endpoints</p>
+            </div>
           </div>
-          <Button variant="outline" onClick={() => void checkBackend()} disabled={isCheckingBackend}>
-            <RefreshCw className={`w-4 h-4 mr-2 ${isCheckingBackend ? "animate-spin" : ""}`} />
-            Check Backend
+          <Button variant="outline" size="sm" onClick={() => void checkBackend()} disabled={isCheckingBackend} className="rounded-lg">
+            <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isCheckingBackend ? "animate-spin" : ""}`} />
+            {isCheckingBackend ? "Checking..." : "Check Now"}
           </Button>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
-          <div className="rounded-lg border p-3">
-            <div className="text-xs text-[#64748B]">Backend API</div>
-            <div className="mt-2 flex items-center gap-2">
-              {diagnostics.backendApiOk ? <CheckCircle className="w-4 h-4 text-[#10B981]" /> : <XCircle className="w-4 h-4 text-[#EF4444]" />}
-              <span className="text-sm">{diagnostics.backendApiOk ? "Reachable" : "Unchecked / Failed"}</span>
+        <div className="grid grid-cols-1 divide-y divide-[#F8FAFC] md:grid-cols-3 md:divide-x md:divide-y-0">
+          <div className="flex items-center gap-3 px-5 py-4">
+            <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${diagnostics.backendApiOk ? "bg-[#ECFDF5]" : diagnostics.checkedAt ? "bg-[#FEF2F2]" : "bg-[#F8FAFC]"}`}>
+              {diagnostics.backendApiOk
+                ? <CheckCircle className="w-4 h-4 text-[#10B981]" />
+                : diagnostics.checkedAt
+                ? <XCircle className="w-4 h-4 text-[#EF4444]" />
+                : <RefreshCw className="w-4 h-4 text-[#94A3B8]" />}
+            </div>
+            <div>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-[#94A3B8]">Backend API</p>
+              <p className={`text-sm font-semibold ${diagnostics.backendApiOk ? "text-[#10B981]" : diagnostics.checkedAt ? "text-[#EF4444]" : "text-[#94A3B8]"}`}>
+                {diagnostics.backendApiOk ? "Reachable" : diagnostics.checkedAt ? "Failed" : "Not checked"}
+              </p>
             </div>
           </div>
-          <div className="rounded-lg border p-3">
-            <div className="text-xs text-[#64748B]">Notifications Admin</div>
-            <div className="mt-2 flex items-center gap-2">
-              {diagnostics.notificationsAdminOk ? <CheckCircle className="w-4 h-4 text-[#10B981]" /> : <XCircle className="w-4 h-4 text-[#EF4444]" />}
-              <span className="text-sm">{diagnostics.notificationsAdminOk ? "Reachable" : "Unchecked / Failed"}</span>
+          <div className="flex items-center gap-3 px-5 py-4">
+            <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${diagnostics.notificationsAdminOk ? "bg-[#ECFDF5]" : diagnostics.checkedAt ? "bg-[#FEF2F2]" : "bg-[#F8FAFC]"}`}>
+              {diagnostics.notificationsAdminOk
+                ? <CheckCircle className="w-4 h-4 text-[#10B981]" />
+                : diagnostics.checkedAt
+                ? <XCircle className="w-4 h-4 text-[#EF4444]" />
+                : <Bell className="w-4 h-4 text-[#94A3B8]" />}
+            </div>
+            <div>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-[#94A3B8]">Notifications</p>
+              <p className={`text-sm font-semibold ${diagnostics.notificationsAdminOk ? "text-[#10B981]" : diagnostics.checkedAt ? "text-[#EF4444]" : "text-[#94A3B8]"}`}>
+                {diagnostics.notificationsAdminOk ? "Reachable" : diagnostics.checkedAt ? "Failed" : "Not checked"}
+              </p>
             </div>
           </div>
-          <div className="rounded-lg border p-3">
-            <div className="text-xs text-[#64748B]">Last Backend Check</div>
-            <div className="mt-2 text-sm">{formatDateTime(diagnostics.checkedAt)}</div>
+          <div className="flex items-center gap-3 px-5 py-4">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#F8FAFC]">
+              <Database className="w-4 h-4 text-[#94A3B8]" />
+            </div>
+            <div>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-[#94A3B8]">Last Checked</p>
+              <p className="text-sm font-semibold text-[#1E293B]">{diagnostics.checkedAt ? formatDateTime(diagnostics.checkedAt) : "—"}</p>
+            </div>
           </div>
         </div>
         {diagnostics.backendError ? (
-          <div className="mt-3 rounded-lg border border-[#FECACA] bg-[#FEF2F2] p-3 text-sm text-[#991B1B]">
+          <div className="mx-5 mb-4 rounded-lg border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-sm text-[#991B1B]">
             {diagnostics.backendError}
           </div>
         ) : null}
       </Card>
 
       <Tabs defaultValue="general" className="w-full">
-        <TabsList className="w-full justify-start border rounded-lg p-1 bg-white overflow-x-auto flex flex-wrap gap-0">
-          {/* Core Settings */}
-          <TabsTrigger value="general" className={settingsTabTriggerClass}><Settings className="w-4 h-4" />General</TabsTrigger>
-          <TabsTrigger value="brand" className={settingsTabTriggerClass}><Palette className="w-4 h-4" />Brand</TabsTrigger>
-          
-          {/* Communication */}
-          <div className="w-px h-6 bg-gray-200 mx-1 my-auto" />
-          <TabsTrigger value="notifications" className={settingsTabTriggerClass}><Bell className="w-4 h-4" />Notifications</TabsTrigger>
-          
-          {/* System Integration */}
-          <div className="w-px h-6 bg-gray-200 mx-1 my-auto" />
-          <TabsTrigger value="integrations" className={settingsTabTriggerClass}><Plug className="w-4 h-4" />Integrations</TabsTrigger>
-          <TabsTrigger value="backup" className={settingsTabTriggerClass}><Database className="w-4 h-4" />Backup</TabsTrigger>
-          
-          {/* Access Control */}
-          <div className="w-px h-6 bg-gray-200 mx-1 my-auto" />
-          <TabsTrigger value="security" className={settingsTabTriggerClass}><Shield className="w-4 h-4" />Security</TabsTrigger>
-          <TabsTrigger value="mobile-access" className={settingsTabTriggerClass}><Shield className="w-4 h-4" />Mobile Access</TabsTrigger>
-          
-          {/* Organization */}
-          <div className="w-px h-6 bg-gray-200 mx-1 my-auto" />
-          <TabsTrigger value="departments" className={settingsTabTriggerClass}><Settings className="w-4 h-4" />Departments</TabsTrigger>
-          <TabsTrigger value="users" className={settingsTabTriggerClass}><Users className="w-4 h-4" />System Users</TabsTrigger>
-          <TabsTrigger value="roles" className={settingsTabTriggerClass}><Shield className="w-4 h-4" />Roles & Permissions</TabsTrigger>
-        </TabsList>
+        <div className="overflow-x-auto rounded-xl border border-[#E2E8F0] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
+          <TabsList className="flex h-auto w-full min-w-max justify-start gap-0 rounded-none bg-transparent p-0">
+            <TabsTrigger value="general" className={settingsTabTriggerClass}><Settings className="w-3.5 h-3.5" />General</TabsTrigger>
+            <TabsTrigger value="brand" className={settingsTabTriggerClass}><Palette className="w-3.5 h-3.5" />Brand</TabsTrigger>
+            <div className="my-3 w-px bg-[#F1F5F9]" />
+            <TabsTrigger value="notifications" className={settingsTabTriggerClass}><Bell className="w-3.5 h-3.5" />Notifications</TabsTrigger>
+            <div className="my-3 w-px bg-[#F1F5F9]" />
+            <TabsTrigger value="integrations" className={settingsTabTriggerClass}><Plug className="w-3.5 h-3.5" />Integrations</TabsTrigger>
+            <TabsTrigger value="backup" className={settingsTabTriggerClass}><Database className="w-3.5 h-3.5" />Backup</TabsTrigger>
+            <div className="my-3 w-px bg-[#F1F5F9]" />
+            <TabsTrigger value="security" className={settingsTabTriggerClass}><Shield className="w-3.5 h-3.5" />Security</TabsTrigger>
+            <TabsTrigger value="mobile-access" className={settingsTabTriggerClass}><Shield className="w-3.5 h-3.5" />Mobile Access</TabsTrigger>
+            <div className="my-3 w-px bg-[#F1F5F9]" />
+            <TabsTrigger value="departments" className={settingsTabTriggerClass}><Settings className="w-3.5 h-3.5" />Departments</TabsTrigger>
+            <TabsTrigger value="users" className={settingsTabTriggerClass}><Users className="w-3.5 h-3.5" />System Users</TabsTrigger>
+            <TabsTrigger value="roles" className={settingsTabTriggerClass}><Shield className="w-3.5 h-3.5" />Roles & Permissions</TabsTrigger>
+          </TabsList>
+        </div>
 
         <TabsContent value="general" className="mt-4">
           <Card className="p-6 space-y-4">
@@ -1411,48 +1444,150 @@ export function SystemSettings() {
         </TabsContent>
 
         <TabsContent value="security" className="mt-4">
-          <Card className="p-6 space-y-4">
-            <h3 className="text-[#1E293B]">Security Settings</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="flex items-center justify-between rounded-lg border p-3"><span>Enforce 2FA</span><Switch checked={draft.security.enforce2fa} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, security: { ...s.security, enforce2fa: v === true } }))} /></div>
-              <div className="flex items-center justify-between rounded-lg border p-3"><span>Auto Logout</span><Switch checked={draft.security.autoLogoutEnabled} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, security: { ...s.security, autoLogoutEnabled: v === true } }))} /></div>
-              <div className="space-y-2">
-                <Label>Session Timeout (minutes)</Label>
-                <Input type="number" value={String(draft.security.sessionTimeoutMinutes)} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, sessionTimeoutMinutes: Number(e.target.value || 0) } }))} />
+          <div className="space-y-4">
+            {/* Authentication */}
+            <Card className="overflow-hidden rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
+              <div className="flex items-center gap-2 border-b border-[#F1F5F9] px-5 py-4">
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#EEF2FF]">
+                  <Shield className="h-3.5 w-3.5 text-[#4338CA]" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-[#1E293B]">Authentication</h3>
+                  <p className="text-[11px] text-[#94A3B8]">Login, session, and multi-factor policies</p>
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label>Min Password Length</Label>
-                <Input type="number" value={String(draft.security.minPasswordLength)} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, minPasswordLength: Number(e.target.value || 0) } }))} />
+              <div className="divide-y divide-[#F8FAFC]">
+                <div className="flex items-center justify-between px-5 py-3.5">
+                  <div>
+                    <p className="text-sm font-medium text-[#1E293B]">Enforce Two-Factor Authentication</p>
+                    <p className="text-[11px] text-[#94A3B8]">Require 2FA for all admin accounts</p>
+                  </div>
+                  <Switch checked={draft.security.enforce2fa} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, security: { ...s.security, enforce2fa: v === true } }))} />
+                </div>
+                <div className="flex items-center justify-between px-5 py-3.5">
+                  <div>
+                    <p className="text-sm font-medium text-[#1E293B]">Auto Logout on Inactivity</p>
+                    <p className="text-[11px] text-[#94A3B8]">Automatically sign out idle sessions</p>
+                  </div>
+                  <Switch checked={draft.security.autoLogoutEnabled} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, security: { ...s.security, autoLogoutEnabled: v === true } }))} />
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label>Max Login Attempts</Label>
-                <Input type="number" value={String(draft.security.maxLoginAttempts)} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, maxLoginAttempts: Number(e.target.value || 0) } }))} />
+              <div className="grid grid-cols-1 gap-4 border-t border-[#F8FAFC] px-5 py-4 md:grid-cols-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-[#64748B] uppercase tracking-wide">Session Timeout</Label>
+                  <div className="flex items-center gap-2">
+                    <Input type="number" className="rounded-lg" value={String(draft.security.sessionTimeoutMinutes)} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, sessionTimeoutMinutes: Number(e.target.value || 0) } }))} />
+                    <span className="shrink-0 text-sm text-[#94A3B8]">min</span>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-[#64748B] uppercase tracking-wide">Concurrent Sessions</Label>
+                  <Input type="number" className="rounded-lg" value={String(draft.security.allowConcurrentSessions)} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, allowConcurrentSessions: Number(e.target.value || 1) } }))} />
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label>Lockout Duration (minutes)</Label>
-                <Input type="number" value={String(draft.security.lockoutDurationMinutes)} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, lockoutDurationMinutes: Number(e.target.value || 0) } }))} />
+            </Card>
+
+            {/* Password Policy */}
+            <Card className="overflow-hidden rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
+              <div className="flex items-center gap-2 border-b border-[#F1F5F9] px-5 py-4">
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#FFF7ED]">
+                  <Shield className="h-3.5 w-3.5 text-[#C2410C]" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-[#1E293B]">Password & Brute-Force Policy</h3>
+                  <p className="text-[11px] text-[#94A3B8]">Strength requirements and account lockout rules</p>
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label>Allowed Concurrent Sessions</Label>
-                <Input type="number" value={String(draft.security.allowConcurrentSessions)} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, allowConcurrentSessions: Number(e.target.value || 1) } }))} />
+              <div className="grid grid-cols-1 gap-4 px-5 py-4 md:grid-cols-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-[#64748B] uppercase tracking-wide">Min Password Length</Label>
+                  <div className="flex items-center gap-2">
+                    <Input type="number" className="rounded-lg" value={String(draft.security.minPasswordLength)} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, minPasswordLength: Number(e.target.value || 0) } }))} />
+                    <span className="shrink-0 text-sm text-[#94A3B8]">chars</span>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-[#64748B] uppercase tracking-wide">Max Login Attempts</Label>
+                  <Input type="number" className="rounded-lg" value={String(draft.security.maxLoginAttempts)} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, maxLoginAttempts: Number(e.target.value || 0) } }))} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-[#64748B] uppercase tracking-wide">Lockout Duration</Label>
+                  <div className="flex items-center gap-2">
+                    <Input type="number" className="rounded-lg" value={String(draft.security.lockoutDurationMinutes)} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, lockoutDurationMinutes: Number(e.target.value || 0) } }))} />
+                    <span className="shrink-0 text-sm text-[#94A3B8]">min</span>
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center justify-between rounded-lg border p-3"><span>Rate Limiting</span><Switch checked={draft.security.rateLimitEnabled} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, security: { ...s.security, rateLimitEnabled: v === true } }))} /></div>
-              <div className="space-y-2">
-                <Label>Requests / Minute</Label>
-                <Input type="number" value={String(draft.security.rateLimitPerMinute)} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, rateLimitPerMinute: Number(e.target.value || 0) } }))} />
+              <div className="mx-5 mb-4 rounded-lg bg-[#FFFBEB] border border-[#FDE68A] px-4 py-3">
+                <p className="text-[11px] text-[#92400E]">
+                  <span className="font-semibold">Note:</span> Password hashing uses bcrypt (cost factor 10) on the backend. These settings control policy enforcement at the API layer.
+                </p>
               </div>
-              <div className="flex items-center justify-between rounded-lg border p-3"><span>IP Whitelist Enabled</span><Switch checked={draft.security.ipWhitelistEnabled} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, security: { ...s.security, ipWhitelistEnabled: v === true } }))} /></div>
-              <div className="flex items-center justify-between rounded-lg border p-3"><span>Audit Logging</span><Switch checked={draft.security.auditLoggingEnabled} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, security: { ...s.security, auditLoggingEnabled: v === true } }))} /></div>
-              <div className="flex items-center justify-between rounded-lg border p-3"><span>Require Secure Connections (HTTPS)</span><Switch checked={draft.security.requireSecureConnections} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, security: { ...s.security, requireSecureConnections: v === true } }))} /></div>
-            </div>
-            {draft.security.ipWhitelistEnabled && (
-              <div className="space-y-2 border-t pt-4">
-                <Label>IP Whitelist (comma-separated)</Label>
-                <Textarea rows={4} placeholder="192.168.1.0/24, 10.0.0.1" value={draft.security.ipWhitelist.join(", ")} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, ipWhitelist: e.target.value.split(",").map((ip) => ip.trim()).filter(Boolean) } }))} />
-                <p className="text-xs text-[#64748B]">Enter IP addresses or CIDR ranges, one per line or comma-separated</p>
+            </Card>
+
+            {/* Network & Logging */}
+            <Card className="overflow-hidden rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
+              <div className="flex items-center gap-2 border-b border-[#F1F5F9] px-5 py-4">
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#F0FDF4]">
+                  <Shield className="h-3.5 w-3.5 text-[#15803D]" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-[#1E293B]">Network & Audit</h3>
+                  <p className="text-[11px] text-[#94A3B8]">Rate limiting, HTTPS enforcement, and audit trail</p>
+                </div>
               </div>
-            )}
-          </Card>
+              <div className="divide-y divide-[#F8FAFC]">
+                <div className="flex items-center justify-between px-5 py-3.5">
+                  <div>
+                    <p className="text-sm font-medium text-[#1E293B]">Rate Limiting</p>
+                    <p className="text-[11px] text-[#94A3B8]">Throttle API requests per client</p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {draft.security.rateLimitEnabled ? (
+                      <span className="text-[11px] text-[#94A3B8]">{draft.security.rateLimitPerMinute} req/min</span>
+                    ) : null}
+                    <Switch checked={draft.security.rateLimitEnabled} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, security: { ...s.security, rateLimitEnabled: v === true } }))} />
+                  </div>
+                </div>
+                {draft.security.rateLimitEnabled ? (
+                  <div className="px-5 py-3.5">
+                    <div className="max-w-xs space-y-1.5">
+                      <Label className="text-xs font-semibold text-[#64748B] uppercase tracking-wide">Requests per Minute</Label>
+                      <Input type="number" className="rounded-lg" value={String(draft.security.rateLimitPerMinute)} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, rateLimitPerMinute: Number(e.target.value || 0) } }))} />
+                    </div>
+                  </div>
+                ) : null}
+                <div className="flex items-center justify-between px-5 py-3.5">
+                  <div>
+                    <p className="text-sm font-medium text-[#1E293B]">IP Whitelist</p>
+                    <p className="text-[11px] text-[#94A3B8]">Restrict access to specific IP addresses or CIDR ranges</p>
+                  </div>
+                  <Switch checked={draft.security.ipWhitelistEnabled} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, security: { ...s.security, ipWhitelistEnabled: v === true } }))} />
+                </div>
+                {draft.security.ipWhitelistEnabled ? (
+                  <div className="px-5 py-3.5 space-y-1.5">
+                    <Label className="text-xs font-semibold text-[#64748B] uppercase tracking-wide">Allowed IPs / CIDRs</Label>
+                    <Textarea rows={3} className="rounded-lg font-mono text-xs" placeholder="192.168.1.0/24, 10.0.0.1" value={draft.security.ipWhitelist.join(", ")} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, ipWhitelist: e.target.value.split(",").map((ip) => ip.trim()).filter(Boolean) } }))} />
+                    <p className="text-[11px] text-[#94A3B8]">Comma-separated IPv4/IPv6 addresses or CIDR notation</p>
+                  </div>
+                ) : null}
+                <div className="flex items-center justify-between px-5 py-3.5">
+                  <div>
+                    <p className="text-sm font-medium text-[#1E293B]">Audit Logging</p>
+                    <p className="text-[11px] text-[#94A3B8]">Record all admin actions for compliance</p>
+                  </div>
+                  <Switch checked={draft.security.auditLoggingEnabled} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, security: { ...s.security, auditLoggingEnabled: v === true } }))} />
+                </div>
+                <div className="flex items-center justify-between px-5 py-3.5">
+                  <div>
+                    <p className="text-sm font-medium text-[#1E293B]">Require HTTPS</p>
+                    <p className="text-[11px] text-[#94A3B8]">Reject non-secure HTTP connections</p>
+                  </div>
+                  <Switch checked={draft.security.requireSecureConnections} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, security: { ...s.security, requireSecureConnections: v === true } }))} />
+                </div>
+              </div>
+            </Card>
+          </div>
         </TabsContent>
 
         <TabsContent value="backup" className="mt-4">

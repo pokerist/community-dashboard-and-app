@@ -483,8 +483,8 @@ export class ReportsService {
       },
       include: {
         unit: { select: { unitNumber: true } },
-        resident: { select: { user: { select: { nameEN: true } } } },
-        assignee: { select: { nameEN: true } },
+        reporter: { select: { nameEN: true } },
+        assignedTo: { select: { nameEN: true } },
       },
       orderBy: { createdAt: 'desc' },
       take: 5000,
@@ -494,8 +494,8 @@ export class ReportsService {
       complaintNumber: (c as any).complaintNumber || c.id,
       category: (c as any).category,
       unit: c.unit?.unitNumber,
-      reporter: c.resident?.user?.nameEN,
-      assignee: c.assignee?.nameEN,
+      reporter: c.reporter?.nameEN,
+      assignee: c.assignedTo?.nameEN,
       priority: (c as any).priority,
       status: (c as any).status,
       slaStatus: (c as any).slaStatus,
@@ -515,7 +515,7 @@ export class ReportsService {
       },
       include: {
         unit: { select: { unitNumber: true } },
-        resident: { select: { user: { select: { nameEN: true } } } },
+        resident: { select: { nameEN: true } },
         issuedBy: { select: { nameEN: true } },
       },
       orderBy: { createdAt: 'desc' },
@@ -526,7 +526,7 @@ export class ReportsService {
       violationNumber: (v as any).violationNumber || v.id,
       category: (v as any).category,
       unit: v.unit?.unitNumber,
-      resident: v.resident?.user?.nameEN,
+      resident: v.resident?.nameEN,
       issuer: v.issuedBy?.nameEN,
       fineAmount: (v as any).fineAmount,
       status: (v as any).status,
@@ -539,40 +539,39 @@ export class ReportsService {
   private async buildGateEntryLogRows(range: DateRange): Promise<ReportRow[]> {
     const entries = await this.prisma.accessQRCode.findMany({
       where: {
-        lastUsedAt: {
+        checkedInAt: {
           gte: range.from,
           lte: range.to,
         },
       },
       include: {
-        unit: { select: { unitNumber: true } },
-        gate: { select: { name: true } },
-        createdBy: { select: { nameEN: true } },
+        forUnit: { select: { unitNumber: true } },
+        generatedBy: { select: { nameEN: true } },
       },
-      orderBy: { lastUsedAt: 'desc' },
+      orderBy: { checkedInAt: 'desc' },
       take: 5000,
     });
 
     return entries.map((e) => ({
-      date: e.lastUsedAt?.toLocaleDateString?.('en-US'),
-      time: e.lastUsedAt?.toLocaleTimeString?.('en-US'),
-      visitor: e.createdBy?.nameEN,
-      unit: e.unit?.unitNumber,
-      qrType: e.qrType,
-      gate: e.gate?.name,
-      checkIn: e.lastUsedAt?.toISOString?.(),
-      checkOut: null,
+      date: e.checkedInAt?.toLocaleDateString?.('en-US'),
+      time: e.checkedInAt?.toLocaleTimeString?.('en-US'),
+      visitor: e.visitorName ?? e.generatedBy?.nameEN,
+      unit: e.forUnit?.unitNumber,
+      qrType: e.type,
+      gate: e.gates?.join(', ') ?? null,
+      checkIn: e.checkedInAt?.toISOString?.(),
+      checkOut: e.checkedOutAt?.toISOString?.() ?? null,
       duration: null,
-      operator: e.createdBy?.nameEN,
+      operator: e.generatedBy?.nameEN,
     }));
   }
 
   private async buildResidentActivityRows(_range: DateRange): Promise<ReportRow[]> {
     const residents = await this.prisma.resident.findMany({
       include: {
-        user: { select: { nameEN: true, email: true, lastLoginAt: true } },
+        user: { select: { nameEN: true, email: true, lastLoginAt: true, createdAt: true } },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { user: { createdAt: 'desc' } },
       take: 5000,
     });
 
@@ -584,7 +583,7 @@ export class ReportsService {
       violationsCount: 0,
       bookingsCount: 0,
       lastLogin: r.user?.lastLoginAt?.toISOString?.() ?? null,
-      createdAt: r.createdAt.toISOString(),
+      createdAt: r.user?.createdAt?.toISOString?.() ?? null,
     }));
   }
 

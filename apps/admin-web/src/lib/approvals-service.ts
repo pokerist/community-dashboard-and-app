@@ -97,7 +97,35 @@ export type ApprovalStats = {
   pendingFamilyMembers: number;
   pendingDelegates: number;
   pendingHomeStaff: number;
+  pendingTenants: number;
   totalPending: number;
+};
+
+export type TenantApprovalItem = {
+  id: string;
+  unitId: string;
+  unitNumber: string;
+  ownerUserId: string;
+  ownerName: string | null;
+  ownerEmail: string | null;
+  tenantName: string;
+  tenantEmail: string;
+  tenantPhone: string;
+  tenantNationality: string;
+  status: "PENDING" | "APPROVED" | "REJECTED" | "CANCELLED";
+  rejectionReason: string | null;
+  requestedAt: string;
+  reviewedAt: string | null;
+  reviewedByName: string | null;
+  contractFileId: string | null;
+  tenantNationalIdFileId: string | null;
+};
+
+export type TenantFilter = {
+  search?: string;
+  status?: "PENDING" | "APPROVED" | "REJECTED" | "ALL";
+  page?: number;
+  limit?: number;
 };
 
 export type ApprovalActionResponse = {
@@ -292,6 +320,32 @@ const approvalsService = {
         .filter(Boolean)
         .join(" - "),
     }));
+  },
+
+  async listTenants(filters: TenantFilter): Promise<{ data: TenantApprovalItem[]; total: number }> {
+    const params: Record<string, unknown> = {
+      page: filters.page ?? 1,
+      limit: filters.limit ?? 50,
+    };
+    if (filters.search) params.search = filters.search;
+    if (filters.status && filters.status !== "ALL") params.status = filters.status;
+    const response = await apiClient.get("/rental/rent-requests", { params });
+    const raw = response.data;
+    if (raw && typeof raw === "object" && "data" in raw) {
+      return { data: (raw as any).data as TenantApprovalItem[], total: (raw as any).total ?? 0 };
+    }
+    const arr = Array.isArray(raw) ? raw : [];
+    return { data: arr as TenantApprovalItem[], total: arr.length };
+  },
+
+  async approveTenant(id: string): Promise<{ success: true }> {
+    const response = await apiClient.post(`/rental/rent-requests/${id}/approve`);
+    return response.data as { success: true };
+  },
+
+  async rejectTenant(id: string, reason: string): Promise<{ success: true }> {
+    const response = await apiClient.post(`/rental/rent-requests/${id}/reject`, { reason });
+    return response.data as { success: true };
   },
 
   async fetchDocumentBlob(url: string): Promise<Blob> {

@@ -1,12 +1,16 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
+  Audience,
+  Channel,
   ComplaintStatus,
+  NotificationType,
   Prisma,
   Priority,
   type Complaint,
   type ComplaintCategory,
 } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AddCommentDto } from './dto/add-comment.dto';
 import {
   CheckSlaBreachesResponseDto,
@@ -25,6 +29,7 @@ import { CreateComplaintDto } from './dto/create-complaint.dto';
 const OPEN_COMPLAINT_STATUSES: ComplaintStatus[] = [
   ComplaintStatus.NEW,
   ComplaintStatus.IN_PROGRESS,
+  ComplaintStatus.PENDING_RESIDENT,
 ];
 
 type ComplaintListRecord = Prisma.ComplaintGetPayload<{
@@ -68,7 +73,12 @@ type ComplaintCommentRecord = Prisma.ComplaintCommentGetPayload<{
 
 @Injectable()
 export class ComplaintsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(ComplaintsService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   private toIso(value: Date | null): string | null {
     return value ? value.toISOString() : null;
@@ -432,8 +442,11 @@ export class ComplaintsService {
       where: { id },
       select: {
         id: true,
+        complaintNumber: true,
+        title: true,
         status: true,
         assignedToId: true,
+        reporterId: true,
         resolvedAt: true,
       },
     });
@@ -446,29 +459,34 @@ export class ComplaintsService {
     const trimmedResolutionNotes = resolutionNotes?.trim();
     const isDirectClose = status === ComplaintStatus.CLOSED;
 
+    const VALID_TRANSITIONS: Partial<Record<ComplaintStatus, ComplaintStatus[]>> = {
+      [ComplaintStatus.NEW]: [ComplaintStatus.IN_PROGRESS],
+      [ComplaintStatus.IN_PROGRESS]: [ComplaintStatus.PENDING_RESIDENT, ComplaintStatus.RESOLVED],
+      [ComplaintStatus.PENDING_RESIDENT]: [ComplaintStatus.IN_PROGRESS, ComplaintStatus.RESOLVED],
+    };
+
     if (!isDirectClose) {
-      if (
-        currentStatus === ComplaintStatus.NEW &&
-        status === ComplaintStatus.IN_PROGRESS
-      ) {
+      const allowed = VALID_TRANSITIONS[currentStatus] ?? [];
+      if (!allowed.includes(status)) {
+        throw new BadRequestException(
+          `Invalid complaint status transition: ${currentStatus} -> ${status}`,
+        );
+      }
+
+      if (status === ComplaintStatus.IN_PROGRESS && currentStatus === ComplaintStatus.NEW) {
         if (!complaint.assignedToId) {
           throw new BadRequestException(
             'Complaint must be assigned before marking IN_PROGRESS',
           );
         }
-      } else if (
-        currentStatus === ComplaintStatus.IN_PROGRESS &&
-        status === ComplaintStatus.RESOLVED
-      ) {
+      }
+
+      if (status === ComplaintStatus.RESOLVED) {
         if (!trimmedResolutionNotes) {
           throw new BadRequestException(
             'resolutionNotes is required when moving to RESOLVED',
           );
         }
-      } else {
-        throw new BadRequestException(
-          `Invalid complaint status transition: ${currentStatus} -> ${status}`,
-        );
       }
     }
 
@@ -493,6 +511,94 @@ export class ComplaintsService {
       where: { id },
       data: updateData,
     });
+
+    // Notify reporter when resolved or closed
+    if (
+      (status === ComplaintStatus.RESOLVED || status === ComplaintStatus.CLOSED) &&
+      complaint.reporterId
+    ) {
+      const label = status === ComplaintStatus.RESOLVED ? 'Resolved' : 'Closed';
+      this.notificationsService
+        .sendNotification({
+          type: NotificationType.ANNOUNCEMENT,
+          title: `Complaint ${label}`,
+          messageEn: `Your complaint "${complaint.title ?? complaint.complaintNumber}" has been ${label.toLowerCase()}.${trimmedResolutionNotes ? ` Note: ${trimmedResolutionNotes}` : ''}`,
+          channels: [Channel.IN_APP, Channel.PUSH],
+          targetAudience: Audience.SPECIFIC_RESIDENCES,
+          audienceMeta: { userIds: [complaint.reporterId] },
+          payload: { route: '#complaints', entityType: 'COMPLAINT', entityId: id },
+        })
+        .catch((err) =>
+          this.logger.error(`Complaint status notification failed for ${id}`, err),
+        );
+    }
+
+    return this.getComplaintDetail(id);
+  }
+
+  async returnToResident(
+    id: string,
+    message: string,
+    adminId: string,
+  ): Promise<ComplaintDetailDto> {
+    const complaint = await this.prisma.complaint.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        complaintNumber: true,
+        title: true,
+        status: true,
+        reporterId: true,
+      },
+    });
+
+    if (!complaint) {
+      throw new NotFoundException(`Complaint ${id} not found`);
+    }
+
+    if (complaint.status !== ComplaintStatus.IN_PROGRESS) {
+      throw new BadRequestException(
+        `Complaint must be IN_PROGRESS to return to resident (current: ${complaint.status})`,
+      );
+    }
+
+    const trimmedMessage = message?.trim();
+    if (!trimmedMessage) {
+      throw new BadRequestException('A message to the resident is required');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.complaint.update({
+        where: { id },
+        data: { status: ComplaintStatus.PENDING_RESIDENT },
+      });
+
+      await tx.complaintComment.create({
+        data: {
+          complaintId: id,
+          createdById: adminId,
+          body: trimmedMessage,
+          isInternal: false,
+        },
+      });
+    });
+
+    // Notify resident
+    if (complaint.reporterId) {
+      this.notificationsService
+        .sendNotification({
+          type: NotificationType.ANNOUNCEMENT,
+          title: 'Action Required on Your Complaint',
+          messageEn: `Your complaint "${complaint.title ?? complaint.complaintNumber}" requires your attention. Message from support: ${trimmedMessage}`,
+          channels: [Channel.IN_APP, Channel.PUSH, Channel.EMAIL],
+          targetAudience: Audience.SPECIFIC_RESIDENCES,
+          audienceMeta: { userIds: [complaint.reporterId] },
+          payload: { route: '#complaints', entityType: 'COMPLAINT', entityId: id },
+        })
+        .catch((err) =>
+          this.logger.error(`Return-to-resident notification failed for ${id}`, err),
+        );
+    }
 
     return this.getComplaintDetail(id);
   }
@@ -610,6 +716,7 @@ export class ComplaintsService {
     const byStatus: Record<ComplaintStatus, number> = {
       NEW: 0,
       IN_PROGRESS: 0,
+      PENDING_RESIDENT: 0,
       RESOLVED: 0,
       CLOSED: 0,
     };

@@ -30,6 +30,7 @@ import approvalsService, {
   HomeStaffType,
   OwnerApprovalItem,
   OwnerOption,
+  TenantApprovalItem,
   UnitOption,
 } from "../../lib/approvals-service";
 import {
@@ -41,7 +42,7 @@ import {
   toInitials,
 } from "../../lib/live-data";
 
-type TabKey = "owners" | "family" | "delegates" | "home-staff";
+type TabKey = "owners" | "family" | "delegates" | "home-staff" | "tenants";
 type StatusFilter = "PENDING" | "PROCESSING" | "ALL";
 type PreRegistrationMode = "OWNER" | "FAMILY";
 type PreRegistrationStep = 1 | 2;
@@ -50,7 +51,8 @@ type SelectedItem =
   | { tab: "owners"; item: OwnerApprovalItem }
   | { tab: "family"; item: FamilyApprovalItem }
   | { tab: "delegates"; item: DelegateApprovalItem }
-  | { tab: "home-staff"; item: HomeStaffApprovalItem };
+  | { tab: "home-staff"; item: HomeStaffApprovalItem }
+  | { tab: "tenants"; item: TenantApprovalItem };
 
 type PreviewState = {
   loading: boolean;
@@ -86,11 +88,14 @@ export function ApprovalsCenter() {
   const [family, setFamily] = useState<FamilyApprovalItem[]>([]);
   const [delegates, setDelegates] = useState<DelegateApprovalItem[]>([]);
   const [homeStaff, setHomeStaff] = useState<HomeStaffApprovalItem[]>([]);
+  const [tenants, setTenants] = useState<TenantApprovalItem[]>([]);
+  const [tenantsTotal, setTenantsTotal] = useState(0);
 
   const [ownersLoading, setOwnersLoading] = useState(false);
   const [familyLoading, setFamilyLoading] = useState(false);
   const [delegatesLoading, setDelegatesLoading] = useState(false);
   const [homeStaffLoading, setHomeStaffLoading] = useState(false);
+  const [tenantsLoading, setTenantsLoading] = useState(false);
 
   const [ownerStatus, setOwnerStatus] = useState<StatusFilter>("ALL");
   const [ownerSearch, setOwnerSearch] = useState("");
@@ -115,6 +120,9 @@ export function ApprovalsCenter() {
   const [homeStaffDateFrom, setHomeStaffDateFrom] = useState("");
   const [homeStaffDateTo, setHomeStaffDateTo] = useState("");
   const [homeStaffType, setHomeStaffType] = useState<"ALL" | HomeStaffType>("ALL");
+
+  const [tenantStatus, setTenantStatus] = useState<"PENDING" | "APPROVED" | "REJECTED" | "ALL">("PENDING");
+  const [tenantSearch, setTenantSearch] = useState("");
 
   const [selectedItem, setSelectedItem] = useState<SelectedItem | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -249,6 +257,23 @@ export function ApprovalsCenter() {
     }
   }, [homeStaffDateFrom, homeStaffDateTo, homeStaffSearch, homeStaffStatus, homeStaffType]);
 
+  const loadTenants = useCallback(async () => {
+    setTenantsLoading(true);
+    try {
+      const result = await approvalsService.listTenants({
+        search: tenantSearch || undefined,
+        status: tenantStatus === "ALL" ? undefined : tenantStatus,
+        limit: 100,
+      });
+      setTenants(result.data);
+      setTenantsTotal(result.total);
+    } catch (error) {
+      toast.error("Failed to load tenant approvals", { description: errorMessage(error) });
+    } finally {
+      setTenantsLoading(false);
+    }
+  }, [tenantSearch, tenantStatus]);
+
   useEffect(() => {
     void loadStats();
   }, [loadStats]);
@@ -258,7 +283,8 @@ export function ApprovalsCenter() {
     if (activeTab === "family") void loadFamily();
     if (activeTab === "delegates") void loadDelegates();
     if (activeTab === "home-staff") void loadHomeStaff();
-  }, [activeTab, loadDelegates, loadFamily, loadHomeStaff, loadOwners]);
+    if (activeTab === "tenants") void loadTenants();
+  }, [activeTab, loadDelegates, loadFamily, loadHomeStaff, loadOwners, loadTenants]);
 
   useEffect(() => {
     if (!preRegisterOpen) return;
@@ -354,37 +380,20 @@ export function ApprovalsCenter() {
     let familyRow: FamilyApprovalItem | null = null;
     let delegateRow: DelegateApprovalItem | null = null;
     let staffRow: HomeStaffApprovalItem | null = null;
+    let tenantRow: TenantApprovalItem | null = null;
 
-    if (tab === "owners") {
-      setOwners((prev) => {
-        ownerRow = prev.find((row) => row.id === id) ?? null;
-        return prev.filter((row) => row.id !== id);
-      });
-    }
-    if (tab === "family") {
-      setFamily((prev) => {
-        familyRow = prev.find((row) => row.id === id) ?? null;
-        return prev.filter((row) => row.id !== id);
-      });
-    }
-    if (tab === "delegates") {
-      setDelegates((prev) => {
-        delegateRow = prev.find((row) => row.id === id) ?? null;
-        return prev.filter((row) => row.id !== id);
-      });
-    }
-    if (tab === "home-staff") {
-      setHomeStaff((prev) => {
-        staffRow = prev.find((row) => row.id === id) ?? null;
-        return prev.filter((row) => row.id !== id);
-      });
-    }
+    if (tab === "owners") setOwners((prev) => { ownerRow = prev.find((row) => row.id === id) ?? null; return prev.filter((row) => row.id !== id); });
+    if (tab === "family") setFamily((prev) => { familyRow = prev.find((row) => row.id === id) ?? null; return prev.filter((row) => row.id !== id); });
+    if (tab === "delegates") setDelegates((prev) => { delegateRow = prev.find((row) => row.id === id) ?? null; return prev.filter((row) => row.id !== id); });
+    if (tab === "home-staff") setHomeStaff((prev) => { staffRow = prev.find((row) => row.id === id) ?? null; return prev.filter((row) => row.id !== id); });
+    if (tab === "tenants") setTenants((prev) => { tenantRow = prev.find((row) => row.id === id) ?? null; return prev.filter((row) => row.id !== id); });
 
     setStats((prev) => {
       if (!prev) return prev;
       if (tab === "owners") return { ...prev, pendingOwners: Math.max(0, prev.pendingOwners - 1), totalPending: Math.max(0, prev.totalPending - 1) };
       if (tab === "family") return { ...prev, pendingFamilyMembers: Math.max(0, prev.pendingFamilyMembers - 1), totalPending: Math.max(0, prev.totalPending - 1) };
       if (tab === "delegates") return { ...prev, pendingDelegates: Math.max(0, prev.pendingDelegates - 1), totalPending: Math.max(0, prev.totalPending - 1) };
+      if (tab === "tenants") return { ...prev, pendingTenants: Math.max(0, (prev.pendingTenants ?? 0) - 1), totalPending: Math.max(0, prev.totalPending - 1) };
       return { ...prev, pendingHomeStaff: Math.max(0, prev.pendingHomeStaff - 1), totalPending: Math.max(0, prev.totalPending - 1) };
     });
 
@@ -393,12 +402,14 @@ export function ApprovalsCenter() {
       if (tab === "family" && familyRow) setFamily((prev) => [familyRow as FamilyApprovalItem, ...prev]);
       if (tab === "delegates" && delegateRow) setDelegates((prev) => [delegateRow as DelegateApprovalItem, ...prev]);
       if (tab === "home-staff" && staffRow) setHomeStaff((prev) => [staffRow as HomeStaffApprovalItem, ...prev]);
+      if (tab === "tenants" && tenantRow) setTenants((prev) => [tenantRow as TenantApprovalItem, ...prev]);
 
       setStats((prev) => {
         if (!prev) return prev;
         if (tab === "owners") return { ...prev, pendingOwners: prev.pendingOwners + 1, totalPending: prev.totalPending + 1 };
         if (tab === "family") return { ...prev, pendingFamilyMembers: prev.pendingFamilyMembers + 1, totalPending: prev.totalPending + 1 };
         if (tab === "delegates") return { ...prev, pendingDelegates: prev.pendingDelegates + 1, totalPending: prev.totalPending + 1 };
+        if (tab === "tenants") return { ...prev, pendingTenants: (prev.pendingTenants ?? 0) + 1, totalPending: prev.totalPending + 1 };
         return { ...prev, pendingHomeStaff: prev.pendingHomeStaff + 1, totalPending: prev.totalPending + 1 };
       });
     };
@@ -415,6 +426,7 @@ export function ApprovalsCenter() {
       if (selectedItem.tab === "family") await approvalsService.approveFamilyMember(selectedItem.item.id);
       if (selectedItem.tab === "delegates") await approvalsService.approveDelegate(selectedItem.item.id);
       if (selectedItem.tab === "home-staff") await approvalsService.approveHomeStaff(selectedItem.item.id);
+      if (selectedItem.tab === "tenants") await approvalsService.approveTenant(selectedItem.item.id);
       toast.success("Approval completed");
       setDrawerOpen(false);
       setSelectedItem(null);
@@ -442,6 +454,7 @@ export function ApprovalsCenter() {
       if (selectedItem.tab === "family") await approvalsService.rejectFamilyMember(selectedItem.item.id, rejectReason.trim());
       if (selectedItem.tab === "delegates") await approvalsService.rejectDelegate(selectedItem.item.id, rejectReason.trim());
       if (selectedItem.tab === "home-staff") await approvalsService.rejectHomeStaff(selectedItem.item.id, rejectReason.trim());
+      if (selectedItem.tab === "tenants") await approvalsService.rejectTenant(selectedItem.item.id, rejectReason.trim());
       toast.success("Request rejected");
       setDrawerOpen(false);
       setSelectedItem(null);
@@ -504,6 +517,26 @@ export function ApprovalsCenter() {
     { key: "liveIn", header: "Live-In", render: (row) => <Badge>{row.isLiveIn ? "Live-In" : "Non Live-In"}</Badge> },
     { key: "status", header: "Status", render: (row) => <StatusBadge value={row.status} /> },
     { key: "actions", header: "Actions", render: (row) => <Button size="sm" onClick={() => openReview({ tab: "home-staff", item: row })}>Review</Button> },
+  ], [openReview]);
+
+  const tenantColumns = useMemo<DataTableColumn<TenantApprovalItem>[]>(() => [
+    { key: "tenant", header: "Tenant", render: (row) => (
+      <div>
+        <p className="font-medium text-[#1E293B]">{row.tenantName}</p>
+        <p className="text-xs text-[#64748B]">{row.tenantEmail}</p>
+      </div>
+    )},
+    { key: "phone", header: "Phone", render: (row) => row.tenantPhone },
+    { key: "nationality", header: "Nationality", render: (row) => row.tenantNationality || "—" },
+    { key: "unit", header: "Unit", render: (row) => row.unitNumber || row.unitId.slice(0, 8) },
+    { key: "owner", header: "Owner", render: (row) => row.ownerName || "—" },
+    { key: "requested", header: "Requested", render: (row) => formatDateTime(row.requestedAt) },
+    { key: "status", header: "Status", render: (row) => <StatusBadge value={row.status} /> },
+    { key: "actions", header: "Actions", render: (row) => (
+      row.status === "PENDING"
+        ? <Button size="sm" onClick={() => openReview({ tab: "tenants", item: row })}>Review</Button>
+        : <Button size="sm" variant="outline" onClick={() => openReview({ tab: "tenants", item: row })}>View</Button>
+    )},
   ], [openReview]);
 
   const preRegisterNext = () => {
@@ -587,23 +620,25 @@ export function ApprovalsCenter() {
     <div className="space-y-6">
       <PageHeader
         title="Approvals"
-        description="Unified queue for owner registrations, family members, delegates, and home staff."
+        description="Unified queue for owner registrations, family members, delegates, home staff, and tenants."
         actions={<Button onClick={() => setPreRegisterOpen(true)}>Pre-Register</Button>}
       />
 
-      <div className="grid gap-3 md:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-5">
         <StatCard title="Pending Owners" value={statsLoading ? "..." : String(stats?.pendingOwners ?? 0)} icon="active-users" onClick={() => setActiveTab("owners")} />
-        <StatCard title="Pending Family Members" value={statsLoading ? "..." : String(stats?.pendingFamilyMembers ?? 0)} icon="visitors" onClick={() => setActiveTab("family")} />
-        <StatCard title="Pending Delegates" value={statsLoading ? "..." : String(stats?.pendingDelegates ?? 0)} icon="tickets" onClick={() => setActiveTab("delegates")} />
-        <StatCard title="Pending Home Staff" value={statsLoading ? "..." : String(stats?.pendingHomeStaff ?? 0)} icon="workers" onClick={() => setActiveTab("home-staff")} />
+        <StatCard title="Family Members" value={statsLoading ? "..." : String(stats?.pendingFamilyMembers ?? 0)} icon="visitors" onClick={() => setActiveTab("family")} />
+        <StatCard title="Delegates" value={statsLoading ? "..." : String(stats?.pendingDelegates ?? 0)} icon="tickets" onClick={() => setActiveTab("delegates")} />
+        <StatCard title="Home Staff" value={statsLoading ? "..." : String(stats?.pendingHomeStaff ?? 0)} icon="workers" onClick={() => setActiveTab("home-staff")} />
+        <StatCard title="Tenants" value={statsLoading ? "..." : String(stats?.pendingTenants ?? 0)} icon="tickets" onClick={() => setActiveTab("tenants")} />
       </div>
 
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabKey)}>
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-5">
           <TabsTrigger value="owners">Owners</TabsTrigger>
           <TabsTrigger value="family">Family Members</TabsTrigger>
           <TabsTrigger value="delegates">Delegates</TabsTrigger>
           <TabsTrigger value="home-staff">Home Staff</TabsTrigger>
+          <TabsTrigger value="tenants">Tenants</TabsTrigger>
         </TabsList>
 
         <TabsContent value="owners" className="space-y-3">
@@ -684,6 +719,31 @@ export function ApprovalsCenter() {
           </div>
           {homeStaffLoading ? <SkeletonTable columns={9} /> : <DataTable columns={homeStaffColumns} rows={homeStaff} rowKey={(row) => row.id} emptyTitle="No home staff approvals" emptyDescription="No home staff request matches current filters." />}
         </TabsContent>
+
+        <TabsContent value="tenants" className="space-y-3">
+          <div className="grid gap-3 rounded-xl border border-[#E2E8F0] bg-white p-3 md:grid-cols-3">
+            <Input placeholder="Search tenant name or email" value={tenantSearch} onChange={(event) => setTenantSearch(event.target.value)} />
+            <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={tenantStatus} onChange={(event) => setTenantStatus(event.target.value as "PENDING" | "APPROVED" | "REJECTED" | "ALL")}>
+              <option value="PENDING">Pending</option>
+              <option value="APPROVED">Approved</option>
+              <option value="REJECTED">Rejected</option>
+              <option value="ALL">All</option>
+            </select>
+            <p className="flex items-center text-sm text-[#64748B]">
+              {tenantsLoading ? "Loading..." : `${tenantsTotal} total`}
+            </p>
+          </div>
+          {tenantsLoading
+            ? <SkeletonTable columns={8} />
+            : <DataTable
+                columns={tenantColumns}
+                rows={tenants}
+                rowKey={(row) => row.id}
+                emptyTitle="No tenant approvals"
+                emptyDescription="No rent requests match current filters."
+              />
+          }
+        </TabsContent>
       </Tabs>
 
       <DrawerForm
@@ -703,57 +763,77 @@ export function ApprovalsCenter() {
             {rejectMode ? (
               <Textarea value={rejectReason} onChange={(event) => setRejectReason(event.target.value)} placeholder="Enter rejection reason" />
             ) : null}
-            <div className="flex justify-end gap-2">
-              {rejectMode ? (
-                <>
-                  <Button variant="outline" onClick={() => setRejectMode(false)} disabled={actionBusy}>Cancel</Button>
-                  <Button variant="destructive" onClick={() => void handleReject()} disabled={actionBusy}>Confirm Reject</Button>
-                </>
-              ) : (
-                <>
-                  <Button variant="destructive" onClick={() => setRejectMode(true)} disabled={actionBusy}>Reject</Button>
-                  <Button onClick={() => void handleApprove()} disabled={actionBusy}>Approve</Button>
-                </>
-              )}
-            </div>
+            {selectedItem && selectedItem.tab === "tenants" && selectedItem.item.status !== "PENDING" ? (
+              <p className="text-center text-sm text-[#64748B]">This request has already been {selectedItem.item.status.toLowerCase()}.</p>
+            ) : (
+              <div className="flex justify-end gap-2">
+                {rejectMode ? (
+                  <>
+                    <Button variant="outline" onClick={() => setRejectMode(false)} disabled={actionBusy}>Cancel</Button>
+                    <Button variant="destructive" onClick={() => void handleReject()} disabled={actionBusy}>Confirm Reject</Button>
+                  </>
+                ) : (
+                  <>
+                    <Button variant="destructive" onClick={() => setRejectMode(true)} disabled={actionBusy}>Reject</Button>
+                    <Button onClick={() => void handleApprove()} disabled={actionBusy}>Approve</Button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         }
       >
         {selectedItem ? (
           <div className="space-y-4">
+            {/* Profile header */}
             <div className="rounded-xl border border-[#E2E8F0] p-4">
               <div className="flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#E2E8F0] text-sm font-semibold text-[#334155]">
                   {selectedItem.tab === "owners"
                     ? toInitials(selectedItem.item.name || "Owner")
+                    : selectedItem.tab === "tenants"
+                    ? toInitials(selectedItem.item.tenantName)
                     : toInitials((selectedItem.item as FamilyApprovalItem | DelegateApprovalItem | HomeStaffApprovalItem).fullName)}
                 </div>
                 <div>
                   <p className="text-sm font-medium text-[#0F172A]">
                     {selectedItem.tab === "owners"
                       ? selectedItem.item.name || "Owner"
+                      : selectedItem.tab === "tenants"
+                      ? selectedItem.item.tenantName
                       : (selectedItem.item as FamilyApprovalItem | DelegateApprovalItem | HomeStaffApprovalItem).fullName}
                   </p>
                   <p className="text-xs text-[#64748B]">
-                    {(selectedItem.item as OwnerApprovalItem | FamilyApprovalItem | DelegateApprovalItem | HomeStaffApprovalItem).phone}
+                    {selectedItem.tab === "tenants"
+                      ? selectedItem.item.tenantPhone
+                      : (selectedItem.item as OwnerApprovalItem | FamilyApprovalItem | DelegateApprovalItem | HomeStaffApprovalItem).phone}
                   </p>
                 </div>
               </div>
               <div className="mt-3 flex flex-wrap gap-2 text-xs text-[#64748B]">
-                <span>Submitted: {formatDateTime(selectedItem.item.submittedAt)}</span>
-                <Badge>{selectedItem.item.isPreRegistration ? "Pre-Registered" : "Self-Registered"}</Badge>
+                {selectedItem.tab === "tenants" ? (
+                  <span>Requested: {formatDateTime(selectedItem.item.requestedAt)}</span>
+                ) : (
+                  <>
+                    <span>Submitted: {formatDateTime(selectedItem.item.submittedAt)}</span>
+                    <Badge>{selectedItem.item.isPreRegistration ? "Pre-Registered" : "Self-Registered"}</Badge>
+                  </>
+                )}
               </div>
             </div>
 
-            <div className="rounded-xl border border-[#E2E8F0] p-4">
-              <h3 className="mb-3 text-sm font-medium text-[#0F172A]">Documents</h3>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {renderDocumentCard("Profile Photo", selectedItem.item.documents.photo)}
-                {renderDocumentCard("National ID", selectedItem.item.documents.nationalId)}
-                {renderDocumentCard("Passport", selectedItem.item.documents.passport)}
-                {selectedItem.item.documents.other.map((doc) => renderDocumentCard(doc.label, doc.url))}
+            {/* Documents — only for non-tenant tabs */}
+            {selectedItem.tab !== "tenants" ? (
+              <div className="rounded-xl border border-[#E2E8F0] p-4">
+                <h3 className="mb-3 text-sm font-medium text-[#0F172A]">Documents</h3>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  {renderDocumentCard("Profile Photo", selectedItem.item.documents.photo)}
+                  {renderDocumentCard("National ID", selectedItem.item.documents.nationalId)}
+                  {renderDocumentCard("Passport", selectedItem.item.documents.passport)}
+                  {selectedItem.item.documents.other.map((doc) => renderDocumentCard(doc.label, doc.url))}
+                </div>
               </div>
-            </div>
+            ) : null}
 
             <div className="rounded-xl border border-[#E2E8F0] p-4">
               <h3 className="mb-3 text-sm font-medium text-[#0F172A]">Details</h3>
@@ -792,6 +872,28 @@ export function ApprovalsCenter() {
                   <p>Live-In: {selectedItem.item.isLiveIn ? "Yes" : "No"}</p>
                   <p>Employment: {selectedItem.item.employmentFrom ? formatDate(selectedItem.item.employmentFrom) : "N/A"} - {selectedItem.item.employmentTo ? formatDate(selectedItem.item.employmentTo) : "N/A"}</p>
                   <p>Access: {formatDate(selectedItem.item.accessValidFrom)} - {formatDate(selectedItem.item.accessValidTo)}</p>
+                </div>
+              ) : null}
+
+              {selectedItem.tab === "tenants" ? (
+                <div className="space-y-2 text-sm text-[#334155]">
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                    <div><p className="text-xs text-[#64748B]">Tenant Email</p><p>{selectedItem.item.tenantEmail}</p></div>
+                    <div><p className="text-xs text-[#64748B]">Phone</p><p>{selectedItem.item.tenantPhone}</p></div>
+                    <div><p className="text-xs text-[#64748B]">Nationality</p><p>{selectedItem.item.tenantNationality || "—"}</p></div>
+                    <div><p className="text-xs text-[#64748B]">Unit</p><p>{selectedItem.item.unitNumber || "—"}</p></div>
+                    <div><p className="text-xs text-[#64748B]">Owner</p><p>{selectedItem.item.ownerName || "—"}</p></div>
+                    <div><p className="text-xs text-[#64748B]">Owner Email</p><p>{selectedItem.item.ownerEmail || "—"}</p></div>
+                    {selectedItem.item.rejectionReason ? (
+                      <div className="col-span-2"><p className="text-xs text-[#64748B]">Rejection Reason</p><p className="text-[#DC2626]">{selectedItem.item.rejectionReason}</p></div>
+                    ) : null}
+                    {selectedItem.item.reviewedAt ? (
+                      <div><p className="text-xs text-[#64748B]">Reviewed At</p><p>{formatDateTime(selectedItem.item.reviewedAt)}</p></div>
+                    ) : null}
+                    {selectedItem.item.reviewedByName ? (
+                      <div><p className="text-xs text-[#64748B]">Reviewed By</p><p>{selectedItem.item.reviewedByName}</p></div>
+                    ) : null}
+                  </div>
                 </div>
               ) : null}
             </div>

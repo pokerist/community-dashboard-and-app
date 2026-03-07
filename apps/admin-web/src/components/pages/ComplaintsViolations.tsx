@@ -17,6 +17,7 @@ import complaintsService, { type ComplaintCategoryItem, type ComplaintDetail, ty
 const PRIORITY_DOT: Record<Priority, string> = { CRITICAL: "bg-red-500", HIGH: "bg-orange-500", MEDIUM: "bg-amber-500", LOW: "bg-slate-500" };
 const dot = ["bg-blue-400","bg-emerald-400","bg-amber-400","bg-red-400","bg-violet-400","bg-orange-400","bg-teal-400","bg-rose-400"];
 const fmt = (v?: string | null) => (v ? new Date(v).toLocaleString() : "—");
+const initials = (name: string) => name.split(" ").map((w) => w[0] ?? "").slice(0, 2).join("").toUpperCase();
 
 export function ComplaintsViolations() {
   const [tab, setTab] = useState<"complaints" | "settings">("complaints");

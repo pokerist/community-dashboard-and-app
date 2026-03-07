@@ -1,9 +1,13 @@
 ﻿import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
+  Audience,
+  Channel,
+  NotificationType,
   PermitCategory,
   PermitStatus,
   Prisma,
@@ -12,6 +16,7 @@ import {
   type PermitType,
 } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { getActiveUnitAccess } from '../../common/utils/unit-access.util';
 import { ApprovePermitDto } from './dto/approve-permit.dto';
 import { CreatePermitFieldDto } from './dto/create-permit-field.dto';
@@ -33,7 +38,12 @@ import { UpdatePermitTypeDto } from './dto/update-permit-type.dto';
 
 @Injectable()
 export class PermitsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(PermitsService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   private monthBounds(now = new Date()): { start: Date; end: Date } {
     const start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
@@ -684,7 +694,13 @@ export class PermitsService {
   ): Promise<PermitRequestDetailDto> {
     const existing = await this.prisma.permitRequest.findUnique({
       where: { id },
-      select: { id: true, status: true },
+      select: {
+        id: true,
+        status: true,
+        requestNumber: true,
+        requestedById: true,
+        permitType: { select: { name: true } },
+      },
     });
     if (!existing) {
       throw new NotFoundException(`Permit request with ID ${id} not found.`);
@@ -704,6 +720,21 @@ export class PermitsService {
       },
     });
 
+    // Notify the requester
+    this.notificationsService
+      .sendNotification({
+        type: NotificationType.ANNOUNCEMENT,
+        title: 'Permit Request Approved',
+        messageEn: `Your "${existing.permitType.name}" request (${existing.requestNumber}) has been approved.${dto.notes ? ` Note: ${dto.notes.trim()}` : ''}`,
+        channels: [Channel.IN_APP, Channel.PUSH, Channel.EMAIL],
+        targetAudience: Audience.SPECIFIC_RESIDENCES,
+        audienceMeta: { userIds: [existing.requestedById] },
+        payload: { route: '#permits', entityType: 'PERMIT_REQUEST', entityId: id },
+      })
+      .catch((err: unknown) =>
+        this.logger.error(`Permit approval notification failed for ${id}`, err),
+      );
+
     return this.getPermitRequestDetail(id);
   }
 
@@ -714,7 +745,13 @@ export class PermitsService {
   ): Promise<PermitRequestDetailDto> {
     const existing = await this.prisma.permitRequest.findUnique({
       where: { id },
-      select: { id: true, status: true },
+      select: {
+        id: true,
+        status: true,
+        requestNumber: true,
+        requestedById: true,
+        permitType: { select: { name: true } },
+      },
     });
     if (!existing) {
       throw new NotFoundException(`Permit request with ID ${id} not found.`);
@@ -732,6 +769,21 @@ export class PermitsService {
         rejectionReason: dto.reason.trim(),
       },
     });
+
+    // Notify the requester
+    this.notificationsService
+      .sendNotification({
+        type: NotificationType.ANNOUNCEMENT,
+        title: 'Permit Request Rejected',
+        messageEn: `Your "${existing.permitType.name}" request (${existing.requestNumber}) was not approved. Reason: ${dto.reason.trim()}`,
+        channels: [Channel.IN_APP, Channel.PUSH, Channel.EMAIL],
+        targetAudience: Audience.SPECIFIC_RESIDENCES,
+        audienceMeta: { userIds: [existing.requestedById] },
+        payload: { route: '#permits', entityType: 'PERMIT_REQUEST', entityId: id },
+      })
+      .catch((err: unknown) =>
+        this.logger.error(`Permit rejection notification failed for ${id}`, err),
+      );
 
     return this.getPermitRequestDetail(id);
   }
