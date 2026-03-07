@@ -11,7 +11,11 @@
       "Bash(powershell.exe -Command \"Get-NetTCPConnection -LocalPort 5433 -ErrorAction SilentlyContinue | Select-Object LocalPort,State,OwningProcess\")",
       "Bash(xargs grep -l \"css\\\\|import\")",
       "Bash(xargs grep -l \"activity\\\\|Activity\\\\|RecentActivity\\\\|feed\\\\|Feed\")",
-      "Bash(xargs grep -l \"QuickAction\\\\|quick.action\\\\|Quick Action\\\\|quickaction\")"
+      "Bash(xargs grep -l \"QuickAction\\\\|quick.action\\\\|Quick Action\\\\|quickaction\")",
+      "Bash(npx prisma migrate deploy)"
+    ],
+    "additionalDirectories": [
+      "i:\\PROJECTS\\work-projects\\sss\\community-app\\community-dashboard-and-app\\apps\\admin-web\\src\\components\\pages"
     ]
   }
 }
