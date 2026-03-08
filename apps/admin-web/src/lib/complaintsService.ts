@@ -207,6 +207,14 @@ const complaintsService = {
     return response.data;
   },
 
+  async updateComplaint(
+    id: string,
+    payload: { categoryId?: string; title?: string; priority?: Priority },
+  ): Promise<ComplaintDetail> {
+    const response = await apiClient.patch<ComplaintDetail>(`/complaints/${id}`, payload);
+    return response.data;
+  },
+
   async assignComplaint(id: string, assignedToId: string): Promise<ComplaintDetail> {
     const response = await apiClient.patch<ComplaintDetail>(`/complaints/${id}/assign`, {
       assignedToId,

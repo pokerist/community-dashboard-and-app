@@ -44,11 +44,11 @@ function LoginIllustration() {
             <stop offset="100%" stopColor="rgba(255,255,255,0.03)" />
           </linearGradient>
           <linearGradient id="accentBar" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="#5B4FE9" />
-            <stop offset="100%" stopColor="#7C6FFF" />
+            <stop offset="0%" stopColor="#2563EB" />
+            <stop offset="100%" stopColor="#60A5FA" />
           </linearGradient>
           <filter id="cardGlow">
-            <feDropShadow dx="0" dy="4" stdDeviation="10" floodColor="#5B4FE9" floodOpacity="0.18" />
+            <feDropShadow dx="0" dy="4" stdDeviation="10" floodColor="#2563EB" floodOpacity="0.18" />
           </filter>
           <filter id="amberGlow">
             <feDropShadow dx="0" dy="2" stdDeviation="8" floodColor="#F5A623" floodOpacity="0.22" />
@@ -62,7 +62,7 @@ function LoginIllustration() {
         <rect width="520" height="310" fill="url(#illusGrid)" />
 
         {/* Ambient glow blob */}
-        <ellipse cx="260" cy="155" rx="160" ry="110" fill="rgba(91,79,233,0.06)" />
+        <ellipse cx="260" cy="155" rx="160" ry="110" fill="rgba(37,99,235,0.06)" />
 
         {/* ── Buildings ── */}
         {/* Left secondary building */}
@@ -81,11 +81,11 @@ function LoginIllustration() {
         {[90, 108, 126, 144, 162, 180, 198, 216, 234].map((y, i) => (
           <g key={i}>
             <rect x="212" y={y} width="12" height="10"
-              fill={i % 4 === 0 || i % 3 === 0 ? "rgba(91,79,233,0.52)" : "rgba(255,255,255,0.06)"} rx="1" />
+              fill={i % 4 === 0 || i % 3 === 0 ? "rgba(37,99,235,0.52)" : "rgba(255,255,255,0.06)"} rx="1" />
             <rect x="232" y={y} width="12" height="10"
-              fill={i % 3 === 1 ? "rgba(91,79,233,0.38)" : "rgba(255,255,255,0.05)"} rx="1" />
+              fill={i % 3 === 1 ? "rgba(37,99,235,0.38)" : "rgba(255,255,255,0.05)"} rx="1" />
             <rect x="252" y={y} width="12" height="10"
-              fill={i % 5 === 0 || i % 4 === 2 ? "rgba(91,79,233,0.44)" : "rgba(255,255,255,0.06)"} rx="1" />
+              fill={i % 5 === 0 || i % 4 === 2 ? "rgba(37,99,235,0.44)" : "rgba(255,255,255,0.06)"} rx="1" />
           </g>
         ))}
         {/* Tower top accent bar */}
@@ -110,7 +110,7 @@ function LoginIllustration() {
         {/* OCCUPANCY — top left, indigo glow */}
         <g className="al-float-a" filter="url(#cardGlow)">
           <rect x="0" y="28" width="138" height="66" rx="4"
-            fill="rgba(91,79,233,0.22)" stroke="rgba(91,79,233,0.42)" strokeWidth="1" />
+            fill="rgba(37,99,235,0.22)" stroke="rgba(37,99,235,0.42)" strokeWidth="1" />
           <text x="14" y="50" fontSize="8.5" fill="rgba(255,255,255,0.46)"
             letterSpacing="0.14em" fontFamily="'DM Mono',monospace" fontWeight="500">OCCUPANCY</text>
           <text x="14" y="78" fontSize="28" fontWeight="500"
@@ -118,7 +118,7 @@ function LoginIllustration() {
           <circle cx="124" cy="44" r="5" fill="#22C55E" filter="url(#greenPulse)" />
           {/* Sparkline */}
           <polyline points="14,90 28,87 42,88 56,84 70,81 84,78 98,79 112,75"
-            stroke="rgba(91,79,233,0.55)" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+            stroke="rgba(37,99,235,0.55)" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
         </g>
 
         {/* RESIDENTS — top right */}
@@ -152,21 +152,21 @@ function LoginIllustration() {
         </g>
 
         {/* Connection lines from cards to tower */}
-        <line x1="138" y1="61" x2="200" y2="148" stroke="rgba(91,79,233,0.22)" strokeWidth="0.75" strokeDasharray="4 6" />
+        <line x1="138" y1="61" x2="200" y2="148" stroke="rgba(37,99,235,0.22)" strokeWidth="0.75" strokeDasharray="4 6" />
         <line x1="382" y1="51" x2="320" y2="140" stroke="rgba(255,255,255,0.08)" strokeWidth="0.75" strokeDasharray="4 6" />
         <line x1="138" y1="229" x2="200" y2="222" stroke="rgba(255,255,255,0.07)" strokeWidth="0.75" strokeDasharray="4 6" />
         <line x1="382" y1="243" x2="320" y2="230" stroke="rgba(245,166,35,0.18)" strokeWidth="0.75" strokeDasharray="4 6" />
 
         {/* Connection dots */}
-        <circle cx="138" cy="61" r="3" fill="rgba(91,79,233,0.65)" />
+        <circle cx="138" cy="61" r="3" fill="rgba(37,99,235,0.65)" />
         <circle cx="382" cy="51" r="3" fill="rgba(255,255,255,0.22)" />
         <circle cx="138" cy="229" r="3" fill="rgba(255,255,255,0.18)" />
         <circle cx="382" cy="243" r="3" fill="rgba(245,166,35,0.55)" />
 
         {/* Decorative dots */}
-        <circle cx="170" cy="45" r="2" fill="rgba(91,79,233,0.5)" />
+        <circle cx="170" cy="45" r="2" fill="rgba(37,99,235,0.5)" />
         <circle cx="345" cy="62" r="1.5" fill="rgba(255,255,255,0.2)" />
-        <circle cx="455" cy="140" r="2" fill="rgba(91,79,233,0.3)" />
+        <circle cx="455" cy="140" r="2" fill="rgba(37,99,235,0.3)" />
         <circle cx="62" cy="185" r="1.5" fill="rgba(255,255,255,0.15)" />
       </svg>
     </div>

@@ -1,17 +1,15 @@
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
-import { ViolationActionStatus, ViolationActionType, ViolationStatus } from "@prisma/client";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
-import { DataTable, type DataTableColumn } from "../DataTable";
-import { useEffect, useMemo, useState } from "react";
-import { Eye, Edit2, Plus, Search } from "lucide-react";
-import { SkeletonTable } from "../SkeletonTable";
-import { StatusBadge } from "../StatusBadge";
-import { DrawerForm } from "../DrawerForm";
-import { EmptyState } from "../EmptyState";
-import { PageHeader } from "../PageHeader";
-import { StatCard } from "../StatCard";
-import { toast } from "sonner";
-import { cn } from "../ui/utils";
+import { useEffect, useMemo, useState } from 'react';
+import { ViolationActionStatus, ViolationActionType, ViolationStatus } from '@prisma/client';
+import {
+  Edit2, Eye, Plus, Search, Check, X,
+  ChevronLeft, ChevronRight, SlidersHorizontal, ChevronDown, CalendarRange,
+} from 'lucide-react';
+import { toast } from 'sonner';
+import { StatCard } from '../StatCard';
+import { DataTable, type DataTableColumn } from '../DataTable';
+import { DrawerForm } from '../DrawerForm';
+import { EmptyState } from '../EmptyState';
+import { StatusBadge } from '../StatusBadge';
 import violationsService, {
   type ViolationActionRequestItem,
   type ViolationAppealQueueItem,
@@ -20,46 +18,548 @@ import violationsService, {
   type ViolationInvoice,
   type ViolationListItem,
   type ViolationStats,
-} from "../../lib/violationsService";
+} from '../../lib/violationsService';
 
-const colors = ["bg-blue-400", "bg-emerald-400", "bg-amber-400", "bg-red-400"];
-const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : "—");
-const fmtDateTime = (v?: string | null) => (v ? new Date(v).toLocaleString() : "—");
-const money = (v: number) => `EGP ${v.toLocaleString()}`;
+// ─── Constants ────────────────────────────────────────────────
+
+const CAT_DOTS = ['#0D9488', '#2563EB', '#D97706', '#DC2626'];
+
+const fmtDate     = (v?: string | null) => v ? new Date(v).toLocaleDateString() : '—';
+const fmtDateTime = (v?: string | null) => v ? new Date(v).toLocaleString()     : '—';
+const money       = (v: number)          => `EGP ${v.toLocaleString()}`;
+
+// ─── Shared styles ────────────────────────────────────────────
+
+const inputStyle: React.CSSProperties = {
+  width: '100%', padding: '8px 10px', borderRadius: '7px',
+  border: '1px solid #E5E7EB', fontSize: '13px', color: '#111827',
+  background: '#FFF', outline: 'none', fontFamily: "'Work Sans', sans-serif",
+  boxSizing: 'border-box', height: '36px',
+};
+const selectStyle: React.CSSProperties = { ...inputStyle, cursor: 'pointer' };
+const textareaStyle: React.CSSProperties = {
+  ...inputStyle, height: 'auto', minHeight: '80px', resize: 'vertical', padding: '9px 10px',
+};
+
+// ─── Primitives ───────────────────────────────────────────────
+
+function TabBtn({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick}
+      style={{ padding: '7px 18px', borderRadius: '7px', border: 'none', background: active ? '#FFF' : 'transparent', color: active ? '#111827' : '#9CA3AF', cursor: 'pointer', fontSize: '12.5px', fontWeight: active ? 700 : 500, transition: 'all 120ms ease', fontFamily: "'Work Sans', sans-serif", flexShrink: 0, boxShadow: active ? '0 1px 3px rgba(0,0,0,0.08)' : 'none' }}>
+      {label}
+    </button>
+  );
+}
+
+function SmallTabBtn({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick}
+      style={{ padding: '5px 14px', borderRadius: '6px', border: 'none', background: active ? '#FFF' : 'transparent', color: active ? '#111827' : '#9CA3AF', cursor: 'pointer', fontSize: '12px', fontWeight: active ? 700 : 500, transition: 'all 120ms ease', fontFamily: "'Work Sans', sans-serif", flexShrink: 0, boxShadow: active ? '0 1px 3px rgba(0,0,0,0.07)' : 'none' }}>
+      {label}
+    </button>
+  );
+}
+
+function GhostIconBtn({ icon, onClick, danger }: {
+  icon: React.ReactNode; onClick: () => void; danger?: boolean;
+}) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button type="button" onClick={onClick}
+      onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{ width: '28px', height: '28px', borderRadius: '6px', border: '1px solid #EBEBEB', background: hov ? (danger ? '#FEF2F2' : '#F3F4F6') : '#FAFAFA', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: hov ? (danger ? '#DC2626' : '#374151') : '#9CA3AF', transition: 'all 120ms', flexShrink: 0 }}>
+      {icon}
+    </button>
+  );
+}
+
+function InfoPair({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #EBEBEB', background: '#FFF' }}>
+      <p style={{ fontSize: '9.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 3px', fontFamily: "'Work Sans', sans-serif" }}>{label}</p>
+      <p style={{ fontSize: '13px', fontWeight: 600, color: '#111827', margin: 0, fontFamily: mono ? "'DM Mono', monospace" : "'Work Sans', sans-serif" }}>{value}</p>
+    </div>
+  );
+}
+
+function Pagination({ page, totalPages, total, onPrev, onNext }: {
+  page: number; totalPages: number; total: number; onPrev: () => void; onNext: () => void;
+}) {
+  return (
+    <div style={{ padding: '12px 14px', borderTop: '1px solid #F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <span style={{ fontSize: '11.5px', color: '#9CA3AF', fontFamily: "'DM Mono', monospace" }}>
+        Page {page} of {totalPages}<span style={{ color: '#D1D5DB', marginLeft: '6px' }}>({total})</span>
+      </span>
+      <div style={{ display: 'flex', gap: '6px' }}>
+        <button type="button" disabled={page <= 1} onClick={onPrev}
+          style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '5px 10px', borderRadius: '6px', border: '1px solid #E5E7EB', background: page <= 1 ? '#F9FAFB' : '#FFF', color: page <= 1 ? '#D1D5DB' : '#374151', cursor: page <= 1 ? 'not-allowed' : 'pointer', fontSize: '12px', fontFamily: "'Work Sans', sans-serif" }}>
+          <ChevronLeft style={{ width: '12px', height: '12px' }} /> Prev
+        </button>
+        <button type="button" disabled={page >= totalPages} onClick={onNext}
+          style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '5px 10px', borderRadius: '6px', border: '1px solid #E5E7EB', background: page >= totalPages ? '#F9FAFB' : '#FFF', color: page >= totalPages ? '#D1D5DB' : '#374151', cursor: page >= totalPages ? 'not-allowed' : 'pointer', fontSize: '12px', fontFamily: "'Work Sans', sans-serif" }}>
+          Next <ChevronRight style={{ width: '12px', height: '12px' }} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function FilterBar({
+  search, setSearch,
+  extra, filtersOpen, setFiltersOpen, activeFilters,
+  children,
+}: {
+  search: string; setSearch: (v: string) => void;
+  extra?: React.ReactNode;
+  filtersOpen: boolean; setFiltersOpen: (v: boolean) => void; activeFilters: number;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div style={{ borderBottom: filtersOpen ? '1px solid #F3F4F6' : 'none' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px' }}>
+        <Search style={{ width: '13px', height: '13px', color: '#C4C9D4', flexShrink: 0 }} />
+        <input
+          placeholder="Search…" value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: '13px', color: '#111827', fontFamily: "'Work Sans', sans-serif" }}
+        />
+        {extra}
+        <button type="button" onClick={() => setFiltersOpen(!filtersOpen)}
+          style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 10px', borderRadius: '6px', border: `1px solid ${activeFilters > 0 ? '#2563EB40' : '#E5E7EB'}`, background: activeFilters > 0 ? '#EFF6FF' : '#FAFAFA', color: activeFilters > 0 ? '#2563EB' : '#6B7280', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer', fontFamily: "'Work Sans', sans-serif", flexShrink: 0 }}>
+          <SlidersHorizontal style={{ width: '11px', height: '11px' }} />
+          Filters
+          {activeFilters > 0 && (
+            <span style={{ width: '15px', height: '15px', borderRadius: '50%', background: '#2563EB', color: '#FFF', fontSize: '9px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              {activeFilters}
+            </span>
+          )}
+          <ChevronDown style={{ width: '10px', height: '10px', transform: filtersOpen ? 'rotate(180deg)' : 'none', transition: 'transform 150ms' }} />
+        </button>
+      </div>
+      {filtersOpen && children && (
+        <div style={{ padding: '10px 14px', borderTop: '1px solid #F3F4F6', display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DateRangePill({ from, to, onFrom, onTo }: {
+  from: string; to: string; onFrom: (v: string) => void; onTo: (v: string) => void;
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 10px', borderRadius: '7px', border: '1px solid #E5E7EB', background: '#FAFAFA' }}>
+      <CalendarRange style={{ width: '11px', height: '11px', color: '#C4C9D4' }} />
+      <span style={{ fontSize: '9.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em' }}>FROM</span>
+      <input type="date" value={from} onChange={(e) => onFrom(e.target.value)}
+        style={{ width: '120px', border: 'none', background: 'transparent', outline: 'none', fontSize: '12px', color: '#374151', fontFamily: "'Work Sans', sans-serif" }} />
+      <span style={{ fontSize: '9.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em' }}>TO</span>
+      <input type="date" value={to} onChange={(e) => onTo(e.target.value)}
+        style={{ width: '120px', border: 'none', background: 'transparent', outline: 'none', fontSize: '12px', color: '#374151', fontFamily: "'Work Sans', sans-serif" }} />
+    </div>
+  );
+}
+
+// ─── Category Modal ───────────────────────────────────────────
+
+function CategoryModal({ open, onClose, editing, onSaved }: {
+  open: boolean; onClose: () => void;
+  editing: ViolationCategoryItem | null; onSaved: () => void;
+}) {
+  const [form, setForm]     = useState({ name: '', defaultFineAmount: '500', description: '' });
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (editing) setForm({ name: editing.name, defaultFineAmount: String(editing.defaultFineAmount), description: editing.description ?? '' });
+    else          setForm({ name: '', defaultFineAmount: '500', description: '' });
+  }, [editing, open]);
+
+  const handleSave = async () => {
+    const name = form.name.trim();
+    const amt  = Number(form.defaultFineAmount);
+    if (!name || !Number.isFinite(amt) || amt <= 0) {
+      toast.error('Provide a valid category name and fine amount'); return;
+    }
+    setSaving(true);
+    try {
+      if (editing) await violationsService.updateCategory(editing.id, { name, defaultFineAmount: amt, description: form.description.trim() || undefined });
+      else         await violationsService.createCategory({ name, defaultFineAmount: amt, description: form.description.trim() || undefined });
+      toast.success('Category saved'); onSaved(); onClose();
+    } catch { toast.error('Failed to save category'); }
+    finally { setSaving(false); }
+  };
+
+  if (!open) return null;
+
+  return (
+    <div onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(17,24,39,0.4)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '24px' }}>
+      <div style={{ width: '100%', maxWidth: '440px', background: '#FFF', borderRadius: '14px', overflow: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,0.18)', fontFamily: "'Work Sans', sans-serif" }}>
+        <div style={{ height: '4px', background: 'linear-gradient(90deg, #7C3AED 0%, #2563EB 100%)' }} />
+
+        {/* Header */}
+        <div style={{ padding: '20px 22px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #F3F4F6' }}>
+          <p style={{ fontSize: '14.5px', fontWeight: 800, color: '#111827', margin: 0, letterSpacing: '-0.01em' }}>
+            {editing ? 'Edit Category' : 'Add Category'}
+          </p>
+          <button type="button" onClick={onClose}
+            style={{ width: '28px', height: '28px', borderRadius: '6px', border: '1px solid #EBEBEB', background: '#FAFAFA', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9CA3AF' }}>
+            <X style={{ width: '12px', height: '12px' }} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            <label style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'Work Sans', sans-serif" }}>
+              Category Name <span style={{ color: '#EF4444' }}>*</span>
+            </label>
+            <input value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} placeholder="e.g. Noise Violation" style={inputStyle} />
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            <label style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'Work Sans', sans-serif" }}>
+              Default Fine <span style={{ color: '#EF4444' }}>*</span>
+            </label>
+            <div style={{ position: 'relative' }}>
+              <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '11px', color: '#9CA3AF', fontFamily: "'DM Mono', monospace", pointerEvents: 'none' }}>EGP</span>
+              <input type="number" min={0} value={form.defaultFineAmount} onChange={(e) => setForm((p) => ({ ...p, defaultFineAmount: e.target.value }))}
+                style={{ ...inputStyle, paddingLeft: '42px', fontFamily: "'DM Mono', monospace" }} />
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            <label style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'Work Sans', sans-serif" }}>
+              Description
+            </label>
+            <textarea value={form.description} onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))} placeholder="Optional description…" style={textareaStyle} />
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: '14px 22px 20px', display: 'flex', justifyContent: 'flex-end', gap: '8px', borderTop: '1px solid #F3F4F6' }}>
+          <button type="button" disabled={saving} onClick={onClose}
+            style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '8px 16px', borderRadius: '8px', border: '1px solid #E5E7EB', background: '#FFF', color: '#6B7280', cursor: saving ? 'not-allowed' : 'pointer', fontSize: '13px', fontFamily: "'Work Sans', sans-serif", fontWeight: 600 }}>
+            <X style={{ width: '12px', height: '12px' }} /> Cancel
+          </button>
+          <button type="button" disabled={saving} onClick={() => void handleSave()}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 20px', borderRadius: '8px', background: saving ? '#9CA3AF' : '#111827', color: '#FFF', border: 'none', cursor: saving ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif", boxShadow: saving ? 'none' : '0 2px 6px rgba(0,0,0,0.18)' }}>
+            <Check style={{ width: '13px', height: '13px' }} />
+            {saving ? 'Saving…' : 'Save Category'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Action Request Card ──────────────────────────────────────
+
+function ActionCard({ action, onReview }: {
+  action: ViolationActionRequestItem;
+  onReview: (approved: boolean, reason?: string) => void;
+}) {
+  const [rejectInput, setRejectInput]       = useState('');
+  const [showReject,  setShowReject]        = useState(false);
+  const isAppeal = action.type === ViolationActionType.APPEAL;
+
+  return (
+    <div style={{ padding: '14px 16px', borderRadius: '10px', border: '1px solid #EBEBEB', background: '#FFF', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#111827', fontFamily: "'Work Sans', sans-serif" }}>
+            {isAppeal ? 'Appeal' : 'Fix Submission'}
+          </span>
+          {isAppeal && (
+            <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '4px', background: '#EDE9FE', color: '#7C3AED', fontFamily: "'Work Sans', sans-serif" }}>APPEAL</span>
+          )}
+        </div>
+        <StatusBadge value={action.status} />
+      </div>
+
+      {/* Meta */}
+      <p style={{ fontSize: '11px', color: '#9CA3AF', margin: 0 }}>
+        Submitted by <strong style={{ color: '#6B7280' }}>{action.requestedByName}</strong> · {fmtDateTime(action.createdAt)}
+      </p>
+
+      {/* Note */}
+      <div style={{ padding: '10px 12px', borderRadius: '8px', background: '#FAFAFA', border: '1px solid #F0F0F0' }}>
+        <p style={{ fontSize: '12.5px', color: '#374151', margin: 0, whiteSpace: 'pre-wrap', lineHeight: 1.55, fontFamily: "'Work Sans', sans-serif" }}>
+          {action.note ?? 'No note provided'}
+        </p>
+      </div>
+
+      {/* Appeal waiver note */}
+      {isAppeal && action.status === ViolationActionStatus.PENDING && (
+        <p style={{ fontSize: '11px', color: '#7C3AED', margin: 0, fontFamily: "'Work Sans', sans-serif" }}>
+          Approving this appeal will cancel the violation and waive the fine.
+        </p>
+      )}
+
+      {/* Actions */}
+      {action.status === ViolationActionStatus.PENDING && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button type="button" onClick={() => onReview(true)}
+              style={{ padding: '6px 16px', borderRadius: '7px', background: '#111827', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+              {isAppeal ? 'Approve Appeal' : 'Approve Fix'}
+            </button>
+            <button type="button" onClick={() => setShowReject((p) => !p)}
+              style={{ padding: '6px 14px', borderRadius: '7px', background: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA', cursor: 'pointer', fontSize: '12px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+              {isAppeal ? 'Reject Appeal' : 'Reject Fix'}
+            </button>
+          </div>
+          {showReject && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <textarea value={rejectInput} onChange={(e) => setRejectInput(e.target.value)}
+                placeholder="Rejection reason…" style={{ ...textareaStyle, minHeight: '70px' }} />
+              <button type="button" onClick={() => {
+                if (!rejectInput.trim()) { toast.error('Rejection reason is required'); return; }
+                onReview(false, rejectInput.trim());
+              }}
+                style={{ alignSelf: 'flex-start', padding: '6px 16px', borderRadius: '7px', background: '#DC2626', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+                Confirm Reject
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Detail Drawer content ────────────────────────────────────
+
+function DetailContent({ detail, onReload }: {
+  detail: ViolationDetail; onReload: () => void;
+}) {
+  const [subTab,          setSubTab]          = useState<'details' | 'evidence' | 'appeals' | 'invoices'>('details');
+  const [showCancelInput, setShowCancelInput] = useState(false);
+  const [cancelInput,     setCancelInput]     = useState('');
+
+  const detailAppeals = detail.actionRequests.filter((a) => a.type === ViolationActionType.APPEAL);
+  const detailFixes   = detail.actionRequests.filter((a) => a.type === ViolationActionType.FIX_SUBMISSION);
+
+  const reviewAction = async (row: ViolationActionRequestItem, approved: boolean, reason?: string) => {
+    try {
+      if (row.type === ViolationActionType.APPEAL) await violationsService.reviewAppeal(row.id, approved, reason);
+      else                                          await violationsService.reviewFixSubmission(row.id, approved, reason);
+      toast.success('Review saved'); onReload();
+    } catch { toast.error('Failed to save review'); }
+  };
+
+  const handleMarkPaid = async () => {
+    try {
+      await violationsService.markAsPaid(detail.id);
+      toast.success('Marked as paid'); onReload();
+    } catch { toast.error('Failed to update'); }
+  };
+
+  const handleCancel = async () => {
+    if (!cancelInput.trim()) { toast.error('Cancellation reason is required'); return; }
+    try {
+      await violationsService.cancelViolation(detail.id);
+      toast.success('Violation cancelled'); setShowCancelInput(false); setCancelInput(''); onReload();
+    } catch { toast.error('Failed to cancel'); }
+  };
+
+  const invoiceCols: DataTableColumn<ViolationInvoice>[] = [
+    { key: 'n', header: 'Invoice #', render: (r) => <span style={{ fontSize: '12px', fontFamily: "'DM Mono', monospace", color: '#111827' }}>{r.invoiceNumber}</span> },
+    { key: 'a', header: 'Amount',    render: (r) => <span style={{ fontSize: '12.5px', fontWeight: 700, fontFamily: "'DM Mono', monospace", color: '#111827' }}>{money(r.amount)}</span> },
+    { key: 't', header: 'Type',      render: (r) => <span style={{ fontSize: '12px', color: '#6B7280' }}>{r.type}</span> },
+    { key: 's', header: 'Status',    render: (r) => <StatusBadge value={r.status} /> },
+    { key: 'd', header: 'Due Date',  render: (r) => <span style={{ fontSize: '11.5px', color: '#9CA3AF', fontFamily: "'DM Mono', monospace" }}>{fmtDate(r.dueDate)}</span> },
+  ];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      {/* Number + badges */}
+      <div>
+        <p style={{ fontSize: '22px', fontWeight: 900, color: '#111827', letterSpacing: '-0.03em', margin: 0, fontFamily: "'DM Mono', monospace" }}>{detail.violationNumber}</p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap', marginTop: '10px' }}>
+          <StatusBadge value={detail.status} />
+          {detail.categoryName && (
+            <span style={{ fontSize: '10.5px', fontWeight: 700, padding: '2px 8px', borderRadius: '5px', background: '#EFF6FF', color: '#2563EB', fontFamily: "'Work Sans', sans-serif" }}>
+              {detail.categoryName}
+            </span>
+          )}
+          {detail.actionRequests.some((a) => a.type === ViolationActionType.APPEAL) && (
+            <span style={{ fontSize: '10.5px', fontWeight: 700, padding: '2px 8px', borderRadius: '5px', background: '#EDE9FE', color: '#7C3AED', fontFamily: "'Work Sans', sans-serif" }}>
+              Appealed
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Sub-tabs */}
+      <div style={{ display: 'flex', gap: '2px', padding: '3px', borderRadius: '8px', background: '#F3F4F6' }}>
+        <SmallTabBtn label="Details"                                   active={subTab === 'details'}  onClick={() => setSubTab('details')} />
+        <SmallTabBtn label="Evidence"                                  active={subTab === 'evidence'} onClick={() => setSubTab('evidence')} />
+        <SmallTabBtn label={`Appeals (${detailAppeals.length + detailFixes.length})`} active={subTab === 'appeals'}  onClick={() => setSubTab('appeals')} />
+        <SmallTabBtn label={`Invoices (${detail.invoices.length})`}    active={subTab === 'invoices'} onClick={() => setSubTab('invoices')} />
+      </div>
+
+      {/* ── Details ── */}
+      {subTab === 'details' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <InfoPair label="Unit"     value={detail.unitNumber} />
+            <InfoPair label="Resident" value={detail.residentName ?? '—'} />
+            <InfoPair label="Issuer"   value={detail.issuerName ?? '—'} />
+            <InfoPair label="Appeal Deadline" value={fmtDate(detail.appealDeadline)} mono />
+          </div>
+
+          {detail.description && (
+            <div style={{ padding: '12px 14px', borderRadius: '9px', border: '1px solid #EBEBEB', background: '#FAFAFA', fontSize: '13px', color: '#374151', lineHeight: 1.6, fontFamily: "'Work Sans', sans-serif" }}>
+              {detail.description}
+            </div>
+          )}
+
+          {/* Fine */}
+          <div style={{ padding: '14px 16px', borderRadius: '10px', border: '1px solid #EBEBEB', background: '#FFF' }}>
+            <p style={{ fontSize: '9.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 6px', fontFamily: "'Work Sans', sans-serif" }}>Fine Amount</p>
+            <p style={{ fontSize: '24px', fontWeight: 900, color: '#111827', margin: 0, fontFamily: "'DM Mono', monospace", letterSpacing: '-0.03em' }}>
+              {money(detail.fineAmount)}
+            </p>
+          </div>
+
+          {/* Actions */}
+          {detail.status === ViolationStatus.PENDING && (
+            <div style={{ padding: '14px 16px', borderRadius: '10px', border: '1px solid #EBEBEB', background: '#FFF', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <p style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.07em', margin: 0, fontFamily: "'Work Sans', sans-serif" }}>Actions</p>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <button type="button" onClick={() => void handleMarkPaid()}
+                  style={{ padding: '7px 16px', borderRadius: '7px', background: '#111827', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '12.5px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+                  Mark as Paid
+                </button>
+                <button type="button" onClick={() => setShowCancelInput((p) => !p)}
+                  style={{ padding: '7px 14px', borderRadius: '7px', background: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA', cursor: 'pointer', fontSize: '12.5px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+                  Cancel Violation
+                </button>
+              </div>
+              {showCancelInput && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <textarea value={cancelInput} onChange={(e) => setCancelInput(e.target.value)}
+                    placeholder="Cancellation reason…" style={textareaStyle} />
+                  <button type="button" onClick={() => void handleCancel()}
+                    style={{ alignSelf: 'flex-start', padding: '7px 16px', borderRadius: '7px', background: '#DC2626', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '12.5px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+                    Confirm Cancel
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Evidence ── */}
+      {subTab === 'evidence' && (
+        detail.photoEvidence.length === 0
+          ? <EmptyState title="No photo evidence" description="Evidence files will appear here." />
+          : (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              {detail.photoEvidence.map((f) => (
+                <a key={f.id} href={f.url ?? '#'} target="_blank" rel="noreferrer"
+                  style={{ borderRadius: '9px', border: '1px solid #EBEBEB', overflow: 'hidden', background: '#FAFAFA', textDecoration: 'none', display: 'block' }}>
+                  <img src={f.url ?? ''} alt={f.fileName ?? 'Evidence'} style={{ width: '100%', height: '120px', objectFit: 'cover', display: 'block' }} />
+                  <div style={{ padding: '8px 10px' }}>
+                    <p style={{ fontSize: '11px', color: '#6B7280', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: "'Work Sans', sans-serif" }}>
+                      {f.fileName ?? f.id}
+                    </p>
+                  </div>
+                </a>
+              ))}
+            </div>
+          )
+      )}
+
+      {/* ── Appeals & Fixes ── */}
+      {subTab === 'appeals' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {detailAppeals.length === 0 && detailFixes.length === 0
+            ? <EmptyState title="No appeals submitted" description="Appeals and fix submissions will appear here." />
+            : (
+              <>
+                {detailAppeals.map((a) => (
+                  <ActionCard key={a.id} action={a}
+                    onReview={(approved, reason) => void reviewAction(a, approved, reason)} />
+                ))}
+                {detailFixes.map((a) => (
+                  <ActionCard key={a.id} action={a}
+                    onReview={(approved, reason) => void reviewAction(a, approved, reason)} />
+                ))}
+              </>
+            )
+          }
+        </div>
+      )}
+
+      {/* ── Invoices ── */}
+      {subTab === 'invoices' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button type="button"
+              onClick={() => toast.info('Create invoice from Billing until inline invoice form is enabled.')}
+              style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '6px 14px', borderRadius: '7px', background: '#2563EB', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+              <Plus style={{ width: '11px', height: '11px' }} /> Create Invoice
+            </button>
+          </div>
+          <DataTable
+            columns={invoiceCols} rows={detail.invoices} rowKey={(r) => r.id}
+            emptyTitle="No linked invoices" emptyDescription="No invoice records linked to this violation."
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main ─────────────────────────────────────────────────────
 
 export function ViolationsManagement() {
-  const [tab, setTab] = useState<"violations" | "appeals" | "settings">("violations");
-  const [stats, setStats] = useState<ViolationStats | null>(null);
+  const [tab,        setTab]        = useState<'violations' | 'appeals' | 'settings'>('violations');
+  const [stats,      setStats]      = useState<ViolationStats | null>(null);
   const [categories, setCategories] = useState<ViolationCategoryItem[]>([]);
-  const [rows, setRows] = useState<ViolationListItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [status, setStatus] = useState("ALL");
-  const [categoryId, setCategoryId] = useState("ALL");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [hasAppeal, setHasAppeal] = useState(false);
-  const [page, setPage] = useState(1);
+
+  // Violations list
+  const [rows,       setRows]       = useState<ViolationListItem[]>([]);
+  const [loading,    setLoading]    = useState(true);
+  const [search,     setSearch]     = useState('');
+  const [status,     setStatus]     = useState('ALL');
+  const [categoryId, setCategoryId] = useState('ALL');
+  const [dateFrom,   setDateFrom]   = useState('');
+  const [dateTo,     setDateTo]     = useState('');
+  const [hasAppeal,  setHasAppeal]  = useState(false);
+  const [page,       setPage]       = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const [total, setTotal] = useState(0);
-  const [appealRows, setAppealRows] = useState<ViolationAppealQueueItem[]>([]);
-  const [appealsLoading, setAppealsLoading] = useState(true);
-  const [appealSearch, setAppealSearch] = useState("");
-  const [appealStatus, setAppealStatus] = useState("ALL");
-  const [appealDateFrom, setAppealDateFrom] = useState("");
-  const [appealDateTo, setAppealDateTo] = useState("");
-  const [appealPage, setAppealPage] = useState(1);
+  const [total,      setTotal]      = useState(0);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  // Appeals list
+  const [appealRows,       setAppealRows]       = useState<ViolationAppealQueueItem[]>([]);
+  const [appealsLoading,   setAppealsLoading]   = useState(true);
+  const [appealSearch,     setAppealSearch]     = useState('');
+  const [appealStatus,     setAppealStatus]     = useState('ALL');
+  const [appealDateFrom,   setAppealDateFrom]   = useState('');
+  const [appealDateTo,     setAppealDateTo]     = useState('');
+  const [appealPage,       setAppealPage]       = useState(1);
   const [appealTotalPages, setAppealTotalPages] = useState(1);
-  const [appealTotal, setAppealTotal] = useState(0);
-  const [detail, setDetail] = useState<ViolationDetail | null>(null);
+  const [appealTotal,      setAppealTotal]      = useState(0);
+  const [appealFiltersOpen, setAppealFiltersOpen] = useState(false);
+
+  // Detail drawer
+  const [detail,     setDetail]     = useState<ViolationDetail | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
-  const [detailTab, setDetailTab] = useState<"details" | "evidence" | "appeals" | "invoices">("details");
-  const [cancelInput, setCancelInput] = useState("");
-  const [showCancelInput, setShowCancelInput] = useState(false);
-  const [rejectByAction, setRejectByAction] = useState<Record<string, string>>({});
-  const [categoryOpen, setCategoryOpen] = useState(false);
+  const [detailKey,  setDetailKey]  = useState(0);
+
+  // Category modal
+  const [catModalOpen,    setCatModalOpen]    = useState(false);
   const [editingCategory, setEditingCategory] = useState<ViolationCategoryItem | null>(null);
-  const [categoryForm, setCategoryForm] = useState({ name: "", defaultFineAmount: "500", description: "" });
+
+  // ── Loaders ───────────────────────────────────────────────────
 
   const loadViolations = async () => {
     setLoading(true);
@@ -68,283 +568,289 @@ export function ViolationsManagement() {
         violationsService.getViolationStats(),
         violationsService.listCategories(true),
         violationsService.listViolations({
-          page,
-          limit: 25,
-          search: search || undefined,
-          status: status === "ALL" ? undefined : (status as ViolationStatus),
-          categoryId: categoryId === "ALL" ? undefined : categoryId,
-          hasAppeal: hasAppeal || undefined,
-          dateFrom: dateFrom ? new Date(dateFrom).toISOString() : undefined,
-          dateTo: dateTo ? new Date(`${dateTo}T23:59:59`).toISOString() : undefined,
+          page, limit: 25,
+          search:     search     || undefined,
+          status:     status     !== 'ALL' ? (status as ViolationStatus) : undefined,
+          categoryId: categoryId !== 'ALL' ? categoryId                  : undefined,
+          hasAppeal:  hasAppeal  || undefined,
+          dateFrom:   dateFrom   ? new Date(dateFrom).toISOString()                   : undefined,
+          dateTo:     dateTo     ? new Date(`${dateTo}T23:59:59`).toISOString()        : undefined,
         }),
       ]);
-      setStats(st);
-      setCategories(cats);
-      setRows(list.data);
-      setTotal(list.total);
-      setTotalPages(list.totalPages);
-    } catch {
-      toast.error("Failed to load violations");
-    } finally {
-      setLoading(false);
-    }
+      setStats(st); setCategories(cats);
+      setRows(list.data); setTotal(list.total); setTotalPages(list.totalPages);
+    } catch { toast.error('Failed to load violations'); }
+    finally { setLoading(false); }
   };
 
   const loadAppeals = async () => {
     setAppealsLoading(true);
     try {
       const res = await violationsService.listAppealRequests({
-        page: appealPage,
-        limit: 25,
-        search: appealSearch || undefined,
-        status: appealStatus === "ALL" ? undefined : (appealStatus as ViolationActionStatus),
-        dateFrom: appealDateFrom ? new Date(appealDateFrom).toISOString() : undefined,
-        dateTo: appealDateTo ? new Date(`${appealDateTo}T23:59:59`).toISOString() : undefined,
+        page: appealPage, limit: 25,
+        search:   appealSearch   || undefined,
+        status:   appealStatus   !== 'ALL' ? (appealStatus as ViolationActionStatus) : undefined,
+        dateFrom: appealDateFrom ? new Date(appealDateFrom).toISOString()             : undefined,
+        dateTo:   appealDateTo   ? new Date(`${appealDateTo}T23:59:59`).toISOString() : undefined,
       });
-      setAppealRows(res.data);
-      setAppealTotal(res.total);
-      setAppealTotalPages(res.totalPages);
-    } catch {
-      toast.error("Failed to load appeals");
-    } finally {
-      setAppealsLoading(false);
-    }
+      setAppealRows(res.data); setAppealTotal(res.total); setAppealTotalPages(res.totalPages);
+    } catch { toast.error('Failed to load appeals'); }
+    finally { setAppealsLoading(false); }
   };
 
   useEffect(() => {
-    if (tab === "violations" || tab === "settings") void loadViolations();
+    if (tab === 'violations' || tab === 'settings') void loadViolations();
   }, [tab, page, search, status, categoryId, dateFrom, dateTo, hasAppeal]);
 
   useEffect(() => {
-    if (tab === "appeals") void loadAppeals();
+    if (tab === 'appeals') void loadAppeals();
   }, [tab, appealPage, appealSearch, appealStatus, appealDateFrom, appealDateTo]);
 
-  const openDetail = async (id: string, active: "details" | "evidence" | "appeals" | "invoices" = "details") => {
+  const openDetail = async (id: string) => {
     try {
       const d = await violationsService.getViolationDetail(id);
-      setDetail(d);
-      setDetailTab(active);
-      setDetailOpen(true);
-      setShowCancelInput(false);
-      setCancelInput("");
-    } catch {
-      toast.error("Failed to load detail");
-    }
+      setDetail(d); setDetailKey((k) => k + 1); setDetailOpen(true);
+    } catch { toast.error('Failed to load detail'); }
   };
 
+  // ── Columns ───────────────────────────────────────────────────
+
   const violationCols = useMemo<DataTableColumn<ViolationListItem>[]>(() => [
-    { key: "n", header: "#", className: "w-[130px]", render: (r) => <span className="font-['DM_Mono']">{r.violationNumber}</span> },
-    { key: "c", header: "Category", className: "w-[160px]", render: (r) => <span>{r.categoryName ?? "—"}</span> },
-    { key: "u", header: "Unit", className: "w-[100px]", render: (r) => <span>{r.unitNumber}</span> },
-    { key: "r", header: "Resident", className: "w-[150px]", render: (r) => <span>{r.residentName ?? "—"}</span> },
-    { key: "i", header: "Issuer", className: "w-[150px]", render: (r) => <span>{r.issuerName ?? "—"}</span> },
-    { key: "f", header: "Fine Amount", className: "w-[150px] text-right", render: (r) => <span className="block text-right font-['DM_Mono'] text-[#1E293B]">{money(r.fineAmount)}</span> },
-    { key: "s", header: "Status", className: "w-[120px]", render: (r) => <StatusBadge value={r.status} /> },
-    { key: "a", header: "Appeal", className: "w-[120px]", render: (r) => r.hasAppeal ? <span className="text-xs bg-violet-500/10 text-violet-400 border border-violet-500/20 px-2 py-0.5 rounded-full">Appealed</span> : <span className="text-[#475569]">—</span> },
-    { key: "x", header: "Actions", className: "w-[80px] text-right", render: (r) => <button type="button" onClick={() => void openDetail(r.id)} className="inline-flex p-2 rounded-lg hover:bg-[#F8FAFC] text-slate-400 hover:text-[#1E293B]"><Eye className="w-4 h-4" /></button> },
+    { key: 'n', header: '#',           render: (r) => <span style={{ fontSize: '11.5px', fontFamily: "'DM Mono', monospace", color: '#6B7280' }}>{r.violationNumber}</span> },
+    { key: 'c', header: 'Category',    render: (r) => <span style={{ fontSize: '12px', color: '#374151' }}>{r.categoryName ?? '—'}</span> },
+    { key: 'u', header: 'Unit',        render: (r) => (
+      <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: '5px', fontSize: '10.5px', fontWeight: 700, background: '#EFF6FF', color: '#2563EB', fontFamily: "'Work Sans', sans-serif" }}>
+        {r.unitNumber}
+      </span>
+    )},
+    { key: 'r', header: 'Resident',    render: (r) => <span style={{ fontSize: '12px', color: '#374151' }}>{r.residentName ?? '—'}</span> },
+    { key: 'i', header: 'Issuer',      render: (r) => <span style={{ fontSize: '12px', color: '#6B7280' }}>{r.issuerName ?? '—'}</span> },
+    { key: 'f', header: 'Fine',        render: (r) => (
+      <span style={{ fontSize: '12.5px', fontWeight: 700, fontFamily: "'DM Mono', monospace", color: '#111827', display: 'block', textAlign: 'right' }}>
+        {money(r.fineAmount)}
+      </span>
+    )},
+    { key: 's', header: 'Status',      render: (r) => <StatusBadge value={r.status} /> },
+    { key: 'a', header: 'Appeal',      render: (r) => r.hasAppeal
+      ? <span style={{ fontSize: '10.5px', fontWeight: 700, padding: '2px 8px', borderRadius: '5px', background: '#EDE9FE', color: '#7C3AED', fontFamily: "'Work Sans', sans-serif" }}>Appealed</span>
+      : <span style={{ color: '#D1D5DB', fontSize: '12px' }}>—</span>
+    },
+    { key: 'x', header: '',            render: (r) => (
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <GhostIconBtn icon={<Eye style={{ width: '11px', height: '11px' }} />} onClick={() => void openDetail(r.id)} />
+      </div>
+    )},
   ], []);
 
   const appealCols = useMemo<DataTableColumn<ViolationAppealQueueItem>[]>(() => [
-    { key: "n", header: "Violation #", className: "w-[130px]", render: (r) => <span className="font-['DM_Mono']">{r.violationNumber}</span> },
-    { key: "c", header: "Category", className: "w-[150px]", render: (r) => <span>{r.categoryName ?? "—"}</span> },
-    { key: "u", header: "Unit", className: "w-[100px]", render: (r) => <span>{r.unitNumber}</span> },
-    { key: "r", header: "Resident", className: "w-[150px]", render: (r) => <span>{r.residentName ?? "—"}</span> },
-    { key: "f", header: "Fine", className: "w-[120px] text-right", render: (r) => <span className="block text-right font-['DM_Mono']">{money(r.fineAmount)}</span> },
-    { key: "note", header: "Appeal Note", render: (r) => <span>{(r.appealNote ?? "—").slice(0, 70)}{(r.appealNote ?? "").length > 70 ? "..." : ""}</span> },
-    { key: "d", header: "Submitted", className: "w-[150px]", render: (r) => <span>{fmtDateTime(r.submittedAt)}</span> },
-    { key: "s", header: "Status", className: "w-[120px]", render: (r) => <StatusBadge value={r.status} /> },
-    { key: "x", header: "Actions", className: "w-[80px] text-right", render: (r) => <button type="button" onClick={() => void openDetail(r.violationId, "appeals")} className="inline-flex p-2 rounded-lg hover:bg-[#F8FAFC] text-slate-400 hover:text-[#1E293B]"><Eye className="w-4 h-4" /></button> },
+    { key: 'n',    header: 'Violation #', render: (r) => <span style={{ fontSize: '11.5px', fontFamily: "'DM Mono', monospace", color: '#6B7280' }}>{r.violationNumber}</span> },
+    { key: 'c',    header: 'Category',    render: (r) => <span style={{ fontSize: '12px', color: '#374151' }}>{r.categoryName ?? '—'}</span> },
+    { key: 'u',    header: 'Unit',        render: (r) => (
+      <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: '5px', fontSize: '10.5px', fontWeight: 700, background: '#EFF6FF', color: '#2563EB', fontFamily: "'Work Sans', sans-serif" }}>
+        {r.unitNumber}
+      </span>
+    )},
+    { key: 'r',    header: 'Resident',    render: (r) => <span style={{ fontSize: '12px', color: '#374151' }}>{r.residentName ?? '—'}</span> },
+    { key: 'f',    header: 'Fine',        render: (r) => <span style={{ fontSize: '12.5px', fontWeight: 700, fontFamily: "'DM Mono', monospace", color: '#111827' }}>{money(r.fineAmount)}</span> },
+    { key: 'note', header: 'Appeal Note', render: (r) => (
+      <span style={{ fontSize: '12px', color: '#6B7280' }}>
+        {(r.appealNote ?? '—').slice(0, 70)}{(r.appealNote ?? '').length > 70 ? '…' : ''}
+      </span>
+    )},
+    { key: 'd',    header: 'Submitted',   render: (r) => <span style={{ fontSize: '11px', fontFamily: "'DM Mono', monospace", color: '#9CA3AF' }}>{fmtDateTime(r.submittedAt)}</span> },
+    { key: 's',    header: 'Status',      render: (r) => <StatusBadge value={r.status} /> },
+    { key: 'x',    header: '',            render: (r) => (
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <GhostIconBtn icon={<Eye style={{ width: '11px', height: '11px' }} />} onClick={() => void openDetail(r.violationId)} />
+      </div>
+    )},
   ], []);
 
-  const invoiceCols = useMemo<DataTableColumn<ViolationInvoice>[]>(() => [
-    { key: "n", header: "Invoice #", render: (r) => <span className="font-['DM_Mono']">{r.invoiceNumber}</span> },
-    { key: "a", header: "Amount", render: (r) => <span className="font-['DM_Mono']">{money(r.amount)}</span> },
-    { key: "t", header: "Type", render: (r) => <span>{r.type}</span> },
-    { key: "s", header: "Status", render: (r) => <StatusBadge value={r.status} /> },
-    { key: "d", header: "Due Date", render: (r) => <span>{fmtDate(r.dueDate)}</span> },
-  ], []);
+  const vActiveFilters = [status !== 'ALL', categoryId !== 'ALL', dateFrom, dateTo, hasAppeal].filter(Boolean).length;
+  const aActiveFilters = [appealStatus !== 'ALL', appealDateFrom, appealDateTo].filter(Boolean).length;
 
-  const detailAppeals = detail?.actionRequests.filter((a) => a.type === ViolationActionType.APPEAL) ?? [];
-  const detailFixes = detail?.actionRequests.filter((a) => a.type === ViolationActionType.FIX_SUBMISSION) ?? [];
-
-  const reviewAction = async (row: ViolationActionRequestItem, approved: boolean) => {
-    if (!detail) return;
-    const reason = rejectByAction[row.id]?.trim();
-    if (!approved && !reason) {
-      toast.error("Rejection reason is required");
-      return;
-    }
-    try {
-      if (row.type === ViolationActionType.APPEAL) {
-        await violationsService.reviewAppeal(row.id, approved, reason || undefined);
-      } else {
-        await violationsService.reviewFixSubmission(row.id, approved, reason || undefined);
-      }
-      const refreshed = await violationsService.getViolationDetail(detail.id);
-      setDetail(refreshed);
-      await Promise.all([loadViolations(), loadAppeals()]);
-      toast.success("Review saved");
-    } catch {
-      toast.error("Failed to save review");
-    }
-  };
-
-  const saveCategory = async () => {
-    const name = categoryForm.name.trim();
-    const defaultFineAmount = Number(categoryForm.defaultFineAmount);
-    if (!name || !Number.isFinite(defaultFineAmount) || defaultFineAmount <= 0) {
-      toast.error("Provide valid category name and default fine");
-      return;
-    }
-    try {
-      if (editingCategory) {
-        await violationsService.updateCategory(editingCategory.id, {
-          name,
-          defaultFineAmount,
-          description: categoryForm.description.trim() || undefined,
-        });
-      } else {
-        await violationsService.createCategory({
-          name,
-          defaultFineAmount,
-          description: categoryForm.description.trim() || undefined,
-        });
-      }
-      setCategoryOpen(false);
-      await loadViolations();
-      toast.success("Category saved");
-    } catch {
-      toast.error("Failed to save category");
-    }
-  };
-
-  const saveCancel = async () => {
-    if (!detail) return;
-    if (!cancelInput.trim()) {
-      toast.error("Cancellation reason is required");
-      return;
-    }
-    try {
-      const d = await violationsService.cancelViolation(detail.id);
-      setDetail(d);
-      setShowCancelInput(false);
-      setCancelInput("");
-      await loadViolations();
-      toast.success("Violation cancelled");
-    } catch {
-      toast.error("Failed to cancel violation");
-    }
-  };
+  // ─────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-[calc(100vh-140px)] bg-[#F8FAFC] rounded-2xl p-8 space-y-6">
-      <PageHeader variant="light" title="Violations" description="Manage violations, appeals queue, and categories." />
-      <Tabs value={tab} onValueChange={(v: string) => setTab(v as "violations" | "appeals" | "settings")} className="space-y-6">
-        <TabsList className="bg-white border border-[#E2E8F0] p-1 rounded-lg">
-          <TabsTrigger value="violations" className="text-[#334155]">Violations</TabsTrigger>
-          <TabsTrigger value="appeals" className="text-[#334155]">Appeals</TabsTrigger>
-          <TabsTrigger value="settings" className="text-[#334155]">Settings</TabsTrigger>
-        </TabsList>
-        <TabsContent value="violations" className="space-y-6">
-          <div className="grid grid-cols-4 gap-4">
-            <StatCard variant="light" title="Total Violations" value={String(stats?.total ?? 0)} subtitle="All records" icon="complaints-total" />
-            <StatCard variant="light" title="Pending Payment" value={String(stats?.pending ?? 0)} subtitle="Awaiting payment" icon="complaints-open" />
-            <StatCard variant="light" title="Fines Collected" value={money(stats?.totalFinesCollected ?? 0)} subtitle="Status = PAID" icon="revenue" />
-            <StatCard variant="light" title="Pending Appeals" value={String(stats?.pendingAppeals ?? 0)} subtitle="Appeal queue" icon="tickets" />
+    <div style={{ fontFamily: "'Work Sans', sans-serif" }}>
+
+      {/* ── Header ─────────────────────────────────────────── */}
+      <div style={{ marginBottom: '20px' }}>
+        <h1 style={{ fontSize: '18px', fontWeight: 900, color: '#111827', letterSpacing: '-0.02em', margin: 0 }}>Violations Management</h1>
+        <p style={{ fontSize: '13px', color: '#6B7280', margin: '4px 0 0' }}>Manage violations, appeals queue, and categories.</p>
+      </div>
+
+      {/* ── Tabs ───────────────────────────────────────────── */}
+      <div style={{ display: 'flex', gap: '2px', padding: '4px', borderRadius: '10px', background: '#F3F4F6', marginBottom: '20px', width: 'fit-content' }}>
+        <TabBtn label="Violations" active={tab === 'violations'} onClick={() => setTab('violations')} />
+        <TabBtn label="Appeals"    active={tab === 'appeals'}    onClick={() => setTab('appeals')} />
+        <TabBtn label="Settings"   active={tab === 'settings'}   onClick={() => setTab('settings')} />
+      </div>
+
+      {/* ══ Violations tab ════════════════════════════════════ */}
+      {tab === 'violations' && (
+        <>
+          {/* Stats */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '20px' }}>
+            <StatCard icon="complaints-total" title="Total Violations"   value={String(stats?.total ?? 0)}                       subtitle="All records" />
+            <StatCard icon="complaints-open"  title="Pending Payment"    value={String(stats?.pending ?? 0)}                      subtitle="Awaiting payment" />
+            <StatCard icon="revenue"          title="Fines Collected"    value={money(stats?.totalFinesCollected ?? 0)}            subtitle="Status = PAID" />
+            <StatCard icon="tickets"          title="Pending Appeals"    value={String(stats?.pendingAppeals ?? 0)}                subtitle="Appeal queue" />
           </div>
-          <div className="bg-white rounded-xl border border-[#E2E8F0]">
-            <div className="p-4 border-b border-[#E2E8F0] flex items-center gap-3 flex-wrap">
-              <div className="relative flex-1 max-w-xs">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                <input value={search} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setSearch(e.target.value); setPage(1); }} className="w-full bg-[#F8FAFC] border border-[#CBD5E1] rounded-lg pl-9 pr-3 py-2 text-sm text-[#1E293B] placeholder:text-[#475569] focus:outline-none focus:border-blue-500/50" placeholder="Search..." />
-              </div>
-              <select value={status} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => { setStatus(e.target.value); setPage(1); }} className="w-40 bg-[#F8FAFC] border border-[#CBD5E1] rounded-lg px-3 py-2 text-sm text-[#334155] focus:outline-none focus:border-blue-500/50 appearance-none"><option value="ALL">All Statuses</option><option value="PENDING">Pending</option><option value="PAID">Paid</option><option value="APPEALED">Appealed</option><option value="CANCELLED">Cancelled</option></select>
-              <select value={categoryId} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => { setCategoryId(e.target.value); setPage(1); }} className="w-44 bg-[#F8FAFC] border border-[#CBD5E1] rounded-lg px-3 py-2 text-sm text-[#334155] focus:outline-none focus:border-blue-500/50 appearance-none"><option value="ALL">All Categories</option>{categories.filter((c) => c.isActive).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
-              <input type="date" value={dateFrom} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setDateFrom(e.target.value); setPage(1); }} className="w-36 bg-[#F8FAFC] border border-[#CBD5E1] rounded-lg px-3 py-2 text-sm text-[#334155] focus:outline-none focus:border-blue-500/50" />
-              <input type="date" value={dateTo} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setDateTo(e.target.value); setPage(1); }} className="w-36 bg-[#F8FAFC] border border-[#CBD5E1] rounded-lg px-3 py-2 text-sm text-[#334155] focus:outline-none focus:border-blue-500/50" />
-              <button type="button" onClick={() => { setHasAppeal((p: boolean) => !p); setPage(1); }} className={cn("text-xs px-3 py-1.5 rounded-full border", hasAppeal ? "bg-violet-500/10 text-violet-400 border-violet-500/20" : "bg-[#F8FAFC] text-slate-400 border-transparent")}>Has Appeal</button>
-            </div>
-            <div className="p-6">{loading ? <SkeletonTable columns={9} variant="light" /> : <DataTable variant="light" columns={violationCols} rows={rows} rowKey={(r) => r.id} rowClassName={(r) => r.status === ViolationStatus.APPEALED ? "border-l-2 border-violet-500/30" : ""} emptyTitle="No violations found" emptyDescription="Try adjusting filters." />}</div>
-            <div className="px-6 pb-6 flex items-center justify-between"><p className="text-xs text-slate-500">Page {page} of {totalPages} ({total} records)</p><div className="flex items-center gap-2"><button type="button" disabled={page <= 1} onClick={() => setPage((p: number) => Math.max(1, p - 1))} className="bg-[#F8FAFC] hover:bg-[#E2E8F0] border border-[#CBD5E1] text-[#334155] text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-50">Previous</button><button type="button" disabled={page >= totalPages} onClick={() => setPage((p: number) => Math.min(totalPages, p + 1))} className="bg-[#F8FAFC] hover:bg-[#E2E8F0] border border-[#CBD5E1] text-[#334155] text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-50">Next</button></div></div>
+
+          {/* Table card */}
+          <div style={{ borderRadius: '12px', border: '1px solid #EBEBEB', background: '#FFF', overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
+            <FilterBar
+              search={search} setSearch={(v) => { setSearch(v); setPage(1); }}
+              filtersOpen={filtersOpen} setFiltersOpen={setFiltersOpen} activeFilters={vActiveFilters}
+              extra={
+                <button type="button" onClick={() => { setHasAppeal((p) => !p); setPage(1); }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 10px', borderRadius: '6px', border: `1px solid ${hasAppeal ? '#DDD6FE' : '#E5E7EB'}`, background: hasAppeal ? '#EDE9FE' : '#FAFAFA', color: hasAppeal ? '#7C3AED' : '#9CA3AF', fontSize: '11.5px', fontWeight: 700, cursor: 'pointer', fontFamily: "'Work Sans', sans-serif", flexShrink: 0, transition: 'all 120ms' }}>
+                  Has Appeal
+                </button>
+              }
+            >
+              <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} style={{ ...selectStyle, width: '150px' }}>
+                <option value="ALL">All Statuses</option>
+                <option value="PENDING">Pending</option>
+                <option value="PAID">Paid</option>
+                <option value="APPEALED">Appealed</option>
+                <option value="CANCELLED">Cancelled</option>
+              </select>
+              <select value={categoryId} onChange={(e) => { setCategoryId(e.target.value); setPage(1); }} style={{ ...selectStyle, width: '170px' }}>
+                <option value="ALL">All Categories</option>
+                {categories.filter((c) => c.isActive).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              <DateRangePill
+                from={dateFrom} to={dateTo}
+                onFrom={(v) => { setDateFrom(v); setPage(1); }}
+                onTo={(v)   => { setDateTo(v);   setPage(1); }}
+              />
+            </FilterBar>
+
+            <DataTable
+              columns={violationCols} rows={rows} rowKey={(r) => r.id} loading={loading}
+              rowStyle={(r) => r.status === ViolationStatus.APPEALED ? { borderLeft: '3px solid #C4B5FD' } : {}}
+              emptyTitle="No violations found" emptyDescription="Try adjusting your search or filters."
+            />
+
+            <Pagination
+              page={page} totalPages={totalPages} total={total}
+              onPrev={() => setPage((p) => Math.max(1, p - 1))}
+              onNext={() => setPage((p) => Math.min(totalPages, p + 1))}
+            />
           </div>
-        </TabsContent>
-        <TabsContent value="appeals" className="space-y-6">
-          <div className="bg-white rounded-xl border border-[#E2E8F0]">
-            <div className="p-4 border-b border-[#E2E8F0] flex items-center gap-3 flex-wrap">
-              <div className="relative flex-1 max-w-xs"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" /><input value={appealSearch} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setAppealSearch(e.target.value); setAppealPage(1); }} className="w-full bg-[#F8FAFC] border border-[#CBD5E1] rounded-lg pl-9 pr-3 py-2 text-sm text-[#1E293B] placeholder:text-[#475569] focus:outline-none focus:border-blue-500/50" placeholder="Search..." /></div>
-              <select value={appealStatus} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => { setAppealStatus(e.target.value); setAppealPage(1); }} className="w-40 bg-[#F8FAFC] border border-[#CBD5E1] rounded-lg px-3 py-2 text-sm text-[#334155] focus:outline-none focus:border-blue-500/50 appearance-none"><option value="ALL">All Statuses</option><option value="PENDING">Pending</option><option value="APPROVED">Approved</option><option value="REJECTED">Rejected</option><option value="CLOSED">Closed</option></select>
-              <input type="date" value={appealDateFrom} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setAppealDateFrom(e.target.value); setAppealPage(1); }} className="w-36 bg-[#F8FAFC] border border-[#CBD5E1] rounded-lg px-3 py-2 text-sm text-[#334155] focus:outline-none focus:border-blue-500/50" />
-              <input type="date" value={appealDateTo} onChange={(e: React.ChangeEvent<HTMLInputElement>) => { setAppealDateTo(e.target.value); setAppealPage(1); }} className="w-36 bg-[#F8FAFC] border border-[#CBD5E1] rounded-lg px-3 py-2 text-sm text-[#334155] focus:outline-none focus:border-blue-500/50" />
-            </div>
-            <div className="p-6">{appealsLoading ? <SkeletonTable columns={9} variant="light" /> : <DataTable variant="light" columns={appealCols} rows={appealRows} rowKey={(r) => r.actionRequestId} emptyTitle="No appeals submitted" emptyDescription="Appeal queue is empty." />}</div>
-            <div className="px-6 pb-6 flex items-center justify-between"><p className="text-xs text-slate-500">Page {appealPage} of {appealTotalPages} ({appealTotal} records)</p><div className="flex items-center gap-2"><button type="button" disabled={appealPage <= 1} onClick={() => setAppealPage((p: number) => Math.max(1, p - 1))} className="bg-[#F8FAFC] hover:bg-[#E2E8F0] border border-[#CBD5E1] text-[#334155] text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-50">Previous</button><button type="button" disabled={appealPage >= appealTotalPages} onClick={() => setAppealPage((p: number) => Math.min(appealTotalPages, p + 1))} className="bg-[#F8FAFC] hover:bg-[#E2E8F0] border border-[#CBD5E1] text-[#334155] text-sm font-medium px-4 py-2 rounded-lg disabled:opacity-50">Next</button></div></div>
-          </div>
-        </TabsContent>
-        <TabsContent value="settings">
-          <div className="bg-white rounded-xl border border-[#E2E8F0] p-6">
-            <PageHeader variant="light" title="Violation Categories" description="Define category names and default fine amounts" actions={<button type="button" onClick={() => { setEditingCategory(null); setCategoryForm({ name: "", defaultFineAmount: "500", description: "" }); setCategoryOpen(true); }} className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-2"><Plus className="w-4 h-4" />Add Category</button>} />
-            <div className="mt-6">{categories.length === 0 ? <EmptyState variant="light" title="No violation categories" description="Create categories and default fines." /> : categories.map((c) => <div key={c.id} className="p-4 rounded-lg bg-[#F8FAFC] mb-2 flex items-center justify-between"><div className="flex items-center gap-3"><span className={cn("w-2.5 h-2.5 rounded-full", colors[Math.abs(c.displayOrder) % colors.length])} /><div className="space-y-1"><p className="text-sm font-medium text-[#1E293B]">{c.name}</p><span className="text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 rounded-full font-['DM_Mono']">{money(c.defaultFineAmount)}</span></div></div><div className="flex items-center gap-2"><button type="button" onClick={() => void violationsService.toggleCategory(c.id).then(() => loadViolations())} className={cn("relative w-11 h-6 rounded-full border", c.isActive ? "bg-emerald-500/20 border-emerald-500/30" : "bg-[#F8FAFC] border-[#CBD5E1]")}><span className={cn("absolute top-0.5 w-5 h-5 rounded-full", c.isActive ? "left-5 bg-emerald-400" : "left-0.5 bg-slate-500")} /></button><button type="button" onClick={() => { setEditingCategory(c); setCategoryForm({ name: c.name, defaultFineAmount: String(c.defaultFineAmount), description: c.description ?? "" }); setCategoryOpen(true); }} className="p-2 rounded-lg hover:bg-[#F8FAFC] text-slate-400 hover:text-[#1E293B]"><Edit2 className="w-4 h-4" /></button></div></div>)}</div>
-          </div>
-        </TabsContent>
-      </Tabs>
-            <Dialog open={categoryOpen} onOpenChange={setCategoryOpen}>
-        <DialogContent className="w-full max-w-[480px] bg-white border border-slate-200 p-0 overflow-hidden">
-          <DialogHeader className="px-6 py-5 border-b border-slate-200">
-            <DialogTitle className="text-base font-semibold text-slate-900">{editingCategory ? "Edit Category" : "Add Category"}</DialogTitle>
-          </DialogHeader>
-          <div className="px-6 py-6 space-y-4">
+        </>
+      )}
+
+      {/* ══ Appeals tab ═══════════════════════════════════════ */}
+      {tab === 'appeals' && (
+        <div style={{ borderRadius: '12px', border: '1px solid #EBEBEB', background: '#FFF', overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
+          <FilterBar
+            search={appealSearch} setSearch={(v) => { setAppealSearch(v); setAppealPage(1); }}
+            filtersOpen={appealFiltersOpen} setFiltersOpen={setAppealFiltersOpen} activeFilters={aActiveFilters}
+          >
+            <select value={appealStatus} onChange={(e) => { setAppealStatus(e.target.value); setAppealPage(1); }} style={{ ...selectStyle, width: '150px' }}>
+              <option value="ALL">All Statuses</option>
+              <option value="PENDING">Pending</option>
+              <option value="APPROVED">Approved</option>
+              <option value="REJECTED">Rejected</option>
+              <option value="CLOSED">Closed</option>
+            </select>
+            <DateRangePill
+              from={appealDateFrom} to={appealDateTo}
+              onFrom={(v) => { setAppealDateFrom(v); setAppealPage(1); }}
+              onTo={(v)   => { setAppealDateTo(v);   setAppealPage(1); }}
+            />
+          </FilterBar>
+
+          <DataTable
+            columns={appealCols} rows={appealRows} rowKey={(r) => r.actionRequestId} loading={appealsLoading}
+            emptyTitle="No appeals submitted" emptyDescription="Appeal queue is empty."
+          />
+
+          <Pagination
+            page={appealPage} totalPages={appealTotalPages} total={appealTotal}
+            onPrev={() => setAppealPage((p) => Math.max(1, p - 1))}
+            onNext={() => setAppealPage((p) => Math.min(appealTotalPages, p + 1))}
+          />
+        </div>
+      )}
+
+      {/* ══ Settings tab ══════════════════════════════════════ */}
+      {tab === 'settings' && (
+        <div style={{ borderRadius: '12px', border: '1px solid #EBEBEB', background: '#FFF', overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
+          <div style={{ padding: '16px 18px', borderBottom: '1px solid #F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div>
-              <label className="block text-xs text-[#475569] mb-1.5">Name</label>
-              <input value={categoryForm.name} onChange={(e) => setCategoryForm((p) => ({ ...p, name: e.target.value }))} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500" />
+              <p style={{ fontSize: '14px', fontWeight: 800, color: '#111827', margin: 0, letterSpacing: '-0.01em' }}>Violation Categories</p>
+              <p style={{ fontSize: '12px', color: '#9CA3AF', margin: '3px 0 0' }}>Define category names and default fine amounts.</p>
             </div>
-            <div>
-              <label className="block text-xs text-[#475569] mb-1.5">Default Fine Amount</label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-slate-500">EGP</span>
-                <input type="number" min={0} value={categoryForm.defaultFineAmount} onChange={(e) => setCategoryForm((p) => ({ ...p, defaultFineAmount: e.target.value }))} className="w-full bg-white border border-slate-300 rounded-lg pl-12 pr-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500" />
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs text-[#475569] mb-1.5">Description</label>
-              <textarea value={categoryForm.description} onChange={(e) => setCategoryForm((p) => ({ ...p, description: e.target.value }))} className="w-full min-h-[90px] bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-900 focus:outline-none focus:border-blue-500" />
-            </div>
+            <button type="button" onClick={() => { setEditingCategory(null); setCatModalOpen(true); }}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 16px', height: '36px', borderRadius: '8px', background: '#111827', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif", boxShadow: '0 2px 6px rgba(0,0,0,0.15)' }}>
+              <Plus style={{ width: '13px', height: '13px' }} /> Add Category
+            </button>
           </div>
-          <DialogFooter className="px-6 py-4 border-t border-slate-200 flex items-center justify-end gap-3">
-            <button type="button" onClick={() => setCategoryOpen(false)} className="bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-sm font-medium px-4 py-2 rounded-lg">Cancel</button>
-            <button type="button" onClick={() => void saveCategory()} className="bg-black hover:bg-slate-900 text-white text-sm font-medium px-4 py-2 rounded-lg">Save</button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog><DrawerForm open={detailOpen} onOpenChange={setDetailOpen} title="Violation Detail" description="Review violation details, appeals and actions" widthClassName="w-full sm:max-w-[560px]" variant="light">
-        {!detail ? <EmptyState variant="light" compact title="No violation selected" description="Select a violation from the list." /> : (
-          <div className="space-y-4">
-            <div><p className="font-['DM_Mono'] text-2xl text-[#0F172A]">{detail.violationNumber}</p><div className="mt-3 flex items-center gap-2 flex-wrap"><StatusBadge value={detail.status} />{detail.categoryName ? <span className="text-xs px-2 py-1 rounded-full border border-blue-500/20 bg-blue-500/10 text-blue-400">{detail.categoryName}</span> : null}</div></div>
-            <Tabs value={detailTab} onValueChange={(v: string) => setDetailTab(v as "details" | "evidence" | "appeals" | "invoices")} className="space-y-4">
-              <TabsList className="bg-[#F8FAFC] border border-[#E2E8F0] p-1 rounded-lg"><TabsTrigger value="details" className="text-[#334155]">Details</TabsTrigger><TabsTrigger value="evidence" className="text-[#334155]">Evidence</TabsTrigger><TabsTrigger value="appeals" className="text-[#334155]">Appeals</TabsTrigger><TabsTrigger value="invoices" className="text-[#334155]">Invoices</TabsTrigger></TabsList>
-              <TabsContent value="details" className="space-y-4">
-                <div className="bg-white rounded-xl border border-[#E2E8F0] p-6 space-y-3"><p className="text-xs font-medium uppercase tracking-wider text-slate-500">Unit & Resident</p><p className="text-sm text-[#334155]">Unit: <span className="text-[#0F172A]">{detail.unitNumber}</span></p><p className="text-sm text-[#334155]">Resident: <span className="text-[#0F172A]">{detail.residentName ?? "—"}</span></p><p className="text-sm text-[#334155]">Issuer: <span className="text-[#0F172A]">{detail.issuerName ?? "—"}</span></p><p className="text-xs text-slate-500">Appeal deadline: {fmtDate(detail.appealDeadline)}</p></div>
-                <div className="bg-white rounded-xl border border-[#E2E8F0] p-6 space-y-3"><p className="text-xs font-medium uppercase tracking-wider text-slate-500">Category & Fine</p><p className="text-sm text-[#334155]">{detail.description}</p><p className="text-2xl font-semibold text-[#0F172A] font-['DM_Mono']">{money(detail.fineAmount)}</p></div>
-                {detail.status === ViolationStatus.PENDING ? <div className="bg-white rounded-xl border border-[#E2E8F0] p-6 space-y-4"><p className="text-xs font-medium uppercase tracking-wider text-slate-500">Actions</p><div className="flex items-center gap-2"><button type="button" onClick={() => { if (!window.confirm("Mark as paid?")) return; void violationsService.markAsPaid(detail.id).then(async (d) => { setDetail(d); await loadViolations(); toast.success("Marked as paid"); }).catch(() => toast.error("Failed to update")); }} className="bg-black hover:bg-slate-900 text-white text-sm font-medium px-4 py-2 rounded-lg">Mark as Paid</button><button type="button" onClick={() => setShowCancelInput((p) => !p)} className="bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 text-sm font-medium px-4 py-2 rounded-lg">Cancel Violation</button></div>{showCancelInput ? <div className="space-y-2"><textarea value={cancelInput} onChange={(e) => setCancelInput(e.target.value)} className="w-full min-h-[80px] bg-[#F8FAFC] border border-[#CBD5E1] rounded-lg px-3 py-2 text-sm text-[#1E293B] focus:outline-none focus:border-red-500/50" placeholder="Cancellation reason" /><button type="button" onClick={() => void saveCancel()} className="bg-red-600 hover:bg-red-500 text-white text-sm font-medium px-4 py-2 rounded-lg">Confirm Cancel</button></div> : null}</div> : null}
-              </TabsContent>
-              <TabsContent value="evidence">{detail.photoEvidence.length === 0 ? <EmptyState variant="light" compact title="No photo evidence attached" description="Evidence files will appear here." /> : <div className="grid grid-cols-2 gap-4">{detail.photoEvidence.map((f) => <a key={f.id} href={f.url ?? "#"} target="_blank" rel="noreferrer" className="rounded-lg overflow-hidden border border-[#CBD5E1] bg-[#F8FAFC] hover:border-white/20 transition-colors"><img src={f.url ?? ""} alt={f.fileName ?? "Evidence"} className="w-full h-32 object-cover" /><div className="p-3"><p className="text-xs text-[#334155] truncate">{f.fileName ?? f.id}</p></div></a>)}</div>}</TabsContent>
-              <TabsContent value="appeals" className="space-y-4">
-                {detailAppeals.length === 0 && detailFixes.length === 0 ? <EmptyState variant="light" compact title="No appeals submitted" description="Appeals and fix submissions will appear here." /> : <>
-                  {detailAppeals.map((a) => <div key={a.id} className="bg-white rounded-xl border border-[#E2E8F0] p-6 space-y-3"><div className="flex items-center justify-between"><p className="text-sm font-medium text-[#1E293B]">Appeal</p><StatusBadge value={a.status} /></div><p className="text-xs text-slate-500">Submitted by {a.requestedByName} on {fmtDateTime(a.createdAt)}</p><div className="bg-[#F8FAFC] rounded-lg p-4"><p className="text-sm text-[#334155] whitespace-pre-wrap">{a.note ?? "No note provided"}</p></div>{a.status === ViolationActionStatus.PENDING ? <div className="space-y-2"><p className="text-xs text-violet-400">Violation will be cancelled and fine waived.</p><div className="flex items-center gap-2"><button type="button" onClick={() => void reviewAction(a, true)} className="bg-black hover:bg-slate-900 text-white text-sm font-medium px-4 py-2 rounded-lg">Approve Appeal</button><button type="button" onClick={() => setRejectByAction((p) => ({ ...p, [a.id]: p[a.id] ?? "" }))} className="bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 text-sm font-medium px-4 py-2 rounded-lg">Reject Appeal</button></div>{rejectByAction[a.id] !== undefined ? <div className="space-y-2"><textarea value={rejectByAction[a.id]} onChange={(e) => setRejectByAction((p) => ({ ...p, [a.id]: e.target.value }))} className="w-full min-h-[80px] bg-[#F8FAFC] border border-[#CBD5E1] rounded-lg px-3 py-2 text-sm text-[#1E293B] focus:outline-none focus:border-red-500/50" placeholder="Rejection reason" /><button type="button" onClick={() => void reviewAction(a, false)} className="bg-red-600 hover:bg-red-500 text-white text-sm font-medium px-4 py-2 rounded-lg">Confirm Reject</button></div> : null}</div> : null}</div>)}
-                  {detailFixes.map((a) => <div key={a.id} className="bg-white rounded-xl border border-[#E2E8F0] p-6 space-y-3"><div className="flex items-center justify-between"><p className="text-sm font-medium text-[#1E293B]">Fix Submission</p><StatusBadge value={a.status} /></div><div className="bg-[#F8FAFC] rounded-lg p-4"><p className="text-sm text-[#334155] whitespace-pre-wrap">{a.note ?? "No note provided"}</p></div>{a.status === ViolationActionStatus.PENDING ? <div className="flex items-center gap-2"><button type="button" onClick={() => void reviewAction(a, true)} className="bg-black hover:bg-slate-900 text-white text-sm font-medium px-4 py-2 rounded-lg">Approve Fix</button><button type="button" onClick={() => void reviewAction(a, false)} className="bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 text-red-400 text-sm font-medium px-4 py-2 rounded-lg">Reject Fix</button></div> : null}</div>)}
-                </>}
-              </TabsContent>
-              <TabsContent value="invoices"><div className="bg-white rounded-xl border border-[#E2E8F0] p-6 space-y-4"><div className="flex items-center justify-end"><button type="button" onClick={() => toast.info("Create invoice from Billing until inline invoice form is enabled.")} className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-2"><Plus className="w-4 h-4" />Create Invoice</button></div><DataTable variant="light" columns={invoiceCols} rows={detail.invoices} rowKey={(r) => r.id} emptyTitle="No linked invoices" emptyDescription="No invoice records linked to this violation." /></div></TabsContent>
-            </Tabs>
+
+          <div style={{ padding: '14px 18px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {categories.length === 0
+              ? <EmptyState title="No violation categories" description="Create categories and default fines." />
+              : categories.map((c, i) => (
+                <div key={c.id}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 14px', borderRadius: '9px', border: '1px solid #EBEBEB', background: '#FAFAFA' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: CAT_DOTS[Math.abs(c.displayOrder ?? i) % CAT_DOTS.length], flexShrink: 0 }} />
+                    <div>
+                      <p style={{ fontSize: '13px', fontWeight: 700, color: '#111827', margin: 0 }}>{c.name}</p>
+                      {c.description && <p style={{ fontSize: '11px', color: '#9CA3AF', margin: '2px 0 0' }}>{c.description}</p>}
+                    </div>
+                    <span style={{ fontSize: '10.5px', fontWeight: 700, padding: '2px 8px', borderRadius: '5px', background: '#FEF2F2', color: '#DC2626', fontFamily: "'DM Mono', monospace" }}>
+                      {money(c.defaultFineAmount)}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {/* Toggle */}
+                    <button type="button"
+                      onClick={() => void violationsService.toggleCategory(c.id).then(() => loadViolations())}
+                      style={{ position: 'relative', width: '40px', height: '22px', borderRadius: '11px', border: `1.5px solid ${c.isActive ? '#A7F3D0' : '#E5E7EB'}`, background: c.isActive ? '#ECFDF5' : '#F9FAFB', cursor: 'pointer', transition: 'all 150ms', flexShrink: 0 }}>
+                      <span style={{ position: 'absolute', top: '2px', width: '16px', height: '16px', borderRadius: '50%', background: c.isActive ? '#059669' : '#D1D5DB', left: c.isActive ? '20px' : '2px', transition: 'left 150ms' }} />
+                    </button>
+                    {/* Edit */}
+                    <button type="button"
+                      onClick={() => { setEditingCategory(c); setCatModalOpen(true); }}
+                      style={{ width: '30px', height: '30px', borderRadius: '7px', border: '1px solid #EBEBEB', background: '#FFF', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#9CA3AF' }}>
+                      <Edit2 style={{ width: '12px', height: '12px' }} />
+                    </button>
+                  </div>
+                </div>
+              ))
+            }
           </div>
-        )}
+        </div>
+      )}
+
+      {/* ══ Detail drawer ═════════════════════════════════════ */}
+      <DrawerForm
+        open={detailOpen} onOpenChange={setDetailOpen}
+        title="Violation Detail"
+        description="Review violation details, appeals and actions."
+        widthClassName="w-full sm:max-w-[560px]"
+      >
+        {!detail
+          ? <EmptyState title="No violation selected" description="Select a violation from the list." />
+          : <DetailContent key={detailKey} detail={detail}
+              onReload={() => {
+                void violationsService.getViolationDetail(detail.id).then((d) => setDetail(d)).catch(() => toast.error('Failed to reload'));
+                void loadViolations(); void loadAppeals();
+              }}
+            />
+        }
       </DrawerForm>
+
+      {/* ══ Category modal ════════════════════════════════════ */}
+      <CategoryModal
+        open={catModalOpen} onClose={() => setCatModalOpen(false)}
+        editing={editingCategory} onSaved={() => void loadViolations()}
+      />
     </div>
   );
 }
-
-
-
-
-
-
-
-

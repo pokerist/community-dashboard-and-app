@@ -263,12 +263,16 @@ function CategoryModal({ open, onClose, editing, onSaved }: {
 
 // ─── Detail Drawer content ────────────────────────────────────
 
-function DetailContent({ detail, onReload }: {
-  detail: ComplaintDetail; onReload: () => void;
+function DetailContent({ detail, categories, onReload }: {
+  detail: ComplaintDetail; categories: ComplaintCategoryItem[]; onReload: () => void;
 }) {
   const [subTab,           setSubTab]           = useState<'details' | 'comments' | 'invoices'>('details');
   const [commentBody,      setCommentBody]      = useState('');
   const [postingComment,   setPostingComment]   = useState(false);
+  const [resolutionNotes,  setResolutionNotes]  = useState('');
+  const [showResolveForm,  setShowResolveForm]  = useState(false);
+  const [updatingStatus,   setUpdatingStatus]   = useState(false);
+  const [assigningCategory, setAssigningCategory] = useState(false);
 
   const postComment = async (internal: boolean) => {
     if (!commentBody.trim()) return;
@@ -281,12 +285,26 @@ function DetailContent({ detail, onReload }: {
     finally { setPostingComment(false); }
   };
 
-  const updateStatus = async (s: ComplaintStatus) => {
+  const updateStatus = async (s: ComplaintStatus, notes?: string) => {
+    setUpdatingStatus(true);
     try {
-      await complaintsService.updateComplaintStatus(detail.id, s);
+      await complaintsService.updateComplaintStatus(detail.id, s, notes);
       toast.success('Status updated');
+      setShowResolveForm(false);
+      setResolutionNotes('');
       onReload();
     } catch { toast.error('Failed to update status'); }
+    finally { setUpdatingStatus(false); }
+  };
+
+  const assignCategory = async (categoryId: string) => {
+    setAssigningCategory(true);
+    try {
+      await complaintsService.updateComplaint(detail.id, { categoryId });
+      toast.success('Category assigned');
+      onReload();
+    } catch { toast.error('Failed to assign category'); }
+    finally { setAssigningCategory(false); }
   };
 
   const invoiceCols: DataTableColumn<ComplaintInvoice>[] = [
@@ -337,21 +355,64 @@ function DetailContent({ detail, onReload }: {
             </div>
           )}
 
+          {/* Category assignment */}
+          <div style={{ padding: '14px 16px', borderRadius: '10px', border: '1px solid #EBEBEB', background: '#FFF', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <p style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.07em', margin: 0, fontFamily: "'Work Sans', sans-serif" }}>Category</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <select
+                value={detail.categoryId ?? ''}
+                disabled={assigningCategory || detail.status === ComplaintStatus.CLOSED}
+                onChange={(e) => { if (e.target.value) void assignCategory(e.target.value); }}
+                style={{ ...selectStyle, flex: 1, opacity: assigningCategory ? 0.5 : 1 }}
+              >
+                <option value="">— Select Category —</option>
+                {categories.filter((c) => c.isActive).map((c) => (
+                  <option key={c.id} value={c.id}>{c.name} ({c.slaHours}h SLA)</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
           {/* Status actions */}
           <div style={{ padding: '14px 16px', borderRadius: '10px', border: '1px solid #EBEBEB', background: '#FFF', display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <p style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.07em', margin: 0, fontFamily: "'Work Sans', sans-serif" }}>Status Actions</p>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              {detail.status === ComplaintStatus.NEW && (
-                <BluePillBtn label="Mark In Progress" onClick={() => void updateStatus(ComplaintStatus.IN_PROGRESS)} disabled={!detail.assigneeId} />
-              )}
-              {detail.status === ComplaintStatus.IN_PROGRESS && (
-                <BluePillBtn label="Mark Resolved" onClick={() => void updateStatus(ComplaintStatus.RESOLVED)} />
-              )}
-              {detail.status === ComplaintStatus.RESOLVED && (
-                <GhostBtn label="Close Complaint" onClick={() => void updateStatus(ComplaintStatus.CLOSED)} />
-              )}
-              {detail.status === ComplaintStatus.CLOSED && (
-                <span style={{ fontSize: '12.5px', color: '#9CA3AF', fontFamily: "'Work Sans', sans-serif" }}>This complaint is closed.</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {detail.status === ComplaintStatus.NEW && (
+                  <BluePillBtn label="Mark In Progress" onClick={() => void updateStatus(ComplaintStatus.IN_PROGRESS)} disabled={!detail.assigneeId || updatingStatus} />
+                )}
+                {detail.status === ComplaintStatus.IN_PROGRESS && !showResolveForm && (
+                  <BluePillBtn label="Mark Resolved" onClick={() => setShowResolveForm(true)} disabled={updatingStatus} />
+                )}
+                {detail.status === ComplaintStatus.RESOLVED && (
+                  <GhostBtn label="Close Complaint" onClick={() => void updateStatus(ComplaintStatus.CLOSED)} disabled={updatingStatus} />
+                )}
+                {detail.status === ComplaintStatus.CLOSED && (
+                  <span style={{ fontSize: '12.5px', color: '#9CA3AF', fontFamily: "'Work Sans', sans-serif" }}>This complaint is closed.</span>
+                )}
+              </div>
+
+              {/* Resolution notes form */}
+              {showResolveForm && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', borderRadius: '8px', background: '#F9FAFB', border: '1px solid #E5E7EB' }}>
+                  <label style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'Work Sans', sans-serif" }}>
+                    Resolution Notes <span style={{ color: '#EF4444' }}>*</span>
+                  </label>
+                  <textarea
+                    value={resolutionNotes}
+                    onChange={(e) => setResolutionNotes(e.target.value)}
+                    placeholder="Describe what was done to resolve this complaint…"
+                    style={{ ...textareaStyle, background: '#FFF' }}
+                  />
+                  <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                    <GhostBtn label="Cancel" onClick={() => { setShowResolveForm(false); setResolutionNotes(''); }} disabled={updatingStatus} />
+                    <BluePillBtn
+                      label={updatingStatus ? 'Saving…' : 'Confirm Resolve'}
+                      onClick={() => void updateStatus(ComplaintStatus.RESOLVED, resolutionNotes.trim())}
+                      disabled={!resolutionNotes.trim() || updatingStatus}
+                    />
+                  </div>
+                </div>
               )}
             </div>
           </div>
@@ -608,7 +669,7 @@ export function ComplaintsViolations() {
               rows={rows}
               rowKey={(r) => r.id}
               loading={loading}
-              rowStyle={(r) => r.slaStatus === 'BREACHED' ? { borderLeft: '3px solid #FCA5A5' } : {}}
+              rowStyle={(r: { slaStatus: string; }) => r.slaStatus === 'BREACHED' ? { borderLeft: '3px solid #FCA5A5' } : {}}
               emptyTitle="No complaints found"
               emptyDescription="Try adjusting your search or filters."
             />
@@ -697,7 +758,7 @@ export function ComplaintsViolations() {
       >
         {!detail
           ? <EmptyState title="No complaint selected" description="Select a complaint from the list." />
-          : <DetailContent key={detailKey} detail={detail}
+          : <DetailContent key={detailKey} detail={detail} categories={categories}
               onReload={() => {
                 void complaintsService.getComplaintDetail(detail.id).then((d) => setDetail(d)).catch(() => toast.error('Failed to reload'));
                 void load();

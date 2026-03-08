@@ -37,7 +37,7 @@ export class ReportsController {
   }
 
   @Get('stats')
-  @Permissions('dashboard.view')
+  @Permissions('report.view_all')
   @ApiOperation({
     summary:
       'Get report statistics - total, this month, active schedules, last generated',
@@ -47,7 +47,7 @@ export class ReportsController {
   }
 
   @Get()
-  @Permissions('dashboard.view')
+  @Permissions('report.view_all')
   @ApiOperation({
     summary: 'List generated reports with filters (type, format, date range)',
   })
@@ -56,7 +56,7 @@ export class ReportsController {
   }
 
   @Get(':id')
-  @Permissions('dashboard.view')
+  @Permissions('report.view_all')
   @ApiOperation({
     summary: 'Get full generated report detail with paginated rows',
   })
@@ -65,14 +65,14 @@ export class ReportsController {
   }
 
   @Post('generate')
-  @Permissions('dashboard.view')
+  @Permissions('report.generate')
   @ApiOperation({ summary: 'Generate report and store export snapshot' })
   generate(@Body() dto: GenerateReportDto, @Req() req: any) {
     return this.reportsService.generateReport(dto, this.actorId(req));
   }
 
   @Get(':id/download')
-  @Permissions('dashboard.view')
+  @Permissions('report.view_all')
   @ApiOperation({ summary: 'Download generated report file' })
   async download(@Param('id') id: string, @Res() res: Response) {
     const file = await this.reportsService.getReportForDownload(id);
@@ -85,7 +85,7 @@ export class ReportsController {
   }
 
   @Post('schedules')
-  @Permissions('dashboard.view')
+  @Permissions('report.manage_schedules')
   @ApiOperation({
     summary: 'Create report schedule definition with recipient emails',
   })
@@ -94,14 +94,14 @@ export class ReportsController {
   }
 
   @Get('schedules')
-  @Permissions('dashboard.view')
+  @Permissions('report.view_all')
   @ApiOperation({ summary: 'List report schedule definitions with filters' })
   listSchedules(@Query() query: ListReportSchedulesDto) {
     return this.reportsService.listSchedules(query);
   }
 
   @Patch('schedules/:id')
-  @Permissions('dashboard.view')
+  @Permissions('report.manage_schedules')
   @ApiOperation({ summary: 'Update report schedule' })
   updateSchedule(
     @Param('id') id: string,
@@ -111,7 +111,7 @@ export class ReportsController {
   }
 
   @Patch('schedules/:id/toggle')
-  @Permissions('dashboard.view')
+  @Permissions('report.manage_schedules')
   @ApiOperation({ summary: 'Enable/disable report schedule' })
   toggleSchedule(
     @Param('id') id: string,
@@ -121,21 +121,21 @@ export class ReportsController {
   }
 
   @Delete('schedules/:id')
-  @Permissions('dashboard.view')
+  @Permissions('report.manage_schedules')
   @ApiOperation({ summary: 'Delete report schedule' })
   deleteSchedule(@Param('id') id: string) {
     return this.reportsService.deleteSchedule(id);
   }
 
   @Post('schedules/:id/run-now')
-  @Permissions('dashboard.view')
+  @Permissions('report.manage_schedules')
   @ApiOperation({ summary: 'Run a report schedule immediately' })
   runScheduleNow(@Param('id') id: string) {
     return this.reportsService.runScheduleNow(id);
   }
 
   @Post('schedules/run-due')
-  @Permissions('dashboard.view')
+  @Permissions('report.manage_schedules')
   @ApiOperation({ summary: 'Process due report schedules now (admin/debug)' })
   runDueSchedulesNow() {
     return this.reportsService.processDueSchedules();

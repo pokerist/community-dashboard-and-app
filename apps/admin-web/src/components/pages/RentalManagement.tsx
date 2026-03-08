@@ -1,9 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, RefreshCw, Search, Settings, X } from "lucide-react";
-import { DataTable, type DataTableColumn } from "../DataTable";
-import { toast } from "sonner";
-import { API_BASE_URL } from "../../lib/api-client";
-import { errorMessage } from "../../lib/live-data";
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Eye, RefreshCw, Search, X, ChevronLeft, ChevronRight,
+  SlidersHorizontal, ChevronDown, RotateCcw, AlertTriangle,
+  FileText, Check, Clock, Mail,
+} from 'lucide-react';
+import { DataTable, type DataTableColumn } from '../DataTable';
+import { DrawerForm } from '../DrawerForm';
+import { StatCard } from '../StatCard';
+import { StatusBadge } from '../StatusBadge';
+import { EmptyState } from '../EmptyState';
+import { toast } from 'sonner';
+import { API_BASE_URL } from '../../lib/api-client';
+import { errorMessage } from '../../lib/live-data';
 import rentalService, {
   type LeaseDetail,
   type LeaseListItem,
@@ -12,376 +20,758 @@ import rentalService, {
   type RentRequestStatus,
   type RentalSettings,
   type RentalStats,
-} from "../../lib/rental-service";
+} from '../../lib/rental-service';
 
-type TabKey = "leases" | "requests";
+// ─── Types ────────────────────────────────────────────────────
+
+type TabKey  = 'leases' | 'requests';
+type LeaseMode = 'view' | 'renew' | 'terminate';
+type LeaseSubFilter = 'all' | 'active' | 'expired' | 'terminated';
+
+// ─── Constants ────────────────────────────────────────────────
 
 const EMPTY_SETTINGS: RentalSettings = {
-  leasingEnabled: true,
-  suspensionReason: null,
-  suspendedAt: null,
+  leasingEnabled: true, suspensionReason: null, suspendedAt: null,
 };
-
 const EMPTY_STATS: RentalStats = {
-  activeLeases: 0,
-  expiringThisMonth: 0,
-  expiredLeases: 0,
-  pendingRentRequests: 0,
-  totalMonthlyRevenue: 0,
-  leasingEnabled: true,
+  activeLeases: 0, expiringThisMonth: 0, expiredLeases: 0,
+  pendingRentRequests: 0, totalMonthlyRevenue: 0, leasingEnabled: true,
 };
 
-function formatCurrency(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "EGP",
-    maximumFractionDigits: 0,
-  }).format(value);
+// ─── Helpers ──────────────────────────────────────────────────
+
+function formatCurrency(v: number) {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'EGP', maximumFractionDigits: 0 }).format(v);
+}
+function formatDate(v: string | null) {
+  if (!v) return '—';
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString();
 }
 
-function formatDate(value: string | null): string {
-  if (!value) return "—";
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? "—" : parsed.toLocaleDateString();
+function DaysLeftCell({ days }: { days: number | null }) {
+  if (days === null) return <span style={{ color: '#D1D5DB', fontFamily: "'DM Mono', monospace", fontSize: '12px' }}>—</span>;
+  const color = days > 60 ? '#9CA3AF' : days >= 30 ? '#D97706' : '#DC2626';
+  return (
+    <span style={{ fontSize: '12px', fontWeight: days < 30 ? 700 : 500, color, fontFamily: "'DM Mono', monospace" }}>
+      {days}d
+    </span>
+  );
 }
 
-function statusTone(value: string): string {
-  const key = value.toUpperCase();
-  if (key === "ACTIVE" || key === "APPROVED") return "bg-emerald-500/15 text-emerald-300";
-  if (key === "PENDING" || key === "EXPIRING_SOON") return "bg-amber-500/15 text-amber-300";
-  if (key === "REJECTED" || key === "TERMINATED" || key === "CANCELLED") return "bg-rose-500/15 text-rose-300";
-  return "bg-gray-100 text-gray-700";
+function LeaseStatusChip({ status }: { status: string }) {
+  const map: Record<string, { bg: string; color: string }> = {
+    ACTIVE:        { bg: '#ECFDF5', color: '#059669' },
+    EXPIRING_SOON: { bg: '#FFFBEB', color: '#D97706' },
+    EXPIRED:       { bg: '#F3F4F6', color: '#6B7280' },
+    TERMINATED:    { bg: '#FEF2F2', color: '#DC2626' },
+  };
+  const m = map[status] ?? { bg: '#F3F4F6', color: '#6B7280' };
+  return (
+    <span style={{ display: 'inline-flex', padding: '2px 8px', borderRadius: '5px', fontSize: '10.5px', fontWeight: 700, background: m.bg, color: m.color, fontFamily: "'Work Sans', sans-serif", whiteSpace: 'nowrap' }}>
+      {status.replace('_', ' ')}
+    </span>
+  );
 }
 
-function daysTone(value: number | null): string {
-  if (value === null) return "text-gray-400";
-  if (value > 60) return "text-gray-500";
-  if (value >= 30) return "text-amber-400";
-  return "text-red-400 font-medium";
-}
-
-async function openSecureFile(fileId: string): Promise<void> {
-  const token = localStorage.getItem("auth_token");
-  if (!token) throw new Error("Missing token");
-  const response = await fetch(`${API_BASE_URL}/files/${fileId}/stream`, {
+async function openSecureFile(fileId: string) {
+  const token = localStorage.getItem('auth_token');
+  if (!token) throw new Error('Missing token');
+  const res = await fetch(`${API_BASE_URL}/files/${fileId}/stream`, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!response.ok) throw new Error(`File fetch failed (${response.status})`);
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
-  window.open(url, "_blank", "noopener,noreferrer");
+  if (!res.ok) throw new Error(`File fetch failed (${res.status})`);
+  const url = URL.createObjectURL(await res.blob());
+  window.open(url, '_blank', 'noopener,noreferrer');
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
-export function RentalManagement() {
-  const [tab, setTab] = useState<TabKey>("leases");
-  const [settings, setSettings] = useState<RentalSettings>(EMPTY_SETTINGS);
-  const [stats, setStats] = useState<RentalStats>(EMPTY_STATS);
-  const [communities, setCommunities] = useState<Array<{ id: string; name: string }>>([]);
-  const [leases, setLeases] = useState<LeaseListItem[]>([]);
-  const [requests, setRequests] = useState<RentRequestListItem[]>([]);
-  const [requestTotal, setRequestTotal] = useState(0);
-  const [loadingLeases, setLoadingLeases] = useState(false);
-  const [loadingRequests, setLoadingRequests] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsEnabledDraft, setSettingsEnabledDraft] = useState(true);
-  const [settingsReasonDraft, setSettingsReasonDraft] = useState("");
-  const [leaseFilterSearch, setLeaseFilterSearch] = useState("");
-  const [leaseFilterStatus, setLeaseFilterStatus] = useState<"all" | LeaseStatus>("all");
-  const [leaseFilterCommunity, setLeaseFilterCommunity] = useState("");
-  const [leaseFilterExpiring, setLeaseFilterExpiring] = useState(false);
-  const [requestFilterSearch, setRequestFilterSearch] = useState("");
-  const [requestFilterStatus, setRequestFilterStatus] = useState<"all" | RentRequestStatus>("all");
-  const [requestPage, setRequestPage] = useState(1);
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [leaseDetail, setLeaseDetail] = useState<LeaseDetail | null>(null);
-  const [renewStart, setRenewStart] = useState("");
-  const [renewEnd, setRenewEnd] = useState("");
-  const [renewRent, setRenewRent] = useState("");
-  const [renewAuto, setRenewAuto] = useState(false);
-  const [terminateReason, setTerminateReason] = useState("");
-  const [mode, setMode] = useState<"view" | "renew" | "terminate">("view");
-  const [reviewOpen, setReviewOpen] = useState(false);
-  const [selectedRequest, setSelectedRequest] = useState<RentRequestListItem | null>(null);
-  const [rejectReason, setRejectReason] = useState("");
+// ─── Shared styles ────────────────────────────────────────────
 
-  const requestPages = useMemo(() => Math.max(1, Math.ceil(requestTotal / 20)), [requestTotal]);
+const inputStyle: React.CSSProperties = {
+  width: '100%', padding: '8px 10px', borderRadius: '7px',
+  border: '1px solid #E5E7EB', fontSize: '13px', color: '#111827',
+  background: '#FFF', outline: 'none', fontFamily: "'Work Sans', sans-serif",
+  boxSizing: 'border-box', height: '36px',
+};
+const selectStyle: React.CSSProperties = { ...inputStyle, cursor: 'pointer' };
+const textareaStyle: React.CSSProperties = {
+  ...inputStyle, height: 'auto', minHeight: '90px', resize: 'vertical', padding: '9px 10px',
+};
+
+// ─── Primitives ───────────────────────────────────────────────
+
+function TabBtn({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick}
+      style={{ padding: '7px 18px', borderRadius: '7px', border: 'none', background: active ? '#FFF' : 'transparent', color: active ? '#111827' : '#9CA3AF', cursor: 'pointer', fontSize: '12.5px', fontWeight: active ? 700 : 500, transition: 'all 120ms ease', fontFamily: "'Work Sans', sans-serif", flexShrink: 0, boxShadow: active ? '0 1px 3px rgba(0,0,0,0.08)' : 'none' }}>
+      {label}
+    </button>
+  );
+}
+
+function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+      <label style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'Work Sans', sans-serif" }}>
+        {label}{required && <span style={{ color: '#EF4444', marginLeft: '3px' }}>*</span>}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+function InfoCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={{ padding: '14px 16px', borderRadius: '10px', border: '1px solid #EBEBEB', background: '#FAFAFA', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+      <p style={{ fontSize: '9.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.07em', margin: 0, fontFamily: "'Work Sans', sans-serif" }}>{title}</p>
+      {children}
+    </div>
+  );
+}
+
+function InfoRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <p style={{ fontSize: '13px', color: '#374151', margin: 0, fontFamily: "'Work Sans', sans-serif" }}>
+      <span style={{ fontWeight: 600, color: '#9CA3AF' }}>{label}: </span>
+      <span style={{ fontFamily: mono ? "'DM Mono', monospace" : "'Work Sans', sans-serif", color: '#111827' }}>{value}</span>
+    </p>
+  );
+}
+
+function GhostIconBtn({ icon, onClick, danger }: { icon: React.ReactNode; onClick: () => void; danger?: boolean }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button type="button" onClick={onClick}
+      onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{ width: '28px', height: '28px', borderRadius: '6px', border: '1px solid #EBEBEB', background: hov ? (danger ? '#FEF2F2' : '#F3F4F6') : '#FAFAFA', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: hov ? (danger ? '#DC2626' : '#374151') : '#9CA3AF', transition: 'all 120ms', flexShrink: 0 }}>
+      {icon}
+    </button>
+  );
+}
+
+function ActionBtn({ label, variant = 'ghost', onClick, disabled, small }: {
+  label: string; variant?: 'ghost' | 'primary' | 'danger' | 'warning';
+  onClick: () => void; disabled?: boolean; small?: boolean;
+}) {
+  const [hov, setHov] = useState(false);
+  const vs: Record<string, React.CSSProperties> = {
+    ghost:   { background: hov ? '#F3F4F6' : '#FFF',    color: '#374151', border: '1px solid #E5E7EB' },
+    primary: { background: hov ? '#1E3A8A' : '#2563EB', color: '#FFF',   border: 'none' },
+    danger:  { background: hov ? '#B91C1C' : '#FEF2F2', color: hov ? '#FFF' : '#DC2626', border: '1px solid #FECACA' },
+    warning: { background: hov ? '#92400E' : '#FFFBEB', color: hov ? '#FFF' : '#D97706', border: '1px solid #FDE68A' },
+  };
+  return (
+    <button type="button" onClick={onClick} disabled={disabled}
+      onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{ padding: small ? '5px 12px' : '7px 16px', borderRadius: '7px', cursor: disabled ? 'not-allowed' : 'pointer', fontSize: small ? '11.5px' : '12.5px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif", opacity: disabled ? 0.4 : 1, transition: 'all 120ms ease', ...vs[variant] }}>
+      {label}
+    </button>
+  );
+}
+
+// ─── Lease detail drawer content ─────────────────────────────
+
+function LeaseDetailContent({ detail, mode, setMode, onClose, onRefresh }: {
+  detail: LeaseDetail;
+  mode: LeaseMode;
+  setMode: (m: LeaseMode) => void;
+  onClose: () => void;
+  onRefresh: () => void;
+}) {
+  const [renewStart, setRenewStart]   = useState(detail.startDate.slice(0, 10));
+  const [renewEnd,   setRenewEnd]     = useState(detail.endDate.slice(0, 10));
+  const [renewRent,  setRenewRent]    = useState(String(detail.monthlyRent));
+  const [renewAuto,  setRenewAuto]    = useState(detail.autoRenew);
+  const [termReason, setTermReason]   = useState('');
+
+  const doRenew = async () => {
+    const rent = Number(renewRent);
+    if (!renewStart || !renewEnd || !Number.isFinite(rent) || rent <= 0) { toast.error('Invalid renewal values'); return; }
+    try {
+      await rentalService.renewLease(detail.id, {
+        startDate: new Date(`${renewStart}T00:00:00`).toISOString(),
+        endDate:   new Date(`${renewEnd}T00:00:00`).toISOString(),
+        monthlyRent: rent, autoRenew: renewAuto,
+      });
+      toast.success('Lease renewed'); onClose(); onRefresh();
+    } catch (e) { toast.error('Failed to renew lease', { description: errorMessage(e) }); }
+  };
+
+  const doTerminate = async () => {
+    if (!termReason.trim()) { toast.error('Termination reason is required'); return; }
+    try {
+      await rentalService.terminateLease(detail.id, { reason: termReason.trim() });
+      toast.success('Lease terminated'); onClose(); onRefresh();
+    } catch (e) { toast.error('Failed to terminate lease', { description: errorMessage(e) }); }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      {/* Status badge + mode pills */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+        <LeaseStatusChip status={detail.status} />
+        {mode === 'renew'     && <span style={{ fontSize: '10.5px', fontWeight: 700, padding: '2px 8px', borderRadius: '5px', background: '#EFF6FF', color: '#2563EB' }}>Renew Mode</span>}
+        {mode === 'terminate' && <span style={{ fontSize: '10.5px', fontWeight: 700, padding: '2px 8px', borderRadius: '5px', background: '#FEF2F2', color: '#DC2626' }}>Terminate Mode</span>}
+      </div>
+
+      {/* Parties */}
+      <InfoCard title="Unit & Parties">
+        <InfoRow label="Unit"   value={detail.unit.unitNumber} />
+        <InfoRow label="Owner"  value={detail.owner.name ?? '—'} />
+        <InfoRow label="Tenant" value={detail.tenant?.name ?? '—'} />
+      </InfoCard>
+
+      {/* Terms */}
+      <InfoCard title="Lease Terms">
+        <InfoRow label="Period" value={`${formatDate(detail.startDate)} – ${formatDate(detail.endDate)}`} />
+        <InfoRow label="Rent"   value={formatCurrency(detail.monthlyRent)} mono />
+        <InfoRow label="Source" value={detail.source} />
+        <InfoRow label="Auto Renew" value={detail.autoRenew ? 'Enabled' : 'Disabled'} />
+      </InfoCard>
+
+      {/* Renewal chain */}
+      <InfoCard title="Renewal Chain">
+        {detail.renewedFrom
+          ? <p style={{ fontSize: '12.5px', color: '#2563EB', margin: 0, fontFamily: "'DM Mono', monospace" }}>← From: {detail.renewedFrom.id}</p>
+          : <p style={{ fontSize: '12.5px', color: '#D1D5DB', margin: 0 }}>No previous renewal</p>
+        }
+        {detail.renewedTo && (
+          <p style={{ fontSize: '12.5px', color: '#2563EB', margin: 0, fontFamily: "'DM Mono', monospace" }}>→ To: {detail.renewedTo.id}</p>
+        )}
+      </InfoCard>
+
+      {/* Renew form */}
+      {mode === 'renew' && (
+        <InfoCard title="Renewal Details">
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+            <Field label="New Start">
+              <input type="date" value={renewStart} onChange={(e) => setRenewStart(e.target.value)} style={inputStyle} />
+            </Field>
+            <Field label="New End">
+              <input type="date" value={renewEnd} onChange={(e) => setRenewEnd(e.target.value)} style={inputStyle} />
+            </Field>
+          </div>
+          <Field label="Monthly Rent (EGP)">
+            <input type="number" value={renewRent} onChange={(e) => setRenewRent(e.target.value)}
+              style={{ ...inputStyle, fontFamily: "'DM Mono', monospace" }} />
+          </Field>
+          {/* Auto renew toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderRadius: '8px', border: '1px solid #EBEBEB', background: '#FFF' }}>
+            <span style={{ fontSize: '12.5px', color: '#374151', fontFamily: "'Work Sans', sans-serif" }}>Auto Renew</span>
+            <button type="button" onClick={() => setRenewAuto((p) => !p)}
+              style={{ position: 'relative', width: '40px', height: '22px', borderRadius: '11px', border: `1.5px solid ${renewAuto ? '#A7F3D0' : '#E5E7EB'}`, background: renewAuto ? '#ECFDF5' : '#F9FAFB', cursor: 'pointer', transition: 'all 150ms', flexShrink: 0 }}>
+              <span style={{ position: 'absolute', top: '2px', width: '16px', height: '16px', borderRadius: '50%', background: renewAuto ? '#059669' : '#D1D5DB', left: renewAuto ? '20px' : '2px', transition: 'left 150ms' }} />
+            </button>
+          </div>
+          <div style={{ display: 'flex', gap: '8px', paddingTop: '4px' }}>
+            <ActionBtn label="Save Renewal" variant="primary" onClick={() => void doRenew()} />
+            <ActionBtn label="Cancel" onClick={() => setMode('view')} />
+          </div>
+        </InfoCard>
+      )}
+
+      {/* Terminate form */}
+      {mode === 'terminate' && (
+        <InfoCard title="Termination">
+          <Field label="Reason" required>
+            <textarea value={termReason} onChange={(e) => setTermReason(e.target.value)}
+              placeholder="State the reason for terminating this lease…" style={textareaStyle} />
+          </Field>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 10px', borderRadius: '7px', background: '#EFF6FF', border: '1px solid #BFDBFE' }}>
+            <Mail style={{ width: '13px', height: '13px', color: '#2563EB', flexShrink: 0 }} />
+            <span style={{ fontSize: '11.5px', color: '#1E40AF', fontFamily: "'Work Sans', sans-serif" }}>
+              Both parties will be notified by email.
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: '8px', paddingTop: '4px' }}>
+            <ActionBtn label="Confirm Terminate" variant="danger" onClick={() => void doTerminate()} />
+            <ActionBtn label="Cancel" onClick={() => setMode('view')} />
+          </div>
+        </InfoCard>
+      )}
+
+      {/* View mode actions */}
+      {mode === 'view' && (
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <ActionBtn label="Renew Lease"     variant="primary" onClick={() => setMode('renew')} />
+          <ActionBtn label="Terminate Lease" variant="danger"  onClick={() => setMode('terminate')} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Request review drawer content ───────────────────────────
+
+function RequestReviewContent({ request, onClose, onRefresh }: {
+  request: RentRequestListItem; onClose: () => void; onRefresh: () => void;
+}) {
+  const [rejectReason, setRejectReason] = useState('');
+
+  const approve = async () => {
+    try {
+      await rentalService.approveRequest(request.id);
+      toast.success('Request approved'); onClose(); onRefresh();
+    } catch (e) { toast.error('Failed to approve', { description: errorMessage(e) }); }
+  };
+
+  const reject = async () => {
+    if (!rejectReason.trim()) { toast.error('Rejection reason is required'); return; }
+    try {
+      await rentalService.rejectRequest(request.id, rejectReason.trim());
+      toast.success('Request rejected'); onClose(); onRefresh();
+    } catch (e) { toast.error('Failed to reject', { description: errorMessage(e) }); }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      {/* Status */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <StatusBadge value={request.status} />
+      </div>
+
+      {/* Tenant info */}
+      <InfoCard title="Tenant Info">
+        <InfoRow label="Name"        value={request.tenantName} />
+        <InfoRow label="Email"       value={request.tenantEmail} />
+        <InfoRow label="Phone"       value={request.tenantPhone ?? '—'} />
+        <InfoRow label="Nationality" value={request.tenantNationality ?? '—'} />
+      </InfoCard>
+
+      {/* Documents */}
+      <InfoCard title="Documents">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <FileText style={{ width: '13px', height: '13px', color: '#9CA3AF' }} />
+            <span style={{ fontSize: '12.5px', color: '#374151', fontFamily: "'Work Sans', sans-serif" }}>National ID</span>
+          </div>
+          {request.tenantNationalIdFileId
+            ? <button type="button" onClick={() => void openSecureFile(request.tenantNationalIdFileId!)}
+                style={{ padding: '5px 12px', borderRadius: '6px', background: '#EFF6FF', color: '#2563EB', border: '1px solid #BFDBFE', fontSize: '11.5px', fontWeight: 700, cursor: 'pointer', fontFamily: "'Work Sans', sans-serif" }}>
+                Open
+              </button>
+            : <span style={{ fontSize: '11.5px', color: '#D1D5DB' }}>N/A</span>
+          }
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <FileText style={{ width: '13px', height: '13px', color: '#9CA3AF' }} />
+            <span style={{ fontSize: '12.5px', color: '#374151', fontFamily: "'Work Sans', sans-serif" }}>Contract</span>
+          </div>
+          {request.contractFileId
+            ? <button type="button" onClick={() => void openSecureFile(request.contractFileId!)}
+                style={{ padding: '5px 12px', borderRadius: '6px', background: '#EFF6FF', color: '#2563EB', border: '1px solid #BFDBFE', fontSize: '11.5px', fontWeight: 700, cursor: 'pointer', fontFamily: "'Work Sans', sans-serif" }}>
+                Open
+              </button>
+            : <span style={{ fontSize: '11.5px', color: '#D1D5DB' }}>N/A</span>
+          }
+        </div>
+      </InfoCard>
+
+      {/* Reject reason */}
+      {(request.status === 'PENDING') && (
+        <InfoCard title="Review Actions">
+          <Field label="Rejection Reason (required to reject)">
+            <textarea value={rejectReason} onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="Enter reason if rejecting…" style={textareaStyle} />
+          </Field>
+          <div style={{ display: 'flex', gap: '8px', paddingTop: '4px' }}>
+            <ActionBtn label="Approve" variant="primary" onClick={() => void approve()} />
+            <ActionBtn label="Reject"  variant="danger"  onClick={() => void reject()} />
+          </div>
+        </InfoCard>
+      )}
+    </div>
+  );
+}
+
+// ─── Main ─────────────────────────────────────────────────────
+
+export function RentalManagement() {
+  const [tab,        setTab]        = useState<TabKey>('leases');
+  const [settings,   setSettings]   = useState<RentalSettings>(EMPTY_SETTINGS);
+  const [stats,      setStats]      = useState<RentalStats>(EMPTY_STATS);
+  const [communities, setCommunities] = useState<Array<{ id: string; name: string }>>([]);
+  const [leases,     setLeases]     = useState<LeaseListItem[]>([]);
+  const [requests,   setRequests]   = useState<RentRequestListItem[]>([]);
+  const [requestTotal, setRequestTotal] = useState(0);
+  const [loadingLeases,   setLoadingLeases]   = useState(false);
+  const [loadingRequests, setLoadingRequests] = useState(false);
+
+  // Lease filters
+  const [leaseSearch,     setLeaseSearch]     = useState('');
+  const [leaseStatus,     setLeaseStatus]     = useState<'all' | LeaseStatus>('all');
+  const [leaseCommunity,  setLeaseCommunity]  = useState('');
+  const [leaseExpiring,   setLeaseExpiring]   = useState(false);
+  const [leaseFiltersOpen, setLeaseFiltersOpen] = useState(false);
+  const [leaseSubFilter,  setLeaseSubFilter]  = useState<LeaseSubFilter>('all');
+
+  // Request filters
+  const [reqSearch,  setReqSearch]  = useState('');
+  const [reqStatus,  setReqStatus]  = useState<'all' | RentRequestStatus>('all');
+  const [reqPage,    setReqPage]    = useState(1);
+
+  // Lease detail drawer
+  const [detailOpen,    setDetailOpen]    = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [leaseDetail,   setLeaseDetail]   = useState<LeaseDetail | null>(null);
+  const [leaseMode,     setLeaseMode]     = useState<LeaseMode>('view');
+
+  // Request review drawer
+  const [reviewOpen,     setReviewOpen]     = useState(false);
+  const [selectedReq,    setSelectedReq]    = useState<RentRequestListItem | null>(null);
+
+  const reqPages = useMemo(() => Math.max(1, Math.ceil(requestTotal / 20)), [requestTotal]);
+
+  // Sub-filter leases by status pill
+  const filteredLeases = useMemo(() => {
+    if (leaseSubFilter === 'all') return leases;
+    const map: Record<LeaseSubFilter, LeaseStatus[]> = {
+      all:        [],
+      active:     ['ACTIVE', 'EXPIRING_SOON'],
+      expired:    ['EXPIRED'],
+      terminated: ['TERMINATED'],
+    };
+    const allowed = map[leaseSubFilter];
+    return leases.filter((l) => allowed.includes(l.status));
+  }, [leases, leaseSubFilter]);
+
+  // Leases that are past their end date but still marked ACTIVE (should have auto-expired)
+  const staleActiveLeases = useMemo(() => {
+    const now = new Date();
+    return leases.filter((l) => (l.status === 'ACTIVE' || l.status === 'EXPIRING_SOON') && new Date(l.endDate) < now);
+  }, [leases]);
+
+  const activeLeaseFilters = [leaseStatus !== 'all', leaseCommunity !== (communities[0]?.id ?? ''), leaseExpiring].filter(Boolean).length;
+
+  // ── Loaders ───────────────────────────────────────────────────
 
   const loadHeader = useCallback(async () => {
-    const [nextSettings, nextStats, communityRows] = await Promise.all([
+    const [s, st, comms] = await Promise.all([
       rentalService.getSettings(),
       rentalService.getStats(),
       rentalService.listCommunities(),
     ]);
-    setSettings(nextSettings);
-    setStats(nextStats);
-    setCommunities(communityRows);
-    if (!leaseFilterCommunity && communityRows[0]) setLeaseFilterCommunity(communityRows[0].id);
-    setSettingsEnabledDraft(nextSettings.leasingEnabled);
-    setSettingsReasonDraft(nextSettings.suspensionReason ?? "");
-  }, [leaseFilterCommunity]);
+    setSettings(s); setStats(st); setCommunities(comms);
+    if (!leaseCommunity && comms[0]) setLeaseCommunity(comms[0].id);
+  }, [leaseCommunity]);
 
   const loadLeases = useCallback(async () => {
     setLoadingLeases(true);
     try {
       const rows = await rentalService.listLeases({
-        search: leaseFilterSearch || undefined,
-        status: leaseFilterStatus === "all" ? undefined : leaseFilterStatus,
-        communityId: leaseFilterCommunity || undefined,
-        expiringWithinDays: leaseFilterExpiring ? 30 : undefined,
+        search:             leaseSearch    || undefined,
+        status:             leaseStatus    === 'all' ? undefined : leaseStatus,
+        communityId:        leaseCommunity || undefined,
+        expiringWithinDays: leaseExpiring  ? 30 : undefined,
       });
       setLeases(rows);
-    } catch (error) {
-      toast.error("Failed to load leases", { description: errorMessage(error) });
-    } finally {
-      setLoadingLeases(false);
-    }
-  }, [leaseFilterSearch, leaseFilterStatus, leaseFilterCommunity, leaseFilterExpiring]);
+    } catch (e) { toast.error('Failed to load leases', { description: errorMessage(e) }); }
+    finally { setLoadingLeases(false); }
+  }, [leaseSearch, leaseStatus, leaseCommunity, leaseExpiring]);
 
   const loadRequests = useCallback(async () => {
     setLoadingRequests(true);
     try {
-      const response = await rentalService.listRequests({
-        search: requestFilterSearch || undefined,
-        status: requestFilterStatus === "all" ? undefined : requestFilterStatus,
-        page: requestPage,
-        limit: 20,
+      const r = await rentalService.listRequests({
+        search:  reqSearch || undefined,
+        status:  reqStatus === 'all' ? undefined : reqStatus,
+        page: reqPage, limit: 20,
       });
-      setRequests(response.data);
-      setRequestTotal(response.total);
-    } catch (error) {
-      toast.error("Failed to load requests", { description: errorMessage(error) });
-    } finally {
-      setLoadingRequests(false);
-    }
-  }, [requestFilterSearch, requestFilterStatus, requestPage]);
+      setRequests(r.data); setRequestTotal(r.total);
+    } catch (e) { toast.error('Failed to load requests', { description: errorMessage(e) }); }
+    finally { setLoadingRequests(false); }
+  }, [reqSearch, reqStatus, reqPage]);
 
-  useEffect(() => {
-    void loadHeader();
-  }, [loadHeader]);
+  useEffect(() => { void loadHeader();   }, [loadHeader]);
+  useEffect(() => { void loadLeases();   }, [loadLeases]);
+  useEffect(() => { void loadRequests(); }, [loadRequests]);
 
-  useEffect(() => {
-    void loadLeases();
-  }, [loadLeases]);
+  const refreshAll = () => Promise.all([loadHeader(), loadLeases(), loadRequests()]);
 
-  useEffect(() => {
-    void loadRequests();
-  }, [loadRequests]);
-
-  const refreshAll = async () => {
-    await Promise.all([loadHeader(), loadLeases(), loadRequests()]);
-  };
-
-  const openLease = async (id: string, nextMode: "view" | "renew" | "terminate") => {
-    setDetailOpen(true);
-    setDetailLoading(true);
-    setMode(nextMode);
-    setTerminateReason("");
+  const openLease = async (id: string, mode: LeaseMode) => {
+    setDetailOpen(true); setDetailLoading(true); setLeaseMode(mode);
     try {
-      const detail = await rentalService.getLeaseDetail(id);
-      setLeaseDetail(detail);
-      setRenewStart(detail.startDate.slice(0, 10));
-      setRenewEnd(detail.endDate.slice(0, 10));
-      setRenewRent(String(detail.monthlyRent));
-      setRenewAuto(detail.autoRenew);
-    } catch (error) {
-      toast.error("Failed to load lease", { description: errorMessage(error) });
+      const d = await rentalService.getLeaseDetail(id);
+      setLeaseDetail(d);
+    } catch (e) {
+      toast.error('Failed to load lease', { description: errorMessage(e) });
       setDetailOpen(false);
-    } finally {
-      setDetailLoading(false);
-    }
+    } finally { setDetailLoading(false); }
   };
 
-  const saveSettings = async () => {
-    if (!settingsEnabledDraft && !settingsReasonDraft.trim()) {
-      toast.error("Reason is required when disabling leasing");
-      return;
-    }
-    try {
-      await rentalService.toggleLeasing({
-        enabled: settingsEnabledDraft,
-        reason: settingsEnabledDraft ? undefined : settingsReasonDraft.trim(),
-      });
-      setSettingsOpen(false);
-      await loadHeader();
-      toast.success("Settings updated");
-    } catch (error) {
-      toast.error("Failed to save settings", { description: errorMessage(error) });
-    }
-  };
+  // ── Columns ───────────────────────────────────────────────────
 
-  const doRenew = async () => {
-    if (!leaseDetail) return;
-    const rent = Number(renewRent);
-    if (!renewStart || !renewEnd || !Number.isFinite(rent) || rent <= 0) {
-      toast.error("Invalid renewal values");
-      return;
-    }
-    try {
-      await rentalService.renewLease(leaseDetail.id, {
-        startDate: new Date(`${renewStart}T00:00:00`).toISOString(),
-        endDate: new Date(`${renewEnd}T00:00:00`).toISOString(),
-        monthlyRent: rent,
-        autoRenew: renewAuto,
-      });
-      toast.success("Lease renewed");
-      setDetailOpen(false);
-      await refreshAll();
-    } catch (error) {
-      toast.error("Failed to renew lease", { description: errorMessage(error) });
-    }
-  };
+  const leaseCols: DataTableColumn<LeaseListItem>[] = useMemo(() => [
+    { key: 'unit',      header: 'Unit',      render: (r) => <span style={{ fontSize: '12px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif", color: '#111827' }}>{r.unitNumber}</span> },
+    { key: 'community', header: 'Community', render: (r) => <span style={{ fontSize: '12px', color: '#6B7280' }}>{r.communityName}</span> },
+    { key: 'owner',     header: 'Owner',     render: (r) => <span style={{ fontSize: '12px', color: '#374151' }}>{r.ownerName}</span> },
+    { key: 'tenant',    header: 'Tenant',    render: (r) => <span style={{ fontSize: '12px', color: r.tenantName ? '#374151' : '#D1D5DB' }}>{r.tenantName ?? '—'}</span> },
+    { key: 'rent',      header: 'Rent/mo',   render: (r) => <span style={{ fontSize: '12.5px', fontWeight: 700, fontFamily: "'DM Mono', monospace", color: '#111827' }}>{formatCurrency(r.monthlyRent)}</span> },
+    { key: 'period',    header: 'Period',    render: (r) => <span style={{ fontSize: '11px', color: '#9CA3AF', fontFamily: "'DM Mono', monospace", whiteSpace: 'nowrap' }}>{formatDate(r.startDate)} – {formatDate(r.endDate)}</span> },
+    { key: 'days',      header: 'Days Left', render: (r) => <DaysLeftCell days={r.daysUntilExpiry} /> },
+    { key: 'status',    header: 'Status',    render: (r) => <LeaseStatusChip status={r.status} /> },
+    { key: 'actions',   header: '',          render: (r) => (
+      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'flex-end' }}>
+        <GhostIconBtn icon={<Eye style={{ width: '11px', height: '11px' }} />} onClick={() => void openLease(r.id, 'view')} />
+        <button type="button" onClick={() => void openLease(r.id, 'renew')}
+          style={{ padding: '4px 10px', borderRadius: '6px', border: '1px solid #BFDBFE', background: '#EFF6FF', color: '#2563EB', fontSize: '11px', fontWeight: 700, cursor: 'pointer', fontFamily: "'Work Sans', sans-serif" }}>
+          Renew
+        </button>
+        <button type="button" onClick={() => void openLease(r.id, 'terminate')}
+          style={{ padding: '4px 10px', borderRadius: '6px', border: '1px solid #FECACA', background: '#FEF2F2', color: '#DC2626', fontSize: '11px', fontWeight: 700, cursor: 'pointer', fontFamily: "'Work Sans', sans-serif" }}>
+          Terminate
+        </button>
+      </div>
+    )},
+  ], []);
 
-  const doTerminate = async () => {
-    if (!leaseDetail || !terminateReason.trim()) {
-      toast.error("Termination reason is required");
-      return;
-    }
-    try {
-      await rentalService.terminateLease(leaseDetail.id, { reason: terminateReason.trim() });
-      toast.success("Lease terminated");
-      setDetailOpen(false);
-      await refreshAll();
-    } catch (error) {
-      toast.error("Failed to terminate lease", { description: errorMessage(error) });
-    }
-  };
+  const reqCols: DataTableColumn<RentRequestListItem>[] = useMemo(() => [
+    { key: 'unit',        header: 'Unit',        render: (r) => <span style={{ fontSize: '12px', fontWeight: 700, color: '#111827' }}>{r.unitNumber}</span> },
+    { key: 'owner',       header: 'Owner',       render: (r) => <span style={{ fontSize: '12px', color: '#6B7280' }}>{r.ownerName ?? '—'}</span> },
+    { key: 'tenant',      header: 'Tenant',      render: (r) => <span style={{ fontSize: '12px', color: '#374151' }}>{r.tenantName}</span> },
+    { key: 'email',       header: 'Email',       render: (r) => <span style={{ fontSize: '11.5px', color: '#6B7280' }}>{r.tenantEmail}</span> },
+    { key: 'requested',   header: 'Requested',   render: (r) => <span style={{ fontSize: '11.5px', color: '#9CA3AF', fontFamily: "'DM Mono', monospace" }}>{formatDate(r.requestedAt)}</span> },
+    { key: 'nationality', header: 'Nationality', render: (r) => <span style={{ fontSize: '12px', color: '#6B7280' }}>{r.tenantNationality ?? '—'}</span> },
+    { key: 'status',      header: 'Status',      render: (r) => <StatusBadge value={r.status} /> },
+    { key: 'actions',     header: '',            render: (r) => (
+      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <button type="button" onClick={() => { setSelectedReq(r); setReviewOpen(true); }}
+          style={{ padding: '5px 12px', borderRadius: '7px', background: '#111827', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '11.5px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+          Review
+        </button>
+      </div>
+    )},
+  ], []);
 
-  const approveRequest = async () => {
-    if (!selectedRequest) return;
-    try {
-      await rentalService.approveRequest(selectedRequest.id);
-      toast.success("Request approved");
-      setReviewOpen(false);
-      await refreshAll();
-    } catch (error) {
-      toast.error("Failed to approve request", { description: errorMessage(error) });
-    }
-  };
-
-  const rejectRequest = async () => {
-    if (!selectedRequest || !rejectReason.trim()) {
-      toast.error("Rejection reason is required");
-      return;
-    }
-    try {
-      await rentalService.rejectRequest(selectedRequest.id, rejectReason.trim());
-      toast.success("Request rejected");
-      setReviewOpen(false);
-      await refreshAll();
-    } catch (error) {
-      toast.error("Failed to reject request", { description: errorMessage(error) });
-    }
-  };
+  // ─────────────────────────────────────────────────────────────
 
   return (
-    <div className="p-8 space-y-6">
-      <div className="flex items-start justify-between">
+    <div style={{ fontFamily: "'Work Sans', sans-serif" }}>
+
+      {/* ── Header ─────────────────────────────────────────── */}
+      <div style={{ marginBottom: '20px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
         <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Rental / Lease</h1>
-          <p className="text-sm text-gray-500 mt-1">Leases, requests, and operations controls.</p>
+          <h1 style={{ fontSize: '18px', fontWeight: 900, color: '#111827', letterSpacing: '-0.02em', margin: 0 }}>Rental / Lease</h1>
+          <p style={{ fontSize: '13px', color: '#6B7280', margin: '4px 0 0' }}>Leases, requests, and operations controls.</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button className="bg-white/5 hover:bg-gray-100 border border-gray-300 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-2" onClick={() => void refreshAll()}><RefreshCw className="w-4 h-4" />Refresh</button>
-          <button className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-2" onClick={() => setSettingsOpen(true)}><Settings className="w-4 h-4" />Settings</button>
-        </div>
+        <button type="button" onClick={() => void refreshAll()}
+          style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px', border: '1px solid #E5E7EB', background: '#FFF', color: '#374151', cursor: 'pointer', fontSize: '12.5px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+          <RefreshCw style={{ width: '12px', height: '12px' }} /> Refresh
+        </button>
       </div>
 
-      {!settings.leasingEnabled ? (
-        <div className="w-full rounded-xl border border-amber-400/30 bg-amber-500/10 p-4 flex items-center justify-between">
-          <p className="text-sm text-amber-200">Leasing operations are suspended — {settings.suspensionReason ?? "No reason"}</p>
-          <button className="bg-amber-400 hover:bg-amber-300 text-[#201300] text-sm font-medium px-4 py-2 rounded-lg transition-colors" onClick={() => { setSettingsEnabledDraft(true); setSettingsOpen(true); }}>Re-enable</button>
+      {/* ── Suspension banner ──────────────────────────────── */}
+      {!settings.leasingEnabled && (
+        <div style={{ marginBottom: '20px', padding: '12px 16px', borderRadius: '10px', border: '1px solid #FDE68A', background: '#FFFBEB', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <AlertTriangle style={{ width: '14px', height: '14px', color: '#D97706', flexShrink: 0 }} />
+            <p style={{ fontSize: '13px', color: '#92400E', margin: 0 }}>
+              Leasing operations are suspended — {settings.suspensionReason ?? 'No reason provided'}
+            </p>
+          </div>
         </div>
-      ) : null}
+      )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl border border-gray-200 p-6"><p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Active Leases</p><p className="text-3xl font-semibold text-gray-900 font-['DM_Mono'] mt-4">{stats.activeLeases}</p></div>
-        <div className="bg-white rounded-xl border border-gray-200 p-6"><p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Expiring This Month</p><p className="text-3xl font-semibold text-gray-900 font-['DM_Mono'] mt-4">{stats.expiringThisMonth}</p></div>
-        <div className="bg-white rounded-xl border border-gray-200 p-6"><p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Pending Requests</p><p className="text-3xl font-semibold text-gray-900 font-['DM_Mono'] mt-4">{stats.pendingRentRequests}</p></div>
-        <div className="bg-white rounded-xl border border-gray-200 p-6"><p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Monthly Revenue</p><p className="text-3xl font-semibold text-gray-900 font-['DM_Mono'] mt-4">{formatCurrency(stats.totalMonthlyRevenue)}</p></div>
+      {/* ── Stats ──────────────────────────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '20px' }}>
+        <StatCard icon="active-users"    title="Active Leases"       value={String(stats.activeLeases)}                               subtitle="Currently running" />
+        <StatCard icon="complaints-open" title="Expiring This Month" value={String(stats.expiringThisMonth)}                          subtitle="Within 30 days" />
+        <StatCard icon="tickets"         title="Pending Requests"    value={String(stats.pendingRentRequests)}                         subtitle="Awaiting review" />
+        <StatCard icon="revenue"         title="Monthly Revenue"     value={formatCurrency(stats.totalMonthlyRevenue)}                 subtitle="All active leases" />
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 p-6">
-        <div className="flex items-center gap-2 mb-6">
-          <button className={`px-4 py-2 rounded-lg text-sm ${tab === "leases" ? "bg-blue-600 text-white" : "bg-white/5 text-gray-700"}`} onClick={() => setTab("leases")}>Leases</button>
-          <button className={`px-4 py-2 rounded-lg text-sm ${tab === "requests" ? "bg-blue-600 text-white" : "bg-white/5 text-gray-700"}`} onClick={() => setTab("requests")}>Rent Requests</button>
-        </div>
+      {/* ── Tabs ───────────────────────────────────────────── */}
+      <div style={{ display: 'flex', gap: '2px', padding: '4px', borderRadius: '10px', background: '#F3F4F6', marginBottom: '20px', width: 'fit-content' }}>
+        <TabBtn label="Leases"        active={tab === 'leases'}   onClick={() => setTab('leases')} />
+        <TabBtn label="Rent Requests" active={tab === 'requests'} onClick={() => setTab('requests')} />
+      </div>
 
-        {tab === "leases" ? (
-          <>
-            <div className="p-4 border-b border-gray-200 flex items-center gap-3 flex-wrap">
-              <div className="relative flex-1 max-w-xs">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                <input className="w-full bg-white border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:border-blue-500/50" placeholder="Search..." value={leaseFilterSearch} onChange={(event) => setLeaseFilterSearch(event.target.value)} />
+      {/* ══ Leases tab ════════════════════════════════════════ */}
+      {tab === 'leases' && (
+        <div style={{ borderRadius: '12px', border: '1px solid #EBEBEB', background: '#FFF', overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
+          {/* Sub-filter pills */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '12px 14px', borderBottom: '1px solid #F3F4F6', flexWrap: 'wrap' }}>
+            {([
+              { key: 'all',        label: 'All' },
+              { key: 'active',     label: 'Active' },
+              { key: 'expired',    label: 'Expired' },
+              { key: 'terminated', label: 'Terminated' },
+            ] as const).map((pill) => {
+              const isActive = leaseSubFilter === pill.key;
+              return (
+                <button key={pill.key} type="button" onClick={() => setLeaseSubFilter(pill.key)}
+                  style={{ padding: '5px 14px', borderRadius: '16px', border: `1px solid ${isActive ? '#2563EB' : '#E5E7EB'}`, background: isActive ? '#EFF6FF' : '#FAFAFA', color: isActive ? '#2563EB' : '#6B7280', fontSize: '11.5px', fontWeight: isActive ? 700 : 500, cursor: 'pointer', fontFamily: "'Work Sans', sans-serif", transition: 'all 120ms ease' }}>
+                  {pill.label}
+                  {pill.key === 'all' && <span style={{ marginLeft: '4px', fontSize: '10px', color: isActive ? '#2563EB' : '#9CA3AF' }}>({leases.length})</span>}
+                  {pill.key === 'active' && <span style={{ marginLeft: '4px', fontSize: '10px', color: isActive ? '#2563EB' : '#9CA3AF' }}>({leases.filter((l) => l.status === 'ACTIVE' || l.status === 'EXPIRING_SOON').length})</span>}
+                  {pill.key === 'expired' && <span style={{ marginLeft: '4px', fontSize: '10px', color: isActive ? '#2563EB' : '#9CA3AF' }}>({leases.filter((l) => l.status === 'EXPIRED').length})</span>}
+                  {pill.key === 'terminated' && <span style={{ marginLeft: '4px', fontSize: '10px', color: isActive ? '#2563EB' : '#9CA3AF' }}>({leases.filter((l) => l.status === 'TERMINATED').length})</span>}
+                </button>
+              );
+            })}
+            {/* Auto-expire check */}
+            <div style={{ marginLeft: 'auto' }}>
+              <button type="button" onClick={() => void loadLeases()}
+                title="Re-fetch leases and check for any that should have auto-expired"
+                style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 12px', borderRadius: '16px', border: '1px solid #E5E7EB', background: '#FAFAFA', color: '#6B7280', fontSize: '11px', fontWeight: 600, cursor: 'pointer', fontFamily: "'Work Sans', sans-serif" }}>
+                <Clock style={{ width: '11px', height: '11px' }} />
+                Auto-expire Check
+              </button>
+            </div>
+          </div>
+
+          {/* Stale active leases warning */}
+          {staleActiveLeases.length > 0 && (
+            <div style={{ margin: '0 14px', marginTop: '10px', padding: '10px 14px', borderRadius: '8px', border: '1px solid #FDE68A', background: '#FFFBEB', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <AlertTriangle style={{ width: '13px', height: '13px', color: '#D97706', flexShrink: 0 }} />
+              <span style={{ fontSize: '12px', color: '#92400E', fontFamily: "'Work Sans', sans-serif" }}>
+                {staleActiveLeases.length} lease{staleActiveLeases.length > 1 ? 's are' : ' is'} past {staleActiveLeases.length > 1 ? 'their' : 'its'} end date but still showing as active. These should auto-expire via the backend scheduler.
+              </span>
+            </div>
+          )}
+
+          {/* Filter bar */}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px' }}>
+              <Search style={{ width: '13px', height: '13px', color: '#C4C9D4', flexShrink: 0 }} />
+              <input
+                placeholder="Search unit, owner, tenant…"
+                value={leaseSearch}
+                onChange={(e) => setLeaseSearch(e.target.value)}
+                style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: '13px', color: '#111827', fontFamily: "'Work Sans', sans-serif" }}
+              />
+              {/* Expiring soon pill */}
+              <button type="button" onClick={() => setLeaseExpiring((p) => !p)}
+                style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 10px', borderRadius: '6px', border: `1px solid ${leaseExpiring ? '#FDE68A' : '#E5E7EB'}`, background: leaseExpiring ? '#FFFBEB' : '#FAFAFA', color: leaseExpiring ? '#D97706' : '#9CA3AF', fontSize: '11.5px', fontWeight: 700, cursor: 'pointer', fontFamily: "'Work Sans', sans-serif", flexShrink: 0 }}>
+                Expiring Soon
+              </button>
+              {/* Filters toggle */}
+              <button type="button" onClick={() => setLeaseFiltersOpen((p) => !p)}
+                style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 10px', borderRadius: '6px', border: `1px solid ${activeLeaseFilters > 0 ? '#2563EB40' : '#E5E7EB'}`, background: activeLeaseFilters > 0 ? '#EFF6FF' : '#FAFAFA', color: activeLeaseFilters > 0 ? '#2563EB' : '#6B7280', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer', fontFamily: "'Work Sans', sans-serif", flexShrink: 0 }}>
+                <SlidersHorizontal style={{ width: '11px', height: '11px' }} />
+                Filters
+                {activeLeaseFilters > 0 && <span style={{ width: '15px', height: '15px', borderRadius: '50%', background: '#2563EB', color: '#FFF', fontSize: '9px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{activeLeaseFilters}</span>}
+                <ChevronDown style={{ width: '10px', height: '10px', transform: leaseFiltersOpen ? 'rotate(180deg)' : 'none', transition: 'transform 150ms' }} />
+              </button>
+            </div>
+            {leaseFiltersOpen && (
+              <div style={{ padding: '10px 14px', borderTop: '1px solid #F3F4F6', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <select value={leaseStatus} onChange={(e) => setLeaseStatus(e.target.value as 'all' | LeaseStatus)} style={{ ...selectStyle, width: '150px' }}>
+                  <option value="all">All Statuses</option>
+                  <option value="ACTIVE">Active</option>
+                  <option value="EXPIRING_SOON">Expiring Soon</option>
+                  <option value="EXPIRED">Expired</option>
+                  <option value="TERMINATED">Terminated</option>
+                </select>
+                <select value={leaseCommunity} onChange={(e) => setLeaseCommunity(e.target.value)} style={{ ...selectStyle, width: '180px' }}>
+                  {communities.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
               </div>
-              <select className="w-44 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50 appearance-none" value={leaseFilterStatus} onChange={(event) => setLeaseFilterStatus(event.target.value as "all" | LeaseStatus)}>
-                <option value="all">All Statuses</option><option value="ACTIVE">Active</option><option value="EXPIRING_SOON">Expiring Soon</option><option value="EXPIRED">Expired</option><option value="TERMINATED">Terminated</option>
-              </select>
-              <select className="w-44 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50 appearance-none" value={leaseFilterCommunity} onChange={(event) => setLeaseFilterCommunity(event.target.value)}>
-                {communities.map((community) => (<option key={community.id} value={community.id}>{community.name}</option>))}
-              </select>
-              <button className={`px-3 py-1.5 rounded-full text-xs ${leaseFilterExpiring ? "bg-blue-600/20 text-blue-300" : "bg-white/5 text-gray-500"}`} onClick={() => setLeaseFilterExpiring((prev) => !prev)}>Expiring Soon</button>
+            )}
+          </div>
+
+          <DataTable
+            columns={leaseCols}
+            rows={filteredLeases}
+            rowKey={(r) => r.id}
+            loading={loadingLeases}
+            emptyTitle="No leases found"
+            emptyDescription="Try adjusting your search or filters."
+          />
+        </div>
+      )}
+
+      {/* ══ Requests tab ══════════════════════════════════════ */}
+      {tab === 'requests' && (
+        <div style={{ borderRadius: '12px', border: '1px solid #EBEBEB', background: '#FFF', overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
+          {/* Filter bar */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px', borderBottom: '1px solid #F3F4F6' }}>
+            <Search style={{ width: '13px', height: '13px', color: '#C4C9D4', flexShrink: 0 }} />
+            <input
+              placeholder="Search tenant, unit…"
+              value={reqSearch}
+              onChange={(e) => { setReqSearch(e.target.value); setReqPage(1); }}
+              style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: '13px', color: '#111827', fontFamily: "'Work Sans', sans-serif" }}
+            />
+            <select value={reqStatus} onChange={(e) => { setReqStatus(e.target.value as 'all' | RentRequestStatus); setReqPage(1); }}
+              style={{ ...selectStyle, width: '150px', flex: '0 0 150px' }}>
+              <option value="all">All Statuses</option>
+              <option value="PENDING">Pending</option>
+              <option value="APPROVED">Approved</option>
+              <option value="REJECTED">Rejected</option>
+              <option value="CANCELLED">Cancelled</option>
+            </select>
+          </div>
+
+          <DataTable
+            columns={reqCols}
+            rows={requests}
+            rowKey={(r) => r.id}
+            loading={loadingRequests}
+            emptyTitle="No requests found"
+            emptyDescription="No rent requests match your filters."
+          />
+
+          {/* Pagination */}
+          <div style={{ padding: '12px 14px', borderTop: '1px solid #F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: '11.5px', color: '#9CA3AF', fontFamily: "'DM Mono', monospace" }}>
+              Page {reqPage} of {reqPages}<span style={{ color: '#D1D5DB', marginLeft: '6px' }}>({requestTotal})</span>
+            </span>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button type="button" disabled={reqPage <= 1} onClick={() => setReqPage((p) => Math.max(1, p - 1))}
+                style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '5px 10px', borderRadius: '6px', border: '1px solid #E5E7EB', background: reqPage <= 1 ? '#F9FAFB' : '#FFF', color: reqPage <= 1 ? '#D1D5DB' : '#374151', cursor: reqPage <= 1 ? 'not-allowed' : 'pointer', fontSize: '12px', fontFamily: "'Work Sans', sans-serif" }}>
+                <ChevronLeft style={{ width: '12px', height: '12px' }} /> Prev
+              </button>
+              <button type="button" disabled={reqPage >= reqPages} onClick={() => setReqPage((p) => Math.min(reqPages, p + 1))}
+                style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '5px 10px', borderRadius: '6px', border: '1px solid #E5E7EB', background: reqPage >= reqPages ? '#F9FAFB' : '#FFF', color: reqPage >= reqPages ? '#D1D5DB' : '#374151', cursor: reqPage >= reqPages ? 'not-allowed' : 'pointer', fontSize: '12px', fontFamily: "'Work Sans', sans-serif" }}>
+                Next <ChevronRight style={{ width: '12px', height: '12px' }} />
+              </button>
             </div>
-            {(() => {
-              const leaseCols: DataTableColumn<LeaseListItem>[] = [
-                { key: "unit", header: "Unit", render: (r) => <span className="text-sm text-gray-700">{r.unitNumber}</span> },
-                { key: "community", header: "Community", render: (r) => <span className="text-sm text-gray-700">{r.communityName}</span> },
-                { key: "owner", header: "Owner", render: (r) => <span className="text-sm text-gray-700">{r.ownerName}</span> },
-                { key: "tenant", header: "Tenant", render: (r) => <span className="text-sm text-gray-700">{r.tenantName ?? "—"}</span> },
-                { key: "rent", header: "Rent/mo", render: (r) => <span className="text-sm text-gray-700">{formatCurrency(r.monthlyRent)}</span> },
-                { key: "period", header: "Period", render: (r) => <span className="text-sm text-gray-700">{formatDate(r.startDate)} - {formatDate(r.endDate)}</span> },
-                { key: "days", header: "Days Left", render: (r) => <span className={`text-sm ${daysTone(r.daysUntilExpiry)}`}>{r.daysUntilExpiry ?? "—"}</span> },
-                { key: "status", header: "Status", render: (r) => <span className={`px-2 py-1 rounded-md text-xs ${statusTone(r.status)}`}>{r.status}</span> },
-                { key: "actions", header: "Actions", render: (r) => (
-                  <div className="flex items-center gap-2">
-                    <button className="p-2 rounded-lg hover:bg-gray-100 text-gray-700" onClick={() => void openLease(r.id, "view")}><Eye className="w-4 h-4" /></button>
-                    <button className="p-2 rounded-lg hover:bg-gray-100 text-blue-300" onClick={() => void openLease(r.id, "renew")}>R</button>
-                    <button className="p-2 rounded-lg hover:bg-gray-100 text-rose-300" onClick={() => void openLease(r.id, "terminate")}>T</button>
-                  </div>
-                )},
-              ];
-              return <DataTable columns={leaseCols} rows={leases} rowKey={(r) => r.id} loading={loadingLeases} emptyTitle="No leases found" />;
-            })()}
-          </>
-        ) : (
-          <>
-            <div className="p-4 border-b border-gray-200 flex items-center gap-3 flex-wrap">
-              <div className="relative flex-1 max-w-xs"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" /><input className="w-full bg-white border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:border-blue-500/50" placeholder="Search..." value={requestFilterSearch} onChange={(event) => { setRequestFilterSearch(event.target.value); setRequestPage(1); }} /></div>
-              <select className="w-44 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50 appearance-none" value={requestFilterStatus} onChange={(event) => { setRequestFilterStatus(event.target.value as "all" | RentRequestStatus); setRequestPage(1); }}><option value="all">All Statuses</option><option value="PENDING">Pending</option><option value="APPROVED">Approved</option><option value="REJECTED">Rejected</option><option value="CANCELLED">Cancelled</option></select>
-            </div>
-            {(() => {
-              const reqCols: DataTableColumn<RentRequestListItem>[] = [
-                { key: "unit", header: "Unit", render: (r) => <span className="text-sm text-gray-700">{r.unitNumber}</span> },
-                { key: "owner", header: "Owner", render: (r) => <span className="text-sm text-gray-700">{r.ownerName ?? "—"}</span> },
-                { key: "tenant", header: "Tenant", render: (r) => <span className="text-sm text-gray-700">{r.tenantName}</span> },
-                { key: "email", header: "Email", render: (r) => <span className="text-sm text-gray-700">{r.tenantEmail}</span> },
-                { key: "requested", header: "Requested", render: (r) => <span className="text-sm text-gray-700">{formatDate(r.requestedAt)}</span> },
-                { key: "nationality", header: "Nationality", render: (r) => <span className="text-sm text-gray-700">{r.tenantNationality}</span> },
-                { key: "status", header: "Status", render: (r) => <span className={`px-2 py-1 rounded-md text-xs ${statusTone(r.status)}`}>{r.status}</span> },
-                { key: "actions", header: "Actions", render: (r) => (
-                  <button className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-3 py-2 rounded-lg transition-colors" onClick={() => { setSelectedRequest(r); setRejectReason(""); setReviewOpen(true); }}>Review</button>
-                )},
-              ];
-              return <DataTable columns={reqCols} rows={requests} rowKey={(r) => r.id} loading={loadingRequests} emptyTitle="No requests found" />;
-            })()}
-            <div className="flex items-center justify-end gap-2"><button className="bg-white/5 hover:bg-gray-100 border border-gray-300 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors" disabled={requestPage <= 1} onClick={() => setRequestPage((prev) => Math.max(1, prev - 1))}>Previous</button><p className="text-sm text-gray-500">Page {requestPage} / {requestPages}</p><button className="bg-white/5 hover:bg-gray-100 border border-gray-300 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors" disabled={requestPage >= requestPages} onClick={() => setRequestPage((prev) => Math.min(requestPages, prev + 1))}>Next</button></div>
-          </>
-        )}
-      </div>
+          </div>
+        </div>
+      )}
 
-      {detailOpen ? (
-        <div className="fixed inset-0 z-50 bg-black/60"><div className="fixed inset-y-0 right-0 w-[480px] bg-white border-l border-gray-200 flex flex-col z-50 shadow-2xl shadow-black/50"><div className="px-6 py-5 border-b border-gray-200 flex items-center justify-between flex-shrink-0"><h2 className="text-base font-semibold text-gray-900">Lease Detail</h2><button className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-700" onClick={() => setDetailOpen(false)}><X className="w-4 h-4" /></button></div><div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">{detailLoading || !leaseDetail ? <p className="text-sm text-gray-500">Loading...</p> : (<><div className="bg-white rounded-xl border border-gray-200 p-6"><p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">Unit & Parties</p><p className="text-sm text-gray-700">Unit: {leaseDetail.unit.unitNumber}</p><p className="text-sm text-gray-700">Owner: {leaseDetail.owner.name ?? "—"}</p><p className="text-sm text-gray-700">Tenant: {leaseDetail.tenant?.name ?? "—"}</p></div><div className="bg-white rounded-xl border border-gray-200 p-6"><p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">Lease Terms</p><p className="text-sm text-gray-700">Period: {formatDate(leaseDetail.startDate)} - {formatDate(leaseDetail.endDate)}</p><p className="text-sm text-gray-700">Rent: {formatCurrency(leaseDetail.monthlyRent)}</p><p className="text-sm text-gray-700">Source: {leaseDetail.source}</p><p className="text-sm text-gray-700">Auto Renew: {leaseDetail.autoRenew ? "Enabled" : "Disabled"}</p></div><div className="bg-white rounded-xl border border-gray-200 p-6"><p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-3">Renewal Chain</p>{leaseDetail.renewedFrom ? <p className="text-sm text-blue-300">Renewed from: {leaseDetail.renewedFrom.id}</p> : <p className="text-sm text-gray-400">No renewal links</p>}{leaseDetail.renewedTo ? <p className="text-sm text-blue-300 mt-1">Renewed to: {leaseDetail.renewedTo.id}</p> : null}</div>{mode === "renew" ? <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4"><div className="grid grid-cols-2 gap-4"><div><label className="text-xs font-medium text-gray-500 mb-1.5 block">Start</label><input type="date" className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-700" value={renewStart} onChange={(event) => setRenewStart(event.target.value)} /></div><div><label className="text-xs font-medium text-gray-500 mb-1.5 block">End</label><input type="date" className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-700" value={renewEnd} onChange={(event) => setRenewEnd(event.target.value)} /></div></div><div><label className="text-xs font-medium text-gray-500 mb-1.5 block">Rent</label><input type="number" className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-700" value={renewRent} onChange={(event) => setRenewRent(event.target.value)} /></div><button className={`px-3 py-1.5 rounded-full text-xs ${renewAuto ? "bg-blue-600/20 text-blue-300" : "bg-white/5 text-gray-500"}`} onClick={() => setRenewAuto((prev) => !prev)}>Auto Renew {renewAuto ? "ON" : "OFF"}</button></div> : null}{mode === "terminate" ? <div className="bg-white rounded-xl border border-gray-200 p-6"><label className="text-xs font-medium text-gray-500 mb-1.5 block">Reason</label><textarea className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-700 min-h-[96px]" value={terminateReason} onChange={(event) => setTerminateReason(event.target.value)} /></div> : null}</>)}</div><div className="px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3 flex-shrink-0">{mode === "renew" ? <button className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors" onClick={() => void doRenew()}>Save Renewal</button> : mode === "terminate" ? <button className="bg-rose-600 hover:bg-rose-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors" onClick={() => void doTerminate()}>Confirm Terminate</button> : (<><button className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors" onClick={() => setMode("renew")}>Renew Lease</button><button className="bg-rose-600 hover:bg-rose-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors" onClick={() => setMode("terminate")}>Terminate Lease</button></>)}</div></div></div>
-      ) : null}
+      {/* ══ Lease detail drawer ═══════════════════════════════ */}
+      <DrawerForm
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        title="Lease Detail"
+        description="View, renew, or terminate this lease."
+        widthClassName="w-full sm:max-w-[500px]"
+      >
+        {detailLoading || !leaseDetail
+          ? <EmptyState title="Loading…" description="Fetching lease details." />
+          : <LeaseDetailContent
+              key={leaseDetail.id + leaseMode}
+              detail={leaseDetail}
+              mode={leaseMode}
+              setMode={setLeaseMode}
+              onClose={() => setDetailOpen(false)}
+              onRefresh={() => void refreshAll()}
+            />
+        }
+      </DrawerForm>
 
-      {reviewOpen && selectedRequest ? (
-        <div className="fixed inset-0 z-50 bg-black/60"><div className="fixed inset-y-0 right-0 w-[560px] bg-white border-l border-gray-200 flex flex-col z-50 shadow-2xl shadow-black/50"><div className="px-6 py-5 border-b border-gray-200 flex items-center justify-between flex-shrink-0"><h2 className="text-base font-semibold text-gray-900">Request Review</h2><button className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-700" onClick={() => setReviewOpen(false)}><X className="w-4 h-4" /></button></div><div className="flex-1 overflow-y-auto px-6 py-6 space-y-4"><div className="bg-white rounded-xl border border-gray-200 p-6"><p className="text-sm text-gray-700">Name: {selectedRequest.tenantName}</p><p className="text-sm text-gray-700">Email: {selectedRequest.tenantEmail}</p><p className="text-sm text-gray-700">Phone: {selectedRequest.tenantPhone}</p></div><div className="bg-white rounded-xl border border-gray-200 p-6 space-y-3"><div className="flex items-center justify-between"><p className="text-sm text-gray-700">National ID: {selectedRequest.tenantNationalIdFileId ?? "N/A"}</p>{selectedRequest.tenantNationalIdFileId ? <button className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-3 py-2 rounded-lg transition-colors" onClick={() => void openSecureFile(selectedRequest.tenantNationalIdFileId!)}>Open</button> : null}</div><div className="flex items-center justify-between"><p className="text-sm text-gray-700">Contract: {selectedRequest.contractFileId ?? "N/A"}</p>{selectedRequest.contractFileId ? <button className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-3 py-2 rounded-lg transition-colors" onClick={() => void openSecureFile(selectedRequest.contractFileId!)}>Open</button> : null}</div></div><div><label className="text-xs font-medium text-gray-500 mb-1.5 block">Reject Reason</label><textarea className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-700 min-h-[96px]" value={rejectReason} onChange={(event) => setRejectReason(event.target.value)} /></div></div><div className="px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3 flex-shrink-0"><button className="bg-rose-600 hover:bg-rose-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors" onClick={() => void rejectRequest()}>Reject</button><button className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors" onClick={() => void approveRequest()}>Approve</button></div></div></div>
-      ) : null}
-
-      {settingsOpen ? (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"><div className="w-full max-w-xl bg-white rounded-xl border border-gray-200 p-6"><div className="flex items-center justify-between mb-6"><h2 className="text-base font-semibold text-gray-900">Leasing Operations</h2><button className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 hover:text-gray-700" onClick={() => setSettingsOpen(false)}><X className="w-4 h-4" /></button></div><div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4"><div className="flex items-center justify-between"><p className="text-sm text-gray-700">Current status: {settingsEnabledDraft ? "Enabled" : "Suspended"}</p><button className={`w-12 h-7 rounded-full ${settingsEnabledDraft ? "bg-blue-600" : "bg-slate-600"} relative`} onClick={() => setSettingsEnabledDraft((prev) => !prev)}><span className={`absolute top-1 h-5 w-5 rounded-full bg-white ${settingsEnabledDraft ? "left-6" : "left-1"}`} /></button></div>{!settingsEnabledDraft ? <div><label className="text-xs font-medium text-gray-500 mb-1.5 block">Reason</label><textarea className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2.5 text-sm text-gray-700 min-h-[96px]" value={settingsReasonDraft} onChange={(event) => setSettingsReasonDraft(event.target.value)} /></div> : <p className="text-sm text-gray-500">Re-enabling will clear suspension reason.</p>}</div><div className="flex items-center justify-end gap-3 mt-6"><button className="bg-white/5 hover:bg-gray-100 border border-gray-300 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors" onClick={() => setSettingsOpen(false)}>Cancel</button><button className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors" onClick={() => void saveSettings()}>Save</button></div></div></div>
-      ) : null}
+      {/* ══ Request review drawer ═════════════════════════════ */}
+      <DrawerForm
+        open={reviewOpen}
+        onOpenChange={setReviewOpen}
+        title="Request Review"
+        description="Review tenant documents and approve or reject the request."
+        widthClassName="w-full sm:max-w-[520px]"
+      >
+        {!selectedReq
+          ? <EmptyState title="No request selected" description="Select a request to review." />
+          : <RequestReviewContent
+              key={selectedReq.id}
+              request={selectedReq}
+              onClose={() => setReviewOpen(false)}
+              onRefresh={() => void refreshAll()}
+            />
+        }
+      </DrawerForm>
     </div>
   );
 }
-

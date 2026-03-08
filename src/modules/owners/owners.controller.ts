@@ -56,6 +56,7 @@ export class OwnersController {
 
   // Remove a user from a unit (for family/tenants)
   @Post('units/:unitId/remove-user/:userId')
+  @Permissions('owner.update', 'unit.remove_resident_from_unit')
   removeUserFromUnit(
     @Param('unitId') unitId: string,
     @Param('userId') userId: string,
@@ -67,11 +68,13 @@ export class OwnersController {
   // ===== PROFILE MANAGEMENT =====
 
   @Patch('profile')
+  @Permissions('owner.manage_profile')
   updateOwnProfile(@Body() dto: UpdateProfileDto, @Req() req: any) {
     return this.ownersService.updateOwnProfile(req.user.id, dto);
   }
 
   @Post('upload/profile-photo')
+  @Permissions('owner.manage_profile')
   @UseInterceptors(FileInterceptor('file'))
   uploadProfilePhoto(
     @UploadedFile() file: Express.Multer.File,
@@ -81,6 +84,7 @@ export class OwnersController {
   }
 
   @Post('upload/national-id-photo')
+  @Permissions('owner.manage_profile')
   @UseInterceptors(FileInterceptor('file'))
   uploadNationalIdPhoto(
     @UploadedFile() file: Express.Multer.File,
@@ -92,6 +96,7 @@ export class OwnersController {
   // ===== FAMILY MANAGEMENT =====
 
   @Post('family/:unitId')
+  @Permissions('owner.manage_family')
   addFamilyMember(
     @Param('unitId') unitId: string,
     @Query('targetResidentId') targetResidentId: string,
@@ -102,6 +107,7 @@ export class OwnersController {
   }
 
   @Patch('family/:userId')
+  @Permissions('owner.manage_family')
   updateFamilyProfile(
     @Param('userId') userId: string,
     @Body() dto: UpdateFamilyProfileDto,
@@ -111,6 +117,7 @@ export class OwnersController {
   }
 
   @Get('family/:unitId')
+  @Permissions('owner.manage_family', 'owner.view')
   getFamilyMembers(@Param('unitId') unitId: string, @Req() req: any) {
     return this.ownersService.getFamilyMembers(unitId, req.user.id);
   }

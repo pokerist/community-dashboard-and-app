@@ -109,20 +109,29 @@ const menuSections: NavSection[] = [
   {
     group: "System",
     items: [
-      { title: "Security", icon: Shield, section: "security" },
+      { title: "Emergency & Safety", icon: Shield, section: "security" },
       { title: "System Settings", icon: Settings, section: "settings" },
       { title: "Hospitality", icon: Hotel, section: "hospitality", soon: true },
     ],
   },
 ];
 
+export type SidebarBadgeCounts = {
+  violations: number;
+  permits: number;
+  rental: number;
+  amenities: number;
+  approvals: number;
+};
+
 interface AppSidebarProps {
   onNavigate: (section: string) => void;
   activeSection: string;
   unseenNotifications?: number;
+  badgeCounts?: SidebarBadgeCounts;
 }
 
-export function AppSidebar({ onNavigate, activeSection, unseenNotifications = 0 }: AppSidebarProps) {
+export function AppSidebar({ onNavigate, activeSection, unseenNotifications = 0, badgeCounts }: AppSidebarProps) {
   const authEmail =
     (typeof window !== "undefined" ? localStorage.getItem("auth_email") : null) || "admin@mg.com";
   const authName =
@@ -217,7 +226,18 @@ export function AppSidebar({ onNavigate, activeSection, unseenNotifications = 0 
               {section.items.map((item) => {
                 const Icon = item.icon;
                 const isActive = activeSection === item.section || (item.match?.includes(activeSection) ?? false);
-                const hasBadge = item.section === "notifications" && unseenNotifications > 0;
+
+                // Determine badge count for this nav item
+                let badgeCount = 0;
+                if (item.section === "notifications" && unseenNotifications > 0) {
+                  badgeCount = unseenNotifications;
+                } else if (badgeCounts) {
+                  const key = item.section as keyof SidebarBadgeCounts;
+                  if (key in badgeCounts && badgeCounts[key] > 0) {
+                    badgeCount = badgeCounts[key];
+                  }
+                }
+                const hasBadge = badgeCount > 0;
 
                 return (
                   <button
@@ -258,7 +278,7 @@ export function AppSidebar({ onNavigate, activeSection, unseenNotifications = 0 
                       {item.title}
                     </span>
 
-                    {/* Notification badge */}
+                    {/* Count badge */}
                     {hasBadge && (
                       <span style={{
                         marginLeft: "auto",
@@ -268,7 +288,7 @@ export function AppSidebar({ onNavigate, activeSection, unseenNotifications = 0 
                         fontSize: "9px", fontWeight: 700, padding: "0 4px",
                         fontFamily: "'DM Mono', monospace",
                       }}>
-                        {unseenNotifications > 99 ? "99+" : unseenNotifications}
+                        {badgeCount > 99 ? "99+" : badgeCount}
                       </span>
                     )}
 

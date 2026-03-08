@@ -1,86 +1,76 @@
-import {
-  ClipboardList,
-  ConciergeBell,
-  Hotel,
-  Users,
-  type LucideIcon,
-} from "lucide-react";
-import { EmptyState } from "../EmptyState";
-import { PageHeader } from "../PageHeader";
+import { Users, ConciergeBell, ClipboardList, Hotel, ArrowRight } from "lucide-react";
 
 type HospitalityFeature = {
-  icon: LucideIcon;
+  icon: React.ComponentType<{ style?: React.CSSProperties }>;
   label: string;
+  description: string;
 };
 
-const FEATURE_PREVIEW: HospitalityFeature[] = [
-  { icon: Users, label: "Hospitality Staff" },
-  { icon: ConciergeBell, label: "Guest Services" },
-  { icon: ClipboardList, label: "Service Workflows" },
+const FEATURES: HospitalityFeature[] = [
+  { icon: Users, label: "Hospitality Staff", description: "Dedicated role for hospitality team members with custom access controls." },
+  { icon: ConciergeBell, label: "Guest Services", description: "Manage guest requests, concierge tasks, and service fulfilment." },
+  { icon: ClipboardList, label: "Service Workflows", description: "Build structured workflows for recurring hospitality tasks." },
 ];
 
 export function HospitalityPage() {
   return (
-    <div className="min-h-screen bg-white p-8 space-y-6">
-      <PageHeader
-        title="Hospitality"
-        description="Manage hospitality services and guest experiences"
-      />
+    <div style={{ fontFamily: "'Work Sans', sans-serif" }}>
+      {/* ── Header ─── */}
+      <div style={{ marginBottom: "20px" }}>
+        <h1 style={{ fontSize: "18px", fontWeight: 900, color: "#111827", letterSpacing: "-0.02em", margin: 0 }}>Hospitality</h1>
+        <p style={{ marginTop: "4px", fontSize: "13px", color: "#6B7280" }}>Manage hospitality services and guest experiences.</p>
+      </div>
 
-      <div
-        className="bg-white rounded-xl border border-gray-200 p-6
-                   flex flex-col items-center justify-center
-                   min-h-[480px] text-center"
-      >
-        <div
-          className="w-16 h-16 rounded-2xl bg-blue-50
-                      flex items-center justify-center mb-6"
-        >
-          <Hotel className="w-8 h-8 text-blue-600" />
-        </div>
+      {/* ── Coming soon panel ─── */}
+      <div style={{ borderRadius: "10px", border: "1px solid #EBEBEB", background: "#FFF", overflow: "hidden" }}>
+        {/* Accent bar */}
+        <div style={{ height: "3px", background: "linear-gradient(90deg, #0D9488, #2563EB)" }} />
 
-        <div
-          className="bg-blue-50 border border-blue-200 rounded-full
-                      px-3 py-1 mb-4"
-        >
-          <span className="text-xs font-medium text-blue-600 uppercase tracking-wider">
-            Coming Soon
-          </span>
-        </div>
-
-        <h2 className="text-xl font-semibold text-gray-900 mb-3">
-          Hospitality Module
-        </h2>
-
-        <p className="text-sm text-gray-600 max-w-md leading-relaxed mb-6">
-          The hospitality module will introduce a dedicated Hospitality user type
-          and tools for managing guest services, concierge operations, and
-          hospitality staff workflows.
-        </p>
-
-        {FEATURE_PREVIEW.length === 0 ? (
-          <div className="w-full max-w-lg">
-            <EmptyState
-              compact
-              title="Feature preview unavailable"
-              description="Hospitality preview cards will appear here."
-            />
+        <div style={{ padding: "48px 32px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center" }}>
+          {/* Icon */}
+          <div style={{ width: "52px", height: "52px", borderRadius: "14px", background: "#EFF6FF", border: "1.5px solid #BFDBFE", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: "16px" }}>
+            <Hotel style={{ width: "24px", height: "24px", color: "#2563EB" }} />
           </div>
-        ) : (
-          <div className="grid grid-cols-3 gap-4 w-full max-w-lg">
-            {FEATURE_PREVIEW.map(({ icon: Icon, label }) => (
-              <div
-                key={label}
-                className="bg-gray-50 rounded-xl border border-gray-200 p-4
-                           flex flex-col items-center gap-2"
-              >
-                <Icon className="w-5 h-5 text-gray-600" />
-                <span className="text-xs text-gray-600">{label}</span>
+
+          {/* Badge */}
+          <div style={{ display: "inline-flex", alignItems: "center", gap: "5px", padding: "3px 10px", borderRadius: "20px", border: "1px solid #BFDBFE", background: "#EFF6FF", marginBottom: "14px" }}>
+            <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "#2563EB", animation: "pulse 2s infinite" }} />
+            <span style={{ fontSize: "10.5px", fontWeight: 700, color: "#2563EB", textTransform: "uppercase", letterSpacing: "0.08em" }}>Coming Soon</span>
+          </div>
+
+          {/* Title */}
+          <h2 style={{ fontSize: "16px", fontWeight: 900, color: "#111827", margin: "0 0 10px", letterSpacing: "-0.01em" }}>Hospitality Module</h2>
+
+          {/* Description */}
+          <p style={{ fontSize: "13px", color: "#6B7280", maxWidth: "440px", lineHeight: "1.6", margin: "0 0 32px" }}>
+            The hospitality module will introduce a dedicated Hospitality user type and tools for managing guest services, concierge operations, and hospitality staff workflows.
+          </p>
+
+          {/* Feature preview cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "10px", width: "100%", maxWidth: "560px" }}>
+            {FEATURES.map(({ icon: Icon, label, description }) => (
+              <div key={label}
+                style={{ borderRadius: "8px", border: "1px solid #EBEBEB", background: "#FAFAFA", padding: "14px", textAlign: "left", transition: "border-color 150ms, background 150ms" }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = "#BFDBFE"; (e.currentTarget as HTMLDivElement).style.background = "#F8FBFF"; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.borderColor = "#EBEBEB"; (e.currentTarget as HTMLDivElement).style.background = "#FAFAFA"; }}>
+                <div style={{ width: "28px", height: "28px", borderRadius: "7px", background: "#EFF6FF", border: "1px solid #BFDBFE", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: "8px" }}>
+                  <Icon style={{ width: "13px", height: "13px", color: "#2563EB" }} />
+                </div>
+                <p style={{ fontSize: "12.5px", fontWeight: 700, color: "#111827", margin: "0 0 4px" }}>{label}</p>
+                <p style={{ fontSize: "11.5px", color: "#9CA3AF", margin: 0, lineHeight: "1.5" }}>{description}</p>
               </div>
             ))}
           </div>
-        )}
+
+          {/* Footer note */}
+          <div style={{ display: "flex", alignItems: "center", gap: "5px", marginTop: "28px", fontSize: "12px", color: "#9CA3AF" }}>
+            <ArrowRight style={{ width: "12px", height: "12px" }} />
+            <span>This feature is actively being developed. Check back soon.</span>
+          </div>
+        </div>
       </div>
+
+      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}`}</style>
     </div>
   );
 }

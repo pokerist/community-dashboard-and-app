@@ -71,10 +71,15 @@ export type PaginatedGateLog = {
   limit: number;
 };
 
+export type ClusterOption = {
+  id: string;
+  label: string;
+};
+
 export type GateCreatePayload = {
   communityId: string;
+  clusterId?: string;
   name: string;
-  code?: string;
   allowedRoles: GateAccessRole[];
   etaMinutes?: number;
 };
@@ -198,6 +203,17 @@ const gatesService = {
 
   async listCommunityOptions(): Promise<CommunityOption[]> {
     const response = await apiClient.get<CommunityRow[]>('/communities');
+    const rows = Array.isArray(response.data) ? response.data : [];
+    return rows.map((row) => ({
+      id: row.id,
+      label: row.code ? `${row.name} (${row.code})` : row.name,
+    }));
+  },
+
+  async listClusterOptions(communityId: string): Promise<ClusterOption[]> {
+    const response = await apiClient.get<Array<{ id: string; name: string; code: string | null }>>(
+      `/communities/${communityId}/clusters`,
+    );
     const rows = Array.isArray(response.data) ? response.data : [];
     return rows.map((row) => ({
       id: row.id,

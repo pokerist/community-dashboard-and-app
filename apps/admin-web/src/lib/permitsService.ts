@@ -20,6 +20,8 @@ export type PermitTypeItem = {
   slug: string;
   category: PermitCategory;
   description: string | null;
+  iconName: string | null;
+  color: string | null;
   isActive: boolean;
   displayOrder: number;
   fields: PermitTypeField[];
@@ -88,6 +90,8 @@ export type CreatePermitTypePayload = {
   name: string;
   category: PermitCategory;
   description?: string;
+  iconName?: string;
+  color?: string;
   fields?: Array<{
     label: string;
     type: ServiceFieldType;

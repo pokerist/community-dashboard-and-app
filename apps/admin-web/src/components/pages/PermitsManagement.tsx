@@ -1,19 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, Check, Eye, Pencil, Plus, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, Eye, Pencil, Plus, Search, SlidersHorizontal, ChevronDown, X, CalendarRange } from 'lucide-react';
 import { PermitCategory, ServiceFieldType } from '@prisma/client';
 import { toast } from 'sonner';
-import { Badge } from '../ui/badge';
-import { Button } from '../ui/button';
-import { Card } from '../ui/card';
-import { Input } from '../ui/input';
-import { Label } from '../ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { Switch } from '../ui/switch';
 import { DataTable, type DataTableColumn } from '../DataTable';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
-import { Textarea } from '../ui/textarea';
 import { DrawerForm } from '../DrawerForm';
 import { StatusBadge } from '../StatusBadge';
+import { StatCard } from '../StatCard';
 import permitsService, {
   type PermitRequestDetail,
   type PermitRequestListItem,
@@ -22,9 +14,13 @@ import permitsService, {
 } from '../../lib/permitsService';
 import { errorMessage, formatDateTime, humanizeEnum } from '../../lib/live-data';
 
+// ─── Types ────────────────────────────────────────────────────
+
 type PermitStatusFilter = 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED';
 
-const permitCategories: PermitCategory[] = [
+// ─── Constants ────────────────────────────────────────────────
+
+const PERMIT_CATEGORIES: PermitCategory[] = [
   PermitCategory.ACCOUNT_INFO,
   PermitCategory.LEGAL_OWNERSHIP,
   PermitCategory.UTILITIES_SERVICES,
@@ -32,776 +28,893 @@ const permitCategories: PermitCategory[] = [
   PermitCategory.OPERATIONAL,
 ];
 
-const fieldTypeOptions: ServiceFieldType[] = [
-  ServiceFieldType.TEXT,
-  ServiceFieldType.TEXTAREA,
-  ServiceFieldType.NUMBER,
-  ServiceFieldType.DATE,
-  ServiceFieldType.BOOLEAN,
-  ServiceFieldType.MEMBER_SELECTOR,
-  ServiceFieldType.FILE,
+const FIELD_TYPE_OPTIONS: ServiceFieldType[] = [
+  ServiceFieldType.TEXT, ServiceFieldType.TEXTAREA, ServiceFieldType.NUMBER,
+  ServiceFieldType.DATE, ServiceFieldType.BOOLEAN,  ServiceFieldType.MEMBER_SELECTOR, ServiceFieldType.FILE,
 ];
 
-function categoryBadgeClass(category: PermitCategory): string {
-  if (category === PermitCategory.ACCOUNT_INFO) {
-    return 'bg-blue-500/10 text-blue-400 border border-blue-500/20';
-  }
-  if (category === PermitCategory.LEGAL_OWNERSHIP) {
-    return 'bg-violet-500/10 text-violet-400 border border-violet-500/20';
-  }
-  if (category === PermitCategory.UTILITIES_SERVICES) {
-    return 'bg-teal-500/10 text-teal-400 border border-teal-500/20';
-  }
-  if (category === PermitCategory.COMMUNITY_ACTIVITIES) {
-    return 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
-  }
-  return 'bg-amber-500/10 text-amber-400 border border-amber-500/20';
+const ICON_NAME_OPTIONS = ['Wrench', 'Shield', 'FileText', 'Key', 'Building', 'Car', 'Clock', 'Home', 'Users', 'AlertTriangle', 'Zap', 'Leaf'] as const;
+
+const COLOR_PALETTE = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#F97316', '#14B8A6', '#F43F5E'] as const;
+
+const CATEGORY_META: Record<PermitCategory, { bg: string; color: string; accent: string }> = {
+  ACCOUNT_INFO:         { bg: '#EFF6FF', color: '#2563EB', accent: '#2563EB' },
+  LEGAL_OWNERSHIP:      { bg: '#EDE9FE', color: '#7C3AED', accent: '#7C3AED' },
+  UTILITIES_SERVICES:   { bg: '#F0FDFA', color: '#0D9488', accent: '#0D9488' },
+  COMMUNITY_ACTIVITIES: { bg: '#ECFDF5', color: '#059669', accent: '#059669' },
+  OPERATIONAL:          { bg: '#FFFBEB', color: '#D97706', accent: '#D97706' },
+};
+
+// ─── Helpers ──────────────────────────────────────────────────
+
+function categoryChip(cat: PermitCategory): React.ReactNode {
+  const m = CATEGORY_META[cat];
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: '5px', fontSize: '10.5px', fontWeight: 700, background: m.bg, color: m.color, fontFamily: "'Work Sans', sans-serif", whiteSpace: 'nowrap' }}>
+      {humanizeEnum(cat)}
+    </span>
+  );
 }
 
-function fileNameFromPath(path: string): string {
-  const segments = path.split('/');
-  return segments[segments.length - 1] || path;
-}
-
-function renderFieldValue(field: PermitRequestDetail['fieldValues'][number]): JSX.Element {
+function renderFieldValue(field: PermitRequestDetail['fieldValues'][number]): React.ReactNode {
+  const s: React.CSSProperties = { fontSize: '13px', fontWeight: 600, color: '#111827', fontFamily: "'Work Sans', sans-serif" };
   if (field.type === ServiceFieldType.FILE && field.valueText) {
-    return (
-      <a href={field.valueText} target="_blank" rel="noreferrer" className="text-[#0B5FFF] underline">
-        {fileNameFromPath(field.valueText)}
-      </a>
-    );
+    const name = field.valueText.split('/').at(-1) ?? field.valueText;
+    return <a href={field.valueText} target="_blank" rel="noreferrer" style={{ ...s, color: '#2563EB', textDecoration: 'underline' }}>{name}</a>;
   }
-
   if (field.type === ServiceFieldType.BOOLEAN) {
-    if (field.valueBool === null) {
-      return <span className="text-slate-500">--</span>;
-    }
-    return <span className="text-slate-200">{field.valueBool ? 'Yes' : 'No'}</span>;
+    return <span style={s}>{field.valueBool === null ? '—' : field.valueBool ? 'Yes' : 'No'}</span>;
   }
-
   if (field.type === ServiceFieldType.DATE) {
+    return <span style={s}>{field.valueDate ? formatDateTime(field.valueDate) : '—'}</span>;
+  }
+  if (field.valueNumber !== null) return <span style={s}>{field.valueNumber}</span>;
+  if (field.valueText) return <span style={s}>{field.valueText}</span>;
+  return <span style={{ ...s, color: '#C4C9D4' }}>—</span>;
+}
+
+// ─── Shared styles ────────────────────────────────────────────
+
+const inputStyle: React.CSSProperties = {
+  width: '100%', padding: '8px 10px', borderRadius: '7px',
+  border: '1px solid #E5E7EB', fontSize: '13px', color: '#111827',
+  background: '#FFF', outline: 'none', fontFamily: "'Work Sans', sans-serif",
+  boxSizing: 'border-box', height: '36px',
+};
+const selectStyle: React.CSSProperties = { ...inputStyle, cursor: 'pointer' };
+const textareaStyle: React.CSSProperties = {
+  ...inputStyle, height: 'auto', minHeight: '76px', resize: 'vertical', padding: '9px 10px',
+};
+
+// ─── Primitives ───────────────────────────────────────────────
+
+function TabBtn({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick}
+      style={{ padding: '7px 18px', borderRadius: '7px', border: 'none', background: active ? '#FFF' : 'transparent', color: active ? '#111827' : '#9CA3AF', cursor: 'pointer', fontSize: '12.5px', fontWeight: active ? 700 : 500, transition: 'all 120ms', fontFamily: "'Work Sans', sans-serif", flexShrink: 0, boxShadow: active ? '0 1px 3px rgba(0,0,0,0.08)' : 'none' }}>
+      {label}
+    </button>
+  );
+}
+
+function SmallTabBtn({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick}
+      style={{ padding: '5px 14px', borderRadius: '6px', border: 'none', background: active ? '#FFF' : 'transparent', color: active ? '#111827' : '#9CA3AF', cursor: 'pointer', fontSize: '12px', fontWeight: active ? 700 : 500, transition: 'all 120ms', fontFamily: "'Work Sans', sans-serif", flexShrink: 0, boxShadow: active ? '0 1px 3px rgba(0,0,0,0.07)' : 'none' }}>
+      {label}
+    </button>
+  );
+}
+
+function GhostIconBtn({ icon, onClick, disabled, title }: {
+  icon: React.ReactNode; onClick: () => void; disabled?: boolean; title?: string;
+}) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button type="button" onClick={onClick} disabled={disabled} title={title}
+      onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{ width: '28px', height: '28px', borderRadius: '6px', border: '1px solid #EBEBEB', background: hov && !disabled ? '#F3F4F6' : '#FAFAFA', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: disabled ? 'not-allowed' : 'pointer', color: disabled ? '#D1D5DB' : hov ? '#374151' : '#9CA3AF', transition: 'all 120ms', flexShrink: 0 }}>
+      {icon}
+    </button>
+  );
+}
+
+function Field({ label, required, span2, children }: {
+  label: string; required?: boolean; span2?: boolean; children: React.ReactNode;
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', gridColumn: span2 ? 'span 2' : undefined }}>
+      <label style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'Work Sans', sans-serif" }}>
+        {label}{required && <span style={{ color: '#EF4444', marginLeft: '3px' }}>*</span>}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+function SectionDivider({ label }: { label: string }) {
+  return (
+    <div style={{ gridColumn: 'span 2', display: 'flex', alignItems: 'center', gap: '8px', margin: '2px 0' }}>
+      <span style={{ fontSize: '10px', fontWeight: 800, color: '#C4C9D4', textTransform: 'uppercase', letterSpacing: '0.09em', whiteSpace: 'nowrap', fontFamily: "'Work Sans', sans-serif" }}>{label}</span>
+      <div style={{ flex: 1, height: '1px', background: '#F0F0F0' }} />
+    </div>
+  );
+}
+
+function InfoPair({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #F0F0F0', background: '#FAFAFA' }}>
+      <p style={{ fontSize: '9.5px', fontWeight: 700, color: '#C4C9D4', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 3px', fontFamily: "'Work Sans', sans-serif" }}>{label}</p>
+      <p style={{ fontSize: '13px', fontWeight: 600, color: '#111827', margin: 0, fontFamily: mono ? "'DM Mono', monospace" : "'Work Sans', sans-serif" }}>{value}</p>
+    </div>
+  );
+}
+
+function ToggleSwitch({ checked, onChange }: { checked: boolean; onChange: () => void }) {
+  return (
+    <button type="button" onClick={onChange}
+      style={{ position: 'relative', width: '40px', height: '22px', borderRadius: '11px', border: `1.5px solid ${checked ? '#A7F3D0' : '#E5E7EB'}`, background: checked ? '#ECFDF5' : '#F9FAFB', cursor: 'pointer', transition: 'all 150ms', flexShrink: 0 }}>
+      <span style={{ position: 'absolute', top: '2px', width: '16px', height: '16px', borderRadius: '50%', background: checked ? '#059669' : '#D1D5DB', left: checked ? '20px' : '2px', transition: 'left 150ms' }} />
+    </button>
+  );
+}
+
+function DateRangePill({ from, to, onFrom, onTo }: {
+  from: string; to: string; onFrom: (v: string) => void; onTo: (v: string) => void;
+}) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 10px', borderRadius: '7px', border: '1px solid #E5E7EB', background: '#FAFAFA', flexShrink: 0 }}>
+      <CalendarRange style={{ width: '11px', height: '11px', color: '#C4C9D4' }} />
+      <span style={{ fontSize: '9.5px', fontWeight: 700, color: '#C4C9D4', textTransform: 'uppercase', letterSpacing: '0.06em' }}>FROM</span>
+      <input type="date" value={from} onChange={(e) => onFrom(e.target.value)}
+        style={{ width: '120px', border: 'none', background: 'transparent', outline: 'none', fontSize: '12px', color: '#374151', fontFamily: "'Work Sans', sans-serif" }} />
+      <span style={{ fontSize: '9.5px', fontWeight: 700, color: '#C4C9D4', textTransform: 'uppercase', letterSpacing: '0.06em' }}>TO</span>
+      <input type="date" value={to} onChange={(e) => onTo(e.target.value)}
+        style={{ width: '120px', border: 'none', background: 'transparent', outline: 'none', fontSize: '12px', color: '#374151', fontFamily: "'Work Sans', sans-serif" }} />
+    </div>
+  );
+}
+
+// ─── PermitTypeEditor (right panel) ──────────────────────────
+
+function PermitTypeEditor({ selectedType, onRefresh }: {
+  selectedType: PermitTypeItem | null; onRefresh: (id: string) => Promise<void>;
+}) {
+  const [editingName,    setEditingName]    = useState(false);
+  const [nameDraft,      setNameDraft]      = useState('');
+  const [editingAppearance, setEditingAppearance] = useState(false);
+  const [iconDraft,      setIconDraft]      = useState('');
+  const [colorDraft,     setColorDraft]     = useState('');
+  const [addingField,    setAddingField]    = useState(false);
+  const [fieldLabel,     setFieldLabel]     = useState('');
+  const [fieldType,      setFieldType]      = useState<ServiceFieldType>(ServiceFieldType.TEXT);
+  const [fieldRequired,  setFieldRequired]  = useState(false);
+  const [saving,         setSaving]         = useState(false);
+
+  useEffect(() => {
+    if (selectedType) {
+      setNameDraft(selectedType.name); setEditingName(false); setAddingField(false);
+      setIconDraft(selectedType.iconName ?? 'FileText'); setColorDraft(selectedType.color ?? COLOR_PALETTE[0]);
+      setEditingAppearance(false);
+    }
+  }, [selectedType?.id]);
+
+  if (!selectedType) {
     return (
-      <span className="text-slate-200">
-        {field.valueDate ? formatDateTime(field.valueDate) : '--'}
-      </span>
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px', color: '#C4C9D4', fontSize: '13px', fontFamily: "'Work Sans', sans-serif", textAlign: 'center' }}>
+        Select a permit type to configure its fields.
+      </div>
     );
   }
 
-  if (field.valueNumber !== null) {
-    return <span className="text-slate-200">{field.valueNumber}</span>;
-  }
+  const accent = CATEGORY_META[selectedType.category]?.accent ?? '#6B7280';
 
-  if (field.valueText) {
-    return <span className="text-slate-200">{field.valueText}</span>;
-  }
+  const handleSaveName = async () => {
+    if (!nameDraft.trim()) return;
+    setSaving(true);
+    try {
+      await permitsService.updatePermitType(selectedType.id, { name: nameDraft.trim() });
+      setEditingName(false); await onRefresh(selectedType.id);
+    } catch (e) { toast.error('Failed to save name', { description: errorMessage(e) }); }
+    finally { setSaving(false); }
+  };
 
-  return <span className="text-slate-500">--</span>;
+  const handleSaveAppearance = async () => {
+    setSaving(true);
+    try {
+      await permitsService.updatePermitType(selectedType.id, { iconName: iconDraft, color: colorDraft } as any);
+      setEditingAppearance(false); await onRefresh(selectedType.id);
+    } catch (e) { toast.error('Failed to save appearance', { description: errorMessage(e) }); }
+    finally { setSaving(false); }
+  };
+
+  const handleAddField = async () => {
+    if (!fieldLabel.trim()) { toast.error('Field label is required'); return; }
+    setSaving(true);
+    try {
+      await permitsService.addField(selectedType.id, { label: fieldLabel.trim(), type: fieldType, required: fieldRequired });
+      setFieldLabel(''); setFieldType(ServiceFieldType.TEXT); setFieldRequired(false); setAddingField(false);
+      await onRefresh(selectedType.id);
+    } catch (e) { toast.error('Failed to add field', { description: errorMessage(e) }); }
+    finally { setSaving(false); }
+  };
+
+  const handleRemoveField = async (fieldId: string) => {
+    try {
+      await permitsService.removeField(fieldId); await onRefresh(selectedType.id);
+    } catch (e) { toast.error('Failed to remove field', { description: errorMessage(e) }); }
+  };
+
+  const handleMove = async (fieldId: string, dir: 'up' | 'down') => {
+    const idx = selectedType.fields.findIndex((f) => f.id === fieldId);
+    if (idx < 0) return;
+    const target = dir === 'up' ? idx - 1 : idx + 1;
+    if (target < 0 || target >= selectedType.fields.length) return;
+    const ordered = selectedType.fields.slice();
+    const [moved] = ordered.splice(idx, 1);
+    ordered.splice(target, 0, moved);
+    try {
+      await permitsService.updatePermitType(selectedType.id, {
+        name: selectedType.name, category: selectedType.category,
+        description: selectedType.description ?? undefined,
+        fields: ordered.map((f, i) => ({ label: f.label, type: f.type, placeholder: f.placeholder ?? undefined, required: f.required, displayOrder: i + 1 })),
+      });
+      await onRefresh(selectedType.id);
+    } catch (e) { toast.error('Failed to reorder', { description: errorMessage(e) }); }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      {/* Top accent */}
+      <div style={{ height: '3px', borderRadius: '2px', background: accent }} />
+
+      {/* Type name */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: '10.5px', fontWeight: 700, color: '#C4C9D4', textTransform: 'uppercase', letterSpacing: '0.07em', fontFamily: "'Work Sans', sans-serif" }}>Type Name</span>
+          {!editingName && (
+            <button type="button" onClick={() => setEditingName(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', borderRadius: '5px', border: '1px solid #E5E7EB', background: '#FAFAFA', color: '#6B7280', fontSize: '11.5px', cursor: 'pointer', fontFamily: "'Work Sans', sans-serif" }}>
+              <Pencil style={{ width: '10px', height: '10px' }} /> Edit
+            </button>
+          )}
+        </div>
+
+        {editingName ? (
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <input value={nameDraft} onChange={(e) => setNameDraft(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+            <GhostIconBtn icon={<Check style={{ width: '11px', height: '11px' }} />} onClick={() => void handleSaveName()} disabled={saving} />
+            <GhostIconBtn icon={<X style={{ width: '11px', height: '11px' }} />} onClick={() => { setNameDraft(selectedType.name); setEditingName(false); }} />
+          </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <p style={{ fontSize: '13.5px', fontWeight: 800, color: '#111827', margin: 0, letterSpacing: '-0.01em', fontFamily: "'Work Sans', sans-serif" }}>{selectedType.name}</p>
+            {categoryChip(selectedType.category)}
+          </div>
+        )}
+      </div>
+
+      {/* Appearance (icon + color) */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: '10.5px', fontWeight: 700, color: '#C4C9D4', textTransform: 'uppercase', letterSpacing: '0.07em', fontFamily: "'Work Sans', sans-serif" }}>Appearance</span>
+          {!editingAppearance && (
+            <button type="button" onClick={() => setEditingAppearance(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '3px 8px', borderRadius: '5px', border: '1px solid #E5E7EB', background: '#FAFAFA', color: '#6B7280', fontSize: '11.5px', cursor: 'pointer', fontFamily: "'Work Sans', sans-serif" }}>
+              <Pencil style={{ width: '10px', height: '10px' }} /> Edit
+            </button>
+          )}
+        </div>
+
+        {editingAppearance ? (
+          <div style={{ padding: '12px 14px', borderRadius: '9px', border: '1px dashed #D1D5DB', background: '#FAFAFA', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <span style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', fontFamily: "'Work Sans', sans-serif" }}>Icon Name</span>
+              <select value={iconDraft} onChange={(e) => setIconDraft(e.target.value)} style={selectStyle}>
+                {ICON_NAME_OPTIONS.map((ic) => <option key={ic} value={ic}>{ic}</option>)}
+              </select>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <span style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', fontFamily: "'Work Sans', sans-serif" }}>Color</span>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {COLOR_PALETTE.map((c) => (
+                  <button key={c} type="button" onClick={() => setColorDraft(c)}
+                    style={{
+                      width: '28px', height: '28px', borderRadius: '50%', background: c,
+                      border: colorDraft === c ? '3px solid #111827' : '3px solid transparent',
+                      cursor: 'pointer', transition: 'all 120ms', boxShadow: colorDraft === c ? '0 0 0 2px #FFF inset' : 'none',
+                      outline: 'none', flexShrink: 0,
+                    }}
+                    title={c}
+                  />
+                ))}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button type="button" disabled={saving} onClick={() => void handleSaveAppearance()}
+                style={{ flex: 1, padding: '6px 0', borderRadius: '7px', background: saving ? '#9CA3AF' : '#111827', color: '#FFF', border: 'none', cursor: saving ? 'not-allowed' : 'pointer', fontSize: '12.5px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+                {saving ? 'Saving…' : 'Save'}
+              </button>
+              <button type="button" onClick={() => { setIconDraft(selectedType.iconName ?? 'FileText'); setColorDraft(selectedType.color ?? COLOR_PALETTE[0]); setEditingAppearance(false); }}
+                style={{ padding: '6px 14px', borderRadius: '7px', border: '1px solid #E5E7EB', background: '#FFF', color: '#6B7280', cursor: 'pointer', fontSize: '12.5px', fontFamily: "'Work Sans', sans-serif" }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px', borderRadius: '9px', border: '1px solid #EBEBEB', background: '#FAFAFA' }}>
+            <span style={{
+              width: '28px', height: '28px', borderRadius: '50%',
+              background: selectedType.color ?? COLOR_PALETTE[0],
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+            }} />
+            <div>
+              <p style={{ fontSize: '12.5px', fontWeight: 700, color: '#111827', margin: 0, fontFamily: "'Work Sans', sans-serif" }}>
+                {selectedType.iconName ?? 'FileText'}
+              </p>
+              <p style={{ fontSize: '10.5px', color: '#9CA3AF', margin: '1px 0 0', fontFamily: "'DM Mono', monospace" }}>
+                {selectedType.color ?? COLOR_PALETTE[0]}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Fields list */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        <span style={{ fontSize: '10.5px', fontWeight: 700, color: '#C4C9D4', textTransform: 'uppercase', letterSpacing: '0.07em', fontFamily: "'Work Sans', sans-serif" }}>
+          Fields ({selectedType.fields.length})
+        </span>
+
+        {selectedType.fields.length === 0 && !addingField && (
+          <p style={{ fontSize: '12px', color: '#C4C9D4', fontFamily: "'Work Sans', sans-serif", padding: '12px 0' }}>No fields yet.</p>
+        )}
+
+        {selectedType.fields.map((f, i) => (
+          <div key={f.id} style={{ padding: '10px 12px', borderRadius: '9px', border: '1px solid #EBEBEB', background: '#FAFAFA', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+              <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#111827', flex: 1, fontFamily: "'Work Sans', sans-serif" }}>{f.label}</span>
+              <span style={{ fontSize: '10.5px', fontWeight: 700, padding: '2px 7px', borderRadius: '4px', background: '#F3F4F6', color: '#6B7280', whiteSpace: 'nowrap', fontFamily: "'Work Sans', sans-serif" }}>
+                {humanizeEnum(f.type)}
+              </span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '11px', color: f.required ? '#D97706' : '#C4C9D4', fontFamily: "'Work Sans', sans-serif" }}>
+                {f.required ? 'Required' : 'Optional'}
+              </span>
+              <div style={{ display: 'flex', gap: '4px' }}>
+                <GhostIconBtn icon={<ArrowUp style={{ width: '10px', height: '10px' }} />} onClick={() => void handleMove(f.id, 'up')} disabled={i === 0} title="Move up" />
+                <GhostIconBtn icon={<ArrowDown style={{ width: '10px', height: '10px' }} />} onClick={() => void handleMove(f.id, 'down')} disabled={i === selectedType.fields.length - 1} title="Move down" />
+                <button type="button" onClick={() => void handleRemoveField(f.id)}
+                  style={{ padding: '0 8px', height: '28px', borderRadius: '6px', border: '1px solid #FECACA', background: '#FEF2F2', color: '#DC2626', cursor: 'pointer', fontSize: '11.5px', fontWeight: 600, fontFamily: "'Work Sans', sans-serif" }}>
+                  Remove
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+
+        {/* Add field inline */}
+        {addingField ? (
+          <div style={{ padding: '12px 14px', borderRadius: '9px', border: '1px dashed #D1D5DB', background: '#FAFAFA', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <input value={fieldLabel} onChange={(e) => setFieldLabel(e.target.value)} placeholder="Field label" style={inputStyle} />
+            <select value={fieldType} onChange={(e) => setFieldType(e.target.value as ServiceFieldType)} style={selectStyle}>
+              {FIELD_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{humanizeEnum(t)}</option>)}
+            </select>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11.5px', color: '#9CA3AF', cursor: 'pointer', fontFamily: "'Work Sans', sans-serif" }}>
+              <input type="checkbox" checked={fieldRequired} onChange={(e) => setFieldRequired(e.target.checked)} style={{ accentColor: '#2563EB' }} />
+              Required
+            </label>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button type="button" disabled={saving} onClick={() => void handleAddField()}
+                style={{ flex: 1, padding: '6px 0', borderRadius: '7px', background: saving ? '#9CA3AF' : '#111827', color: '#FFF', border: 'none', cursor: saving ? 'not-allowed' : 'pointer', fontSize: '12.5px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+                {saving ? 'Adding…' : 'Confirm'}
+              </button>
+              <button type="button" onClick={() => { setAddingField(false); setFieldLabel(''); setFieldType(ServiceFieldType.TEXT); setFieldRequired(false); }}
+                style={{ padding: '6px 14px', borderRadius: '7px', border: '1px solid #E5E7EB', background: '#FFF', color: '#6B7280', cursor: 'pointer', fontSize: '12.5px', fontFamily: "'Work Sans', sans-serif" }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button type="button" onClick={() => setAddingField(true)}
+            style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '7px 14px', borderRadius: '7px', border: '1px dashed #D1D5DB', background: '#FAFAFA', color: '#6B7280', cursor: 'pointer', fontSize: '12px', fontFamily: "'Work Sans', sans-serif" }}>
+            <Plus style={{ width: '11px', height: '11px' }} /> Add Field
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
+
+// ─── Request Detail Drawer ────────────────────────────────────
+
+function RequestDetail({ request, onReload }: {
+  request: PermitRequestDetail; onReload: () => void;
+}) {
+  const [approveMode,  setApproveMode]  = useState(false);
+  const [rejectMode,   setRejectMode]   = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const [localReq,     setLocalReq]     = useState(request);
+
+  const isPending = localReq.status === 'PENDING';
+
+  const handleApprove = async () => {
+    try {
+      const d = await permitsService.approveRequest(localReq.id);
+      setLocalReq(d); setApproveMode(false); onReload(); toast.success('Request approved');
+    } catch (e) { toast.error('Failed to approve', { description: errorMessage(e) }); }
+  };
+
+  const handleReject = async () => {
+    try {
+      const d = await permitsService.rejectRequest(localReq.id, rejectReason.trim());
+      setLocalReq(d); setRejectMode(false); onReload(); toast.success('Request rejected');
+    } catch (e) { toast.error('Failed to reject', { description: errorMessage(e) }); }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+      {/* Header */}
+      <div>
+        <p style={{ fontFamily: "'DM Mono', monospace", fontSize: '18px', fontWeight: 900, color: '#111827', margin: '0 0 8px', letterSpacing: '-0.03em' }}>
+          {localReq.requestNumber}
+        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+          <StatusBadge value={localReq.status} />
+          {categoryChip(localReq.permitType.category)}
+        </div>
+        <p style={{ fontSize: '11.5px', color: '#9CA3AF', margin: '8px 0 0', fontFamily: "'DM Mono', monospace" }}>
+          Submitted {formatDateTime(localReq.submittedAt)}
+        </p>
+      </div>
+
+      {/* Permit type */}
+      <div style={{ padding: '12px 14px', borderRadius: '10px', border: '1px solid #EBEBEB', background: '#FAFAFA' }}>
+        <p style={{ fontSize: '9.5px', fontWeight: 700, color: '#C4C9D4', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 4px', fontFamily: "'Work Sans', sans-serif" }}>Permit Type</p>
+        <p style={{ fontSize: '13.5px', fontWeight: 800, color: '#111827', margin: 0, letterSpacing: '-0.01em' }}>{localReq.permitType.name}</p>
+      </div>
+
+      {/* Requester */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+        <InfoPair label="Requester" value={localReq.requester.name} />
+        <InfoPair label="Unit"      value={localReq.unit.unitNumber} />
+        <InfoPair label="Phone"     value={localReq.requester.phone ?? '—'} />
+      </div>
+
+      {/* Field values */}
+      {localReq.fieldValues.length > 0 && (
+        <div style={{ padding: '14px 16px', borderRadius: '10px', border: '1px solid #EBEBEB', background: '#FAFAFA', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <p style={{ fontSize: '10.5px', fontWeight: 700, color: '#C4C9D4', textTransform: 'uppercase', letterSpacing: '0.07em', margin: 0, fontFamily: "'Work Sans', sans-serif" }}>Form Responses</p>
+          {localReq.fieldValues.map((fv) => (
+            <div key={fv.fieldId} style={{ display: 'grid', gridTemplateColumns: '150px 1fr', gap: '8px', alignItems: 'baseline' }}>
+              <span style={{ fontSize: '12px', color: '#9CA3AF', fontFamily: "'Work Sans', sans-serif" }}>{fv.label}</span>
+              {renderFieldValue(fv)}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Notes */}
+      {localReq.notes && (
+        <div style={{ padding: '12px 14px', borderRadius: '10px', border: '1px solid #EBEBEB', background: '#FFFBEB' }}>
+          <p style={{ fontSize: '10.5px', fontWeight: 700, color: '#C4C9D4', textTransform: 'uppercase', letterSpacing: '0.07em', margin: '0 0 4px', fontFamily: "'Work Sans', sans-serif" }}>Notes</p>
+          <p style={{ fontSize: '12.5px', color: '#374151', margin: 0, lineHeight: 1.55 }}>{localReq.notes}</p>
+        </div>
+      )}
+
+      {/* Actions */}
+      {isPending ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          {rejectMode ? (
+            <>
+              <textarea value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="Rejection reason…" style={textareaStyle} />
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button type="button" onClick={() => void handleReject()}
+                  style={{ flex: 1, padding: '8px 0', borderRadius: '7px', background: '#DC2626', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '12.5px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+                  Confirm Reject
+                </button>
+                <button type="button" onClick={() => setRejectMode(false)}
+                  style={{ padding: '8px 16px', borderRadius: '7px', border: '1px solid #E5E7EB', background: '#FFF', color: '#6B7280', cursor: 'pointer', fontSize: '12.5px', fontFamily: "'Work Sans', sans-serif" }}>
+                  Cancel
+                </button>
+              </div>
+            </>
+          ) : approveMode ? (
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button type="button" onClick={() => void handleApprove()}
+                style={{ flex: 1, padding: '8px 0', borderRadius: '7px', background: '#059669', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '12.5px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+                Confirm Approve
+              </button>
+              <button type="button" onClick={() => setApproveMode(false)}
+                style={{ padding: '8px 16px', borderRadius: '7px', border: '1px solid #E5E7EB', background: '#FFF', color: '#6B7280', cursor: 'pointer', fontSize: '12.5px', fontFamily: "'Work Sans', sans-serif" }}>
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button type="button" onClick={() => setApproveMode(true)}
+                style={{ flex: 1, padding: '8px 0', borderRadius: '7px', background: '#111827', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '12.5px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+                Approve
+              </button>
+              <button type="button" onClick={() => setRejectMode(true)}
+                style={{ flex: 1, padding: '8px 0', borderRadius: '7px', background: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA', cursor: 'pointer', fontSize: '12.5px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+                Reject
+              </button>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{ padding: '14px 16px', borderRadius: '10px', border: '1px solid #EBEBEB', background: '#FFF', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          <InfoPair label="Reviewed By" value={localReq.reviewer?.name ?? '—'} />
+          <InfoPair label="Reviewed At" value={localReq.reviewedAt ? formatDateTime(localReq.reviewedAt) : '—'} mono />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Create Type Drawer ───────────────────────────────────────
+
+function CreateTypeDrawer({ open, onClose, onCreated }: {
+  open: boolean; onClose: () => void; onCreated: () => void;
+}) {
+  const [name,        setName]        = useState('');
+  const [cat,         setCat]         = useState<PermitCategory>(PermitCategory.OPERATIONAL);
+  const [description, setDescription] = useState('');
+  const [iconName,    setIconName]    = useState('FileText');
+  const [color,       setColor]       = useState(COLOR_PALETTE[0]);
+  const [fields,      setFields]      = useState([{ id: 'f1', label: '', type: ServiceFieldType.TEXT, required: false }]);
+  const [saving,      setSaving]      = useState(false);
+
+  const reset = () => {
+    setName(''); setCat(PermitCategory.OPERATIONAL); setDescription('');
+    setIconName('FileText'); setColor(COLOR_PALETTE[0]);
+    setFields([{ id: 'f1', label: '', type: ServiceFieldType.TEXT, required: false }]);
+  };
+
+  useEffect(() => { if (!open) reset(); }, [open]);
+
+  const handleCreate = async () => {
+    if (!name.trim()) { toast.error('Permit type name is required'); return; }
+    setSaving(true);
+    try {
+      await permitsService.createPermitType({
+        name: name.trim(), category: cat,
+        description: description.trim() || undefined,
+        iconName: iconName || undefined,
+        color: color || undefined,
+        fields: fields.filter((f) => f.label.trim()).map((f, i) => ({ label: f.label.trim(), type: f.type, required: f.required, displayOrder: i + 1 })),
+      });
+      toast.success('Permit type created'); onCreated(); onClose();
+    } catch (e) { toast.error('Failed to create permit type', { description: errorMessage(e) }); }
+    finally { setSaving(false); }
+  };
+
+  const addField    = () => setFields((p) => [...p, { id: `f-${Date.now()}-${p.length}`, label: '', type: ServiceFieldType.TEXT, required: false }]);
+  const removeField = (id: string) => setFields((p) => p.filter((f) => f.id !== id));
+  const updateField = <K extends keyof typeof fields[number]>(id: string, k: K, v: typeof fields[number][K]) =>
+    setFields((p) => p.map((f) => f.id === id ? { ...f, [k]: v } : f));
+
+  return (
+    <DrawerForm
+      open={open} onOpenChange={(v) => { if (!v) onClose(); }}
+      title="Add Permit Type"
+      description="Create a permit type and configure its form fields."
+      widthClassName="w-full sm:max-w-[540px]"
+      footer={
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', width: '100%' }}>
+          <button type="button" disabled={saving} onClick={onClose}
+            style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '8px 16px', borderRadius: '8px', border: '1px solid #E5E7EB', background: '#FFF', color: '#6B7280', cursor: saving ? 'not-allowed' : 'pointer', fontSize: '13px', fontFamily: "'Work Sans', sans-serif", fontWeight: 600 }}>
+            <X style={{ width: '12px', height: '12px' }} /> Cancel
+          </button>
+          <button type="button" disabled={saving} onClick={() => void handleCreate()}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 20px', borderRadius: '8px', background: saving ? '#9CA3AF' : '#111827', color: '#FFF', border: 'none', cursor: saving ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif", boxShadow: saving ? 'none' : '0 2px 6px rgba(0,0,0,0.15)' }}>
+            <Check style={{ width: '13px', height: '13px' }} />{saving ? 'Creating…' : 'Create Type'}
+          </button>
+        </div>
+      }
+    >
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+        <SectionDivider label="Basic Info" />
+
+        <Field label="Name" required span2>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Construction Permit" style={inputStyle} />
+        </Field>
+
+        <Field label="Category" span2>
+          <select value={cat} onChange={(e) => setCat(e.target.value as PermitCategory)} style={selectStyle}>
+            {PERMIT_CATEGORIES.map((c) => <option key={c} value={c}>{humanizeEnum(c)}</option>)}
+          </select>
+        </Field>
+
+        <Field label="Description" span2>
+          <textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Optional description…" style={textareaStyle} />
+        </Field>
+
+        <SectionDivider label="Appearance (Mobile App)" />
+
+        <Field label="Icon Name" span2>
+          <select value={iconName} onChange={(e) => setIconName(e.target.value)} style={selectStyle}>
+            {ICON_NAME_OPTIONS.map((ic) => <option key={ic} value={ic}>{ic}</option>)}
+          </select>
+          <span style={{ fontSize: '10.5px', color: '#9CA3AF', fontFamily: "'Work Sans', sans-serif", marginTop: '2px' }}>
+            Lucide icon name displayed in the mobile app
+          </span>
+        </Field>
+
+        <Field label="Color" span2>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {COLOR_PALETTE.map((c) => (
+              <button key={c} type="button" onClick={() => setColor(c)}
+                style={{
+                  width: '32px', height: '32px', borderRadius: '50%', background: c, border: color === c ? '3px solid #111827' : '3px solid transparent',
+                  cursor: 'pointer', transition: 'all 120ms', boxShadow: color === c ? '0 0 0 2px #FFF inset' : 'none',
+                  outline: 'none', flexShrink: 0,
+                }}
+                title={c}
+              />
+            ))}
+          </div>
+          <span style={{ fontSize: '10.5px', color: '#9CA3AF', fontFamily: "'Work Sans', sans-serif", marginTop: '2px' }}>
+            Accent color shown in the mobile app
+          </span>
+        </Field>
+
+        <SectionDivider label="Form Fields" />
+
+        <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {fields.map((f) => (
+            <div key={f.id} style={{ display: 'grid', gridTemplateColumns: '1fr 148px auto auto', gap: '8px', alignItems: 'center' }}>
+              <input value={f.label} onChange={(e) => updateField(f.id, 'label', e.target.value)} placeholder="Field label" style={inputStyle} />
+              <select value={f.type} onChange={(e) => updateField(f.id, 'type', e.target.value as ServiceFieldType)} style={selectStyle}>
+                {FIELD_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{humanizeEnum(t)}</option>)}
+              </select>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11.5px', color: '#9CA3AF', cursor: 'pointer', whiteSpace: 'nowrap', fontFamily: "'Work Sans', sans-serif" }}>
+                <input type="checkbox" checked={f.required} onChange={(e) => updateField(f.id, 'required', e.target.checked)} style={{ accentColor: '#2563EB' }} />
+                Req
+              </label>
+              <button type="button" onClick={() => removeField(f.id)}
+                style={{ width: '28px', height: '28px', borderRadius: '6px', border: '1px solid #FECACA', background: '#FEF2F2', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#DC2626', flexShrink: 0 }}>
+                <X style={{ width: '11px', height: '11px' }} />
+              </button>
+            </div>
+          ))}
+          <button type="button" onClick={addField}
+            style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '7px 14px', borderRadius: '7px', border: '1px dashed #D1D5DB', background: '#FAFAFA', color: '#6B7280', cursor: 'pointer', fontSize: '12px', fontFamily: "'Work Sans', sans-serif" }}>
+            <Plus style={{ width: '11px', height: '11px' }} /> Add Field
+          </button>
+        </div>
+      </div>
+    </DrawerForm>
+  );
+}
+
+// ─── Main ─────────────────────────────────────────────────────
 
 export function PermitsManagement() {
-  const [activeTab, setActiveTab] = useState<'requests' | 'types'>('requests');
-  const [loading, setLoading] = useState(false);
-  const [stats, setStats] = useState<PermitStats | null>(null);
-  const [permitTypes, setPermitTypes] = useState<PermitTypeItem[]>([]);
-  const [requests, setRequests] = useState<PermitRequestListItem[]>([]);
+  const [activeTab,       setActiveTab]       = useState<'requests' | 'types'>('types');
+  const [loading,         setLoading]         = useState(false);
+  const [stats,           setStats]           = useState<PermitStats | null>(null);
+  const [permitTypes,     setPermitTypes]     = useState<PermitTypeItem[]>([]);
+  const [requests,        setRequests]        = useState<PermitRequestListItem[]>([]);
+  const [selectedType,    setSelectedType]    = useState<PermitTypeItem | null>(null);
 
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState<PermitStatusFilter>('ALL');
-  const [category, setCategory] = useState<'ALL' | PermitCategory>('ALL');
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo, setDateTo] = useState('');
+  // Filters
+  const [search,          setSearch]          = useState('');
+  const [status,          setStatus]          = useState<PermitStatusFilter>('ALL');
+  const [category,        setCategory]        = useState<'ALL' | PermitCategory>('ALL');
+  const [dateFrom,        setDateFrom]        = useState('');
+  const [dateTo,          setDateTo]          = useState('');
+  const [filtersOpen,     setFiltersOpen]     = useState(false);
 
-  const [selectedType, setSelectedType] = useState<PermitTypeItem | null>(null);
-  const [editingTypeName, setEditingTypeName] = useState(false);
-  const [typeNameDraft, setTypeNameDraft] = useState('');
-  const [inlineFieldLabel, setInlineFieldLabel] = useState('');
-  const [inlineFieldType, setInlineFieldType] = useState<ServiceFieldType>(ServiceFieldType.TEXT);
-  const [inlineFieldRequired, setInlineFieldRequired] = useState(false);
-  const [addingField, setAddingField] = useState(false);
-
-  const [createDrawerOpen, setCreateDrawerOpen] = useState(false);
-  const [newTypeName, setNewTypeName] = useState('');
-  const [newTypeCategory, setNewTypeCategory] = useState<PermitCategory>(PermitCategory.OPERATIONAL);
-  const [newTypeDescription, setNewTypeDescription] = useState('');
-  const [newFields, setNewFields] = useState([
-    { id: 'new-field-1', label: '', type: ServiceFieldType.TEXT, required: false },
-  ]);
-
-  const [requestDrawerOpen, setRequestDrawerOpen] = useState(false);
-  const [activeRequest, setActiveRequest] = useState<PermitRequestDetail | null>(null);
-  const [approveMode, setApproveMode] = useState(false);
-  const [rejectMode, setRejectMode] = useState(false);
-  const [rejectReason, setRejectReason] = useState('');
+  // Drawers
+  const [createOpen,      setCreateOpen]      = useState(false);
+  const [reqDrawerOpen,   setReqDrawerOpen]   = useState(false);
+  const [activeRequest,   setActiveRequest]   = useState<PermitRequestDetail | null>(null);
+  const [reqDetailKey,    setReqDetailKey]    = useState(0);
 
   const groupedTypes = useMemo(() => {
-    const groups: Record<PermitCategory, PermitTypeItem[]> = {
-      ACCOUNT_INFO: [],
-      LEGAL_OWNERSHIP: [],
-      UTILITIES_SERVICES: [],
-      COMMUNITY_ACTIVITIES: [],
-      OPERATIONAL: [],
-    };
-    permitTypes.forEach((permitType) => {
-      groups[permitType.category].push(permitType);
-    });
+    const groups = Object.fromEntries(PERMIT_CATEGORIES.map((c) => [c, [] as PermitTypeItem[]])) as Record<PermitCategory, PermitTypeItem[]>;
+    permitTypes.forEach((pt) => groups[pt.category].push(pt));
     return groups;
   }, [permitTypes]);
 
   const load = async () => {
     setLoading(true);
     try {
-      const [statsData, typeData, requestData] = await Promise.all([
+      const [statsData, typeData, reqData] = await Promise.all([
         permitsService.getStats(),
         permitsService.listPermitTypes(true),
         permitsService.listRequests({
-          search: search || undefined,
-          status: status === 'ALL' ? undefined : status,
+          search:   search   || undefined,
+          status:   status   === 'ALL' ? undefined : status,
           category: category === 'ALL' ? undefined : category,
           dateFrom: dateFrom || undefined,
-          dateTo: dateTo || undefined,
+          dateTo:   dateTo   || undefined,
         }),
       ]);
-
-      setStats(statsData);
-      setPermitTypes(typeData);
-      setRequests(requestData);
-
-      if (typeData.length > 0 && !selectedType) {
-        setSelectedType(typeData[0]);
-        setTypeNameDraft(typeData[0].name);
-      }
-    } catch (error) {
-      toast.error('Failed to load permits', { description: errorMessage(error) });
-    } finally {
-      setLoading(false);
-    }
+      setStats(statsData); setPermitTypes(typeData); setRequests(reqData);
+      if (typeData.length > 0 && !selectedType) setSelectedType(typeData[0]);
+    } catch (e) { toast.error('Failed to load permits', { description: errorMessage(e) }); }
+    finally { setLoading(false); }
   };
 
-  useEffect(() => {
-    void load();
-  }, [search, status, category, dateFrom, dateTo]);
+  useEffect(() => { void load(); }, [search, status, category, dateFrom, dateTo]);
 
-  const refreshSelectedType = async (id: string) => {
+  const refreshType = async (id: string) => {
     const detail = await permitsService.getPermitType(id);
     setSelectedType(detail);
-    setTypeNameDraft(detail.name);
-    await load();
+    setPermitTypes((p) => p.map((t) => t.id === id ? detail : t));
   };
 
-  const openRequestDrawer = async (requestId: string) => {
+  const openRequest = async (id: string) => {
     try {
-      const detail = await permitsService.getRequestDetail(requestId);
-      setActiveRequest(detail);
-      setApproveMode(false);
-      setRejectMode(false);
-      setRejectReason('');
-      setRequestDrawerOpen(true);
-    } catch (error) {
-      toast.error('Failed to load request', { description: errorMessage(error) });
-    }
+      const d = await permitsService.getRequestDetail(id);
+      setActiveRequest(d); setReqDetailKey((k) => k + 1); setReqDrawerOpen(true);
+    } catch (e) { toast.error('Failed to load request', { description: errorMessage(e) }); }
   };
 
-  const saveTypeFieldOrder = async (orderedFields: PermitTypeItem['fields']) => {
-    if (!selectedType) return;
+  const activeFilters = [status !== 'ALL', category !== 'ALL', dateFrom, dateTo].filter(Boolean).length;
 
-    try {
-      await permitsService.updatePermitType(selectedType.id, {
-        name: selectedType.name,
-        category: selectedType.category,
-        description: selectedType.description ?? undefined,
-        fields: orderedFields.map((field, index) => ({
-          label: field.label,
-          type: field.type,
-          placeholder: field.placeholder ?? undefined,
-          required: field.required,
-          displayOrder: index + 1,
-        })),
-      });
-      await refreshSelectedType(selectedType.id);
-    } catch (error) {
-      toast.error('Failed to reorder fields', { description: errorMessage(error) });
-    }
-  };
+  const requestCols = useMemo<DataTableColumn<PermitRequestListItem>[]>(() => [
+    { key: 'n',  header: '#',           render: (r) => <span style={{ fontSize: '11.5px', fontFamily: "'DM Mono', monospace", color: '#6B7280' }}>{r.requestNumber}</span> },
+    { key: 'pt', header: 'Permit Type', render: (r) => <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#111827' }}>{r.permitTypeName}</span> },
+    { key: 'c',  header: 'Category',    render: (r) => categoryChip(r.category) },
+    { key: 'u',  header: 'Unit',        render: (r) => <span style={{ display: 'inline-flex', padding: '2px 8px', borderRadius: '5px', fontSize: '10.5px', fontWeight: 700, background: '#EFF6FF', color: '#2563EB' }}>{r.unitNumber}</span> },
+    { key: 'rq', header: 'Requester',   render: (r) => <span style={{ fontSize: '12px', color: '#374151' }}>{r.requesterName}</span> },
+    { key: 'd',  header: 'Submitted',   render: (r) => <span style={{ fontSize: '11px', fontFamily: "'DM Mono', monospace", color: '#9CA3AF' }}>{formatDateTime(r.submittedAt)}</span> },
+    { key: 'st', header: 'Status',      render: (r) => <StatusBadge value={r.status} /> },
+    { key: 'x',  header: '',            render: (r) => <div style={{ display: 'flex', justifyContent: 'flex-end' }}><GhostIconBtn icon={<Eye style={{ width: '11px', height: '11px' }} />} onClick={() => void openRequest(r.id)} /></div> },
+  ], []);
 
-  const moveSelectedField = async (fieldId: string, direction: 'up' | 'down') => {
-    if (!selectedType) return;
-    const currentIndex = selectedType.fields.findIndex((field) => field.id === fieldId);
-    if (currentIndex < 0) return;
-
-    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
-    if (targetIndex < 0 || targetIndex >= selectedType.fields.length) return;
-
-    const ordered = selectedType.fields.slice();
-    const [moved] = ordered.splice(currentIndex, 1);
-    ordered.splice(targetIndex, 0, moved);
-    await saveTypeFieldOrder(ordered);
-  };
+  // ─────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-xl text-[#1E293B]">Permits</h2>
-        <p className="text-sm text-[#64748B]">Permit requests and permit type configuration.</p>
+    <div style={{ fontFamily: "'Work Sans', sans-serif" }}>
+
+      {/* ── Header ─────────────────────────────────────────── */}
+      <div style={{ marginBottom: '20px' }}>
+        <h1 style={{ fontSize: '18px', fontWeight: 900, color: '#111827', letterSpacing: '-0.02em', margin: 0 }}>Permits</h1>
+        <p style={{ fontSize: '13px', color: '#9CA3AF', margin: '4px 0 0' }}>Manage permit requests and configure permit types.</p>
       </div>
 
-      <div className="grid grid-cols-4 gap-4">
-        <Card className="p-4">
-          <p className="text-xs text-slate-500">Total Requests</p>
-          <p className="text-lg text-slate-200">{stats?.totalRequests ?? 0}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs text-slate-500">Pending</p>
-          <p className="text-lg text-slate-200">{stats?.pendingRequests ?? 0}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs text-slate-500">Approved This Month</p>
-          <p className="text-lg text-slate-200">{stats?.approvedThisMonth ?? 0}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs text-slate-500">Rejected This Month</p>
-          <p className="text-lg text-slate-200">{stats?.rejectedThisMonth ?? 0}</p>
-        </Card>
+      {/* ── Stats ──────────────────────────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '20px' }}>
+        <StatCard icon="complaints-total"  title="Total Requests"      value={String(stats?.totalRequests     ?? 0)} subtitle="All time" />
+        <StatCard icon="complaints-open"   title="Pending"             value={String(stats?.pendingRequests   ?? 0)} subtitle="Awaiting review" />
+        <StatCard icon="complaints-closed" title="Approved This Month" value={String(stats?.approvedThisMonth ?? 0)} subtitle="Current month" />
+        <StatCard icon="tickets"           title="Rejected This Month" value={String(stats?.rejectedThisMonth ?? 0)} subtitle="Current month" />
       </div>
 
-      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'requests' | 'types')}>
-        <TabsList className="grid w-full max-w-sm grid-cols-2">
-          <TabsTrigger value="requests">Requests</TabsTrigger>
-          <TabsTrigger value="types">Permit Types</TabsTrigger>
-        </TabsList>
+      {/* ── Tabs ────────────────────────────────────────────── */}
+      <div style={{ display: 'flex', gap: '2px', padding: '4px', borderRadius: '10px', background: '#F3F4F6', marginBottom: '20px', width: 'fit-content' }}>
+        <TabBtn label="Permit Types" active={activeTab === 'types'}    onClick={() => setActiveTab('types')} />
+        <TabBtn label="Requests"     active={activeTab === 'requests'} onClick={() => setActiveTab('requests')} />
+      </div>
 
-        <TabsContent value="requests" className="space-y-4">
-          <Card className="p-4">
-            <div className="flex items-center gap-3">
-              <Input
-                className="flex-1 max-w-xs"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search request #, unit, requester"
-              />
-              <Select value={status} onValueChange={(value) => setStatus(value as PermitStatusFilter)}>
-                <SelectTrigger className="w-40">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">All Statuses</SelectItem>
-                  <SelectItem value="PENDING">Pending</SelectItem>
-                  <SelectItem value="APPROVED">Approved</SelectItem>
-                  <SelectItem value="REJECTED">Rejected</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select value={category} onValueChange={(value) => setCategory(value as 'ALL' | PermitCategory)}>
-                <SelectTrigger className="w-48">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">All Categories</SelectItem>
-                  {permitCategories.map((categoryValue) => (
-                    <SelectItem key={categoryValue} value={categoryValue}>
-                      {humanizeEnum(categoryValue)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Input className="w-36" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
-              <Input className="w-36" type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
-            </div>
-          </Card>
-
-          {(() => {
-            const cols: DataTableColumn<PermitRequestListItem>[] = [
-              { key: "num", header: "Request #", render: (r) => <span>{r.requestNumber}</span> },
-              { key: "type", header: "Permit Type", render: (r) => <span>{r.permitTypeName}</span> },
-              { key: "category", header: "Category", render: (r) => <Badge className={categoryBadgeClass(r.category)}>{humanizeEnum(r.category)}</Badge> },
-              { key: "unit", header: "Unit", render: (r) => <span>{r.unitNumber}</span> },
-              { key: "requester", header: "Requester", render: (r) => <span>{r.requesterName}</span> },
-              { key: "submitted", header: "Submitted", render: (r) => <span>{formatDateTime(r.submittedAt)}</span> },
-              { key: "status", header: "Status", render: (r) => <StatusBadge value={r.status} /> },
-              { key: "actions", header: "Actions", render: (r) => (
-                <Button variant="ghost" size="icon" onClick={() => void openRequestDrawer(r.id)}><Eye className="h-4 w-4" /></Button>
-              )},
-            ];
-            return (
-              <Card className="overflow-hidden">
-                <DataTable columns={cols} rows={requests} rowKey={(r) => r.id} loading={loading} emptyTitle="No permit requests found" />
-              </Card>
-            );
-          })()}
-        </TabsContent>
-
-        <TabsContent value="types" className="space-y-4">
-          <div className="flex justify-end">
-            <Button className="bg-[#0B5FFF] text-white hover:bg-[#0B5FFF]/90" onClick={() => setCreateDrawerOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              Add Permit Type
-            </Button>
+      {/* ══ Types tab ═════════════════════════════════════════ */}
+      {activeTab === 'types' && (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px' }}>
+            <button type="button" onClick={() => setCreateOpen(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 16px', height: '36px', borderRadius: '8px', background: '#111827', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif", boxShadow: '0 2px 6px rgba(0,0,0,0.15)' }}>
+              <Plus style={{ width: '13px', height: '13px' }} /> Add Permit Type
+            </button>
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
-            <Card className="col-span-2 space-y-4 p-4">
-              {permitCategories.map((categoryValue) => (
-                <div key={categoryValue} className="space-y-2">
-                  <p className="text-xs uppercase tracking-wide text-slate-500">{humanizeEnum(categoryValue)}</p>
-                  {groupedTypes[categoryValue].map((permitType) => (
-                    <div
-                      key={permitType.id}
-                      className={`flex items-center justify-between rounded-md border p-3 ${
-                        selectedType?.id === permitType.id
-                          ? 'border-[#0B5FFF]/40 bg-[#0B5FFF]/5'
-                          : 'border-white/10'
-                      }`}
-                    >
-                      <button
-                        className="text-left"
-                        onClick={() => {
-                          setSelectedType(permitType);
-                          setTypeNameDraft(permitType.name);
-                          setEditingTypeName(false);
-                        }}
-                      >
-                        <p className="text-sm text-slate-200">{permitType.name}</p>
-                        <p className="text-xs text-slate-500">{permitType.fields.length} fields</p>
-                      </button>
-                      <div className="flex items-center gap-3">
-                        <Switch
-                          checked={permitType.isActive}
-                          onCheckedChange={async () => {
-                            await permitsService.togglePermitType(permitType.id);
-                            await load();
-                          }}
-                        />
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setSelectedType(permitType);
-                            setTypeNameDraft(permitType.name);
-                            setEditingTypeName(true);
-                          }}
-                        >
-                          Edit
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ))}
-              {!loading && permitTypes.length === 0 ? (
-                <p className="py-8 text-center text-sm text-slate-500">No permit types configured.</p>
-              ) : null}
-            </Card>
-
-            <Card className="space-y-3 p-4">
-              {selectedType ? (
-                <>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label>Type Name</Label>
-                      {!editingTypeName ? (
-                        <Button variant="ghost" size="sm" onClick={() => setEditingTypeName(true)}>
-                          <Pencil className="mr-1 h-3 w-3" />
-                          Edit
-                        </Button>
-                      ) : null}
-                    </div>
-                    {editingTypeName ? (
-                      <div className="flex items-center gap-2">
-                        <Input value={typeNameDraft} onChange={(event) => setTypeNameDraft(event.target.value)} />
-                        <Button
-                          size="icon"
-                          onClick={async () => {
-                            await permitsService.updatePermitType(selectedType.id, { name: typeNameDraft.trim() });
-                            setEditingTypeName(false);
-                            await refreshSelectedType(selectedType.id);
-                          }}
-                        >
-                          <Check className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          size="icon"
-                          variant="outline"
-                          onClick={() => {
-                            setTypeNameDraft(selectedType.name);
-                            setEditingTypeName(false);
-                          }}
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    ) : (
-                      <p className="text-sm text-slate-200">{selectedType.name}</p>
-                    )}
-                    <Badge className={categoryBadgeClass(selectedType.category)}>
-                      {humanizeEnum(selectedType.category)}
-                    </Badge>
-                  </div>
-
-                  <div className="space-y-2">
-                    <p className="text-xs text-slate-500">Fields</p>
-                    {selectedType.fields.map((field, index) => (
-                      <div key={field.id} className="rounded-md border border-white/10 p-2 text-sm">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-slate-200">{field.label}</span>
-                          <Badge className="bg-white/5 text-slate-300">{humanizeEnum(field.type)}</Badge>
-                        </div>
-                        <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
-                          <span>{field.required ? 'Required' : 'Optional'}</span>
-                          <div className="flex items-center gap-1">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              disabled={index === 0}
-                              onClick={() => void moveSelectedField(field.id, 'up')}
-                            >
-                              <ArrowUp className="h-3 w-3" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              disabled={index === selectedType.fields.length - 1}
-                              onClick={() => void moveSelectedField(field.id, 'down')}
-                            >
-                              <ArrowDown className="h-3 w-3" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={async () => {
-                                await permitsService.removeField(field.id);
-                                await refreshSelectedType(selectedType.id);
-                              }}
-                            >
-                              Remove
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-
-                    {addingField ? (
-                      <div className="space-y-2 rounded-md border border-white/10 p-2">
-                        <Input
-                          value={inlineFieldLabel}
-                          onChange={(event) => setInlineFieldLabel(event.target.value)}
-                          placeholder="Field label"
-                        />
-                        <Select value={inlineFieldType} onValueChange={(value) => setInlineFieldType(value as ServiceFieldType)}>
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {fieldTypeOptions.map((typeValue) => (
-                              <SelectItem key={typeValue} value={typeValue}>
-                                {humanizeEnum(typeValue)}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <label className="flex items-center gap-2 text-xs text-slate-400">
-                          <input
-                            type="checkbox"
-                            checked={inlineFieldRequired}
-                            onChange={(event) => setInlineFieldRequired(event.target.checked)}
-                          />
-                          Required
-                        </label>
-                        <div className="flex items-center gap-2">
-                          <Button
-                            size="sm"
-                            onClick={async () => {
-                              await permitsService.addField(selectedType.id, {
-                                label: inlineFieldLabel.trim(),
-                                type: inlineFieldType,
-                                required: inlineFieldRequired,
-                              });
-                              setInlineFieldLabel('');
-                              setInlineFieldType(ServiceFieldType.TEXT);
-                              setInlineFieldRequired(false);
-                              setAddingField(false);
-                              await refreshSelectedType(selectedType.id);
-                            }}
-                          >
-                            Confirm
-                          </Button>
-                          <Button variant="outline" size="sm" onClick={() => setAddingField(false)}>
-                            Cancel
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <Button variant="outline" size="sm" onClick={() => setAddingField(true)}>
-                        Add Field
-                      </Button>
-                    )}
-                  </div>
-                </>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '14px', alignItems: 'start' }}>
+            {/* Left: grouped list */}
+            <div style={{ borderRadius: '12px', border: '1px solid #EBEBEB', background: '#FFF', overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.04)', padding: '16px', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+              {loading && permitTypes.length === 0 ? (
+                <div style={{ padding: '40px', textAlign: 'center', color: '#C4C9D4', fontSize: '13px' }}>Loading…</div>
+              ) : permitTypes.length === 0 ? (
+                <div style={{ padding: '40px', textAlign: 'center', color: '#C4C9D4', fontSize: '13px' }}>No permit types configured.</div>
               ) : (
-                <p className="py-8 text-sm text-slate-500">Select a permit type to edit.</p>
-              )}
-            </Card>
-          </div>
-        </TabsContent>
-      </Tabs>
-
-      <DrawerForm
-        open={createDrawerOpen}
-        onOpenChange={setCreateDrawerOpen}
-        title="Add Permit Type"
-        description="Create a permit type and initial dynamic fields."
-      >
-        <div className="space-y-3">
-          <Label>Name</Label>
-          <Input value={newTypeName} onChange={(event) => setNewTypeName(event.target.value)} />
-
-          <Label>Category</Label>
-          <Select value={newTypeCategory} onValueChange={(value) => setNewTypeCategory(value as PermitCategory)}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {permitCategories.map((categoryValue) => (
-                <SelectItem key={categoryValue} value={categoryValue}>
-                  {humanizeEnum(categoryValue)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Label>Description</Label>
-          <Textarea rows={3} value={newTypeDescription} onChange={(event) => setNewTypeDescription(event.target.value)} />
-
-          <div className="space-y-2">
-            <p className="text-xs text-slate-500">Fields</p>
-            {newFields.map((field) => (
-              <div key={field.id} className="grid grid-cols-[1fr_130px_90px_32px] gap-2">
-                <Input
-                  value={field.label}
-                  onChange={(event) =>
-                    setNewFields((current) =>
-                      current.map((item) => (item.id === field.id ? { ...item, label: event.target.value } : item)),
-                    )
-                  }
-                  placeholder="Label"
-                />
-                <Select
-                  value={field.type}
-                  onValueChange={(value) =>
-                    setNewFields((current) =>
-                      current.map((item) =>
-                        item.id === field.id ? { ...item, type: value as ServiceFieldType } : item,
-                      ),
-                    )
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {fieldTypeOptions.map((typeValue) => (
-                      <SelectItem key={typeValue} value={typeValue}>
-                        {humanizeEnum(typeValue)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <label className="flex items-center gap-2 text-xs text-slate-400">
-                  <input
-                    type="checkbox"
-                    checked={field.required}
-                    onChange={(event) =>
-                      setNewFields((current) =>
-                        current.map((item) =>
-                          item.id === field.id ? { ...item, required: event.target.checked } : item,
-                        ),
-                      )
-                    }
-                  />
-                  Req
-                </label>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setNewFields((current) => current.filter((item) => item.id !== field.id))}
-                >
-                  X
-                </Button>
-              </div>
-            ))}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                setNewFields((current) => [
-                  ...current,
-                  {
-                    id: `new-field-${Date.now()}-${current.length}`,
-                    label: '',
-                    type: ServiceFieldType.TEXT,
-                    required: false,
-                  },
-                ])
-              }
-            >
-              Add Field
-            </Button>
-          </div>
-
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setCreateDrawerOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={async () => {
-                try {
-                  await permitsService.createPermitType({
-                    name: newTypeName.trim(),
-                    category: newTypeCategory,
-                    description: newTypeDescription.trim() || undefined,
-                    fields: newFields
-                      .filter((field) => field.label.trim().length > 0)
-                      .map((field, index) => ({
-                        label: field.label.trim(),
-                        type: field.type,
-                        required: field.required,
-                        displayOrder: index + 1,
-                      })),
-                  });
-
-                  setCreateDrawerOpen(false);
-                  setNewTypeName('');
-                  setNewTypeCategory(PermitCategory.OPERATIONAL);
-                  setNewTypeDescription('');
-                  setNewFields([{ id: 'new-field-1', label: '', type: ServiceFieldType.TEXT, required: false }]);
-                  await load();
-                } catch (error) {
-                  toast.error('Failed to create permit type', { description: errorMessage(error) });
-                }
-              }}
-            >
-              Create
-            </Button>
-          </div>
-        </div>
-      </DrawerForm>
-
-      <DrawerForm
-        open={requestDrawerOpen}
-        onOpenChange={setRequestDrawerOpen}
-        title={activeRequest?.requestNumber ?? 'Permit Request'}
-        description="Review permit request and decide."
-        widthClassName="w-full sm:max-w-[480px]"
-      >
-        {activeRequest ? (
-          <div className="space-y-3">
-            <Card className="p-3">
-              <p className="font-mono text-sm text-slate-200">{activeRequest.requestNumber}</p>
-              <p className="text-sm text-slate-300">{activeRequest.permitType.name}</p>
-              <div className="mt-2 flex items-center gap-2">
-                <Badge className={categoryBadgeClass(activeRequest.permitType.category)}>
-                  {humanizeEnum(activeRequest.permitType.category)}
-                </Badge>
-                <StatusBadge value={activeRequest.status} />
-              </div>
-              <p className="mt-2 text-xs text-slate-500">Submitted: {formatDateTime(activeRequest.submittedAt)}</p>
-            </Card>
-
-            <Card className="space-y-1 p-3 text-sm">
-              <p className="text-xs text-slate-500">Submitted By</p>
-              <p className="text-slate-200">{activeRequest.requester.name}</p>
-              <p className="text-slate-500">{activeRequest.requester.phone ?? '--'}</p>
-              <p className="text-slate-500">Unit {activeRequest.unit.unitNumber}</p>
-            </Card>
-
-            <Card className="space-y-2 p-3 text-sm">
-              <p className="text-xs text-slate-500">Field Values</p>
-              {activeRequest.fieldValues.map((field) => (
-                <div key={field.fieldId} className="grid grid-cols-[160px_1fr] gap-2">
-                  <span className="text-slate-500">{field.label}</span>
-                  {renderFieldValue(field)}
-                </div>
-              ))}
-            </Card>
-
-            {activeRequest.notes ? (
-              <Card className="p-3 text-sm">
-                <p className="text-xs text-slate-500">Notes</p>
-                <p className="text-slate-200">{activeRequest.notes}</p>
-              </Card>
-            ) : null}
-
-            {activeRequest.status === 'PENDING' ? (
-              <div className="space-y-2">
-                {rejectMode ? (
-                  <>
-                    <Textarea
-                      rows={3}
-                      value={rejectReason}
-                      onChange={(event) => setRejectReason(event.target.value)}
-                      placeholder="Enter rejection reason"
-                    />
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="destructive"
-                        onClick={async () => {
-                          try {
-                            const detail = await permitsService.rejectRequest(activeRequest.id, rejectReason.trim());
-                            setActiveRequest(detail);
-                            setRejectMode(false);
-                            await load();
-                          } catch (error) {
-                            toast.error('Failed to reject request', { description: errorMessage(error) });
-                          }
-                        }}
-                      >
-                        Confirm Reject
-                      </Button>
-                      <Button variant="outline" onClick={() => setRejectMode(false)}>
-                        Cancel
-                      </Button>
+                PERMIT_CATEGORIES.map((cat) => {
+                  const types = groupedTypes[cat];
+                  if (types.length === 0) return null;
+                  const accent = CATEGORY_META[cat].accent;
+                  return (
+                    <div key={cat} style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+                        <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: accent, flexShrink: 0 }} />
+                        <span style={{ fontSize: '10px', fontWeight: 800, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.09em', fontFamily: "'Work Sans', sans-serif" }}>{humanizeEnum(cat)}</span>
+                        <div style={{ flex: 1, height: '1px', background: '#F0F0F0' }} />
+                      </div>
+                      {types.map((pt) => {
+                        const isSelected = selectedType?.id === pt.id;
+                        return (
+                          <button key={pt.id} type="button"
+                            onClick={() => setSelectedType(pt)}
+                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderRadius: '9px', border: `1px solid ${isSelected ? `${accent}40` : '#EBEBEB'}`, background: isSelected ? `${accent}08` : '#FAFAFA', cursor: 'pointer', textAlign: 'left', transition: 'all 120ms', width: '100%' }}>
+                            <div>
+                              <p style={{ fontSize: '13px', fontWeight: isSelected ? 800 : 600, color: '#111827', margin: 0, fontFamily: "'Work Sans', sans-serif" }}>{pt.name}</p>
+                              <p style={{ fontSize: '11px', color: '#9CA3AF', margin: '2px 0 0', fontFamily: "'Work Sans', sans-serif" }}>
+                                {pt.fields.length} field{pt.fields.length !== 1 ? 's' : ''}
+                              </p>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              {isSelected && (
+                                <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 7px', borderRadius: '4px', background: `${accent}18`, color: accent }}>
+                                  Selected
+                                </span>
+                              )}
+                              <ToggleSwitch checked={pt.isActive} onChange={() => void permitsService.togglePermitType(pt.id).then(load).catch(() => toast.error('Failed to toggle'))} />
+                            </div>
+                          </button>
+                        );
+                      })}
                     </div>
-                  </>
-                ) : approveMode ? (
-                  <div className="flex items-center gap-2">
-                    <Button
-                      className="bg-[#0B5FFF] text-white hover:bg-[#0B5FFF]/90"
-                      onClick={async () => {
-                        try {
-                          const detail = await permitsService.approveRequest(activeRequest.id);
-                          setActiveRequest(detail);
-                          setApproveMode(false);
-                          await load();
-                        } catch (error) {
-                          toast.error('Failed to approve request', { description: errorMessage(error) });
-                        }
-                      }}
-                    >
-                      Confirm Approve
-                    </Button>
-                    <Button variant="outline" onClick={() => setApproveMode(false)}>
-                      Cancel
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <Button className="bg-[#0B5FFF] text-white hover:bg-[#0B5FFF]/90" onClick={() => setApproveMode(true)}>
-                      Approve
-                    </Button>
-                    <Button variant="destructive" onClick={() => setRejectMode(true)}>
-                      Reject
-                    </Button>
-                  </div>
-                )}
+                  );
+                })
+              )}
+            </div>
+
+            {/* Right: editor panel */}
+            <div style={{ borderRadius: '12px', border: '1px solid #EBEBEB', background: '#FFF', overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.04)', padding: '16px', position: 'sticky', top: '20px' }}>
+              <PermitTypeEditor selectedType={selectedType} onRefresh={refreshType} />
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* ══ Requests tab ══════════════════════════════════════ */}
+      {activeTab === 'requests' && (
+        <div style={{ borderRadius: '12px', border: '1px solid #EBEBEB', background: '#FFF', overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
+          {/* Filter bar */}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px' }}>
+              <Search style={{ width: '13px', height: '13px', color: '#C4C9D4', flexShrink: 0 }} />
+              <input placeholder="Search request #, unit, requester…" value={search} onChange={(e) => setSearch(e.target.value)}
+                style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: '13px', color: '#111827', fontFamily: "'Work Sans', sans-serif" }} />
+              <button type="button" onClick={() => setFiltersOpen((p) => !p)}
+                style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 10px', borderRadius: '6px', border: `1px solid ${activeFilters > 0 ? '#BFDBFE' : '#E5E7EB'}`, background: activeFilters > 0 ? '#EFF6FF' : '#FAFAFA', color: activeFilters > 0 ? '#2563EB' : '#6B7280', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer', fontFamily: "'Work Sans', sans-serif", flexShrink: 0 }}>
+                <SlidersHorizontal style={{ width: '11px', height: '11px' }} />
+                Filters
+                {activeFilters > 0 && <span style={{ width: '15px', height: '15px', borderRadius: '50%', background: '#2563EB', color: '#FFF', fontSize: '9px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{activeFilters}</span>}
+                <ChevronDown style={{ width: '10px', height: '10px', transform: filtersOpen ? 'rotate(180deg)' : 'none', transition: 'transform 150ms' }} />
+              </button>
+            </div>
+            {filtersOpen && (
+              <div style={{ padding: '10px 14px', borderTop: '1px solid #F3F4F6', display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <select value={status} onChange={(e) => setStatus(e.target.value as PermitStatusFilter)} style={{ ...selectStyle, width: '140px' }}>
+                  <option value="ALL">All Statuses</option>
+                  <option value="PENDING">Pending</option>
+                  <option value="APPROVED">Approved</option>
+                  <option value="REJECTED">Rejected</option>
+                </select>
+                <select value={category} onChange={(e) => setCategory(e.target.value as typeof category)} style={{ ...selectStyle, width: '180px' }}>
+                  <option value="ALL">All Categories</option>
+                  {PERMIT_CATEGORIES.map((c) => <option key={c} value={c}>{humanizeEnum(c)}</option>)}
+                </select>
+                <DateRangePill from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} />
               </div>
-            ) : (
-              <Card className="p-3 text-sm text-slate-300">
-                <p>Status: {humanizeEnum(activeRequest.status)}</p>
-                <p>Reviewed By: {activeRequest.reviewer?.name ?? '--'}</p>
-                <p>Reviewed At: {activeRequest.reviewedAt ? formatDateTime(activeRequest.reviewedAt) : '--'}</p>
-              </Card>
             )}
           </div>
-        ) : (
-          <p className="py-8 text-sm text-slate-500">No request selected.</p>
-        )}
+
+          <DataTable
+            columns={requestCols} rows={requests} rowKey={(r) => r.id} loading={loading}
+            emptyTitle="No permit requests found" emptyDescription="Try adjusting your search or filters."
+          />
+        </div>
+      )}
+
+      {/* ══ Create type drawer ════════════════════════════════ */}
+      <CreateTypeDrawer open={createOpen} onClose={() => setCreateOpen(false)} onCreated={load} />
+
+      {/* ══ Request detail drawer ═════════════════════════════ */}
+      <DrawerForm
+        open={reqDrawerOpen} onOpenChange={(v) => { if (!v) setReqDrawerOpen(false); }}
+        title={activeRequest?.requestNumber ?? 'Permit Request'}
+        description="Review this permit request and decide."
+        widthClassName="w-full sm:max-w-[480px]"
+      >
+        {activeRequest
+          ? <RequestDetail key={reqDetailKey} request={activeRequest} onReload={load} />
+          : <div style={{ padding: '40px', textAlign: 'center', color: '#C4C9D4', fontSize: '13px' }}>No request selected.</div>
+        }
       </DrawerForm>
     </div>
   );

@@ -16,7 +16,22 @@
       "Bash(npx prisma db push)",
       "Bash(npx prisma generate)",
       "Bash(npx tsc --noEmit --pretty)",
-      "Read(//c/Users/maram/AppData/Local/Temp/claude/i--PROJECTS-work-projects-sss-community-app-community-dashboard-and-app/tasks/**)"
+      "Read(//c/Users/maram/AppData/Local/Temp/claude/i--PROJECTS-work-projects-sss-community-app-community-dashboard-and-app/tasks/**)",
+      "Read(//i/PROJECTS/work-projects/sss/community-app/community-dashboard-and-app/**)",
+      "Bash(sort -k2)",
+      "Bash(grep -E \"\\\\.\\(sh|js|ts|py\\)$\")",
+      "Bash(ls -lh /i/PROJECTS/work-projects/sss/community-app/community-dashboard-and-app/apps/admin-web/src/components/*.tsx)",
+      "Bash(grep -v \"^$\")",
+      "Bash(npx tsc --noEmit --pretty apps/admin-web/src/components/pages/RentalManagement.tsx)",
+      "Bash(npx tsc --noEmit --project apps/admin-web/tsconfig.json)",
+      "Bash(npx tsc --noEmit --pretty apps/admin-web/src/components/pages/PermitsManagement.tsx)",
+      "Bash(npx tsc --noEmit --project apps/admin-web/tsconfig.app.json)",
+      "Bash(npx tsc --noEmit --pretty src/modules/survey/survey.service.ts)",
+      "Bash(ls \"i:\\\\PROJECTS\\\\work-projects\\\\sss\\\\community-app\\\\community-dashboard-and-app\\\\apps\\\\admin-web\"/tsconfig*)",
+      "Bash(npx tsc --noEmit -p apps/admin-web/tsconfig.json)",
+      "Bash(node -e \":*)",
+      "Bash(xargs grep -l \"violations.*actions\\\\|''actions''\")",
+      "Bash(npx tsc --noEmit)"
     ],
     "additionalDirectories": [
       "i:\\PROJECTS\\work-projects\\sss\\community-app\\community-dashboard-and-app\\apps\\admin-web\\src\\components\\pages"

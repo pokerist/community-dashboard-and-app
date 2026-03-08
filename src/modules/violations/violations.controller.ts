@@ -19,6 +19,7 @@ import { CreateViolationDto } from './dto/create-violation.dto';
 import { ListAppealRequestsQueryDto } from './dto/list-appeal-requests-query.dto';
 import { ReviewAppealDto } from './dto/review-appeal.dto';
 import { UpdateViolationDto } from './dto/update-violation.dto';
+import { CreateViolationActionDto } from './dto/violation-action.dto';
 import { ViolationsQueryDto } from './dto/violations-query.dto';
 import { ViolationsService } from './violations.service';
 
@@ -36,6 +37,16 @@ interface AuthenticatedRequest extends Request {
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class ViolationsController {
   constructor(private readonly violationsService: ViolationsService) {}
+
+  @Get('me')
+  @Permissions('violation.view_own')
+  listMyViolations(@Req() req: AuthenticatedRequest) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new BadRequestException('Invalid auth context');
+    }
+    return this.violationsService.listMyViolations(userId);
+  }
 
   @Get()
   @Permissions('violation.view_all')
@@ -56,9 +67,29 @@ export class ViolationsController {
   }
 
   @Get(':id')
-  @Permissions('violation.view_all')
+  @Permissions('violation.view_all', 'violation.view_own')
   getViolationDetail(@Param('id') id: string) {
     return this.violationsService.getViolationDetail(id);
+  }
+
+  @Get(':id/actions')
+  @Permissions('violation.view_all', 'violation.view_own')
+  listViolationActions(@Param('id') id: string) {
+    return this.violationsService.listViolationActions(id);
+  }
+
+  @Post(':id/actions')
+  @Permissions('violation.view_own')
+  submitViolationAction(
+    @Param('id') id: string,
+    @Body() dto: CreateViolationActionDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new BadRequestException('Invalid auth context');
+    }
+    return this.violationsService.submitViolationAction(id, dto, userId);
   }
 
   @Post()
