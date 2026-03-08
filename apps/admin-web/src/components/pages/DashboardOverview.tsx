@@ -11,14 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../ui/dialog";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../ui/table";
+import { DataTable, type DataTableColumn } from "../DataTable";
 import dashboardService, {
   CurrentVisitorDrilldownItem,
   DashboardPeriod,
@@ -146,7 +139,7 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
   return (
     <>
       {/* ── Page wrapper ──────────────────────────────────────────── */}
-      <div style={{ background: "#F5F4F1", minHeight: "100vh", fontFamily: "'Work Sans', sans-serif" }}>
+      <div style={{ background: "#F1F3F5", minHeight: "100vh", fontFamily: "'Work Sans', sans-serif" }}>
 
         {/* ── Hero header bar ───────────────────────────────────────── */}
         <div style={{
@@ -352,7 +345,7 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
             maxWidth: "860px",
             borderRadius: "10px",
             border: "1px solid #EBEBEB",
-            boxShadow: "0 20px 60px rgba(0,0,0,0.12)",
+            boxShadow: "0 20px 60px rgba(7, 1, 1, 0.12)",
             fontFamily: "'Work Sans', sans-serif",
             padding: 0,
             overflow: "hidden",
@@ -401,154 +394,42 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
 
 // ─── Drilldown table shell ────────────────────────────────────
 
-function DrilldownSkeleton({ cols }: { cols: number }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-      {Array.from({ length: 5 }).map((_, i) => (
-        <div key={i} style={{ height: "36px", borderRadius: "5px", background: "linear-gradient(90deg,#F3F4F6 25%,#E9EAEC 50%,#F3F4F6 75%)", backgroundSize: "200% 100%", animation: "shimmer 1.5s infinite" }} />
-      ))}
-      <style>{`@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}`}</style>
-    </div>
-  );
-}
-
-// ─── Table shared styles ──────────────────────────────────────
-
-const tableWrap: React.CSSProperties = {
-  maxHeight: "420px",
-  overflowY: "auto",
-  borderRadius: "8px",
-  border: "1px solid #EBEBEB",
-};
-
-const thStyle: React.CSSProperties = {
-  fontSize: "10.5px",
-  fontWeight: 700,
-  textTransform: "uppercase",
-  letterSpacing: "0.08em",
-  color: "#9CA3AF",
-  background: "#F9FAFB",
-  padding: "8px 14px",
-  borderBottom: "1px solid #EBEBEB",
-  fontFamily: "'Work Sans', sans-serif",
-};
-
-const tdStyle: React.CSSProperties = {
-  fontSize: "13px",
-  color: "#374151",
-  padding: "10px 14px",
-  borderBottom: "1px solid #F3F4F6",
-  fontFamily: "'Work Sans', sans-serif",
-};
-
-const tdMono: React.CSSProperties = {
-  ...tdStyle,
-  fontFamily: "'DM Mono', monospace",
-  fontSize: "12px",
-};
-
 // ─── Open Complaints ─────────────────────────────────────────
 
 function OpenComplaintsTable({ rows, loading }: { rows: OpenComplaintDrilldownItem[]; loading: boolean }) {
-  if (loading) return <DrilldownSkeleton cols={6} />;
-  return (
-    <div style={tableWrap}>
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead>
-          <tr>
-            {["Number", "Category", "Priority", "Status", "Unit", "Created"].map((h) => (
-              <th key={h} style={thStyle}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr><td colSpan={6} style={{ ...tdStyle, textAlign: "center", color: "#9CA3AF", padding: "32px" }}>Nothing here — all clear.</td></tr>
-          ) : rows.map((row) => (
-            <tr key={row.id} style={{ transition: "background 100ms" }}
-              onMouseEnter={(e) => ((e.currentTarget as HTMLTableRowElement).style.background = "#FAFAFA")}
-              onMouseLeave={(e) => ((e.currentTarget as HTMLTableRowElement).style.background = "transparent")}
-            >
-              <td style={tdMono}>{row.complaintNumber}</td>
-              <td style={tdStyle}>{row.category}</td>
-              <td style={tdStyle}>{humanizeEnum(row.priority)}</td>
-              <td style={tdStyle}>{humanizeEnum(row.status)}</td>
-              <td style={tdMono}>{row.unitNumber ?? "—"}</td>
-              <td style={{ ...tdMono, color: "#9CA3AF" }}>{formatDateTime(row.createdAt)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
+  const cols: DataTableColumn<OpenComplaintDrilldownItem>[] = [
+    { key: "num", header: "Number", render: (r) => <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "12px" }}>{r.complaintNumber}</span> },
+    { key: "category", header: "Category", render: (r) => <span>{r.category}</span> },
+    { key: "priority", header: "Priority", render: (r) => <span>{humanizeEnum(r.priority)}</span> },
+    { key: "status", header: "Status", render: (r) => <span>{humanizeEnum(r.status)}</span> },
+    { key: "unit", header: "Unit", render: (r) => <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "12px" }}>{r.unitNumber ?? "—"}</span> },
+    { key: "created", header: "Created", render: (r) => <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "12px", color: "#9CA3AF" }}>{formatDateTime(r.createdAt)}</span> },
+  ];
+  return <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} loading={loading} emptyTitle="Nothing here — all clear" />;
 }
 
 // ─── Current Visitors ─────────────────────────────────────────
 
 function CurrentVisitorsTable({ rows, loading }: { rows: CurrentVisitorDrilldownItem[]; loading: boolean }) {
-  if (loading) return <DrilldownSkeleton cols={5} />;
-  return (
-    <div style={tableWrap}>
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead>
-          <tr>
-            {["Visitor", "Unit", "Checked In", "Valid To", "Relative"].map((h) => (
-              <th key={h} style={thStyle}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr><td colSpan={5} style={{ ...tdStyle, textAlign: "center", color: "#9CA3AF", padding: "32px" }}>No visitors checked in right now.</td></tr>
-          ) : rows.map((row) => (
-            <tr key={row.id}
-              onMouseEnter={(e) => ((e.currentTarget as HTMLTableRowElement).style.background = "#FAFAFA")}
-              onMouseLeave={(e) => ((e.currentTarget as HTMLTableRowElement).style.background = "transparent")}
-            >
-              <td style={tdStyle}>{row.visitorName ?? "Visitor"}</td>
-              <td style={tdMono}>{row.unitNumber ?? "—"}</td>
-              <td style={tdMono}>{row.checkedInAt ? formatDateTime(row.checkedInAt) : "—"}</td>
-              <td style={tdMono}>{formatDateTime(row.validTo)}</td>
-              <td style={{ ...tdStyle, color: "#9CA3AF" }}>{row.checkedInAt ? relativeTime(row.checkedInAt) : "—"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
+  const cols: DataTableColumn<CurrentVisitorDrilldownItem>[] = [
+    { key: "visitor", header: "Visitor", render: (r) => <span>{r.visitorName ?? "Visitor"}</span> },
+    { key: "unit", header: "Unit", render: (r) => <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "12px" }}>{r.unitNumber ?? "—"}</span> },
+    { key: "checkedIn", header: "Checked In", render: (r) => <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "12px" }}>{r.checkedInAt ? formatDateTime(r.checkedInAt) : "—"}</span> },
+    { key: "validTo", header: "Valid To", render: (r) => <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "12px" }}>{formatDateTime(r.validTo)}</span> },
+    { key: "relative", header: "Relative", render: (r) => <span style={{ color: "#9CA3AF" }}>{r.checkedInAt ? relativeTime(r.checkedInAt) : "—"}</span> },
+  ];
+  return <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} loading={loading} emptyTitle="No visitors checked in right now" />;
 }
 
 // ─── Revenue ─────────────────────────────────────────────────
 
 function RevenueTable({ rows, loading }: { rows: RevenueDrilldownItem[]; loading: boolean }) {
-  if (loading) return <DrilldownSkeleton cols={5} />;
-  return (
-    <div style={tableWrap}>
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead>
-          <tr>
-            {["Invoice", "Amount", "Resident", "Unit", "Paid At"].map((h) => (
-              <th key={h} style={thStyle}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr><td colSpan={5} style={{ ...tdStyle, textAlign: "center", color: "#9CA3AF", padding: "32px" }}>No revenue records for this period.</td></tr>
-          ) : rows.map((row) => (
-            <tr key={row.id}
-              onMouseEnter={(e) => ((e.currentTarget as HTMLTableRowElement).style.background = "#FAFAFA")}
-              onMouseLeave={(e) => ((e.currentTarget as HTMLTableRowElement).style.background = "transparent")}
-            >
-              <td style={tdMono}>{row.invoiceNumber}</td>
-              <td style={{ ...tdMono, fontWeight: 600, color: "#059669" }}>{formatCurrencyEGP(row.amount)}</td>
-              <td style={tdStyle}>{row.residentName ?? "—"}</td>
-              <td style={tdMono}>{row.unitNumber ?? "—"}</td>
-              <td style={{ ...tdMono, color: "#9CA3AF" }}>{formatDateTime(row.paidDate)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
+  const cols: DataTableColumn<RevenueDrilldownItem>[] = [
+    { key: "invoice", header: "Invoice", render: (r) => <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "12px" }}>{r.invoiceNumber}</span> },
+    { key: "amount", header: "Amount", render: (r) => <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "12px", fontWeight: 600, color: "#059669" }}>{formatCurrencyEGP(r.amount)}</span> },
+    { key: "resident", header: "Resident", render: (r) => <span>{r.residentName ?? "—"}</span> },
+    { key: "unit", header: "Unit", render: (r) => <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "12px" }}>{r.unitNumber ?? "—"}</span> },
+    { key: "paidAt", header: "Paid At", render: (r) => <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "12px", color: "#9CA3AF" }}>{formatDateTime(r.paidDate)}</span> },
+  ];
+  return <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} loading={loading} emptyTitle="No revenue records for this period" />;
 }

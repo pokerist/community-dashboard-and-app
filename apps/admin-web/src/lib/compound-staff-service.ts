@@ -60,6 +60,17 @@ export type CompoundStaffActivityLog = {
   createdAt: string;
 };
 
+export type AttendanceLog = {
+  id: string;
+  staffId: string;
+  clockInAt: string;
+  clockOutAt: string | null;
+  durationMin: number | null;
+  notes: string | null;
+  recordedById: string | null;
+  createdAt: string;
+};
+
 export type CompoundStaff = {
   id: string;
   communityId: string | null;
@@ -346,6 +357,23 @@ const compoundStaffService = {
         label: row.name,
         communityId: row.communityId,
       }));
+  },
+
+  async getAttendance(id: string): Promise<AttendanceLog[]> {
+    const response = await apiClient.get<{ data: AttendanceLog[] }>(
+      `/compound-staff/${id}/attendance`,
+    );
+    return Array.isArray(response.data?.data) ? response.data.data : [];
+  },
+
+  async clockIn(id: string): Promise<AttendanceLog> {
+    const response = await apiClient.post<AttendanceLog>(`/compound-staff/${id}/clock-in`);
+    return response.data;
+  },
+
+  async clockOut(id: string): Promise<AttendanceLog> {
+    const response = await apiClient.post<AttendanceLog>(`/compound-staff/${id}/clock-out`);
+    return response.data;
   },
 
   async uploadProfilePhoto(file: File): Promise<UploadedFileResult> {

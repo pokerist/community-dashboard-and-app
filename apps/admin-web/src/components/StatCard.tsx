@@ -82,7 +82,7 @@ export function StatCard({ title, value, subtitle, icon, onClick, variant = "lig
         tabIndex={onClick ? 0 : undefined}
         style={{
           background: "#1C1B27",
-          borderRadius: "8px",
+          borderRadius: "12px",
           border: "1px solid rgba(255,255,255,0.07)",
           padding: "20px",
           cursor: onClick ? "pointer" : "default",

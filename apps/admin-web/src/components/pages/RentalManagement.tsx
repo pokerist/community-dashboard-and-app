@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Eye, RefreshCw, Search, Settings, X } from "lucide-react";
+import { DataTable, type DataTableColumn } from "../DataTable";
 import { toast } from "sonner";
 import { API_BASE_URL } from "../../lib/api-client";
 import { errorMessage } from "../../lib/live-data";
@@ -322,16 +323,26 @@ export function RentalManagement() {
               </select>
               <button className={`px-3 py-1.5 rounded-full text-xs ${leaseFilterExpiring ? "bg-blue-600/20 text-blue-300" : "bg-white/5 text-gray-500"}`} onClick={() => setLeaseFilterExpiring((prev) => !prev)}>Expiring Soon</button>
             </div>
-            <div className="rounded-xl border border-gray-200 overflow-hidden">
-              <table className="w-full"><thead><tr className="bg-white border-b border-gray-200"><th className="py-3 px-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Unit</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Community</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Owner</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Tenant</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Rent/mo</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Period</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Days Left</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Status</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Actions</th></tr></thead>
-                <tbody>
-                  {loadingLeases ? <tr><td className="py-4 px-4 text-sm text-gray-700" colSpan={9}>Loading...</td></tr> : leases.map((row) => (
-                    <tr key={row.id} className="border-b border-gray-200 hover:bg-white/[0.02] transition-colors last:border-0">
-                      <td className="py-4 px-4 text-sm text-gray-700">{row.unitNumber}</td><td className="py-4 px-4 text-sm text-gray-700">{row.communityName}</td><td className="py-4 px-4 text-sm text-gray-700">{row.ownerName}</td><td className="py-4 px-4 text-sm text-gray-700">{row.tenantName ?? "—"}</td><td className="py-4 px-4 text-sm text-gray-700">{formatCurrency(row.monthlyRent)}</td><td className="py-4 px-4 text-sm text-gray-700">{formatDate(row.startDate)} - {formatDate(row.endDate)}</td><td className={`py-4 px-4 text-sm ${daysTone(row.daysUntilExpiry)}`}>{row.daysUntilExpiry ?? "—"}</td><td className="py-4 px-4 text-sm"><span className={`px-2 py-1 rounded-md text-xs ${statusTone(row.status)}`}>{row.status}</span></td><td className="py-4 px-4 text-sm"><div className="flex items-center gap-2"><button className="p-2 rounded-lg hover:bg-gray-100 text-gray-700" onClick={() => void openLease(row.id, "view")}><Eye className="w-4 h-4" /></button><button className="p-2 rounded-lg hover:bg-gray-100 text-blue-300" onClick={() => void openLease(row.id, "renew")}>R</button><button className="p-2 rounded-lg hover:bg-gray-100 text-rose-300" onClick={() => void openLease(row.id, "terminate")}>T</button></div></td>
-                    </tr>
-                  ))}
-                </tbody></table>
-            </div>
+            {(() => {
+              const leaseCols: DataTableColumn<LeaseListItem>[] = [
+                { key: "unit", header: "Unit", render: (r) => <span className="text-sm text-gray-700">{r.unitNumber}</span> },
+                { key: "community", header: "Community", render: (r) => <span className="text-sm text-gray-700">{r.communityName}</span> },
+                { key: "owner", header: "Owner", render: (r) => <span className="text-sm text-gray-700">{r.ownerName}</span> },
+                { key: "tenant", header: "Tenant", render: (r) => <span className="text-sm text-gray-700">{r.tenantName ?? "—"}</span> },
+                { key: "rent", header: "Rent/mo", render: (r) => <span className="text-sm text-gray-700">{formatCurrency(r.monthlyRent)}</span> },
+                { key: "period", header: "Period", render: (r) => <span className="text-sm text-gray-700">{formatDate(r.startDate)} - {formatDate(r.endDate)}</span> },
+                { key: "days", header: "Days Left", render: (r) => <span className={`text-sm ${daysTone(r.daysUntilExpiry)}`}>{r.daysUntilExpiry ?? "—"}</span> },
+                { key: "status", header: "Status", render: (r) => <span className={`px-2 py-1 rounded-md text-xs ${statusTone(r.status)}`}>{r.status}</span> },
+                { key: "actions", header: "Actions", render: (r) => (
+                  <div className="flex items-center gap-2">
+                    <button className="p-2 rounded-lg hover:bg-gray-100 text-gray-700" onClick={() => void openLease(r.id, "view")}><Eye className="w-4 h-4" /></button>
+                    <button className="p-2 rounded-lg hover:bg-gray-100 text-blue-300" onClick={() => void openLease(r.id, "renew")}>R</button>
+                    <button className="p-2 rounded-lg hover:bg-gray-100 text-rose-300" onClick={() => void openLease(r.id, "terminate")}>T</button>
+                  </div>
+                )},
+              ];
+              return <DataTable columns={leaseCols} rows={leases} rowKey={(r) => r.id} loading={loadingLeases} emptyTitle="No leases found" />;
+            })()}
           </>
         ) : (
           <>
@@ -339,12 +350,21 @@ export function RentalManagement() {
               <div className="relative flex-1 max-w-xs"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" /><input className="w-full bg-white border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:border-blue-500/50" placeholder="Search..." value={requestFilterSearch} onChange={(event) => { setRequestFilterSearch(event.target.value); setRequestPage(1); }} /></div>
               <select className="w-44 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50 appearance-none" value={requestFilterStatus} onChange={(event) => { setRequestFilterStatus(event.target.value as "all" | RentRequestStatus); setRequestPage(1); }}><option value="all">All Statuses</option><option value="PENDING">Pending</option><option value="APPROVED">Approved</option><option value="REJECTED">Rejected</option><option value="CANCELLED">Cancelled</option></select>
             </div>
-            <div className="rounded-xl border border-gray-200 overflow-hidden">
-              <table className="w-full"><thead><tr className="bg-white border-b border-gray-200"><th className="py-3 px-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Unit</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Owner</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Tenant</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Email</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Requested</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Nationality</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Status</th><th className="py-3 px-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Actions</th></tr></thead>
-                <tbody>
-                  {loadingRequests ? <tr><td className="py-4 px-4 text-sm text-gray-700" colSpan={8}>Loading...</td></tr> : requests.map((row) => (<tr key={row.id} className="border-b border-gray-200 hover:bg-white/[0.02] transition-colors last:border-0"><td className="py-4 px-4 text-sm text-gray-700">{row.unitNumber}</td><td className="py-4 px-4 text-sm text-gray-700">{row.ownerName ?? "—"}</td><td className="py-4 px-4 text-sm text-gray-700">{row.tenantName}</td><td className="py-4 px-4 text-sm text-gray-700">{row.tenantEmail}</td><td className="py-4 px-4 text-sm text-gray-700">{formatDate(row.requestedAt)}</td><td className="py-4 px-4 text-sm text-gray-700">{row.tenantNationality}</td><td className="py-4 px-4 text-sm"><span className={`px-2 py-1 rounded-md text-xs ${statusTone(row.status)}`}>{row.status}</span></td><td className="py-4 px-4 text-sm"><button className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-3 py-2 rounded-lg transition-colors" onClick={() => { setSelectedRequest(row); setRejectReason(""); setReviewOpen(true); }}>Review</button></td></tr>))}
-                </tbody></table>
-            </div>
+            {(() => {
+              const reqCols: DataTableColumn<RentRequestListItem>[] = [
+                { key: "unit", header: "Unit", render: (r) => <span className="text-sm text-gray-700">{r.unitNumber}</span> },
+                { key: "owner", header: "Owner", render: (r) => <span className="text-sm text-gray-700">{r.ownerName ?? "—"}</span> },
+                { key: "tenant", header: "Tenant", render: (r) => <span className="text-sm text-gray-700">{r.tenantName}</span> },
+                { key: "email", header: "Email", render: (r) => <span className="text-sm text-gray-700">{r.tenantEmail}</span> },
+                { key: "requested", header: "Requested", render: (r) => <span className="text-sm text-gray-700">{formatDate(r.requestedAt)}</span> },
+                { key: "nationality", header: "Nationality", render: (r) => <span className="text-sm text-gray-700">{r.tenantNationality}</span> },
+                { key: "status", header: "Status", render: (r) => <span className={`px-2 py-1 rounded-md text-xs ${statusTone(r.status)}`}>{r.status}</span> },
+                { key: "actions", header: "Actions", render: (r) => (
+                  <button className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-3 py-2 rounded-lg transition-colors" onClick={() => { setSelectedRequest(r); setRejectReason(""); setReviewOpen(true); }}>Review</button>
+                )},
+              ];
+              return <DataTable columns={reqCols} rows={requests} rowKey={(r) => r.id} loading={loadingRequests} emptyTitle="No requests found" />;
+            })()}
             <div className="flex items-center justify-end gap-2"><button className="bg-white/5 hover:bg-gray-100 border border-gray-300 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors" disabled={requestPage <= 1} onClick={() => setRequestPage((prev) => Math.max(1, prev - 1))}>Previous</button><p className="text-sm text-gray-500">Page {requestPage} / {requestPages}</p><button className="bg-white/5 hover:bg-gray-100 border border-gray-300 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors" disabled={requestPage >= requestPages} onClick={() => setRequestPage((prev) => Math.min(requestPages, prev + 1))}>Next</button></div>
           </>
         )}

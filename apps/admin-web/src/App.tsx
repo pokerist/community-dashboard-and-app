@@ -9,6 +9,7 @@ import { UnitsManagement } from "./components/pages/UnitsManagement";
 import { CommunitiesManagement } from "./components/pages/CommunitiesManagement";
 import { CommercialManagement } from "./components/pages/CommercialManagement";
 import { CompoundStaffManagement } from "./components/pages/CompoundStaffManagement";
+import { AttendanceSchedules } from "./components/pages/AttendanceSchedules";
 import { BlueCollarManagement } from "./components/pages/BlueCollarManagement";
 import { ServiceManagement } from "./components/pages/ServiceManagement";
 import { PermitsManagement } from "./components/pages/PermitsManagement";
@@ -57,6 +58,7 @@ const VALID_SECTIONS = new Set([
   "communities",
   "commercial",
   "compound-staff",
+  "attendance",
   "blue-collar",
   "services",
   "permits",
@@ -130,6 +132,7 @@ function mapNotificationRouteToSection(routeRaw?: string | null): string | null 
   if (route.includes("permits")) return "permits";
   if (route.includes("commercial")) return "commercial";
   if (route.includes("compound-staff") || route.includes("compound_staff")) return "compound-staff";
+  if (route.includes("attendance")) return "attendance";
   if (route.includes("blue-collar") || route.includes("blue_collar")) return "blue-collar";
   if (route.includes("complaints")) return "complaints";
   if (route.includes("violations")) return "violations";
@@ -159,6 +162,7 @@ const SECTION_LABELS: Record<string, string> = {
   communities: "Communities",
   commercial: "Commercial",
   "compound-staff": "Compound Staff",
+  attendance: "Attendance & Schedules",
   "blue-collar": "Blue Collar Workers",
   services: "Services",
   permits: "Permits & Requests",
@@ -358,6 +362,7 @@ export default function App() {
       case "communities":     return <CommunitiesManagement />;
       case "commercial":      return <CommercialManagement />;
       case "compound-staff":  return <CompoundStaffManagement />;
+      case "attendance":      return <AttendanceSchedules />;
       case "blue-collar":     return <BlueCollarManagement />;
       case "services":        return <ServiceManagement />;
       case "permits":         return <PermitsManagement />;
@@ -408,7 +413,7 @@ export default function App() {
             />
 
             {/* Content column */}
-            <div className="flex flex-1 flex-col overflow-hidden" style={{ background: "#F5F4F1" }}>
+            <div className="flex flex-1 flex-col overflow-hidden" style={{ background: "#F1F3F5" }}>
 
             {/* ── Top bar ────────────────────────────────────── */}
             <header className="h-16 bg-white border-b border-[#E5E7EB] flex items-center justify-between px-6 sticky top-0 z-50 flex-shrink-0">
@@ -425,7 +430,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => { setUnseenAdminNotifications(0); navigateToSection("notifications"); }}
-                  className="relative flex h-8 w-8 items-center justify-center rounded-[6px] text-[#9CA3AF] transition-colors hover:bg-[#F5F4F1] hover:text-[#374151]"
+                  className="relative flex h-8 w-8 items-center justify-center rounded-[6px] text-[#9CA3AF] transition-colors hover:bg-[#F1F3F5] hover:text-[#374151]"
                   aria-label="Notifications"
                 >
                   <svg className="h-[17px] w-[17px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -478,7 +483,7 @@ export default function App() {
               </div>
 
               {/* Footer */}
-              <footer className="border-t border-[#E5E7EB] px-6 py-4 mt-4" style={{ background: "#F5F4F1" }}>
+              <footer className="border-t border-[#E5E7EB] px-6 py-4 mt-4" style={{ background: "#F1F3F5" }}>
                 <div className="flex items-center justify-between">
                   <p className="text-[11px] text-[#B0ADA7]" style={{ fontFamily: "'Work Sans', sans-serif" }}>
                     MG Developments — Admin Dashboard © 2025 · Powered by Smart Station Solutions

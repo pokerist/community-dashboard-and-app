@@ -12,7 +12,11 @@
       "Bash(xargs grep -l \"css\\\\|import\")",
       "Bash(xargs grep -l \"activity\\\\|Activity\\\\|RecentActivity\\\\|feed\\\\|Feed\")",
       "Bash(xargs grep -l \"QuickAction\\\\|quick.action\\\\|Quick Action\\\\|quickaction\")",
-      "Bash(npx prisma migrate deploy)"
+      "Bash(npx prisma migrate deploy)",
+      "Bash(npx prisma db push)",
+      "Bash(npx prisma generate)",
+      "Bash(npx tsc --noEmit --pretty)",
+      "Read(//c/Users/maram/AppData/Local/Temp/claude/i--PROJECTS-work-projects-sss-community-app-community-dashboard-and-app/tasks/**)"
     ],
     "additionalDirectories": [
       "i:\\PROJECTS\\work-projects\\sss\\community-app\\community-dashboard-and-app\\apps\\admin-web\\src\\components\\pages"

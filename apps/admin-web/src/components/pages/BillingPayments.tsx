@@ -1,1324 +1,766 @@
+import { errorMessage, formatDateTime, humanizeEnum } from '../../lib/live-data';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ArrowDown,
-  ArrowUp,
-  Ban,
-  Check,
-  Eye,
-  GripVertical,
-  Plus,
-  Search,
-  Settings,
-  X,
-} from 'lucide-react';
-import { toast } from 'sonner';
+import { DataTable, type DataTableColumn } from '../DataTable';
+import { StatusBadge } from '../StatusBadge';
+import { DrawerForm } from '../DrawerForm';
 import { EmptyState } from '../EmptyState';
-import { SkeletonTable } from '../SkeletonTable';
-import invoiceService, {
-  type CommunityOption,
-  type InvoiceCategory,
-  type InvoiceDetail,
-  type InvoiceListItem,
+import { StatCard } from '../StatCard';
+import { toast } from 'sonner';
+import {
+  CreditCard, FileText, CheckCircle2, XCircle, Search, Receipt,
+  RefreshCw, Plus, Check, X, ChevronLeft, ChevronRight,
+  CalendarRange, SlidersHorizontal, ChevronDown,
+} from 'lucide-react';
+import billingService, {
+  type BillingInvoice,
+  type BillingPayment,
+  type BillingStats,
   type InvoiceStatus,
-  type InvoiceStats,
-  type InvoiceType,
-  type ResidentOption,
-  SOURCE_BADGE_COLOR,
-  INVOICE_TYPE_OPTIONS,
-  type UnitOption,
-} from '../../lib/invoiceService';
-import { errorMessage } from '../../lib/live-data';
+  type PaymentMethod,
+  type CreateInvoicePayload,
+  type RecordPaymentPayload,
+} from '../../lib/billing-service';
 
-const CARD_CLASS = 'bg-white rounded-xl border border-gray-200 p-6';
+// ─── Types ────────────────────────────────────────────────────
 
-const statusClass: Record<string, string> = {
-  PAID: 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30',
-  PENDING: 'bg-amber-500/15 text-amber-300 border border-amber-500/30',
-  OVERDUE: 'bg-red-500/15 text-red-300 border border-red-500/30',
-  CANCELLED: 'bg-gray-100 text-gray-700 border border-slate-500/30',
+type ActiveTab = 'invoices' | 'payments';
+
+type InvoiceFormState = {
+  communityId: string; unitId: string; residentId: string;
+  title: string; amount: string; currency: string;
+  dueDate: string; category: string; notes: string;
 };
 
-const categorySwatches: Array<{ value: string; className: string }> = [
-  { value: '#3b82f6', className: 'bg-blue-500' },
-  { value: '#10b981', className: 'bg-emerald-500' },
-  { value: '#f59e0b', className: 'bg-amber-500' },
-  { value: '#ef4444', className: 'bg-red-500' },
-  { value: '#8b5cf6', className: 'bg-violet-500' },
-  { value: '#f97316', className: 'bg-orange-500' },
-  { value: '#14b8a6', className: 'bg-teal-500' },
-  { value: '#64748b', className: 'bg-slate-500' },
-];
-
-const swatchClassByValue = new Map(
-  categorySwatches.map((swatch) => [swatch.value, swatch.className]),
-);
-
-const emptyStats: InvoiceStats = {
-  totalRevenue: 0,
-  pendingAmount: 0,
-  overdueAmount: 0,
-  overdueCount: 0,
-  paidThisMonth: 0,
-  invoicesByType: {
-    RENT: 0,
-    SERVICE_FEE: 0,
-    UTILITY: 0,
-    FINE: 0,
-    MAINTENANCE_FEE: 0,
-    BOOKING_FEE: 0,
-    SETUP_FEE: 0,
-    LATE_FEE: 0,
-    MISCELLANEOUS: 0,
-    OWNER_EXPENSE: 0,
-    MANAGEMENT_FEE: 0,
-    CREDIT_MEMO: 0,
-    DEBIT_MEMO: 0,
-  },
-  invoicesByStatus: {
-    PAID: 0,
-    PENDING: 0,
-    OVERDUE: 0,
-    CANCELLED: 0,
-  },
+type PaymentFormState = {
+  invoiceId: string; amount: string; method: PaymentMethod;
+  referenceNumber: string; notes: string; paidAt: string;
 };
 
-type CreateInvoiceForm = {
-  unitId: string;
-  residentId: string;
-  type: InvoiceType;
-  amount: string;
-  dueDate: string;
+const INIT_INVOICE: InvoiceFormState = {
+  communityId: '', unitId: '', residentId: '', title: '',
+  amount: '', currency: 'EGP', dueDate: '', category: 'MAINTENANCE', notes: '',
 };
 
-type CreateCategoryForm = {
-  label: string;
-  description: string;
-  color: string;
+const INIT_PAYMENT: PaymentFormState = {
+  invoiceId: '', amount: '', method: 'BANK_TRANSFER',
+  referenceNumber: '', notes: '', paidAt: '',
 };
 
-function enumLabel(value: string): string {
-  return value
-    .replace(/_/g, ' ')
-    .toLowerCase()
-    .replace(/\b\w/g, (char) => char.toUpperCase());
+const EMPTY_STATS: BillingStats = {
+  totalInvoiced: 0, totalCollected: 0, totalOverdue: 0,
+  pendingCount: 0, overdueCount: 0, paidCount: 0, totalCount: 0,
+};
+
+const PAGE_SIZE = 20;
+
+const PAYMENT_METHODS: PaymentMethod[] = ['BANK_TRANSFER', 'CASH', 'CHEQUE', 'ONLINE', 'CARD'];
+const INVOICE_CATEGORIES = ['MAINTENANCE', 'UTILITY', 'SERVICE', 'PENALTY', 'DEPOSIT', 'OTHER'];
+const CURRENCIES = ['EGP', 'USD', 'EUR', 'SAR', 'AED'];
+
+const METHOD_META: Record<string, { bg: string; color: string }> = {
+  BANK_TRANSFER: { bg: '#EFF6FF', color: '#2563EB' },
+  CASH:          { bg: '#F0FDF4', color: '#16A34A' },
+  CHEQUE:        { bg: '#FFFBEB', color: '#D97706' },
+  ONLINE:        { bg: '#F5F3FF', color: '#7C3AED' },
+  CARD:          { bg: '#F0FDFA', color: '#0D9488' },
+};
+
+const CAT_META: Record<string, { bg: string; color: string }> = {
+  MAINTENANCE: { bg: '#EFF6FF', color: '#2563EB' },
+  UTILITY:     { bg: '#F0FDF4', color: '#16A34A' },
+  SERVICE:     { bg: '#F5F3FF', color: '#7C3AED' },
+  PENALTY:     { bg: '#FEF2F2', color: '#DC2626' },
+  DEPOSIT:     { bg: '#FFF7ED', color: '#EA580C' },
+  OTHER:       { bg: '#F3F4F6', color: '#6B7280' },
+};
+
+// ─── Shared styles ────────────────────────────────────────────
+
+const inputStyle: React.CSSProperties = {
+  width: '100%', padding: '8px 10px', borderRadius: '7px',
+  border: '1px solid #E5E7EB', fontSize: '13px', color: '#111827',
+  background: '#FFF', outline: 'none', fontFamily: "'Work Sans', sans-serif",
+  boxSizing: 'border-box', height: '36px',
+};
+const selectStyle: React.CSSProperties = { ...inputStyle, cursor: 'pointer' };
+const textareaStyle: React.CSSProperties = {
+  ...inputStyle, height: 'auto', minHeight: '76px', resize: 'vertical', padding: '9px 10px',
+};
+
+// ─── Primitives ───────────────────────────────────────────────
+
+function Field({ label, hint, required, span2, children }: {
+  label: string; hint?: string; required?: boolean; span2?: boolean; children: React.ReactNode;
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', gridColumn: span2 ? 'span 2' : undefined }}>
+      <label style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'Work Sans', sans-serif" }}>
+        {label}{required && <span style={{ color: '#EF4444', marginLeft: '3px' }}>*</span>}
+      </label>
+      {hint && <p style={{ fontSize: '10.5px', color: '#B0B7C3', margin: 0 }}>{hint}</p>}
+      {children}
+    </div>
+  );
 }
 
-function formatCurrency(value: number): string {
-  return `EGP ${value.toLocaleString('en-US', {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 2,
-  })}`;
+function SectionLabel({ label }: { label: string }) {
+  return (
+    <div style={{ gridColumn: 'span 2', display: 'flex', alignItems: 'center', gap: '8px', paddingTop: '4px' }}>
+      <span style={{ fontSize: '10px', fontWeight: 800, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.09em', whiteSpace: 'nowrap', fontFamily: "'Work Sans', sans-serif" }}>{label}</span>
+      <div style={{ flex: 1, height: '1px', background: '#F0F0F0' }} />
+    </div>
+  );
 }
 
-function formatDate(value: string | null): string {
-  if (!value) return '--';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '--';
-  return date.toLocaleDateString('en-GB');
+function TabBtn({ label, icon, active, onClick }: { label: string; icon: React.ReactNode; active: boolean; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick}
+      style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 18px', borderRadius: '7px', border: 'none', background: active ? '#FFF' : 'transparent', color: active ? '#111827' : '#9CA3AF', cursor: 'pointer', fontSize: '12.5px', fontWeight: active ? 700 : 500, transition: 'all 120ms ease', fontFamily: "'Work Sans', sans-serif", flexShrink: 0, boxShadow: active ? '0 1px 3px rgba(0,0,0,0.08)' : 'none' }}>
+      <span style={{ color: active ? '#2563EB' : '#D1D5DB' }}>{icon}</span>
+      {label}
+    </button>
+  );
 }
 
-function formatDateTime(value: string | null): string {
-  if (!value) return '--';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return '--';
-  return date.toLocaleString('en-GB');
+function ActionBtn({ label, icon, variant = 'ghost', onClick, disabled }: {
+  label: string; icon?: React.ReactNode; variant?: 'ghost' | 'danger' | 'success';
+  onClick: () => void; disabled?: boolean;
+}) {
+  const [hov, setHov] = useState(false);
+  const vs: Record<string, React.CSSProperties> = {
+    ghost:   { background: hov ? '#F3F4F6' : '#FFF',    color: '#374151',                  border: '1px solid #E5E7EB' },
+    danger:  { background: hov ? '#B91C1C' : '#FEF2F2', color: hov ? '#FFF' : '#DC2626',   border: '1px solid #FECACA' },
+    success: { background: hov ? '#047857' : '#ECFDF5', color: hov ? '#FFF' : '#059669',   border: '1px solid #A7F3D0' },
+  };
+  return (
+    <button type="button" onClick={onClick} disabled={disabled}
+      onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 10px', borderRadius: '6px', cursor: disabled ? 'not-allowed' : 'pointer', fontSize: '11.5px', fontWeight: 700, transition: 'all 120ms ease', fontFamily: "'Work Sans', sans-serif", opacity: disabled ? 0.4 : 1, ...vs[variant] }}>
+      {icon}{label}
+    </button>
+  );
 }
 
-export function BillingPayments() {
-  const [loading, setLoading] = useState(false);
-  const [tableLoading, setTableLoading] = useState(false);
-  const [stats, setStats] = useState<InvoiceStats>(emptyStats);
-  const [rows, setRows] = useState<InvoiceListItem[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [limit] = useState(25);
+function MethodChip({ method }: { method: string }) {
+  const m = METHOD_META[method] ?? { bg: '#F3F4F6', color: '#6B7280' };
+  return <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: '5px', fontSize: '10.5px', fontWeight: 700, background: m.bg, color: m.color, fontFamily: "'Work Sans', sans-serif" }}>{humanizeEnum(method)}</span>;
+}
 
-  const [filters, setFilters] = useState<{
-    search: string;
-    status: string;
-    type: string;
-    fromDate: string;
-    toDate: string;
-    communityId: string;
-  }>({
-    search: '',
-    status: 'all',
-    type: 'all',
-    fromDate: '',
-    toDate: '',
-    communityId: 'all',
-  });
+function CatChip({ category }: { category: string }) {
+  const m = CAT_META[category] ?? { bg: '#F3F4F6', color: '#6B7280' };
+  return <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: '5px', fontSize: '10.5px', fontWeight: 700, background: m.bg, color: m.color, fontFamily: "'Work Sans', sans-serif" }}>{humanizeEnum(category)}</span>;
+}
 
-  const [communities, setCommunities] = useState<CommunityOption[]>([]);
-  const [units, setUnits] = useState<UnitOption[]>([]);
-  const [residents, setResidents] = useState<ResidentOption[]>([]);
-
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(
-    null,
+function MonoAmount({ amount, currency }: { amount: number; currency: string }) {
+  return (
+    <span style={{ fontSize: '13px', fontWeight: 700, color: '#111827', fontFamily: "'DM Mono', monospace" }}>
+      {currency} {amount.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+    </span>
   );
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detail, setDetail] = useState<InvoiceDetail | null>(null);
+}
 
-  const [createOpen, setCreateOpen] = useState(false);
-  const [createSubmitting, setCreateSubmitting] = useState(false);
-  const [createForm, setCreateForm] = useState<CreateInvoiceForm>({
-    unitId: '',
-    residentId: '',
-    type: 'RENT',
-    amount: '',
-    dueDate: '',
-  });
-
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [categoryDrawerOpen, setCategoryDrawerOpen] = useState(false);
-  const [categories, setCategories] = useState<InvoiceCategory[]>([]);
-  const [categorySubmitting, setCategorySubmitting] = useState(false);
-  const [categoryForm, setCategoryForm] = useState<CreateCategoryForm>({
-    label: '',
-    description: '',
-    color: categorySwatches[0].value,
-  });
-
-  const totalPages = Math.max(1, Math.ceil(total / limit));
-
-  const loadBaseOptions = useCallback(async () => {
-    const [communityOptions, unitOptions, residentOptions] = await Promise.all([
-      invoiceService.listCommunityOptions(),
-      invoiceService.listUnitOptions(),
-      invoiceService.listResidentOptions(),
-    ]);
-
-    setCommunities(communityOptions);
-    setUnits(unitOptions);
-    setResidents(residentOptions);
-  }, []);
-
-  const loadCategories = useCallback(async () => {
-    const data = await invoiceService.listCategories(true);
-    setCategories(data);
-  }, []);
-
-  const loadStats = useCallback(async () => {
-    const data = await invoiceService.getInvoiceStats(
-      filters.communityId !== 'all'
-        ? { communityId: filters.communityId }
-        : undefined,
-    );
-    setStats(data);
-  }, [filters.communityId]);
-
-  const loadInvoices = useCallback(async () => {
-    setTableLoading(true);
-    try {
-      const response = await invoiceService.listInvoices({
-        page,
-        limit,
-        search: filters.search.trim() || undefined,
-        status:
-          filters.status !== 'all'
-            ? (filters.status as InvoiceStatus)
-            : undefined,
-        type:
-          filters.type !== 'all' ? (filters.type as InvoiceType) : undefined,
-        createdFrom: filters.fromDate
-          ? new Date(`${filters.fromDate}T00:00:00.000Z`).toISOString()
-          : undefined,
-        createdTo: filters.toDate
-          ? new Date(`${filters.toDate}T23:59:59.999Z`).toISOString()
-          : undefined,
-        communityId:
-          filters.communityId !== 'all' ? filters.communityId : undefined,
-      });
-
-      setRows(response.data);
-      setTotal(response.total);
-    } catch (error) {
-      toast.error('Failed to load invoices', {
-        description: errorMessage(error),
-      });
-    } finally {
-      setTableLoading(false);
-    }
-  }, [
-    filters.communityId,
-    filters.fromDate,
-    filters.search,
-    filters.status,
-    filters.toDate,
-    filters.type,
-    limit,
-    page,
-  ]);
-
-  const loadPage = useCallback(async () => {
-    setLoading(true);
-    try {
-      await Promise.all([
-        loadBaseOptions(),
-        loadCategories(),
-        loadStats(),
-        loadInvoices(),
-      ]);
-    } catch (error) {
-      toast.error('Failed to initialize invoices page', {
-        description: errorMessage(error),
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [loadBaseOptions, loadCategories, loadInvoices, loadStats]);
-
-  useEffect(() => {
-    void loadPage();
-  }, [loadPage]);
-
-  useEffect(() => {
-    void loadInvoices();
-  }, [loadInvoices]);
-
-  const refreshData = useCallback(async () => {
-    await Promise.all([loadStats(), loadInvoices()]);
-  }, [loadInvoices, loadStats]);
-
-  const openDetail = useCallback(async (invoiceId: string) => {
-    setSelectedInvoiceId(invoiceId);
-    setDetailOpen(true);
-    setDetailLoading(true);
-    try {
-      const response = await invoiceService.getInvoiceDetail(invoiceId);
-      setDetail(response);
-    } catch (error) {
-      toast.error('Failed to load invoice details', {
-        description: errorMessage(error),
-      });
-      setDetailOpen(false);
-    } finally {
-      setDetailLoading(false);
-    }
-  }, []);
-
-  const submitCreateInvoice = useCallback(async () => {
-    if (!createForm.unitId || !createForm.amount || !createForm.dueDate) {
-      toast.error('Unit, amount, and due date are required');
-      return;
-    }
-
-    const amount = Number(createForm.amount);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      toast.error('Amount must be greater than zero');
-      return;
-    }
-
-    setCreateSubmitting(true);
-    try {
-      await invoiceService.createInvoice({
-        unitId: createForm.unitId,
-        residentId: createForm.residentId || undefined,
-        type: createForm.type,
-        amount,
-        dueDate: new Date(`${createForm.dueDate}T00:00:00.000Z`).toISOString(),
-      });
-      toast.success('Invoice created');
-      setCreateOpen(false);
-      setCreateForm({
-        unitId: '',
-        residentId: '',
-        type: 'RENT',
-        amount: '',
-        dueDate: '',
-      });
-      await refreshData();
-    } catch (error) {
-      toast.error('Failed to create invoice', {
-        description: errorMessage(error),
-      });
-    } finally {
-      setCreateSubmitting(false);
-    }
-  }, [
-    createForm.amount,
-    createForm.dueDate,
-    createForm.residentId,
-    createForm.type,
-    createForm.unitId,
-    refreshData,
-  ]);
-
-  const markAsPaid = useCallback(
-    async (invoiceId: string) => {
-      try {
-        await invoiceService.markAsPaid(invoiceId);
-        toast.success('Invoice marked as paid');
-        await refreshData();
-        if (selectedInvoiceId === invoiceId) {
-          await openDetail(invoiceId);
-        }
-      } catch (error) {
-        toast.error('Failed to mark invoice as paid', {
-          description: errorMessage(error),
-        });
-      }
-    },
-    [openDetail, refreshData, selectedInvoiceId],
+function Pagination({ page, totalPages, total, onPrev, onNext }: {
+  page: number; totalPages: number; total: number; onPrev: () => void; onNext: () => void;
+}) {
+  if (total === 0) return null;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '8px', marginTop: '12px' }}>
+      <button type="button" disabled={page <= 1} onClick={onPrev}
+        style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '5px 10px', borderRadius: '6px', border: '1px solid #E5E7EB', background: page <= 1 ? '#F9FAFB' : '#FFF', color: page <= 1 ? '#D1D5DB' : '#374151', cursor: page <= 1 ? 'not-allowed' : 'pointer', fontSize: '12px', fontFamily: "'Work Sans', sans-serif" }}>
+        <ChevronLeft style={{ width: '12px', height: '12px' }} /> Prev
+      </button>
+      <span style={{ fontSize: '12px', color: '#6B7280', fontFamily: "'DM Mono', monospace" }}>
+        {page} / {totalPages}<span style={{ color: '#D1D5DB', marginLeft: '6px' }}>({total})</span>
+      </span>
+      <button type="button" disabled={page >= totalPages} onClick={onNext}
+        style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '5px 10px', borderRadius: '6px', border: '1px solid #E5E7EB', background: page >= totalPages ? '#F9FAFB' : '#FFF', color: page >= totalPages ? '#D1D5DB' : '#374151', cursor: page >= totalPages ? 'not-allowed' : 'pointer', fontSize: '12px', fontFamily: "'Work Sans', sans-serif" }}>
+        Next <ChevronRight style={{ width: '12px', height: '12px' }} />
+      </button>
+    </div>
   );
+}
 
-  const cancelInvoice = useCallback(
-    async (invoiceId: string) => {
-      const reason = window.prompt('Cancellation reason');
-      if (!reason || !reason.trim()) {
-        return;
-      }
-
-      try {
-        await invoiceService.cancelInvoice(invoiceId, reason.trim());
-        toast.success('Invoice cancelled');
-        await refreshData();
-        if (selectedInvoiceId === invoiceId) {
-          await openDetail(invoiceId);
-        }
-      } catch (error) {
-        toast.error('Failed to cancel invoice', {
-          description: errorMessage(error),
-        });
-      }
-    },
-    [openDetail, refreshData, selectedInvoiceId],
+function FilterBar({ searchValue, onSearchChange, filtersOpen, onToggleFilters, activeFilters, placeholder, children }: {
+  searchValue: string; onSearchChange: (v: string) => void;
+  filtersOpen: boolean; onToggleFilters: () => void;
+  activeFilters: number; placeholder?: string; children: React.ReactNode;
+}) {
+  return (
+    <div style={{ borderRadius: '10px', border: '1px solid #EBEBEB', background: '#FFF', overflow: 'hidden', marginBottom: '12px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px', borderBottom: filtersOpen ? '1px solid #F3F4F6' : 'none' }}>
+        <Search style={{ width: '13px', height: '13px', color: '#C4C9D4', flexShrink: 0 }} />
+        <input placeholder={placeholder ?? 'Search…'} value={searchValue} onChange={(e) => onSearchChange(e.target.value)}
+          style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: '13px', color: '#111827', fontFamily: "'Work Sans', sans-serif" }} />
+        <button type="button" onClick={onToggleFilters}
+          style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 10px', borderRadius: '6px', border: `1px solid ${activeFilters > 0 ? '#2563EB40' : '#E5E7EB'}`, background: activeFilters > 0 ? '#EFF6FF' : '#FAFAFA', color: activeFilters > 0 ? '#2563EB' : '#6B7280', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer', fontFamily: "'Work Sans', sans-serif", flexShrink: 0 }}>
+          <SlidersHorizontal style={{ width: '11px', height: '11px' }} />
+          Filters
+          {activeFilters > 0 && <span style={{ width: '15px', height: '15px', borderRadius: '50%', background: '#2563EB', color: '#FFF', fontSize: '9px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{activeFilters}</span>}
+          <ChevronDown style={{ width: '10px', height: '10px', transform: filtersOpen ? 'rotate(180deg)' : 'none', transition: 'transform 150ms' }} />
+        </button>
+      </div>
+      {filtersOpen && (
+        <div style={{ padding: '10px 14px', display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+          {children}
+        </div>
+      )}
+    </div>
   );
+}
 
-  const bulkMarkOverdue = useCallback(async () => {
-    try {
-      const response = await invoiceService.bulkMarkOverdue();
-      toast.success(`Marked ${response.updatedCount} invoice(s) overdue`);
-      await refreshData();
-    } catch (error) {
-      toast.error('Failed to mark overdue invoices', {
-        description: errorMessage(error),
-      });
-    }
-  }, [refreshData]);
-
-  const submitCategory = useCallback(async () => {
-    if (!categoryForm.label.trim()) {
-      toast.error('Category label is required');
-      return;
-    }
-
-    setCategorySubmitting(true);
-    try {
-      await invoiceService.createCategory({
-        label: categoryForm.label.trim(),
-        description: categoryForm.description.trim() || undefined,
-        color: categoryForm.color,
-      });
-      toast.success('Category added');
-      setCategoryDrawerOpen(false);
-      setCategoryForm({
-        label: '',
-        description: '',
-        color: categorySwatches[0].value,
-      });
-      await loadCategories();
-    } catch (error) {
-      toast.error('Failed to add category', {
-        description: errorMessage(error),
-      });
-    } finally {
-      setCategorySubmitting(false);
-    }
-  }, [
-    categoryForm.color,
-    categoryForm.description,
-    categoryForm.label,
-    loadCategories,
-  ]);
-
-  const moveCategory = useCallback(
-    async (index: number, direction: -1 | 1) => {
-      const nextIndex = index + direction;
-      if (nextIndex < 0 || nextIndex >= categories.length) {
-        return;
-      }
-      const reordered = [...categories];
-      const [item] = reordered.splice(index, 1);
-      reordered.splice(nextIndex, 0, item);
-
-      try {
-        setCategories(reordered);
-        await invoiceService.reorderCategories(reordered.map((row) => row.id));
-      } catch (error) {
-        toast.error('Failed to reorder categories', {
-          description: errorMessage(error),
-        });
-        await loadCategories();
-      }
-    },
-    [categories, loadCategories],
+function DateRangePill({ from, to, onFrom, onTo }: { from: string; to: string; onFrom: (v: string) => void; onTo: (v: string) => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 10px', borderRadius: '7px', border: '1px solid #E5E7EB', background: '#FAFAFA' }}>
+      <CalendarRange style={{ width: '11px', height: '11px', color: '#C4C9D4' }} />
+      <span style={{ fontSize: '9.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em' }}>FROM</span>
+      <input type="date" value={from} onChange={(e) => onFrom(e.target.value)}
+        style={{ width: '130px', border: 'none', background: 'transparent', outline: 'none', fontSize: '12px', color: '#374151', fontFamily: "'Work Sans', sans-serif" }} />
+      <span style={{ fontSize: '9.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em' }}>TO</span>
+      <input type="date" value={to} onChange={(e) => onTo(e.target.value)}
+        style={{ width: '130px', border: 'none', background: 'transparent', outline: 'none', fontSize: '12px', color: '#374151', fontFamily: "'Work Sans', sans-serif" }} />
+    </div>
   );
+}
 
-  const filteredUnits = useMemo(() => {
-    if (filters.communityId === 'all') {
-      return units;
-    }
-    return units.filter((unit) => unit.communityId === filters.communityId);
-  }, [filters.communityId, units]);
+function DrawerFooter({ onCancel, onSave, saving, saveLabel }: {
+  onCancel: () => void; onSave: () => void; saving: boolean; saveLabel: string;
+}) {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', width: '100%' }}>
+      <button type="button" disabled={saving} onClick={onCancel}
+        style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '8px 16px', borderRadius: '8px', border: '1px solid #E5E7EB', background: '#FFF', color: '#6B7280', cursor: saving ? 'not-allowed' : 'pointer', fontSize: '13px', fontFamily: "'Work Sans', sans-serif", fontWeight: 600 }}>
+        <X style={{ width: '12px', height: '12px' }} /> Cancel
+      </button>
+      <button type="button" disabled={saving} onClick={onSave}
+        style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 20px', borderRadius: '8px', background: saving ? '#9CA3AF' : '#111827', color: '#FFF', border: 'none', cursor: saving ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif", boxShadow: saving ? 'none' : '0 2px 6px rgba(0,0,0,0.18)' }}>
+        <Check style={{ width: '13px', height: '13px' }} />
+        {saving ? 'Saving…' : saveLabel}
+      </button>
+    </div>
+  );
+}
+
+// ─── Invoice Detail Modal ─────────────────────────────────────
+
+function InvoiceDetailModal({ invoice, onClose, onRecordPayment }: {
+  invoice: BillingInvoice; onClose: () => void; onRecordPayment: (inv: BillingInvoice) => void;
+}) {
+  const canPay = invoice.status !== 'PAID' && invoice.status !== 'VOID';
 
   return (
-    <div className="p-8 space-y-6">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900">
-            Payments & Invoices
-          </h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Track invoices, collections, and category settings.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            className="bg-white/5 hover:bg-gray-100 border border-gray-300 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
-            onClick={() => setSettingsOpen(true)}
-          >
-            <Settings className="w-4 h-4" />
-            Categories
-          </button>
-          <button
-            className="bg-black hover:bg-black/90 border border-black text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
-            style={{ backgroundColor: '#000000', color: '#ffffff' }}
-            onClick={() => setCreateOpen(true)}
-          >
-            <Plus className="w-4 h-4" />
-            Create Invoice
-          </button>
-        </div>
-      </div>
+    <div
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(17,24,39,0.4)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '24px' }}
+    >
+      <div style={{ width: '100%', maxWidth: '460px', background: '#FFF', borderRadius: '14px', overflow: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,0.18)', fontFamily: "'Work Sans', sans-serif" }}>
+        {/* Top gradient strip */}
+        <div style={{ height: '4px', background: 'linear-gradient(90deg, #2563EB 0%, #0D9488 100%)' }} />
 
-      <div className="grid grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl border border-gray-200 p-6 cursor-pointer hover:border-gray-300 transition-colors">
-          <div className="flex items-start justify-between mb-4">
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Total Revenue
-            </p>
-            <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center" />
-          </div>
-          <p className="text-3xl font-semibold text-emerald-400 font-['DM_Mono']">
-            {formatCurrency(stats.totalRevenue)}
-          </p>
-          <p className="text-xs text-gray-400 mt-1">Paid invoices</p>
-        </div>
-
-        <div className="bg-white rounded-xl border border-gray-200 p-6 cursor-pointer hover:border-gray-300 transition-colors">
-          <div className="flex items-start justify-between mb-4">
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Pending Amount
-            </p>
-            <div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center" />
-          </div>
-          <p className="text-3xl font-semibold text-gray-900 font-['DM_Mono']">
-            {formatCurrency(stats.pendingAmount)}
-          </p>
-          <p className="text-xs text-gray-400 mt-1">Awaiting payment</p>
-        </div>
-
-        <div className="bg-white rounded-xl border border-gray-200 p-6 cursor-pointer hover:border-gray-300 transition-colors">
-          <div className="flex items-start justify-between mb-4">
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Overdue Amount
-            </p>
-            <div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center" />
-          </div>
-          <p className="text-3xl font-semibold text-gray-900 font-['DM_Mono']">
-            {formatCurrency(stats.overdueAmount)}
-          </p>
-          <p className="text-xs text-gray-400 mt-1">Past due invoices</p>
-        </div>
-
-        <div className="bg-white rounded-xl border border-gray-200 p-6 cursor-pointer hover:border-gray-300 transition-colors">
-          <div className="flex items-start justify-between mb-4">
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Overdue Count
-            </p>
-            <div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center" />
-          </div>
-          <p
-            className={`text-3xl font-semibold font-['DM_Mono'] ${stats.overdueCount > 0 ? 'text-red-400' : 'text-gray-900'}`}
-          >
-            {stats.overdueCount.toLocaleString()}
-          </p>
-          <p className="text-xs text-gray-400 mt-1">
-            Current overdue invoices
-          </p>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-xl border border-gray-200 p-0 overflow-hidden">
-        <div className="p-4 border-b border-gray-200 flex items-center gap-3 flex-wrap">
-          <div className="relative flex-1 max-w-xs">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              className="w-full bg-white border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:border-blue-500/50"
-              placeholder="Search..."
-              value={filters.search}
-              onChange={(event) => {
-                setPage(1);
-                setFilters((prev) => ({ ...prev, search: event.target.value }));
-              }}
-            />
-          </div>
-
-          <select
-            className="w-40 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50 appearance-none"
-            value={filters.status}
-            onChange={(event) => {
-              setPage(1);
-              setFilters((prev) => ({ ...prev, status: event.target.value }));
-            }}
-          >
-            <option value="all">All Statuses</option>
-            <option value="PENDING">Pending</option>
-            <option value="PAID">Paid</option>
-            <option value="OVERDUE">Overdue</option>
-            <option value="CANCELLED">Cancelled</option>
-          </select>
-
-          <select
-            className="w-48 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50 appearance-none"
-            value={filters.type}
-            onChange={(event) => {
-              setPage(1);
-              setFilters((prev) => ({ ...prev, type: event.target.value }));
-            }}
-          >
-            <option value="all">All Types</option>
-            {INVOICE_TYPE_OPTIONS.map((type) => (
-              <option key={type} value={type}>
-                {enumLabel(type)}
-              </option>
-            ))}
-          </select>
-
-          <input
-            type="date"
-            className="w-36 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50"
-            value={filters.fromDate}
-            onChange={(event) => {
-              setPage(1);
-              setFilters((prev) => ({ ...prev, fromDate: event.target.value }));
-            }}
-          />
-          <input
-            type="date"
-            className="w-36 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50"
-            value={filters.toDate}
-            onChange={(event) => {
-              setPage(1);
-              setFilters((prev) => ({ ...prev, toDate: event.target.value }));
-            }}
-          />
-
-          <select
-            className="w-48 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50 appearance-none"
-            value={filters.communityId}
-            onChange={(event) => {
-              setPage(1);
-              setFilters((prev) => ({
-                ...prev,
-                communityId: event.target.value,
-              }));
-            }}
-          >
-            <option value="all">All Communities</option>
-            {communities.map((community) => (
-              <option key={community.id} value={community.id}>
-                {community.label}
-              </option>
-            ))}
-          </select>
-
-          <div className="ml-auto flex items-center gap-2">
-            <button
-              className="bg-white/5 hover:bg-gray-100 border border-gray-300 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
-              onClick={() => void bulkMarkOverdue()}
-            >
-              Mark Overdue
-            </button>
-            <button
-              className="bg-black hover:bg-black/90 border border-black text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
-              style={{ backgroundColor: '#000000', color: '#ffffff' }}
-              onClick={() => setCreateOpen(true)}
-            >
-              <Plus className="w-4 h-4" /> Create Invoice
-            </button>
-          </div>
-        </div>
-
-        {loading || tableLoading ? (
-          <div className="p-6">
-            <SkeletonTable columns={9} rows={8} />
-          </div>
-        ) : rows.length === 0 ? (
-          <div className="p-6">
-            <EmptyState
-              title="No invoices found"
-              description="Try changing status, type, date, or search filters."
-            />
-          </div>
-        ) : (
-          <>
-            <div className="rounded-xl border border-gray-200 overflow-hidden">
-              <table className="w-full">
-                <thead>
-                  <tr className="bg-white border-b border-gray-200">
-                    {[
-                      'Invoice #',
-                      'Unit',
-                      'Resident',
-                      'Category',
-                      'Amount',
-                      'Due Date',
-                      'Status',
-                      'Source',
-                      'Actions',
-                    ].map((column) => (
-                      <th
-                        key={column}
-                        className="py-3 px-4 text-left text-xs font-medium text-gray-400 uppercase tracking-wider"
-                      >
-                        {column}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row) => (
-                    <tr
-                      key={row.id}
-                      className={`border-b border-gray-200 hover:bg-white/[0.02] transition-colors last:border-0 ${row.status === 'OVERDUE' ? 'border-l-2 border-red-500/40' : ''}`}
-                    >
-                      <td className="py-4 px-4 text-sm text-gray-700 font-['DM_Mono']">
-                        {row.invoiceNumber}
-                      </td>
-                      <td className="py-4 px-4 text-sm text-gray-700">
-                        {row.unitNumber}
-                      </td>
-                      <td className="py-4 px-4 text-sm text-gray-700">
-                        {row.residentName || '--'}
-                      </td>
-                      <td className="py-4 px-4 text-sm text-gray-700">
-                        {row.categoryLabel || '--'}
-                      </td>
-                      <td className="py-4 px-4 text-sm text-gray-700 text-right font-['DM_Mono']">
-                        {formatCurrency(row.amount)}
-                      </td>
-                      <td className="py-4 px-4 text-sm text-gray-700">
-                        {formatDate(row.dueDate)}
-                      </td>
-                      <td className="py-4 px-4 text-sm text-gray-700">
-                        <span
-                          className={`text-xs px-2.5 py-1 rounded-full ${statusClass[row.status] || statusClass.CANCELLED}`}
-                        >
-                          {enumLabel(row.status)}
-                        </span>
-                      </td>
-                      <td className="py-4 px-4 text-sm text-gray-700">
-                        <span
-                          className={`text-xs px-2.5 py-1 rounded-full ${SOURCE_BADGE_COLOR[row.source]}`}
-                        >
-                          {enumLabel(row.source)}
-                        </span>
-                      </td>
-                      <td className="py-4 px-4 text-sm text-gray-700">
-                        <div className="flex items-center gap-2">
-                          <button
-                            className="p-2 rounded-lg bg-white/5 hover:bg-gray-100"
-                            onClick={() => void openDetail(row.id)}
-                          >
-                            <Eye className="w-4 h-4" />
-                          </button>
-                          {row.status === 'PENDING' ||
-                          row.status === 'OVERDUE' ? (
-                            <button
-                              className="p-2 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300"
-                              onClick={() => void markAsPaid(row.id)}
-                            >
-                              <Check className="w-4 h-4" />
-                            </button>
-                          ) : null}
-                          {row.status !== 'PAID' &&
-                          row.status !== 'CANCELLED' ? (
-                            <button
-                              className="p-2 rounded-lg bg-red-500/15 hover:bg-red-500/25 text-red-300"
-                              onClick={() => void cancelInvoice(row.id)}
-                            >
-                              <Ban className="w-4 h-4" />
-                            </button>
-                          ) : null}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        {/* Header */}
+        <div style={{ padding: '20px 22px 16px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', borderBottom: '1px solid #F3F4F6' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ width: '36px', height: '36px', borderRadius: '9px', background: '#EFF6FF', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <Receipt style={{ width: '15px', height: '15px', color: '#2563EB' }} />
             </div>
-
-            <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-end gap-3">
-              <button
-                className="bg-white/5 hover:bg-gray-100 border border-gray-300 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
-                disabled={page <= 1}
-                onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-              >
-                Previous
-              </button>
-              <span className="text-sm text-gray-500">
-                Page {page} of {totalPages}
-              </span>
-              <button
-                className="bg-white/5 hover:bg-gray-100 border border-gray-300 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
-                disabled={page >= totalPages}
-                onClick={() =>
-                  setPage((prev) => Math.min(totalPages, prev + 1))
-                }
-              >
-                Next
-              </button>
+            <div>
+              <p style={{ fontSize: '14px', fontWeight: 800, color: '#111827', margin: 0, letterSpacing: '-0.01em' }}>Invoice Detail</p>
+              <p style={{ fontSize: '10.5px', color: '#9CA3AF', margin: '2px 0 0', fontFamily: "'DM Mono', monospace" }}>
+                #{invoice.invoiceNumber ?? invoice.id.slice(0, 12).toUpperCase()}
+              </p>
             </div>
-          </>
+          </div>
+          <button type="button" onClick={onClose}
+            style={{ width: '28px', height: '28px', borderRadius: '6px', border: '1px solid #EBEBEB', background: '#FAFAFA', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9CA3AF', flexShrink: 0 }}>
+            <X style={{ width: '12px', height: '12px' }} />
+          </button>
+        </div>
+
+        {/* Title + badges */}
+        <div style={{ margin: '16px 22px 12px', padding: '14px 16px', borderRadius: '10px', border: '1px solid #EBEBEB', background: '#FAFAFA' }}>
+          <p style={{ fontSize: '15px', fontWeight: 800, color: '#111827', margin: '0 0 8px', letterSpacing: '-0.01em', lineHeight: 1.3 }}>{invoice.title}</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+            <StatusBadge value={invoice.status} />
+            <CatChip category={invoice.category} />
+          </div>
+        </div>
+
+        {/* Info grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', padding: '0 22px 14px' }}>
+          {[
+            { label: 'Amount',   value: `${invoice.currency} ${invoice.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, mono: true },
+            { label: 'Due Date', value: invoice.dueDate ? formatDateTime(invoice.dueDate) : '—',                                        mono: true },
+            { label: 'Unit',     value: invoice.unit?.unitNumber ?? '—',                                                                mono: false },
+            { label: 'Resident', value: invoice.resident?.nameEN ?? '—',                                                               mono: false },
+          ].map(({ label, value, mono }) => (
+            <div key={label} style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #EBEBEB', background: '#FFF' }}>
+              <p style={{ fontSize: '9.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 3px' }}>{label}</p>
+              <p style={{ fontSize: '13px', fontWeight: 700, color: '#111827', margin: 0, fontFamily: mono ? "'DM Mono', monospace" : "'Work Sans', sans-serif" }}>{value}</p>
+            </div>
+          ))}
+        </div>
+
+        {invoice.notes && (
+          <div style={{ margin: '0 22px 14px', padding: '11px 13px', borderRadius: '8px', border: '1px solid #EBEBEB', background: '#FAFAFA', fontSize: '12.5px', color: '#4B5563', lineHeight: 1.55 }}>
+            {invoice.notes}
+          </div>
         )}
+
+        {/* Footer */}
+        <div style={{ padding: '14px 22px 20px', display: 'flex', justifyContent: 'flex-end', gap: '8px', borderTop: '1px solid #F3F4F6' }}>
+          <button type="button" onClick={onClose}
+            style={{ padding: '8px 16px', borderRadius: '8px', border: '1px solid #E5E7EB', background: '#FFF', color: '#6B7280', cursor: 'pointer', fontSize: '13px', fontFamily: "'Work Sans', sans-serif", fontWeight: 600 }}>
+            Close
+          </button>
+          {canPay && (
+            <button type="button" onClick={() => { onClose(); onRecordPayment(invoice); }}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 18px', borderRadius: '8px', background: '#111827', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif", boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
+              <CreditCard style={{ width: '12px', height: '12px' }} /> Record Payment
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main ─────────────────────────────────────────────────────
+
+export function BillingPayments() {
+  const [activeTab,           setActiveTab]           = useState<ActiveTab>('invoices');
+  const [isBootstrapping,     setIsBootstrapping]     = useState(false);
+  const [isInvoicesLoading,   setIsInvoicesLoading]   = useState(false);
+  const [isPaymentsLoading,   setIsPaymentsLoading]   = useState(false);
+  const [isSavingInvoice,     setIsSavingInvoice]     = useState(false);
+  const [isSavingPayment,     setIsSavingPayment]     = useState(false);
+
+  const [communities,         setCommunities]         = useState<Array<{ id: string; label: string }>>([]);
+  const [unitOptions,         setUnitOptions]         = useState<Array<{ id: string; label: string }>>([]);
+  const [residentOptions,     setResidentOptions]     = useState<Array<{ id: string; label: string }>>([]);
+  const [selectedCommunityId, setSelectedCommunityId] = useState('');
+
+  const [invoices,     setInvoices]     = useState<BillingInvoice[]>([]);
+  const [payments,     setPayments]     = useState<BillingPayment[]>([]);
+  const [stats,        setStats]        = useState<BillingStats>(EMPTY_STATS);
+  const [invoiceTotal, setInvoiceTotal] = useState(0);
+  const [paymentTotal, setPaymentTotal] = useState(0);
+
+  const [invFilters, setInvFilters] = useState({ status: 'all', category: 'all', unitId: 'all', from: '', to: '', search: '', page: 1 });
+  const [payFilters, setPayFilters] = useState({ method: 'all', from: '', to: '', search: '', page: 1 });
+  const [invFiltersOpen, setInvFiltersOpen] = useState(false);
+  const [payFiltersOpen, setPayFiltersOpen] = useState(false);
+
+  const [invoiceDrawerOpen, setInvoiceDrawerOpen] = useState(false);
+  const [paymentDrawerOpen, setPaymentDrawerOpen] = useState(false);
+  const [invoiceForm,       setInvoiceForm]       = useState<InvoiceFormState>(INIT_INVOICE);
+  const [paymentForm,       setPaymentForm]       = useState<PaymentFormState>(INIT_PAYMENT);
+
+  const [selectedInvoice, setSelectedInvoice] = useState<BillingInvoice | null>(null);
+  const [detailOpen,      setDetailOpen]      = useState(false);
+
+  // ── Loaders ───────────────────────────────────────────────────
+
+  const loadStats = useCallback(async (cid: string) => {
+    try { setStats(await billingService.getStats(cid)); }
+    catch (e) { toast.error('Failed to load stats', { description: errorMessage(e) }); }
+  }, []);
+
+  const loadInvoices = useCallback(async (cid: string) => {
+    setIsInvoicesLoading(true);
+    try {
+      const r = await billingService.listInvoices({
+        communityId: cid,
+        status:   invFilters.status   !== 'all' ? (invFilters.status as InvoiceStatus) : undefined,
+        category: invFilters.category !== 'all' ? invFilters.category                  : undefined,
+        unitId:   invFilters.unitId   !== 'all' ? invFilters.unitId                    : undefined,
+        from:     invFilters.from     ? new Date(`${invFilters.from}T00:00:00`).toISOString()       : undefined,
+        to:       invFilters.to       ? new Date(`${invFilters.to}T23:59:59.999`).toISOString()     : undefined,
+        search:   invFilters.search   || undefined,
+        page: invFilters.page, limit: PAGE_SIZE,
+      });
+      setInvoices(r.data); setInvoiceTotal(r.total);
+    } catch (e) { toast.error('Failed to load invoices', { description: errorMessage(e) }); }
+    finally { setIsInvoicesLoading(false); }
+  }, [invFilters]);
+
+  const loadPayments = useCallback(async (cid: string) => {
+    setIsPaymentsLoading(true);
+    try {
+      const r = await billingService.listPayments({
+        communityId: cid,
+        method: payFilters.method !== 'all' ? (payFilters.method as PaymentMethod) : undefined,
+        from:   payFilters.from   ? new Date(`${payFilters.from}T00:00:00`).toISOString()       : undefined,
+        to:     payFilters.to     ? new Date(`${payFilters.to}T23:59:59.999`).toISOString()     : undefined,
+        search: payFilters.search || undefined,
+        page: payFilters.page, limit: PAGE_SIZE,
+      });
+      setPayments(r.data); setPaymentTotal(r.total);
+    } catch (e) { toast.error('Failed to load payments', { description: errorMessage(e) }); }
+    finally { setIsPaymentsLoading(false); }
+  }, [payFilters]);
+
+  const loadOptions = useCallback(async (cid: string) => {
+    try {
+      const [units, residents] = await Promise.all([
+        billingService.listUnitOptions(cid),
+        billingService.listResidentOptions(cid),
+      ]);
+      setUnitOptions(units); setResidentOptions(residents);
+    } catch { /* non-fatal */ }
+  }, []);
+
+  const bootstrap = useCallback(async () => {
+    setIsBootstrapping(true);
+    try {
+      const opts = await billingService.listCommunityOptions();
+      setCommunities(opts);
+      const first = opts[0]?.id ?? '';
+      setSelectedCommunityId(first);
+      if (first) await Promise.all([loadStats(first), loadInvoices(first), loadPayments(first), loadOptions(first)]);
+    } catch (e) { toast.error('Failed to initialize', { description: errorMessage(e) }); }
+    finally { setIsBootstrapping(false); }
+  }, [loadStats, loadInvoices, loadPayments, loadOptions]);
+
+  useEffect(() => { void bootstrap(); }, [bootstrap]);
+  useEffect(() => { if (selectedCommunityId) void Promise.all([loadStats(selectedCommunityId), loadOptions(selectedCommunityId)]); }, [selectedCommunityId, loadStats, loadOptions]);
+  useEffect(() => { if (selectedCommunityId) void loadInvoices(selectedCommunityId); }, [selectedCommunityId, loadInvoices]);
+  useEffect(() => { if (selectedCommunityId) void loadPayments(selectedCommunityId); }, [selectedCommunityId, loadPayments]);
+
+  // ── Actions ───────────────────────────────────────────────────
+
+  const saveInvoice = async () => {
+    if (!invoiceForm.communityId || !invoiceForm.unitId || !invoiceForm.title.trim() || !invoiceForm.amount || !invoiceForm.dueDate) {
+      toast.error('Fill all required fields'); return;
+    }
+    const amount = parseFloat(invoiceForm.amount);
+    if (Number.isNaN(amount) || amount <= 0) { toast.error('Invalid amount'); return; }
+    setIsSavingInvoice(true);
+    try {
+      await billingService.createInvoice({
+        communityId: invoiceForm.communityId, unitId: invoiceForm.unitId,
+        residentId:  invoiceForm.residentId  || undefined,
+        title: invoiceForm.title.trim(), amount, currency: invoiceForm.currency,
+        dueDate: new Date(`${invoiceForm.dueDate}T00:00:00`).toISOString(),
+        category: invoiceForm.category,
+        notes: invoiceForm.notes.trim() || undefined,
+      } as CreateInvoicePayload);
+      toast.success('Invoice created');
+      setInvoiceDrawerOpen(false); setInvoiceForm(INIT_INVOICE);
+      await Promise.all([loadInvoices(selectedCommunityId), loadStats(selectedCommunityId)]);
+    } catch (e) { toast.error('Failed to create invoice', { description: errorMessage(e) }); }
+    finally { setIsSavingInvoice(false); }
+  };
+
+  const savePayment = async () => {
+    if (!paymentForm.invoiceId || !paymentForm.amount || !paymentForm.paidAt) {
+      toast.error('Fill all required fields'); return;
+    }
+    const amount = parseFloat(paymentForm.amount);
+    if (Number.isNaN(amount) || amount <= 0) { toast.error('Invalid amount'); return; }
+    setIsSavingPayment(true);
+    try {
+      await billingService.recordPayment({
+        invoiceId: paymentForm.invoiceId, amount, method: paymentForm.method,
+        referenceNumber: paymentForm.referenceNumber.trim() || undefined,
+        notes: paymentForm.notes.trim() || undefined,
+        paidAt: new Date(paymentForm.paidAt).toISOString(),
+      } as RecordPaymentPayload);
+      toast.success('Payment recorded');
+      setPaymentDrawerOpen(false); setPaymentForm(INIT_PAYMENT);
+      await Promise.all([loadPayments(selectedCommunityId), loadInvoices(selectedCommunityId), loadStats(selectedCommunityId)]);
+    } catch (e) { toast.error('Failed to record payment', { description: errorMessage(e) }); }
+    finally { setIsSavingPayment(false); }
+  };
+
+  const voidInvoice = async (invoice: BillingInvoice) => {
+    if (!window.confirm(`Void invoice "${invoice.title}"?`)) return;
+    try {
+      await billingService.voidInvoice(invoice.id);
+      toast.success('Invoice voided');
+      await Promise.all([loadInvoices(selectedCommunityId), loadStats(selectedCommunityId)]);
+    } catch (e) { toast.error('Failed to void', { description: errorMessage(e) }); }
+  };
+
+  const openRecordPayment = (invoice: BillingInvoice) => {
+    setPaymentForm({ ...INIT_PAYMENT, invoiceId: invoice.id, amount: String((invoice as any).amountDue ?? invoice.amount) });
+    setPaymentDrawerOpen(true);
+  };
+
+  // ── Derived ───────────────────────────────────────────────────
+
+  const invActiveFilters = useMemo(() => [
+    invFilters.status !== 'all', invFilters.category !== 'all', invFilters.unitId !== 'all',
+    invFilters.from, invFilters.to, invFilters.search,
+  ].filter(Boolean).length, [invFilters]);
+
+  const payActiveFilters = useMemo(() => [
+    payFilters.method !== 'all', payFilters.from, payFilters.to, payFilters.search,
+  ].filter(Boolean).length, [payFilters]);
+
+  const invTotalPages = Math.max(1, Math.ceil(invoiceTotal / PAGE_SIZE));
+  const payTotalPages = Math.max(1, Math.ceil(paymentTotal / PAGE_SIZE));
+
+  const fmt = (n: number) =>
+    n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M`
+    : n >= 1_000   ? `${(n / 1_000).toFixed(1)}K`
+    : n.toLocaleString();
+
+  // ── Columns ───────────────────────────────────────────────────
+
+  const invoiceColumns: DataTableColumn<BillingInvoice>[] = [
+    { key: 'id', header: 'Invoice', render: (r) => (
+      <div>
+        <p style={{ fontSize: '12.5px', fontWeight: 700, color: '#111827', margin: 0 }}>{r.title}</p>
+        <p style={{ fontSize: '10.5px', color: '#9CA3AF', margin: '1px 0 0', fontFamily: "'DM Mono', monospace" }}>#{r.invoiceNumber ?? r.id.slice(0, 8).toUpperCase()}</p>
+      </div>
+    )},
+    { key: 'unit',     header: 'Unit',     render: (r) => <span style={{ fontSize: '12px', color: '#374151' }}>{r.unit?.unitNumber ?? '—'}</span> },
+    { key: 'resident', header: 'Resident', render: (r) => <span style={{ fontSize: '12px', color: '#374151' }}>{r.resident?.nameEN ?? '—'}</span> },
+    { key: 'category', header: 'Category', render: (r) => <CatChip category={r.category} /> },
+    { key: 'amount',   header: 'Amount',   render: (r) => <MonoAmount amount={r.amount} currency={r.currency} /> },
+    { key: 'due',      header: 'Due Date', render: (r) => (
+      <span style={{ fontSize: '11.5px', fontFamily: "'DM Mono', monospace", color: r.status === 'OVERDUE' ? '#DC2626' : '#6B7280', fontWeight: r.status === 'OVERDUE' ? 700 : 400 }}>
+        {r.dueDate ? formatDateTime(r.dueDate) : '—'}
+      </span>
+    )},
+    { key: 'status',  header: 'Status',  render: (r) => <StatusBadge value={r.status} /> },
+    { key: 'actions', header: '', render: (r) => (
+      <div style={{ display: 'flex', gap: '5px', justifyContent: 'flex-end' }}>
+        <ActionBtn label="View" icon={<FileText    style={{ width: '10px', height: '10px' }} />} onClick={() => { setSelectedInvoice(r); setDetailOpen(true); }} />
+        <ActionBtn label="Pay"  icon={<CheckCircle2 style={{ width: '10px', height: '10px' }} />} variant="success" onClick={() => openRecordPayment(r)} disabled={r.status === 'PAID' || r.status === 'VOID'} />
+        <ActionBtn label="Void" icon={<XCircle     style={{ width: '10px', height: '10px' }} />} variant="danger"  onClick={() => void voidInvoice(r)}   disabled={r.status === 'VOID' || r.status === 'PAID'} />
+      </div>
+    )},
+  ];
+
+  const paymentColumns: DataTableColumn<BillingPayment>[] = [
+    { key: 'ref',    header: 'Reference', render: (r) => (
+      <div>
+        <p style={{ fontSize: '12px', fontWeight: 700, color: '#111827', margin: 0, fontFamily: "'DM Mono', monospace" }}>{r.referenceNumber ?? r.id.slice(0, 10).toUpperCase()}</p>
+        <p style={{ fontSize: '10.5px', color: '#9CA3AF', margin: '1px 0 0' }}>{r.invoice?.title ?? '—'}</p>
+      </div>
+    )},
+    { key: 'unit',   header: 'Unit',       render: (r) => <span style={{ fontSize: '12px', color: '#374151' }}>{r.invoice?.unit?.unitNumber ?? '—'}</span> },
+    { key: 'amount', header: 'Amount',     render: (r) => <MonoAmount amount={r.amount} currency={r.currency ?? 'EGP'} /> },
+    { key: 'method', header: 'Method',     render: (r) => <MethodChip method={r.method} /> },
+    { key: 'paidAt', header: 'Paid At',    render: (r) => <span style={{ fontSize: '11.5px', color: '#6B7280', fontFamily: "'DM Mono', monospace" }}>{r.paidAt ? formatDateTime(r.paidAt) : '—'}</span> },
+    { key: 'by',     header: 'Recorded By', render: (r) => <span style={{ fontSize: '12px', color: '#9CA3AF' }}>{r.recordedBy?.nameEN ?? '—'}</span> },
+    { key: 'status', header: 'Status',     render: (r) => <StatusBadge value={r.status ?? 'COMPLETED'} /> },
+  ];
+
+  // ─────────────────────────────────────────────────────────────
+
+  return (
+    <div style={{ fontFamily: "'Work Sans', sans-serif" }}>
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+
+      {/* ── Header ─────────────────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' }}>
+        <div>
+          <h1 style={{ fontSize: '18px', fontWeight: 900, color: '#111827', letterSpacing: '-0.02em', margin: 0 }}>Billing & Payments</h1>
+          <p style={{ fontSize: '13px', color: '#6B7280', margin: '4px 0 0' }}>Manage invoices, track payments, and monitor collection.</p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <select value={selectedCommunityId || ''} onChange={(e) => setSelectedCommunityId(e.target.value)} style={{ ...selectStyle, width: '220px' }}>
+            <option value=''>Select community</option>
+            {communities.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+          </select>
+          <button type="button" onClick={() => void bootstrap()} disabled={isBootstrapping}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', borderRadius: '7px', border: '1px solid #E5E7EB', background: '#FFF', color: '#6B7280', cursor: isBootstrapping ? 'not-allowed' : 'pointer' }}>
+            <RefreshCw style={{ width: '13px', height: '13px', animation: isBootstrapping ? 'spin 1s linear infinite' : 'none' }} />
+          </button>
+          {/* Single context-aware action button — switches with the active tab */}
+          {activeTab === 'invoices' ? (
+            <button type="button"
+              onClick={() => { setInvoiceForm({ ...INIT_INVOICE, communityId: selectedCommunityId }); setInvoiceDrawerOpen(true); }}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 16px', height: '36px', borderRadius: '8px', background: '#111827', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif", boxShadow: '0 2px 6px rgba(0,0,0,0.15)' }}>
+              <Plus style={{ width: '13px', height: '13px' }} /> New Invoice
+            </button>
+          ) : (
+            <button type="button"
+              onClick={() => { setPaymentForm(INIT_PAYMENT); setPaymentDrawerOpen(true); }}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 16px', height: '36px', borderRadius: '8px', background: '#2563EB', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif", boxShadow: '0 2px 6px rgba(37,99,235,0.3)' }}>
+              <CreditCard style={{ width: '13px', height: '13px' }} /> Record Payment
+            </button>
+          )}
+        </div>
       </div>
 
-      {detailOpen ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/50"
-          onClick={() => setDetailOpen(false)}
-        >
-          <div
-            className="w-full max-w-3xl max-h-[90vh] bg-white border border-slate-200 rounded-xl flex flex-col z-50 shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="px-6 py-5 border-b border-slate-200 flex items-center justify-between flex-shrink-0">
-              <h2 className="text-base font-semibold text-slate-900">
-                Invoice Detail
-              </h2>
-              <button
-                className="p-2 rounded-lg hover:bg-white text-gray-400 hover:text-slate-700"
-                onClick={() => setDetailOpen(false)}
-              >
-                <X className="w-4 h-4" />
-              </button>
+      {/* ── Stats — StatCard component ─────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '10px', marginBottom: '20px' }}>
+        <StatCard icon="revenue"            title="Total Invoiced" value={`EGP ${fmt(stats.totalInvoiced)}`}   subtitle="Gross raised" />
+        <StatCard icon="revenue"            title="Collected"      value={`EGP ${fmt(stats.totalCollected)}`}  subtitle="Payments received" />
+        <StatCard icon="complaints-open"    title="Overdue"        value={`EGP ${fmt(stats.totalOverdue)}`}    subtitle="Past due date" />
+        <StatCard icon="complaints-total"   title="Pending"        value={String(stats.pendingCount)}           subtitle="Awaiting payment" />
+        <StatCard icon="complaints-closed"  title="Paid"           value={String(stats.paidCount)}              subtitle="Invoices settled" />
+        <StatCard icon="tickets"            title="Total"          value={String(stats.totalCount)}             subtitle="All invoices" />
+      </div>
+
+      {/* ── Tabs ───────────────────────────────────────────── */}
+      <div style={{ display: 'flex', gap: '2px', padding: '4px', borderRadius: '10px', background: '#F3F4F6', marginBottom: '16px' }}>
+        <TabBtn label="Invoices" icon={<Receipt    style={{ width: '12px', height: '12px' }} />} active={activeTab === 'invoices'} onClick={() => setActiveTab('invoices')} />
+        <TabBtn label="Payments" icon={<CreditCard style={{ width: '12px', height: '12px' }} />} active={activeTab === 'payments'} onClick={() => setActiveTab('payments')} />
+      </div>
+
+      {/* ══ Invoices ══════════════════════════════════════════ */}
+      {activeTab === 'invoices' && (
+        <>
+          <FilterBar searchValue={invFilters.search} onSearchChange={(v) => setInvFilters((p) => ({ ...p, search: v, page: 1 }))} filtersOpen={invFiltersOpen} onToggleFilters={() => setInvFiltersOpen((p) => !p)} activeFilters={invActiveFilters} placeholder="Search invoices…">
+            <select value={invFilters.status} onChange={(e) => setInvFilters((p) => ({ ...p, status: e.target.value, page: 1 }))} style={{ ...selectStyle, width: '140px' }}>
+              <option value="all">All Statuses</option>
+              {(['PENDING','PAID','OVERDUE','PARTIAL','VOID'] as InvoiceStatus[]).map((s) => <option key={s} value={s}>{humanizeEnum(s)}</option>)}
+            </select>
+            <select value={invFilters.category} onChange={(e) => setInvFilters((p) => ({ ...p, category: e.target.value, page: 1 }))} style={{ ...selectStyle, width: '140px' }}>
+              <option value="all">All Categories</option>
+              {INVOICE_CATEGORIES.map((c) => <option key={c} value={c}>{humanizeEnum(c)}</option>)}
+            </select>
+            <select value={invFilters.unitId} onChange={(e) => setInvFilters((p) => ({ ...p, unitId: e.target.value, page: 1 }))} style={{ ...selectStyle, width: '160px' }}>
+              <option value="all">All Units</option>
+              {unitOptions.map((u) => <option key={u.id} value={u.id}>{u.label}</option>)}
+            </select>
+            <DateRangePill from={invFilters.from} to={invFilters.to} onFrom={(v) => setInvFilters((p) => ({ ...p, from: v, page: 1 }))} onTo={(v) => setInvFilters((p) => ({ ...p, to: v, page: 1 }))} />
+          </FilterBar>
+          <DataTable columns={invoiceColumns} rows={invoices} rowKey={(r) => r.id} loading={isInvoicesLoading} emptyTitle="No invoices found" emptyDescription="Create an invoice or adjust your filters." />
+          <Pagination page={invFilters.page} totalPages={invTotalPages} total={invoiceTotal} onPrev={() => setInvFilters((p) => ({ ...p, page: Math.max(1, p.page - 1) }))} onNext={() => setInvFilters((p) => ({ ...p, page: Math.min(invTotalPages, p.page + 1) }))} />
+        </>
+      )}
+
+      {/* ══ Payments ══════════════════════════════════════════ */}
+      {activeTab === 'payments' && (
+        <>
+          <FilterBar searchValue={payFilters.search} onSearchChange={(v) => setPayFilters((p) => ({ ...p, search: v, page: 1 }))} filtersOpen={payFiltersOpen} onToggleFilters={() => setPayFiltersOpen((p) => !p)} activeFilters={payActiveFilters} placeholder="Search payments…">
+            <select value={payFilters.method} onChange={(e) => setPayFilters((p) => ({ ...p, method: e.target.value, page: 1 }))} style={{ ...selectStyle, width: '160px' }}>
+              <option value="all">All Methods</option>
+              {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{humanizeEnum(m)}</option>)}
+            </select>
+            <DateRangePill from={payFilters.from} to={payFilters.to} onFrom={(v) => setPayFilters((p) => ({ ...p, from: v, page: 1 }))} onTo={(v) => setPayFilters((p) => ({ ...p, to: v, page: 1 }))} />
+          </FilterBar>
+          <DataTable columns={paymentColumns} rows={payments} rowKey={(r) => r.id} loading={isPaymentsLoading} emptyTitle="No payments found" emptyDescription="Record a payment or adjust your filters." />
+          <Pagination page={payFilters.page} totalPages={payTotalPages} total={paymentTotal} onPrev={() => setPayFilters((p) => ({ ...p, page: Math.max(1, p.page - 1) }))} onNext={() => setPayFilters((p) => ({ ...p, page: Math.min(payTotalPages, p.page + 1) }))} />
+        </>
+      )}
+
+      {/* ══ Invoice detail modal ══════════════════════════════ */}
+      {detailOpen && selectedInvoice && (
+        <InvoiceDetailModal
+          invoice={selectedInvoice}
+          onClose={() => setDetailOpen(false)}
+          onRecordPayment={openRecordPayment}
+        />
+      )}
+
+      {/* ══ New Invoice drawer ════════════════════════════════ */}
+      <DrawerForm
+        open={invoiceDrawerOpen}
+        onOpenChange={(o) => { setInvoiceDrawerOpen(o); if (!o) setInvoiceForm(INIT_INVOICE); }}
+        title="New Invoice"
+        description="Create a billing invoice for a unit or resident."
+        footer={<DrawerFooter onCancel={() => setInvoiceDrawerOpen(false)} onSave={() => void saveInvoice()} saving={isSavingInvoice} saveLabel="Create Invoice" />}
+      >
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+          <SectionLabel label="Assignment" />
+
+          <Field label="Community" required>
+            <select value={invoiceForm.communityId || ''} onChange={(e) => setInvoiceForm((p) => ({ ...p, communityId: e.target.value }))} style={selectStyle}>
+              <option value=''>Select community…</option>
+              {communities.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Unit" required>
+            <select value={invoiceForm.unitId || ''} onChange={(e) => setInvoiceForm((p) => ({ ...p, unitId: e.target.value }))} style={selectStyle}>
+              <option value=''>Select unit…</option>
+              {unitOptions.map((u) => <option key={u.id} value={u.id}>{u.label}</option>)}
+            </select>
+          </Field>
+          <Field label="Resident" span2 hint="Optional — leave blank for a unit-level invoice">
+            <select value={invoiceForm.residentId || ''} onChange={(e) => setInvoiceForm((p) => ({ ...p, residentId: e.target.value }))} style={selectStyle}>
+              <option value=''>None</option>
+              {residentOptions.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+            </select>
+          </Field>
+
+          <SectionLabel label="Invoice Details" />
+
+          <Field label="Title" required span2>
+            <input value={invoiceForm.title} onChange={(e) => setInvoiceForm((p) => ({ ...p, title: e.target.value }))} placeholder="e.g. Monthly maintenance fee" style={inputStyle} />
+          </Field>
+          <Field label="Amount" required>
+            <div style={{ position: 'relative' }}>
+              <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '12px', color: '#9CA3AF', fontFamily: "'DM Mono', monospace", pointerEvents: 'none', userSelect: 'none' }}>
+                {invoiceForm.currency}
+              </span>
+              <input
+                type="number" min="0" step="0.01"
+                value={invoiceForm.amount}
+                onChange={(e) => setInvoiceForm((p) => ({ ...p, amount: e.target.value }))}
+                placeholder="0.00"
+                style={{ ...inputStyle, paddingLeft: `${invoiceForm.currency.length * 8 + 18}px`, fontFamily: "'DM Mono', monospace" }}
+              />
             </div>
-
-            <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
-              {detailLoading || !detail ? (
-                <SkeletonTable columns={2} rows={6} />
-              ) : (
-                <>
-                  <div className="rounded-xl border border-slate-200 bg-white p-6">
-                    <p className="text-2xl font-semibold text-slate-900 font-['DM_Mono']">
-                      {detail.invoiceNumber}
-                    </p>
-                    <div className="flex items-center gap-2 mt-3">
-                      <span
-                        className={`text-xs px-2.5 py-1 rounded-full ${statusClass[detail.status] || statusClass.CANCELLED}`}
-                      >
-                        {enumLabel(detail.status)}
-                      </span>
-                      <span
-                        className={`text-xs px-2.5 py-1 rounded-full ${SOURCE_BADGE_COLOR[detail.source]}`}
-                      >
-                        {enumLabel(detail.source)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-slate-200 bg-white p-6">
-                    <p className="text-xs font-medium text-gray-400 mb-2 uppercase tracking-wider">
-                      Parties
-                    </p>
-                    <p className="text-sm text-slate-800">
-                      Unit: {detail.parties.unitNumber}
-                    </p>
-                    <p className="text-sm text-slate-800">
-                      Resident: {detail.parties.residentName || '--'}
-                    </p>
-                    <p className="text-sm text-slate-800">
-                      Phone: {detail.parties.residentPhone || '--'}
-                    </p>
-                    <p className="text-sm text-gray-400">
-                      Community: {detail.parties.communityName}
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl border border-slate-200 bg-white p-6">
-                    <p className="text-xs font-medium text-gray-400 mb-2 uppercase tracking-wider">
-                      Amount
-                    </p>
-                    <p className="text-2xl font-semibold text-slate-900 font-['DM_Mono']">
-                      {formatCurrency(detail.amount)}
-                    </p>
-                    <p className="text-sm text-slate-700 mt-2">
-                      Due: {formatDate(detail.dueDate)}
-                    </p>
-                    <p className="text-sm text-slate-700">
-                      Paid: {formatDate(detail.paidDate)}
-                    </p>
-                    <p className="text-sm text-slate-700 mt-1 flex items-center gap-2">
-                      <span
-                        className={`w-2 h-2 rounded-full ${swatchClassByValue.get(detail.categoryColor || '') || 'bg-slate-500'}`}
-                      />
-                      {detail.categoryLabel || '--'}
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl border border-slate-200 bg-white p-6">
-                    <p className="text-xs font-medium text-gray-400 mb-2 uppercase tracking-wider">
-                      Source Record
-                    </p>
-                    <p className="text-sm text-slate-800">
-                      {detail.sourceRecord.label}
-                    </p>
-                    <p className="text-sm text-gray-400">
-                      {detail.sourceRecord.secondaryLabel || 'Manually created'}
-                    </p>
-                    <p className="text-sm text-gray-400 mt-1">
-                      Amount:{' '}
-                      {detail.sourceRecord.amount !== null
-                        ? formatCurrency(detail.sourceRecord.amount)
-                        : '--'}
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl border border-slate-200 bg-white p-6">
-                    <p className="text-xs font-medium text-gray-400 mb-2 uppercase tracking-wider">
-                      Documents
-                    </p>
-                    {detail.documents.length === 0 ? (
-                      <p className="text-sm text-gray-400">
-                        No documents attached.
-                      </p>
-                    ) : (
-                      <div className="space-y-2">
-                        {detail.documents.map((document) => (
-                          <div
-                            key={document.id}
-                            className="flex items-center gap-3 p-3 rounded-lg bg-slate-50 border border-slate-200"
-                          >
-                            <div className="w-12 h-12 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-xs text-gray-400">
-                              FILE
-                            </div>
-                            <div>
-                              <p className="text-sm text-slate-800">
-                                {document.name}
-                              </p>
-                              <p className="text-xs text-gray-400">
-                                {document.mimeType || 'Unknown type'}
-                              </p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-
-            <div className="px-6 py-4 border-t border-slate-200 flex items-center justify-end gap-3 flex-shrink-0">
-              {detail &&
-              (detail.status === 'PENDING' || detail.status === 'OVERDUE') ? (
-                <>
-                  <button
-                    className="bg-red-600 hover:bg-red-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
-                    onClick={() => detail && void cancelInvoice(detail.id)}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
-                    onClick={() => detail && void markAsPaid(detail.id)}
-                  >
-                    Mark as Paid
-                  </button>
-                </>
-              ) : detail && detail.status === 'PAID' ? (
-                <p className="text-sm text-emerald-600">
-                  Paid on {formatDate(detail.paidDate)}
-                </p>
-              ) : (
-                <p className="text-sm text-gray-400">Cancelled</p>
-              )}
-            </div>
-          </div>
+          </Field>
+          <Field label="Currency">
+            <select value={invoiceForm.currency} onChange={(e) => setInvoiceForm((p) => ({ ...p, currency: e.target.value }))} style={selectStyle}>
+              {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </Field>
+          <Field label="Category">
+            <select value={invoiceForm.category} onChange={(e) => setInvoiceForm((p) => ({ ...p, category: e.target.value }))} style={selectStyle}>
+              {INVOICE_CATEGORIES.map((c) => <option key={c} value={c}>{humanizeEnum(c)}</option>)}
+            </select>
+          </Field>
+          <Field label="Due Date" required>
+            <input type="date" value={invoiceForm.dueDate} onChange={(e) => setInvoiceForm((p) => ({ ...p, dueDate: e.target.value }))} style={inputStyle} />
+          </Field>
+          <Field label="Notes" span2>
+            <textarea value={invoiceForm.notes} onChange={(e) => setInvoiceForm((p) => ({ ...p, notes: e.target.value }))} placeholder="Optional internal notes…" style={textareaStyle} />
+          </Field>
         </div>
-      ) : null}
+      </DrawerForm>
 
-      {createOpen ? (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black/50"
-          onClick={() => setCreateOpen(false)}
-        >
-          <div
-            className="w-full max-w-2xl max-h-[90vh] bg-white border border-slate-200 rounded-xl flex flex-col z-50 shadow-2xl"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="px-6 py-5 border-b border-slate-200 flex items-center justify-between flex-shrink-0">
-              <h2 className="text-base font-semibold text-slate-900">
-                Create Invoice
-              </h2>
-              <button
-                className="p-2 rounded-lg hover:bg-white text-gray-400 hover:text-slate-700"
-                onClick={() => setCreateOpen(false)}
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
-              <div>
-                <label className="text-xs font-medium text-slate-700 mb-1.5 block">
-                  Community
-                </label>
-                <select
-                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-blue-500"
-                  value={filters.communityId}
-                  onChange={(event) =>
-                    setFilters((prev) => ({
-                      ...prev,
-                      communityId: event.target.value,
-                    }))
-                  }
-                >
-                  <option value="all">All Communities</option>
-                  {communities.map((community) => (
-                    <option key={community.id} value={community.id}>
-                      {community.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-slate-700 mb-1.5 block">
-                  Unit
-                </label>
-                <select
-                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-blue-500"
-                  value={createForm.unitId}
-                  onChange={(event) =>
-                    setCreateForm((prev) => ({
-                      ...prev,
-                      unitId: event.target.value,
-                    }))
-                  }
-                >
-                  <option value="">Select Unit</option>
-                  {filteredUnits.map((unit) => (
-                    <option key={unit.id} value={unit.id}>
-                      {unit.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-slate-700 mb-1.5 block">
-                  Resident (Optional)
-                </label>
-                <select
-                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-blue-500"
-                  value={createForm.residentId}
-                  onChange={(event) =>
-                    setCreateForm((prev) => ({
-                      ...prev,
-                      residentId: event.target.value,
-                    }))
-                  }
-                >
-                  <option value="">No Resident</option>
-                  {residents.map((resident) => (
-                    <option key={resident.id} value={resident.id}>
-                      {resident.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs font-medium text-slate-700 mb-1.5 block">
-                    Type
-                  </label>
-                  <select
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-blue-500"
-                    value={createForm.type}
-                    onChange={(event) =>
-                      setCreateForm((prev) => ({
-                        ...prev,
-                        type: event.target.value as InvoiceType,
-                      }))
-                    }
-                  >
-                    {INVOICE_TYPE_OPTIONS.map((type) => (
-                      <option key={type} value={type}>
-                        {enumLabel(type)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-slate-700 mb-1.5 block">
-                    Amount
-                  </label>
-                  <input
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-blue-500"
-                    type="number"
-                    min={0}
-                    value={createForm.amount}
-                    onChange={(event) =>
-                      setCreateForm((prev) => ({
-                        ...prev,
-                        amount: event.target.value,
-                      }))
-                    }
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-slate-700 mb-1.5 block">
-                  Due Date
-                </label>
-                <input
-                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm text-slate-900 focus:outline-none focus:border-blue-500"
-                  type="date"
-                  value={createForm.dueDate}
-                  onChange={(event) =>
-                    setCreateForm((prev) => ({
-                      ...prev,
-                      dueDate: event.target.value,
-                    }))
-                  }
-                />
-              </div>
-            </div>
-            <div className="px-6 py-4 border-t border-slate-200 flex items-center justify-end gap-3 flex-shrink-0">
-              <button
-                className="bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors"
-                onClick={() => setCreateOpen(false)}
-              >
-                Cancel
-              </button>
-              <button
-                className="bg-black hover:bg-black/90 border border-black text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
-                style={{ backgroundColor: '#000000', color: '#ffffff' }}
-                onClick={() => void submitCreateInvoice()}
-                disabled={createSubmitting}
-              >
-                {createSubmitting ? 'Saving...' : 'Create'}
-              </button>
-            </div>
-          </div>
+      {/* ══ Record Payment drawer ═════════════════════════════ */}
+      <DrawerForm
+        open={paymentDrawerOpen}
+        onOpenChange={(o) => { setPaymentDrawerOpen(o); if (!o) setPaymentForm(INIT_PAYMENT); }}
+        title="Record Payment"
+        description="Log a payment against an existing invoice."
+        footer={<DrawerFooter onCancel={() => setPaymentDrawerOpen(false)} onSave={() => void savePayment()} saving={isSavingPayment} saveLabel="Record Payment" />}
+      >
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+          <SectionLabel label="Invoice" />
+
+          <Field label="Invoice" required span2>
+            <select value={paymentForm.invoiceId || ''} onChange={(e) => setPaymentForm((p) => ({ ...p, invoiceId: e.target.value }))} style={selectStyle}>
+              <option value=''>Select invoice…</option>
+              {invoices
+                .filter((i) => i.status !== 'PAID' && i.status !== 'VOID')
+                .map((i) => (
+                  <option key={i.id} value={i.id}>
+                    {i.title} — {i.currency} {i.amount.toLocaleString()}
+                  </option>
+                ))}
+            </select>
+          </Field>
+
+          <SectionLabel label="Payment Details" />
+
+          <Field label="Amount" required>
+            <input type="number" min="0" step="0.01" value={paymentForm.amount} onChange={(e) => setPaymentForm((p) => ({ ...p, amount: e.target.value }))} placeholder="0.00" style={{ ...inputStyle, fontFamily: "'DM Mono', monospace" }} />
+          </Field>
+          <Field label="Method">
+            <select value={paymentForm.method} onChange={(e) => setPaymentForm((p) => ({ ...p, method: e.target.value as PaymentMethod }))} style={selectStyle}>
+              {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{humanizeEnum(m)}</option>)}
+            </select>
+          </Field>
+          <Field label="Date & Time Paid" required span2>
+            <input type="datetime-local" value={paymentForm.paidAt} onChange={(e) => setPaymentForm((p) => ({ ...p, paidAt: e.target.value }))} style={inputStyle} />
+          </Field>
+          <Field label="Reference Number" span2 hint="Transaction ID, cheque number, or reference">
+            <input value={paymentForm.referenceNumber} onChange={(e) => setPaymentForm((p) => ({ ...p, referenceNumber: e.target.value }))} placeholder="TXN-12345" style={{ ...inputStyle, fontFamily: "'DM Mono', monospace" }} />
+          </Field>
+          <Field label="Notes" span2>
+            <textarea value={paymentForm.notes} onChange={(e) => setPaymentForm((p) => ({ ...p, notes: e.target.value }))} placeholder="Optional notes…" style={textareaStyle} />
+          </Field>
         </div>
-      ) : null}
-
-      {settingsOpen ? (
-        <div
-          className="fixed inset-0 z-50 flex items-start justify-center p-6 overflow-y-auto"
-          style={{ backgroundColor: 'rgba(15, 23, 42, 0.28)', backdropFilter: 'blur(1px)' }}
-          onClick={() => setSettingsOpen(false)}
-        >
-          <div
-            className="w-[960px] max-w-[calc(100vw-48px)] mt-8 rounded-xl border border-gray-300 shadow-2xl shadow-black/60 overflow-hidden"
-            style={{ backgroundColor: '#ffffff', color: '#0f172a', borderColor: '#e2e8f0' }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="px-6 py-5 border-b flex items-center justify-between" style={{ borderBottomColor: '#e2e8f0' }}>
-              <div>
-                <h2 className="text-lg font-semibold" style={{ color: '#0f172a' }}>
-                  Invoice Categories
-                </h2>
-                <p className="text-sm" style={{ color: '#475569' }}>
-                  Review system categories and add your own custom categories.
-                </p>
-              </div>
-              <button
-                className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
-                onClick={() => setCategoryDrawerOpen(true)}
-              >
-                <Plus className="w-4 h-4" /> Add Category
-              </button>
-            </div>
-
-            <div className="p-6 space-y-3 max-h-[70vh] overflow-y-auto">
-              {categories.length === 0 ? (
-                <div
-                  className="rounded-xl border p-6 text-center"
-                  style={{ backgroundColor: '#f8fafc', borderColor: '#e2e8f0' }}
-                >
-                  <h3 className="text-base font-semibold" style={{ color: '#0f172a' }}>
-                    No categories configured
-                  </h3>
-                  <p className="mx-auto mt-2 max-w-xl text-sm" style={{ color: '#475569' }}>
-                    System categories are auto-created from invoice types. Add
-                    your own custom categories for manual billing workflows.
-                  </p>
-                </div>
-              ) : (
-                categories.map((category, index) => (
-                  <div
-                    key={category.id}
-                    className="border rounded-lg px-4 py-3 flex items-center gap-3"
-                    style={{ backgroundColor: '#ffffff', borderColor: '#e2e8f0' }}
-                  >
-                    <span
-                      className={`w-3 h-3 rounded-full ${swatchClassByValue.get(category.color || '') || 'bg-slate-500'}`}
-                    />
-                    <div className="min-w-[180px]">
-                      <p className="text-sm font-medium" style={{ color: '#0f172a' }}>
-                        {category.label}
-                      </p>
-                      <p className="text-xs" style={{ color: '#64748b' }}>
-                        {category.description || '--'}
-                      </p>
-                    </div>
-                    <span
-                      className="text-xs px-2.5 py-1 rounded-full"
-                      style={{ color: '#334155', backgroundColor: '#f1f5f9' }}
-                    >
-                      {category.isSystem
-                        ? `System - ${enumLabel(category.mappedType)}`
-                        : 'Custom'}
-                    </span>
-                    <div className="ml-auto flex items-center gap-2">
-                      <button
-                        className="p-2 rounded-lg"
-                        style={{ color: '#334155', backgroundColor: '#f8fafc' }}
-                        onClick={() => void moveCategory(index, -1)}
-                      >
-                        <ArrowUp className="w-4 h-4" />
-                      </button>
-                      <button
-                        className="p-2 rounded-lg"
-                        style={{ color: '#334155', backgroundColor: '#f8fafc' }}
-                        onClick={() => void moveCategory(index, 1)}
-                      >
-                        <ArrowDown className="w-4 h-4" />
-                      </button>
-                      <button
-                        className="text-xs px-2.5 py-1 rounded-full"
-                        style={
-                          category.isActive
-                            ? { backgroundColor: 'rgba(16, 185, 129, 0.16)', color: '#86efac' }
-                            : { backgroundColor: 'rgba(100, 116, 139, 0.24)', color: '#cbd5e1' }
-                        }
-                        onClick={() =>
-                          void invoiceService
-                            .toggleCategory(category.id)
-                            .then(loadCategories)
-                        }
-                      >
-                        {category.isActive ? 'Active' : 'Inactive'}
-                      </button>
-                      <GripVertical className="w-4 h-4" style={{ color: '#94a3b8' }} />
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {categoryDrawerOpen ? (
-        <div
-          className="fixed inset-0 z-[60] bg-black/50"
-          onClick={() => setCategoryDrawerOpen(false)}
-        >
-          <div
-            className="fixed inset-y-0 right-0 w-[480px] border-l border-gray-200 flex flex-col z-[61] shadow-2xl shadow-black/50"
-            style={{ backgroundColor: '#ffffff', borderLeftColor: '#e2e8f0' }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="px-6 py-5 border-b flex items-center justify-between" style={{ borderBottomColor: '#e2e8f0' }}>
-              <h2 className="text-base font-semibold" style={{ color: '#0f172a' }}>
-                Add Category
-              </h2>
-              <button
-                className="p-2 rounded-lg hover:bg-white"
-                style={{ color: '#475569' }}
-                onClick={() => setCategoryDrawerOpen(false)}
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
-              <div>
-                <label className="text-xs font-medium mb-1.5 block" style={{ color: '#334155' }}>
-                  Label
-                </label>
-                <input
-                  className="w-full border rounded-lg px-3 py-2.5 text-sm focus:outline-none"
-                  style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', color: '#0f172a' }}
-                  value={categoryForm.label}
-                  onChange={(event) =>
-                    setCategoryForm((prev) => ({
-                      ...prev,
-                      label: event.target.value,
-                    }))
-                  }
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium mb-1.5 block" style={{ color: '#334155' }}>
-                  Description
-                </label>
-                <textarea
-                  className="w-full border rounded-lg px-3 py-2.5 text-sm focus:outline-none"
-                  style={{ backgroundColor: '#ffffff', borderColor: '#cbd5e1', color: '#0f172a' }}
-                  rows={4}
-                  value={categoryForm.description}
-                  onChange={(event) =>
-                    setCategoryForm((prev) => ({
-                      ...prev,
-                      description: event.target.value,
-                    }))
-                  }
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium mb-1.5 block" style={{ color: '#334155' }}>
-                  Color
-                </label>
-                <div className="flex items-center gap-2 flex-wrap">
-                  {categorySwatches.map((swatch) => (
-                    <button
-                      key={swatch.value}
-                      className={`w-8 h-8 rounded-full border ${swatch.className} ${categoryForm.color === swatch.value ? 'border-white' : 'border-white/20'}`}
-                      onClick={() =>
-                        setCategoryForm((prev) => ({
-                          ...prev,
-                          color: swatch.value,
-                        }))
-                      }
-                    />
-                  ))}
-                </div>
-              </div>
-            </div>
-            <div className="px-6 py-4 border-t flex items-center justify-end gap-3" style={{ borderTopColor: '#e2e8f0' }}>
-              <button
-                className="text-sm font-medium px-4 py-2 rounded-lg transition-colors"
-                style={{ backgroundColor: '#ffffff', color: '#334155', border: '1px solid #cbd5e1' }}
-                onClick={() => setCategoryDrawerOpen(false)}
-              >
-                Cancel
-              </button>
-              <button
-                className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
-                onClick={() => void submitCategory()}
-                disabled={categorySubmitting}
-              >
-                {categorySubmitting ? 'Saving...' : 'Save'}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
+      </DrawerForm>
     </div>
   );
 }
