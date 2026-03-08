@@ -47,6 +47,7 @@ export class ReferralsController {
 
   @Get('validate')
   @HttpCode(HttpStatus.OK)
+  @Permissions('referral.validate')
   @ApiOperation({ summary: 'Validate if a phone number has a valid referral' })
   @ApiQuery({ name: 'phone', description: 'Phone number to validate' })
   @ApiResponse({

@@ -2,7 +2,10 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -19,6 +22,7 @@ import { AddCommentDto } from './dto/add-comment.dto';
 import { AssignComplaintDto } from './dto/assign-complaint.dto';
 import { ComplaintsQueryDto } from './dto/complaints-query.dto';
 import { CreateComplaintDto } from './dto/create-complaint.dto';
+import { UpdateComplaintDto } from './dto/update-complaint.dto';
 import { UpdateComplaintStatusDto } from './dto/update-status.dto';
 import { ReturnToResidentDto } from './dto/return-to-resident.dto';
 import { ComplaintsService } from './complaints.service';
@@ -38,6 +42,16 @@ interface AuthenticatedRequest extends Request {
 export class ComplaintsController {
   constructor(private readonly complaintsService: ComplaintsService) {}
 
+  @Get('me')
+  @Permissions('complaint.view_own')
+  listMyComplaints(@Req() req: AuthenticatedRequest) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new BadRequestException('Invalid auth context');
+    }
+    return this.complaintsService.listMyComplaints(userId);
+  }
+
   @Get()
   @Permissions('complaint.view_all')
   listComplaints(@Query() query: ComplaintsQueryDto) {
@@ -51,9 +65,15 @@ export class ComplaintsController {
   }
 
   @Get(':id')
-  @Permissions('complaint.view_all')
+  @Permissions('complaint.view_all', 'complaint.view_own')
   getComplaintDetail(@Param('id') id: string) {
     return this.complaintsService.getComplaintDetail(id);
+  }
+
+  @Get(':id/comments')
+  @Permissions('complaint.view_all', 'complaint.view_own')
+  listComments(@Param('id') id: string) {
+    return this.complaintsService.listComments(id);
   }
 
   @Post()
@@ -65,6 +85,12 @@ export class ComplaintsController {
     }
 
     return this.complaintsService.createComplaint(dto, reporterId);
+  }
+
+  @Patch(':id')
+  @Permissions('complaint.manage')
+  updateComplaint(@Param('id') id: string, @Body() dto: UpdateComplaintDto) {
+    return this.complaintsService.updateComplaint(id, dto);
   }
 
   @Patch(':id/assign')
@@ -116,6 +142,17 @@ export class ComplaintsController {
     }
 
     return this.complaintsService.returnToResident(id, dto.message, adminId);
+  }
+
+  @Delete(':id')
+  @Permissions('complaint.delete_own')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  deleteComplaint(@Param('id') id: string, @Req() req: AuthenticatedRequest) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new BadRequestException('Invalid auth context');
+    }
+    return this.complaintsService.deleteComplaint(id, userId);
   }
 
   @Post('check-sla')

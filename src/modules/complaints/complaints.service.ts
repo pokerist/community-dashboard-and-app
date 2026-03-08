@@ -25,6 +25,7 @@ import {
 } from './dto/complaint-response.dto';
 import { ComplaintsQueryDto } from './dto/complaints-query.dto';
 import { CreateComplaintDto } from './dto/create-complaint.dto';
+import { UpdateComplaintDto } from './dto/update-complaint.dto';
 
 const OPEN_COMPLAINT_STATUSES: ComplaintStatus[] = [
   ComplaintStatus.NEW,
@@ -260,6 +261,65 @@ export class ComplaintsService {
     return complaint;
   }
 
+  async listMyComplaints(userId: string): Promise<ComplaintListItemDto[]> {
+    const rows = await this.prisma.complaint.findMany({
+      where: { reporterId: userId },
+      include: {
+        category: { select: { id: true, name: true, slaHours: true } },
+        unit: { select: { id: true, unitNumber: true } },
+        reporter: { select: { id: true, nameEN: true, nameAR: true, email: true } },
+        assignedTo: { select: { id: true, nameEN: true, nameAR: true, email: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return rows.map((row) => this.toComplaintListItem(row));
+  }
+
+  async listComments(complaintId: string): Promise<ComplaintDetailCommentDto[]> {
+    const complaint = await this.prisma.complaint.findUnique({
+      where: { id: complaintId },
+      select: { id: true },
+    });
+
+    if (!complaint) {
+      throw new NotFoundException(`Complaint ${complaintId} not found`);
+    }
+
+    const comments = await this.prisma.complaintComment.findMany({
+      where: { complaintId },
+      include: {
+        createdBy: {
+          select: { id: true, nameEN: true, nameAR: true, email: true },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return comments.map((comment) => this.toCommentDto(comment));
+  }
+
+  async deleteComplaint(id: string, userId: string): Promise<void> {
+    const complaint = await this.prisma.complaint.findUnique({
+      where: { id },
+      select: { id: true, reporterId: true, status: true },
+    });
+
+    if (!complaint) {
+      throw new NotFoundException(`Complaint ${id} not found`);
+    }
+
+    if (complaint.reporterId !== userId) {
+      throw new BadRequestException('You can only delete your own complaints');
+    }
+
+    if (complaint.status !== ComplaintStatus.NEW) {
+      throw new BadRequestException('Only complaints with status NEW can be deleted');
+    }
+
+    await this.prisma.complaint.delete({ where: { id } });
+  }
+
   async listComplaints(filters: ComplaintsQueryDto): Promise<ComplaintListResponseDto> {
     const page = filters.page ?? 1;
     const limit = filters.limit ?? 25;
@@ -397,6 +457,58 @@ export class ComplaintsService {
     });
 
     return this.getComplaintDetail(created.id);
+  }
+
+  async updateComplaint(
+    id: string,
+    dto: UpdateComplaintDto,
+  ): Promise<ComplaintDetailDto> {
+    const complaint = await this.prisma.complaint.findUnique({
+      where: { id },
+      select: { id: true, status: true },
+    });
+
+    if (!complaint) {
+      throw new NotFoundException(`Complaint ${id} not found`);
+    }
+
+    const updateData: Prisma.ComplaintUpdateInput = {};
+
+    if (dto.categoryId !== undefined) {
+      const category = await this.prisma.complaintCategory.findUnique({
+        where: { id: dto.categoryId },
+      });
+      if (!category) {
+        throw new BadRequestException('Complaint category not found');
+      }
+      if (!category.isActive) {
+        throw new BadRequestException('Complaint category is inactive');
+      }
+      updateData.category = { connect: { id: dto.categoryId } };
+      updateData.categoryLegacy = category.name;
+      updateData.team = category.name;
+
+      // Recalculate SLA deadline if complaint is still open and has no SLA yet
+      if (OPEN_COMPLAINT_STATUSES.includes(complaint.status)) {
+        const now = new Date();
+        updateData.slaDeadline = new Date(now.getTime() + category.slaHours * 60 * 60 * 1000);
+      }
+    }
+
+    if (dto.title !== undefined) {
+      updateData.title = dto.title.trim() || null;
+    }
+
+    if (dto.priority !== undefined) {
+      updateData.priority = dto.priority;
+    }
+
+    await this.prisma.complaint.update({
+      where: { id },
+      data: updateData,
+    });
+
+    return this.getComplaintDetail(id);
   }
 
   async assignComplaint(

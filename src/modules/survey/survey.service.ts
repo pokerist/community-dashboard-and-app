@@ -845,6 +845,30 @@ export class SurveyService {
       },
     });
 
+    // Notify the survey creator about the new submission (fire-and-forget)
+    this.notificationsService
+      .sendNotification(
+        {
+          type: NotificationType.ANNOUNCEMENT,
+          title: `New survey response: ${survey.title}`,
+          messageEn: `A resident has submitted a response to your survey "${survey.title}".`,
+          channels: [Channel.IN_APP],
+          targetAudience: Audience.SPECIFIC_RESIDENCES,
+          audienceMeta: { userIds: [survey.createdById] },
+          payload: {
+            route: '/surveys',
+            webRoute: '#surveys',
+            entityType: 'SURVEY',
+            entityId: survey.id,
+            eventKey: 'survey.response_submitted',
+          },
+        },
+        survey.createdById,
+      )
+      .catch(() => {
+        /* best-effort notification – ignore failures */
+      });
+
     return {
       id: created.id,
       surveyId: created.surveyId,

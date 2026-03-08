@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Eye, Pencil, Plus, Power, RotateCcw, Home, Search, SlidersHorizontal, DoorOpen } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Eye, Pencil, Plus, Power, RotateCcw, Home, Search, SlidersHorizontal, DoorOpen, Upload, Download, Users, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../ui/dialog";
 import { DataTable, type DataTableColumn } from "../DataTable";
 import { StatusBadge } from "../StatusBadge";
 import communityService, { type ClusterItem, type CommunityListItem, type GateItem } from "../../lib/community-service";
-import { handleApiError } from "../../lib/api-client";
+import apiClient, { handleApiError } from "../../lib/api-client";
 import unitService, {
   type CreateUnitPayload,
   type GateAccessMode,
@@ -22,11 +22,11 @@ const UNIT_STATUSES: UnitStatus[] = ["AVAILABLE","HELD","UNRELEASED","NOT_DELIVE
 const DISPLAY_STATUSES: UnitDisplayStatus[] = ["OFF_PLAN","UNDER_CONSTRUCTION","DELIVERED","OCCUPIED"];
 
 const TYPE_ICONS: Record<string, string> = {
-  APARTMENT:  "🏢",
-  VILLA:      "🏡",
-  PENTHOUSE:  "🌆",
-  DUPLEX:     "🏘️",
-  TOWNHOUSE:  "🏠",
+  APARTMENT:  "\u{1F3E2}",
+  VILLA:      "\u{1F3E1}",
+  PENTHOUSE:  "\u{1F306}",
+  DUPLEX:     "\u{1F3D8}\uFE0F",
+  TOWNHOUSE:  "\u{1F3E0}",
 };
 
 const DISPLAY_STATUS_STYLE: Record<UnitDisplayStatus, { bg: string; color: string }> = {
@@ -38,7 +38,49 @@ const DISPLAY_STATUS_STYLE: Record<UnitDisplayStatus, { bg: string; color: strin
 
 // Accent cycling (matches design system)
 const ACCENTS = ["#0D9488", "#2563EB", "#BE185D"];
-const accentFor = (i: number) => ACCENTS[i % ACCENTS.length];
+
+// ─── Helpers ──────────────────────────────────────────────────
+
+/** Derive a single meaningful status label from displayStatus + ownership */
+function deriveStatusLabel(unit: UnitListItem): string {
+  switch (unit.displayStatus) {
+    case "UNDER_CONSTRUCTION":
+      return unit.residentCount > 0 ? "Sold" : "Under Construction";
+    case "DELIVERED":
+      return "Delivered";
+    case "OFF_PLAN":
+      return "Off Plan";
+    case "OCCUPIED":
+      return "Occupied";
+    default:
+      return unit.displayStatus.replace(/_/g, " ");
+  }
+}
+
+function deriveStatusStyle(unit: UnitListItem): { bg: string; color: string } {
+  if (unit.displayStatus === "UNDER_CONSTRUCTION" && unit.residentCount > 0) {
+    // "Sold" styling – purple-ish
+    return { bg: "#F3E8FF", color: "#7C3AED" };
+  }
+  return DISPLAY_STATUS_STYLE[unit.displayStatus];
+}
+
+/** Resident type returned from GET /units/:id/residents */
+interface UnitResident {
+  id: string;
+  userId: string;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  role: string;
+  isPrimary: boolean;
+  documents?: Array<{
+    id: string;
+    name: string;
+    url: string;
+    type: string;
+  }>;
+}
 
 // ─── Shared UI primitives ─────────────────────────────────────
 
@@ -89,11 +131,15 @@ const selectStyle: React.CSSProperties = { ...inputStyle, cursor: "pointer" };
 
 type UnitForm = {
   communityId: string; clusterId: string; unitNumber: string; block: string;
-  type: UnitType; status: UnitStatus; isDelivered: boolean;
+  type: UnitType; status: UnitStatus;
   bedrooms: string; sizeSqm: string; price: string;
   gateAccessMode: GateAccessMode; allowedGateIds: string[];
 };
-const defaultForm: UnitForm = { communityId: "", clusterId: "", unitNumber: "", block: "", type: "APARTMENT", status: "AVAILABLE", isDelivered: false, bedrooms: "", sizeSqm: "", price: "", gateAccessMode: "ALL_GATES", allowedGateIds: [] };
+const defaultForm: UnitForm = { communityId: "", clusterId: "", unitNumber: "", block: "", type: "APARTMENT", status: "AVAILABLE", bedrooms: "", sizeSqm: "", price: "", gateAccessMode: "ALL_GATES", allowedGateIds: [] };
+
+const CSV_TEMPLATE = `unitNumber,block,type,status,communityId,clusterId,bedrooms,sizeSqm,price
+A-101,A,APARTMENT,AVAILABLE,<communityId>,,2,120,500000
+B-202,B,VILLA,AVAILABLE,<communityId>,,4,300,1500000`;
 
 // ─── Stat card for page header ────────────────────────────────
 function UnitStat({ label, value, accent, icon }: { label: string; value: string | number; accent: string; icon: React.ReactNode }) {
@@ -137,6 +183,14 @@ export function UnitsManagement() {
   const [detailMode, setDetailMode]               = useState<GateAccessMode>("ALL_GATES");
   const [detailGateIds, setDetailGateIds]         = useState<string[]>([]);
   const [detailGates, setDetailGates]             = useState<GateItem[]>([]);
+  const [detailResidents, setDetailResidents]     = useState<UnitResident[]>([]);
+  const [residentsLoading, setResidentsLoading]   = useState(false);
+
+  // Bulk upload state
+  const [bulkOpen, setBulkOpen]           = useState(false);
+  const [bulkFile, setBulkFile]           = useState<File | null>(null);
+  const [bulkUploading, setBulkUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Loaders ─────────────────────────────────────────────────
   const loadCommunities = useCallback(async () => {
@@ -172,6 +226,19 @@ export function UnitsManagement() {
     setFormClusters(cl); setFormGates(ga);
   }, []);
 
+  // ── Load residents for unit detail ─────────────────────────
+  const loadResidents = useCallback(async (unitId: string) => {
+    setResidentsLoading(true);
+    try {
+      const res = await apiClient.get<UnitResident[]>(`/units/${unitId}/residents`);
+      setDetailResidents(Array.isArray(res.data) ? res.data : []);
+    } catch {
+      setDetailResidents([]);
+    } finally {
+      setResidentsLoading(false);
+    }
+  }, []);
+
   // ── CRUD ────────────────────────────────────────────────────
   const openCreate = async () => {
     const cid = communities[0]?.id ?? "";
@@ -181,7 +248,7 @@ export function UnitsManagement() {
 
   const openEdit = async (unit: UnitListItem) => {
     setEditingUnit(unit);
-    setForm({ ...defaultForm, communityId: unit.communityId ?? "", clusterId: unit.clusterId ?? "", unitNumber: unit.unitNumber, block: unit.block ?? "", type: unit.type, status: unit.status, isDelivered: unit.isDelivered, bedrooms: unit.bedrooms != null ? String(unit.bedrooms) : "", sizeSqm: unit.sizeSqm != null ? String(unit.sizeSqm) : "", price: unit.price != null ? String(unit.price) : "" });
+    setForm({ ...defaultForm, communityId: unit.communityId ?? "", clusterId: unit.clusterId ?? "", unitNumber: unit.unitNumber, block: unit.block ?? "", type: unit.type, status: unit.status, bedrooms: unit.bedrooms != null ? String(unit.bedrooms) : "", sizeSqm: unit.sizeSqm != null ? String(unit.sizeSqm) : "", price: unit.price != null ? String(unit.price) : "" });
     await loadFormDeps(unit.communityId ?? "");
     try { const ga = await unitService.getUnitGateAccess(unit.id); setForm((p) => ({ ...p, gateAccessMode: ga.mode, allowedGateIds: ga.gates.map((g) => g.id) })); } catch { /* ignore */ }
     setFormOpen(true);
@@ -190,7 +257,7 @@ export function UnitsManagement() {
   const saveForm = async () => {
     if (!form.communityId || !form.unitNumber.trim()) { toast.error("Community and unit number required"); return; }
     if (form.gateAccessMode === "SELECTED_GATES" && !form.allowedGateIds.length) { toast.error("Select at least one gate"); return; }
-    const payload: CreateUnitPayload = { communityId: form.communityId, clusterId: form.clusterId || undefined, unitNumber: form.unitNumber.trim(), block: form.block.trim() || undefined, type: form.type, status: form.status, isDelivered: form.isDelivered, bedrooms: form.bedrooms ? Number(form.bedrooms) : undefined, sizeSqm: form.sizeSqm ? Number(form.sizeSqm) : undefined, price: form.price ? Number(form.price) : undefined, gateAccessMode: form.gateAccessMode, allowedGateIds: form.gateAccessMode === "SELECTED_GATES" ? form.allowedGateIds : [] };
+    const payload: CreateUnitPayload = { communityId: form.communityId, clusterId: form.clusterId || undefined, unitNumber: form.unitNumber.trim(), block: form.block.trim() || undefined, type: form.type, status: form.status, bedrooms: form.bedrooms ? Number(form.bedrooms) : undefined, sizeSqm: form.sizeSqm ? Number(form.sizeSqm) : undefined, price: form.price ? Number(form.price) : undefined, gateAccessMode: form.gateAccessMode, allowedGateIds: form.gateAccessMode === "SELECTED_GATES" ? form.allowedGateIds : [] };
     try {
       if (editingUnit) { await unitService.updateUnit(editingUnit.id, payload); toast.success("Unit updated"); }
       else { await unitService.createUnit(payload); toast.success("Unit created"); }
@@ -215,6 +282,7 @@ export function UnitsManagement() {
       setDetail(res); setDetailMode(res.gateAccess.mode); setDetailGateIds(res.gateAccess.gates.map((g) => g.id));
       const gates = res.communityId ? await communityService.listGates(res.communityId) : [];
       setDetailGates(gates); setDetailOpen(true);
+      void loadResidents(unit.id);
     } catch (e) { toast.error("Failed to load detail", { description: handleApiError(e) }); }
   };
 
@@ -225,6 +293,33 @@ export function UnitsManagement() {
       const updated = await unitService.updateUnitGateAccess(detail.id, { mode: detailMode, allowedGateIds: detailMode === "SELECTED_GATES" ? detailGateIds : [] });
       setDetail((p) => p ? { ...p, gateAccess: updated } : p); toast.success("Gate access updated"); await loadUnits();
     } catch (e) { toast.error("Failed to update gate access", { description: handleApiError(e) }); }
+  };
+
+  // ── Bulk upload ─────────────────────────────────────────────
+  const downloadTemplate = () => {
+    const blob = new Blob([CSV_TEMPLATE], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "units_template.csv"; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleBulkUpload = async () => {
+    if (!bulkFile) { toast.error("Please select a file"); return; }
+    setBulkUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", bulkFile);
+      await apiClient.post("/units/bulk", formData, { headers: { "Content-Type": "multipart/form-data" } });
+      toast.success("Bulk upload completed successfully");
+      setBulkOpen(false); setBulkFile(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      await loadUnits();
+    } catch (e) {
+      toast.error("Bulk upload failed", { description: handleApiError(e) });
+    } finally {
+      setBulkUploading(false);
+    }
   };
 
   // ── Derived stats ────────────────────────────────────────────
@@ -244,7 +339,7 @@ export function UnitsManagement() {
       key: "unit", header: "Unit",
       render: (u) => (
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span style={{ fontSize: "16px", lineHeight: 1 }}>{TYPE_ICONS[u.type] ?? "🏠"}</span>
+          <span style={{ fontSize: "16px", lineHeight: 1 }}>{TYPE_ICONS[u.type] ?? "\u{1F3E0}"}</span>
           <div>
             <p style={{ fontSize: "13px", fontWeight: 700, color: "#111827", letterSpacing: "-0.01em", fontFamily: "'DM Mono', monospace" }}>{u.unitNumber}</p>
             {u.block && <p style={{ fontSize: "10.5px", color: "#9CA3AF", marginTop: "1px" }}>Block {u.block}</p>}
@@ -270,23 +365,38 @@ export function UnitsManagement() {
       ),
     },
     {
-      key: "displayStatus", header: "Display",
+      key: "status", header: "Status",
       render: (u) => {
-        const s = DISPLAY_STATUS_STYLE[u.displayStatus];
+        const s = deriveStatusStyle(u);
+        const label = deriveStatusLabel(u);
         return (
-          <span style={{ fontSize: "11px", fontWeight: 700, padding: "3px 8px", borderRadius: "5px", background: s.bg, color: s.color, textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap" }}>
-            {u.displayStatus.replace("_", " ")}
-          </span>
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+            <span style={{ fontSize: "11px", fontWeight: 700, padding: "3px 8px", borderRadius: "5px", background: s.bg, color: s.color, textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap" }}>
+              {label}
+            </span>
+            {!u.isActive && <StatusBadge value="INACTIVE" />}
+          </div>
         );
       },
+    },
+    {
+      key: "owners", header: "Owners",
+      render: (u) => (
+        <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+          <Users style={{ width: "12px", height: "12px", color: "#9CA3AF" }} />
+          <span style={{ fontSize: "12px", fontWeight: 600, color: u.residentCount > 0 ? "#111827" : "#D1D5DB", fontFamily: "'DM Mono', monospace" }}>
+            {u.residentCount}
+          </span>
+        </div>
+      ),
     },
     {
       key: "specs", header: "Specs",
       render: (u) => (
         <div style={{ display: "flex", gap: "8px", fontSize: "11.5px", color: "#6B7280", fontFamily: "'DM Mono', monospace" }}>
           {u.bedrooms != null && <span>{u.bedrooms}BR</span>}
-          {u.sizeSqm != null && <span>{u.sizeSqm}m²</span>}
-          {u.bedrooms == null && u.sizeSqm == null && <span style={{ color: "#D1D5DB" }}>—</span>}
+          {u.sizeSqm != null && <span>{u.sizeSqm}m\u00B2</span>}
+          {u.bedrooms == null && u.sizeSqm == null && <span style={{ color: "#D1D5DB" }}>\u2014</span>}
         </div>
       ),
     },
@@ -294,16 +404,7 @@ export function UnitsManagement() {
       key: "price", header: "Price",
       render: (u) => u.price != null
         ? <span style={{ fontSize: "12.5px", fontWeight: 700, color: "#059669", fontFamily: "'DM Mono', monospace" }}>EGP {u.price.toLocaleString()}</span>
-        : <span style={{ color: "#D1D5DB", fontFamily: "'DM Mono', monospace" }}>—</span>,
-    },
-    {
-      key: "status", header: "Status",
-      render: (u) => (
-        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-          <StatusBadge value={u.status} />
-          {!u.isActive && <StatusBadge value="INACTIVE" />}
-        </div>
-      ),
+        : <span style={{ color: "#D1D5DB", fontFamily: "'DM Mono', monospace" }}>\u2014</span>,
     },
     {
       key: "actions", header: "Actions",
@@ -333,7 +434,10 @@ export function UnitsManagement() {
           <h1 style={{ fontSize: "18px", fontWeight: 800, color: "#111827", letterSpacing: "-0.02em", lineHeight: 1.2, margin: 0 }}>Units</h1>
           <p style={{ marginTop: "4px", fontSize: "13px", color: "#6B7280" }}>Manage inventory, clusters, gate access, and occupancy.</p>
         </div>
-        <PrimaryBtn label="Add Unit" icon={<Plus style={{ width: "13px", height: "13px" }} />} onClick={() => void openCreate()} />
+        <div style={{ display: "flex", gap: "8px" }}>
+          <GhostBtn label="Bulk Upload" onClick={() => setBulkOpen(true)} />
+          <PrimaryBtn label="Add Unit" icon={<Plus style={{ width: "13px", height: "13px" }} />} onClick={() => void openCreate()} />
+        </div>
       </div>
 
       {/* ── KPI strip ──────────────────────────────────────── */}
@@ -354,7 +458,7 @@ export function UnitsManagement() {
           {/* Search */}
           <div style={{ position: "relative", flex: 1 }}>
             <Search style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", width: "13px", height: "13px", color: "#9CA3AF" }} />
-            <input placeholder="Search units by number, block…" value={search} onChange={(e) => setSearch(e.target.value)}
+            <input placeholder="Search units by number, block..." value={search} onChange={(e) => setSearch(e.target.value)}
               style={{ ...inputStyle, paddingLeft: "32px", fontSize: "12.5px", background: "#F9FAFB" }} />
           </div>
 
@@ -476,15 +580,9 @@ export function UnitsManagement() {
             {/* Specs */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px" }}>
               <Field label="Bedrooms"><input type="number" min={0} value={form.bedrooms} onChange={(e) => setForm((p) => ({ ...p, bedrooms: e.target.value }))} style={inputStyle} /></Field>
-              <Field label="Size (m²)"><input type="number" min={0} value={form.sizeSqm} onChange={(e) => setForm((p) => ({ ...p, sizeSqm: e.target.value }))} style={inputStyle} /></Field>
+              <Field label="Size (m\u00B2)"><input type="number" min={0} value={form.sizeSqm} onChange={(e) => setForm((p) => ({ ...p, sizeSqm: e.target.value }))} style={inputStyle} /></Field>
               <Field label="Price (EGP)"><input type="number" min={0} value={form.price} onChange={(e) => setForm((p) => ({ ...p, price: e.target.value }))} style={inputStyle} /></Field>
             </div>
-
-            {/* Delivered toggle */}
-            <label style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "13px", color: "#374151", cursor: "pointer" }}>
-              <input type="checkbox" checked={form.isDelivered} onChange={(e) => setForm((p) => ({ ...p, isDelivered: e.target.checked }))} style={{ accentColor: "#059669" }} />
-              Mark as delivered
-            </label>
 
             {/* Gate access */}
             <div style={{ borderRadius: "8px", border: "1px solid #EBEBEB", overflow: "hidden" }}>
@@ -525,6 +623,62 @@ export function UnitsManagement() {
         </DialogContent>
       </Dialog>
 
+      {/* ── Bulk Upload dialog ──────────────────────────────── */}
+      <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
+        <DialogContent style={{ maxWidth: "480px", borderRadius: "10px", border: "1px solid #EBEBEB", padding: 0, overflow: "hidden", fontFamily: "'Work Sans', sans-serif" }}>
+          <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid #F3F4F6" }}>
+            <DialogHeader>
+              <DialogTitle style={{ fontFamily: "'Work Sans', sans-serif", fontWeight: 700, fontSize: "15px", color: "#111827", display: "flex", alignItems: "center", gap: "8px" }}>
+                <Upload style={{ width: "16px", height: "16px" }} /> Bulk Upload Units
+              </DialogTitle>
+              <DialogDescription style={{ fontSize: "12px", color: "#9CA3AF", marginTop: "3px" }}>Upload a CSV or XLSX file to create multiple units at once.</DialogDescription>
+            </DialogHeader>
+          </div>
+
+          <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "16px" }}>
+            {/* Template download */}
+            <div style={{ padding: "12px 14px", background: "#F9FAFB", borderRadius: "8px", border: "1px solid #E5E7EB", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div>
+                <p style={{ fontSize: "12.5px", fontWeight: 600, color: "#374151" }}>CSV Template</p>
+                <p style={{ fontSize: "11px", color: "#9CA3AF", marginTop: "2px" }}>Download and fill in the template before uploading.</p>
+              </div>
+              <button type="button" onClick={downloadTemplate}
+                style={{ display: "flex", alignItems: "center", gap: "5px", padding: "6px 12px", borderRadius: "6px", border: "1px solid #D1D5DB", background: "#FFF", color: "#374151", fontSize: "12px", fontWeight: 600, cursor: "pointer", fontFamily: "'Work Sans', sans-serif" }}>
+                <Download style={{ width: "12px", height: "12px" }} /> Download
+              </button>
+            </div>
+
+            {/* File input */}
+            <Field label="Select File" hint="Accepted formats: .csv, .xlsx">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                onChange={(e) => setBulkFile(e.target.files?.[0] ?? null)}
+                style={{ ...inputStyle, padding: "8px", cursor: "pointer" }}
+              />
+            </Field>
+
+            {bulkFile && (
+              <div style={{ padding: "8px 12px", background: "#EFF6FF", borderRadius: "6px", border: "1px solid #BFDBFE", display: "flex", alignItems: "center", gap: "8px" }}>
+                <FileText style={{ width: "14px", height: "14px", color: "#2563EB" }} />
+                <span style={{ fontSize: "12px", fontWeight: 600, color: "#1D4ED8" }}>{bulkFile.name}</span>
+                <span style={{ fontSize: "11px", color: "#6B7280" }}>({(bulkFile.size / 1024).toFixed(1)} KB)</span>
+              </div>
+            )}
+          </div>
+
+          <div style={{ padding: "14px 24px", borderTop: "1px solid #F3F4F6", display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+            <GhostBtn label="Cancel" onClick={() => { setBulkOpen(false); setBulkFile(null); if (fileInputRef.current) fileInputRef.current.value = ""; }} />
+            <PrimaryBtn
+              label={bulkUploading ? "Uploading..." : "Upload"}
+              icon={<Upload style={{ width: "13px", height: "13px" }} />}
+              onClick={() => void handleBulkUpload()}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* ── Deactivate confirm ──────────────────────────────── */}
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent style={{ maxWidth: "380px", borderRadius: "10px", border: "1px solid #EBEBEB", padding: 0, overflow: "hidden", fontFamily: "'Work Sans', sans-serif" }}>
@@ -546,31 +700,113 @@ export function UnitsManagement() {
 
       {/* ── Unit detail ─────────────────────────────────────── */}
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent style={{ maxWidth: "500px", borderRadius: "10px", border: "1px solid #EBEBEB", padding: 0, overflow: "hidden", fontFamily: "'Work Sans', sans-serif" }}>
+        <DialogContent style={{ maxWidth: "580px", borderRadius: "10px", border: "1px solid #EBEBEB", padding: 0, overflow: "hidden", fontFamily: "'Work Sans', sans-serif" }}>
           <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid #F3F4F6" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "4px" }}>
-              <span style={{ fontSize: "24px" }}>{TYPE_ICONS[detail?.type ?? ""] ?? "🏠"}</span>
+              <span style={{ fontSize: "24px" }}>{TYPE_ICONS[detail?.type ?? ""] ?? "\u{1F3E0}"}</span>
               <div>
                 <DialogTitle style={{ fontFamily: "'DM Mono', monospace", fontWeight: 700, fontSize: "16px", color: "#111827" }}>{detail?.unitNumber ?? "Unit"}</DialogTitle>
-                <p style={{ fontSize: "12px", color: "#9CA3AF", marginTop: "2px" }}>{detail?.communityName} {detail?.clusterName ? `· ${detail.clusterName}` : ""}</p>
+                <p style={{ fontSize: "12px", color: "#9CA3AF", marginTop: "2px" }}>{detail?.communityName} {detail?.clusterName ? `\u00B7 ${detail.clusterName}` : ""}</p>
               </div>
             </div>
           </div>
 
           {detail ? (
-            <>
+            <div style={{ maxHeight: "70vh", overflowY: "auto" }}>
               {/* Specs strip */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", borderBottom: "1px solid #F3F4F6" }}>
                 {[
-                  { label: "Bedrooms", value: detail.bedrooms != null ? `${detail.bedrooms} BR` : "—" },
-                  { label: "Size",     value: detail.sizeSqm != null ? `${detail.sizeSqm} m²` : "—" },
-                  { label: "Price",    value: detail.price != null ? `EGP ${detail.price.toLocaleString()}` : "—" },
+                  { label: "Bedrooms", value: detail.bedrooms != null ? `${detail.bedrooms} BR` : "\u2014" },
+                  { label: "Size",     value: detail.sizeSqm != null ? `${detail.sizeSqm} m\u00B2` : "\u2014" },
+                  { label: "Price",    value: detail.price != null ? `EGP ${detail.price.toLocaleString()}` : "\u2014" },
                 ].map((s, i) => (
                   <div key={s.label} style={{ padding: "12px 16px", borderRight: i < 2 ? "1px solid #F3F4F6" : "none" }}>
                     <p style={{ fontSize: "10.5px", color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600 }}>{s.label}</p>
                     <p style={{ fontSize: "14px", fontWeight: 700, color: "#111827", marginTop: "3px", fontFamily: "'DM Mono', monospace" }}>{s.value}</p>
                   </div>
                 ))}
+              </div>
+
+              {/* Status strip */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", borderBottom: "1px solid #F3F4F6" }}>
+                <div style={{ padding: "12px 16px", borderRight: "1px solid #F3F4F6" }}>
+                  <p style={{ fontSize: "10.5px", color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600 }}>Status</p>
+                  <div style={{ marginTop: "6px" }}>
+                    {(() => {
+                      const st = deriveStatusStyle(detail);
+                      return (
+                        <span style={{ fontSize: "11px", fontWeight: 700, padding: "3px 8px", borderRadius: "5px", background: st.bg, color: st.color, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                          {deriveStatusLabel(detail)}
+                        </span>
+                      );
+                    })()}
+                  </div>
+                </div>
+                <div style={{ padding: "12px 16px" }}>
+                  <p style={{ fontSize: "10.5px", color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600 }}>Active</p>
+                  <p style={{ fontSize: "14px", fontWeight: 700, color: detail.isActive ? "#059669" : "#DC2626", marginTop: "3px" }}>{detail.isActive ? "Yes" : "No"}</p>
+                </div>
+              </div>
+
+              {/* ── Owners / Residents section ─────────────────── */}
+              <div style={{ padding: "16px 24px", borderBottom: "1px solid #F3F4F6" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" }}>
+                  <Users style={{ width: "14px", height: "14px", color: "#6B7280" }} />
+                  <span style={{ fontSize: "12.5px", fontWeight: 700, color: "#111827" }}>Owners & Residents</span>
+                  <span style={{ fontSize: "10px", fontWeight: 700, background: "#F3F4F6", color: "#6B7280", padding: "2px 6px", borderRadius: "4px", fontFamily: "'DM Mono', monospace" }}>
+                    {detailResidents.length}
+                  </span>
+                </div>
+
+                {residentsLoading ? (
+                  <div style={{ padding: "16px 0", textAlign: "center" }}>
+                    <div style={{ height: "12px", width: "60%", borderRadius: "4px", margin: "0 auto 8px", backgroundImage: "linear-gradient(90deg,#F3F4F6 25%,#E9EAEC 50%,#F3F4F6 75%)", backgroundSize: "200% 100%", animation: "sk-shimmer 1.4s ease infinite" }} />
+                    <div style={{ height: "12px", width: "40%", borderRadius: "4px", margin: "0 auto", backgroundImage: "linear-gradient(90deg,#F3F4F6 25%,#E9EAEC 50%,#F3F4F6 75%)", backgroundSize: "200% 100%", animation: "sk-shimmer 1.4s ease infinite" }} />
+                  </div>
+                ) : detailResidents.length === 0 ? (
+                  <p style={{ fontSize: "12.5px", color: "#9CA3AF", padding: "8px 0" }}>No owners or residents assigned to this unit.</p>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    {detailResidents.map((r) => (
+                      <div key={r.id} style={{ padding: "10px 12px", borderRadius: "8px", border: `1px solid ${r.isPrimary ? "#BFDBFE" : "#E5E7EB"}`, background: r.isPrimary ? "#EFF6FF" : "#FAFAFA" }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: r.isPrimary ? "#2563EB" : "#9CA3AF", color: "#FFF", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", fontWeight: 700, flexShrink: 0 }}>
+                              {(r.name ?? r.email ?? "?").charAt(0).toUpperCase()}
+                            </div>
+                            <div>
+                              <p style={{ fontSize: "12.5px", fontWeight: 600, color: "#111827" }}>{r.name ?? "Unnamed"}</p>
+                              {r.email && <p style={{ fontSize: "11px", color: "#6B7280", marginTop: "1px" }}>{r.email}</p>}
+                              {r.phone && <p style={{ fontSize: "11px", color: "#9CA3AF", marginTop: "1px" }}>{r.phone}</p>}
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            {r.isPrimary && (
+                              <span style={{ fontSize: "9px", fontWeight: 700, padding: "2px 6px", borderRadius: "4px", background: "#DBEAFE", color: "#1D4ED8", textTransform: "uppercase", letterSpacing: "0.05em" }}>Primary</span>
+                            )}
+                            <span style={{ fontSize: "9px", fontWeight: 700, padding: "2px 6px", borderRadius: "4px", background: "#F3F4F6", color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>{r.role}</span>
+                          </div>
+                        </div>
+
+                        {/* Documents for this resident */}
+                        {r.documents && r.documents.length > 0 && (
+                          <div style={{ marginTop: "8px", paddingTop: "8px", borderTop: "1px solid #E5E7EB" }}>
+                            <p style={{ fontSize: "10.5px", fontWeight: 600, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: "4px" }}>Documents</p>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                              {r.documents.map((doc) => (
+                                <a key={doc.id} href={doc.url} target="_blank" rel="noopener noreferrer"
+                                  style={{ display: "flex", alignItems: "center", gap: "4px", padding: "4px 8px", borderRadius: "5px", border: "1px solid #E5E7EB", background: "#FFF", fontSize: "11px", fontWeight: 500, color: "#2563EB", textDecoration: "none", cursor: "pointer" }}>
+                                  <FileText style={{ width: "10px", height: "10px" }} />
+                                  {doc.name}
+                                </a>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Gate access config */}
@@ -604,7 +840,7 @@ export function UnitsManagement() {
                 <GhostBtn label="Close" onClick={() => setDetailOpen(false)} />
                 <PrimaryBtn label="Save Gate Access" onClick={() => void saveDetailGateAccess()} />
               </div>
-            </>
+            </div>
           ) : (
             <div style={{ padding: "32px 24px", textAlign: "center" }}>
               <div style={{ height: "12px", width: "60%", borderRadius: "4px", margin: "0 auto 8px", backgroundImage: "linear-gradient(90deg,#F3F4F6 25%,#E9EAEC 50%,#F3F4F6 75%)", backgroundSize: "200% 100%", animation: "sk-shimmer 1.4s ease infinite" }} />

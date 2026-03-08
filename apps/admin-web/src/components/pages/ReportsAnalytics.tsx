@@ -1,623 +1,553 @@
 import { useCallback, useEffect, useState } from "react";
-import {
-  CalendarClock,
-  Download,
-  FileText,
-  RefreshCw,
-  Building2,
-  DollarSign,
-  MessageCircle,
-  Wrench,
-  AlertTriangle,
-  Users,
-  Activity,
-  DoorOpen,
-  X,
-  Loader,
-  CheckCircle2,
-  Pause,
-  Play,
-} from "lucide-react";
 import { toast } from "sonner";
+import {
+  BarChart2, TrendingUp, TrendingDown, Download,
+  RefreshCw, ChevronDown, Calendar, SlidersHorizontal,
+  FileText, DollarSign, Activity,
+  AlertTriangle, Shield, Settings, Home, LogIn,
+} from "lucide-react";
+import { StatCard } from "../StatCard";
 import apiClient from "../../lib/api-client";
-import { errorMessage, extractRows, formatCurrencyEGP, formatDateTime, humanizeEnum } from "../../lib/live-data";
-import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
-import { Card } from "../ui/card";
-import { Input } from "../ui/input";
-import { Label } from "../ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { DataTable, type DataTableColumn } from "../DataTable";
-import { PageHeader } from "../PageHeader";
 
-type ReportKey =
-  | "occupancy"
-  | "financial"
-  | "service_requests"
-  | "security_incidents"
-  | "visitor_traffic"
-  | "maintenance_costs"
-  | "complaints"
-  | "violations"
-  | "gate_entry_log"
-  | "resident_activity";
+// ─── Types ────────────────────────────────────────────────────
 
-type ExportFormat = "csv" | "json" | "xlsx" | "pdf";
+type DateRange = "7d" | "30d" | "90d" | "12m" | "custom";
 
-type HistoryRow = {
-  id: string;
-  reportType: string;
-  label: string;
-  format: string;
-  generatedAt: string;
-  rowCount: number;
-  filename: string;
-  createdById?: string | null;
+type KpiCard = {
+  key: string; label: string; value: string | number;
+  change?: number; icon: "revenue" | "active-users" | "tickets" | "devices" | "complaints-total" | "complaints-open";
 };
 
-type ScheduleRow = {
-  id: string;
-  reportType: string;
-  format: string;
-  label: string;
-  frequency: string;
-  isEnabled: boolean;
-  status: string;
-  nextRunAt?: string | null;
-  lastRunAt?: string | null;
-  recipientEmails?: string[];
-  createdAt: string;
+type ChartPoint = { label: string; value: number; secondary?: number };
+
+type ReportSection = {
+  id: string; title: string; description: string; icon: React.ReactNode;
+  data: ChartPoint[]; color: string; secondaryColor?: string;
+  secondaryLabel?: string; primaryLabel?: string;
 };
 
-const REPORT_OPTIONS: Array<{
-  key: ReportKey;
-  label: string;
-  description: string;
-  icon: typeof Building2;
-  bgColor: string;
-  textColor: string;
-}> = [
-  { key: "occupancy", label: "Occupancy Report", description: "Unit occupancy and block utilization analysis", icon: Building2, bgColor: "bg-blue-500/10", textColor: "text-blue-600" },
-  { key: "financial", label: "Financial Summary", description: "Invoices, revenue, and payment status overview", icon: DollarSign, bgColor: "bg-emerald-500/10", textColor: "text-emerald-600" },
-  { key: "complaints", label: "Complaints Report", description: "Complaints grouped by category and resolution status", icon: MessageCircle, bgColor: "bg-amber-500/10", textColor: "text-amber-600" },
-  { key: "service_requests", label: "Service Requests Report", description: "Service requests by type, priority, and status", icon: Wrench, bgColor: "bg-purple-500/10", textColor: "text-purple-600" },
-  { key: "violations", label: "Violations Report", description: "Violations and fines tracking by resident", icon: AlertTriangle, bgColor: "bg-red-500/10", textColor: "text-red-600" },
-  { key: "visitor_traffic", label: "Visitor Traffic Report", description: "Access QR generation and gate usage activity", icon: Users, bgColor: "bg-cyan-500/10", textColor: "text-cyan-600" },
-  { key: "maintenance_costs", label: "Maintenance Cost Analysis", description: "Maintenance invoices and cost breakdown", icon: Wrench, bgColor: "bg-orange-500/10", textColor: "text-orange-600" },
-  { key: "security_incidents", label: "Security Incidents Report", description: "Incidents tracking and resolution status", icon: AlertTriangle, bgColor: "bg-red-600/10", textColor: "text-red-700" },
-  { key: "gate_entry_log", label: "Gate Entry Log Report", description: "Access records and gate operations history", icon: DoorOpen, bgColor: "bg-indigo-500/10", textColor: "text-indigo-600" },
-  { key: "resident_activity", label: "Resident Activity Report", description: "Per-resident activity summary and metrics", icon: Activity, bgColor: "bg-pink-500/10", textColor: "text-pink-600" },
-];
+// ─── Helpers ──────────────────────────────────────────────────
 
-function toBackendReportType(key: ReportKey): string {
-  switch (key) {
-    case "occupancy": return "OCCUPANCY";
-    case "financial": return "FINANCIAL";
-    case "service_requests": return "SERVICE_REQUESTS";
-    case "security_incidents": return "SECURITY_INCIDENTS";
-    case "visitor_traffic": return "VISITOR_TRAFFIC";
-    case "maintenance_costs": return "MAINTENANCE_COSTS";
-    case "complaints": return "COMPLAINTS";
-    case "violations": return "VIOLATIONS";
-    case "gate_entry_log": return "GATE_ENTRY_LOG";
-    case "resident_activity": return "RESIDENT_ACTIVITY";
-    default: return "OCCUPANCY";
+const formatNum = (n: number): string =>
+  n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` :
+    n >= 1_000 ? `${(n / 1_000).toFixed(1)}K` : String(n);
+
+const formatChange = (c: number): string => `${c >= 0 ? "+" : ""}${c.toFixed(1)}%`;
+
+/** Convert an array of ChartPoints to CSV content and trigger a download. */
+function exportSectionCsv(title: string, data: ChartPoint[], primaryLabel?: string, secondaryLabel?: string) {
+  const hasSecondary = data.some((d) => d.secondary !== undefined);
+  const header = hasSecondary
+    ? `Label,${primaryLabel || "Value"},${secondaryLabel || "Secondary"}`
+    : `Label,${primaryLabel || "Value"}`;
+  const rows = data.map((d) =>
+    hasSecondary ? `"${d.label}",${d.value},${d.secondary ?? ""}` : `"${d.label}",${d.value}`
+  );
+  const csv = [header, ...rows].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${title.replace(/\s+/g, "_").toLowerCase()}_report.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ─── Mini bar chart ───────────────────────────────────────────
+
+function BarChart({ data, color, secondaryColor, height = 120 }: {
+  data: ChartPoint[]; color: string; secondaryColor?: string; height?: number;
+}) {
+  const maxVal = Math.max(...data.map((d) => Math.max(d.value, d.secondary ?? 0)), 1);
+  const [hovered, setHovered] = useState<number | null>(null);
+
+  return (
+    <div style={{ position: "relative", width: "100%", height }}>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: "3px", height: "100%", paddingBottom: "20px" }}>
+        {data.map((d, i) => (
+          <div key={i} style={{ flex: 1, height: "100%", display: "flex", flexDirection: "column", justifyContent: "flex-end", gap: "2px", cursor: "pointer", position: "relative" }}
+            onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(null)}>
+            {/* Tooltip */}
+            {hovered === i && (
+              <div style={{ position: "absolute", bottom: "calc(100% - 16px)", left: "50%", transform: "translateX(-50%)", background: "#111827", color: "#FFF", borderRadius: "5px", padding: "4px 8px", fontSize: "10.5px", fontFamily: "'DM Mono', monospace", whiteSpace: "nowrap", zIndex: 10, pointerEvents: "none" }}>
+                {d.label}: {formatNum(d.value)}{d.secondary !== undefined ? ` / ${formatNum(d.secondary)}` : ""}
+              </div>
+            )}
+            {secondaryColor && d.secondary !== undefined && (
+              <div style={{ width: "100%", borderRadius: "3px 3px 0 0", background: secondaryColor, height: `${(d.secondary / maxVal) * 100}%`, opacity: hovered === i ? 1 : 0.7, transition: "height 400ms ease, opacity 150ms" }} />
+            )}
+            <div style={{ width: "100%", borderRadius: secondaryColor ? "3px 3px 0 0" : "3px 3px 0 0", background: color, height: `${(d.value / maxVal) * 100}%`, opacity: hovered === i ? 1 : 0.85, transition: "height 400ms ease, opacity 150ms" }} />
+          </div>
+        ))}
+      </div>
+      {/* X axis labels */}
+      <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, display: "flex", gap: "3px" }}>
+        {data.map((d, i) => (
+          <div key={i} style={{ flex: 1, textAlign: "center", fontSize: "9.5px", color: "#9CA3AF", fontFamily: "'DM Mono', monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.label}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Report card (with per-section export) ────────────────────
+
+function ReportCard({ section }: { section: ReportSection }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const total = section.data.reduce((s, d) => s + d.value, 0);
+  const latest = section.data[section.data.length - 1]?.value ?? 0;
+  const prev = section.data[section.data.length - 2]?.value ?? 0;
+  const change = prev > 0 ? ((latest - prev) / prev) * 100 : 0;
+
+  return (
+    <div style={{ borderRadius: "10px", border: "1px solid #EBEBEB", background: "#FFF", overflow: "hidden" }}>
+      <div style={{ padding: "12px 14px", borderBottom: collapsed ? "none" : "1px solid #F3F4F6", display: "flex", alignItems: "center", gap: "10px", cursor: "pointer" }} onClick={() => setCollapsed((p) => !p)}>
+        <div style={{ width: "30px", height: "30px", borderRadius: "8px", background: `${section.color}18`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          {section.icon}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ fontSize: "13px", fontWeight: 700, color: "#111827", margin: 0 }}>{section.title}</p>
+          <p style={{ fontSize: "11.5px", color: "#9CA3AF", margin: "1px 0 0" }}>{section.description}</p>
+        </div>
+        <div style={{ textAlign: "right", flexShrink: 0 }}>
+          <p style={{ fontSize: "17px", fontWeight: 900, color: "#111827", margin: 0, fontFamily: "'DM Mono', monospace", letterSpacing: "-0.02em" }}>{formatNum(total)}</p>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "3px", marginTop: "1px" }}>
+            {change >= 0
+              ? <TrendingUp style={{ width: "10px", height: "10px", color: "#059669" }} />
+              : <TrendingDown style={{ width: "10px", height: "10px", color: "#DC2626" }} />}
+            <span style={{ fontSize: "11px", fontWeight: 700, color: change >= 0 ? "#059669" : "#DC2626", fontFamily: "'DM Mono', monospace" }}>{formatChange(change)}</span>
+          </div>
+        </div>
+        {/* Per-section CSV export */}
+        <button
+          type="button"
+          title={`Export ${section.title} as CSV`}
+          onClick={(e) => { e.stopPropagation(); exportSectionCsv(section.title, section.data, section.primaryLabel, section.secondaryLabel); }}
+          style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "28px", height: "28px", borderRadius: "6px", border: "1px solid #E5E7EB", background: "#FAFAFA", cursor: "pointer", flexShrink: 0, padding: 0 }}
+        >
+          <Download style={{ width: "12px", height: "12px", color: "#6B7280" }} />
+        </button>
+        <ChevronDown style={{ width: "14px", height: "14px", color: "#9CA3AF", transform: collapsed ? "rotate(0deg)" : "rotate(180deg)", transition: "transform 150ms", flexShrink: 0 }} />
+      </div>
+
+      {!collapsed && (
+        <div style={{ padding: "14px 16px" }}>
+          <BarChart data={section.data} color={section.color} secondaryColor={section.secondaryColor} />
+          {(section.primaryLabel || section.secondaryLabel) && (
+            <div style={{ display: "flex", gap: "12px", marginTop: "8px" }}>
+              {section.primaryLabel && (
+                <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+                  <span style={{ width: "8px", height: "8px", borderRadius: "2px", background: section.color, display: "inline-block" }} />
+                  <span style={{ fontSize: "11px", color: "#6B7280" }}>{section.primaryLabel}</span>
+                </div>
+              )}
+              {section.secondaryLabel && section.secondaryColor && (
+                <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+                  <span style={{ width: "8px", height: "8px", borderRadius: "2px", background: section.secondaryColor, display: "inline-block" }} />
+                  <span style={{ fontSize: "11px", color: "#6B7280" }}>{section.secondaryLabel}</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Export button (global) ──────────────────────────────────
+
+function ExportButton({ onExport, loading }: { onExport: () => void; loading: boolean }) {
+  return (
+    <button type="button" onClick={onExport} disabled={loading}
+      style={{ display: "flex", alignItems: "center", gap: "6px", padding: "8px 14px", borderRadius: "8px", background: "#FFF", color: "#374151", border: "1px solid #E5E7EB", cursor: loading ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 600, fontFamily: "'Work Sans', sans-serif", opacity: loading ? 0.6 : 1 }}>
+      <Download style={{ width: "13px", height: "13px" }} />
+      Export All CSV
+    </button>
+  );
+}
+
+// ─── Safe fetch helper ───────────────────────────────────────
+
+async function safeFetch<T>(url: string, fallback: T): Promise<T> {
+  try {
+    const { data } = await apiClient.get<T>(url);
+    return data;
+  } catch {
+    return fallback;
   }
 }
 
-const FREQUENCY_OPTIONS = [
-  { value: "DAILY", label: "Daily" },
-  { value: "WEEKLY", label: "Weekly" },
-  { value: "MONTHLY", label: "Monthly" },
-];
+// ─── Main ─────────────────────────────────────────────────────
 
 export function ReportsAnalytics() {
-  const [activeTab, setActiveTab] = useState<"reports" | "schedules">("reports");
-  const [selectedReportType, setSelectedReportType] = useState<ReportKey>("occupancy");
-  const [exportFormat, setExportFormat] = useState<ExportFormat>("csv");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [history, setHistory] = useState<HistoryRow[]>([]);
-  const [schedules, setSchedules] = useState<ScheduleRow[]>([]);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [stats, setStats] = useState({
-    totalGenerated: 0,
-    generatedThisMonth: 0,
-    activeSchedules: 0,
-    lastGeneratedAt: null as string | null,
-  });
-  const [showGenerateModal, setShowGenerateModal] = useState(false);
-  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [range, setRange] = useState<DateRange>("30d");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
-  // Schedule creation form state
-  const [scheduleForm, setScheduleForm] = useState({
-    reportType: "occupancy" as ReportKey,
-    format: "csv" as ExportFormat,
-    frequency: "WEEKLY",
-    label: "",
-    recipientEmails: "",
-  });
-  const [isCreatingSchedule, setIsCreatingSchedule] = useState(false);
+  const [kpis, setKpis] = useState<KpiCard[]>([]);
+  const [sections, setSections] = useState<ReportSection[]>([]);
 
-  const loadStats = useCallback(async () => {
+  const load = useCallback(async () => {
+    setLoading(true);
     try {
-      const res = await apiClient.get("/reports/stats");
-      setStats(res.data);
-    } catch (error) {
-      toast.error("Failed to load stats", { description: errorMessage(error) });
-    }
-  }, []);
+      // Fetch all stats in parallel
+      const [
+        complaintStats,
+        violationStats,
+        serviceStats,
+        rentalStats,
+        gateStats,
+        reportStats,
+        facilityStats,
+        surveyStats,
+      ] = await Promise.all([
+        safeFetch<{
+          total: number; open: number; resolved: number; closed: number;
+          slaBreached: number; avgResolutionHours: number;
+          byPriority: Record<string, number>;
+          byCategory: { categoryName: string; count: number }[];
+          byStatus: Record<string, number>;
+        }>("/complaints/stats", {
+          total: 0, open: 0, resolved: 0, closed: 0,
+          slaBreached: 0, avgResolutionHours: 0,
+          byPriority: {}, byCategory: [], byStatus: {},
+        }),
+        safeFetch<{
+          total: number; pending: number; paid: number; appealed: number;
+          cancelled: number; pendingAppeals: number;
+          totalFinesIssued: number; totalFinesCollected: number;
+          byCategory: { categoryName: string; count: number; totalFines: number }[];
+        }>("/violations/stats", {
+          total: 0, pending: 0, paid: 0, appealed: 0,
+          cancelled: 0, pendingAppeals: 0,
+          totalFinesIssued: 0, totalFinesCollected: 0, byCategory: [],
+        }),
+        safeFetch<{
+          totalServices: number; activeServices: number; totalRequests: number;
+          openRequests: number; slaBreachedRequests: number;
+          resolvedThisMonth: number; totalRevenue: number;
+          requestsByCategory: Record<string, number>;
+        }>("/services/stats", {
+          totalServices: 0, activeServices: 0, totalRequests: 0,
+          openRequests: 0, slaBreachedRequests: 0,
+          resolvedThisMonth: 0, totalRevenue: 0, requestsByCategory: {},
+        }),
+        safeFetch<{
+          activeLeases: number; expiringThisMonth: number; expiredLeases: number;
+          pendingRentRequests: number; totalMonthlyRevenue: number; leasingEnabled: boolean;
+        }>("/rental/stats", {
+          activeLeases: 0, expiringThisMonth: 0, expiredLeases: 0,
+          pendingRentRequests: 0, totalMonthlyRevenue: 0, leasingEnabled: false,
+        }),
+        safeFetch<{
+          totalGates: number; activeGates: number; todayEntries: number;
+          currentlyInside: number; todayVisitors: number; todayDeliveries: number;
+        }>("/gates/stats", {
+          totalGates: 0, activeGates: 0, todayEntries: 0,
+          currentlyInside: 0, todayVisitors: 0, todayDeliveries: 0,
+        }),
+        safeFetch<{
+          totalGenerated: number; generatedThisMonth: number;
+          activeSchedules: number; lastGeneratedAt: string | null;
+        }>("/reports/stats", {
+          totalGenerated: 0, generatedThisMonth: 0,
+          activeSchedules: 0, lastGeneratedAt: null,
+        }),
+        safeFetch<{
+          totalFacilities: number; activeFacilities: number; bookingsToday: number;
+          pendingApprovals: number; revenueThisMonth: number;
+          bookingsByFacility: { facilityName: string; totalBookings: number; revenue: number }[];
+          bookingsByStatus: Record<string, number>;
+        }>("/facilities/stats", {
+          totalFacilities: 0, activeFacilities: 0, bookingsToday: 0,
+          pendingApprovals: 0, revenueThisMonth: 0,
+          bookingsByFacility: [], bookingsByStatus: {},
+        }),
+        safeFetch<{
+          total: number; active: number; draft: number; closed: number;
+          totalResponses: number; avgResponseRate: number;
+        }>("/surveys/stats", {
+          total: 0, active: 0, draft: 0, closed: 0,
+          totalResponses: 0, avgResponseRate: 0,
+        }),
+      ]);
 
-  const loadHistory = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const res = await apiClient.get("/reports", { params: { page: 1, limit: 20 } });
-      setHistory(extractRows<HistoryRow>(res.data?.data || []));
-    } catch (error) {
-      toast.error("Failed to load reports", { description: errorMessage(error) });
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
+      // ── KPI cards from real data ──
+      const totalRevenue = rentalStats.totalMonthlyRevenue + serviceStats.totalRevenue + facilityStats.revenueThisMonth;
+      const totalOpenRequests = complaintStats.open + serviceStats.openRequests;
+      const avgResHours = complaintStats.avgResolutionHours;
 
-  const loadSchedules = useCallback(async () => {
-    try {
-      const res = await apiClient.get("/reports/schedules", { params: { limit: 30 } });
-      setSchedules(extractRows<ScheduleRow>(res.data?.data || []));
-    } catch (error) {
-      toast.error("Failed to load schedules", { description: errorMessage(error) });
-    }
-  }, []);
+      setKpis([
+        { key: "revenue", label: "Total Revenue", value: `EGP ${formatNum(totalRevenue)}`, icon: "revenue" },
+        { key: "residents", label: "Active Leases", value: formatNum(rentalStats.activeLeases), icon: "active-users" },
+        { key: "requests", label: "Open Requests", value: formatNum(totalOpenRequests), icon: "complaints-open" },
+        { key: "response", label: "Avg Resolution", value: avgResHours > 0 ? `${avgResHours.toFixed(1)}h` : "N/A", icon: "tickets" },
+      ]);
 
-  const generateReport = useCallback(
-    async (reportType: ReportKey) => {
-      setIsGenerating(true);
-      try {
-        const report = REPORT_OPTIONS.find((r) => r.key === reportType);
-        const res = await apiClient.post("/reports/generate", {
-          reportType: toBackendReportType(reportType),
-          format: exportFormat.toUpperCase(),
-          label: report?.label,
-          dateFrom: dateFrom || undefined,
-          dateTo: dateTo || undefined,
-        });
+      // ── Build report sections from API data ──
+      const builtSections: ReportSection[] = [];
 
-        const reportId = res.data?.id;
-        if (!reportId) throw new Error("No report ID returned");
-
-        try {
-          const downloadRes = await apiClient.get(`/reports/${reportId}/download`, { responseType: "blob" });
-          const blob = new Blob([downloadRes.data]);
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement("a");
-          link.href = url;
-          link.download = res.data?.filename || `report.${exportFormat}`;
-          document.body.appendChild(link);
-          link.click();
-          link.remove();
-          URL.revokeObjectURL(url);
-        } catch {
-          // Fallback — report still saved
-        }
-
-        await loadHistory();
-        toast.success(`${report?.label} generated successfully!`);
-        setShowGenerateModal(false);
-      } catch (error) {
-        toast.error("Failed to generate report", { description: errorMessage(error) });
-      } finally {
-        setIsGenerating(false);
-      }
-    },
-    [exportFormat, dateFrom, dateTo, loadHistory],
-  );
-
-  const downloadReport = useCallback(async (reportId: string, filename: string) => {
-    try {
-      const res = await apiClient.get(`/reports/${reportId}/download`, { responseType: "blob" });
-      const blob = new Blob([res.data]);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      toast.error("Failed to download report", { description: errorMessage(error) });
-    }
-  }, []);
-
-  const toggleSchedule = useCallback(
-    async (scheduleId: string, enable: boolean) => {
-      try {
-        await apiClient.patch(`/reports/schedules/${scheduleId}/toggle`, { isEnabled: enable });
-        await loadSchedules();
-        toast.success(enable ? "Schedule enabled" : "Schedule paused");
-      } catch (error) {
-        toast.error("Failed to toggle schedule", { description: errorMessage(error) });
-      }
-    },
-    [loadSchedules],
-  );
-
-  const runScheduleNow = useCallback(
-    async (scheduleId: string) => {
-      try {
-        await apiClient.post(`/reports/schedules/${scheduleId}/run-now`);
-        await loadSchedules();
-        await loadHistory();
-        toast.success("Schedule executed successfully");
-      } catch (error) {
-        toast.error("Failed to run schedule", { description: errorMessage(error) });
-      }
-    },
-    [loadSchedules, loadHistory],
-  );
-
-  const createSchedule = useCallback(async () => {
-    if (!scheduleForm.label.trim()) {
-      toast.error("Schedule label is required");
-      return;
-    }
-    setIsCreatingSchedule(true);
-    try {
-      const emails = scheduleForm.recipientEmails
-        .split(",")
-        .map((e) => e.trim())
-        .filter(Boolean);
-      await apiClient.post("/reports/schedules", {
-        reportType: toBackendReportType(scheduleForm.reportType),
-        format: scheduleForm.format.toUpperCase(),
-        frequency: scheduleForm.frequency,
-        label: scheduleForm.label.trim(),
-        recipientEmails: emails.length > 0 ? emails : undefined,
+      // 1. Revenue (rental + services + facilities)
+      builtSections.push({
+        id: "revenue", title: "Revenue", description: "Rental income, service revenue and facility bookings",
+        icon: <DollarSign style={{ width: "14px", height: "14px", color: "#059669" }} />,
+        data: [
+          { label: "Rental", value: rentalStats.totalMonthlyRevenue },
+          { label: "Services", value: serviceStats.totalRevenue },
+          { label: "Facilities", value: facilityStats.revenueThisMonth },
+          { label: "Fines Collected", value: violationStats.totalFinesCollected },
+        ],
+        color: "#059669",
       });
-      await loadSchedules();
-      await loadStats();
-      setShowScheduleModal(false);
-      setScheduleForm({ reportType: "occupancy", format: "csv", frequency: "WEEKLY", label: "", recipientEmails: "" });
-      toast.success("Schedule created");
-    } catch (error) {
-      toast.error("Failed to create schedule", { description: errorMessage(error) });
+
+      // 2. Complaints Stats
+      const complaintCategories = complaintStats.byCategory.length > 0
+        ? complaintStats.byCategory.map((c) => ({ label: c.categoryName, value: c.count }))
+        : Object.entries(complaintStats.byStatus).map(([status, count]) => ({ label: status, value: count as number }));
+      if (complaintCategories.length === 0) {
+        complaintCategories.push(
+          { label: "Open", value: complaintStats.open },
+          { label: "Resolved", value: complaintStats.resolved },
+          { label: "Closed", value: complaintStats.closed },
+          { label: "SLA Breached", value: complaintStats.slaBreached },
+        );
+      }
+      builtSections.push({
+        id: "complaints", title: "Complaints", description: `${complaintStats.total} total — ${complaintStats.open} open, ${complaintStats.resolved} resolved`,
+        icon: <AlertTriangle style={{ width: "14px", height: "14px", color: "#F59E0B" }} />,
+        data: complaintCategories,
+        color: "#F59E0B",
+      });
+
+      // 3. Violations Stats
+      const violationCategories = violationStats.byCategory.length > 0
+        ? violationStats.byCategory.map((c) => ({ label: c.categoryName, value: c.count, secondary: c.totalFines }))
+        : [
+            { label: "Pending", value: violationStats.pending },
+            { label: "Paid", value: violationStats.paid },
+            { label: "Appealed", value: violationStats.appealed },
+            { label: "Cancelled", value: violationStats.cancelled },
+          ];
+      builtSections.push({
+        id: "violations", title: "Violations", description: `${violationStats.total} total — EGP ${formatNum(violationStats.totalFinesIssued)} fines issued`,
+        icon: <Shield style={{ width: "14px", height: "14px", color: "#DC2626" }} />,
+        data: violationCategories,
+        color: "#DC2626",
+        ...(violationStats.byCategory.length > 0 ? { secondaryColor: "#FCA5A5", primaryLabel: "Count", secondaryLabel: "Fine Amount" } : {}),
+      });
+
+      // 4. Service Performance
+      const serviceCategories = Object.entries(serviceStats.requestsByCategory);
+      const serviceData: ChartPoint[] = serviceCategories.length > 0
+        ? serviceCategories.map(([cat, count]) => ({ label: cat, value: count as number }))
+        : [
+            { label: "Open", value: serviceStats.openRequests },
+            { label: "Resolved", value: serviceStats.resolvedThisMonth },
+            { label: "SLA Breached", value: serviceStats.slaBreachedRequests },
+          ];
+      builtSections.push({
+        id: "services", title: "Service Performance", description: `${serviceStats.totalRequests} total requests — ${serviceStats.openRequests} open`,
+        icon: <Settings style={{ width: "14px", height: "14px", color: "#2563EB" }} />,
+        data: serviceData,
+        color: "#2563EB",
+      });
+
+      // 5. Occupancy / Rental Stats
+      builtSections.push({
+        id: "occupancy", title: "Occupancy & Leases", description: `${rentalStats.activeLeases} active leases — ${rentalStats.expiringThisMonth} expiring soon`,
+        icon: <Home style={{ width: "14px", height: "14px", color: "#7C3AED" }} />,
+        data: [
+          { label: "Active", value: rentalStats.activeLeases },
+          { label: "Expiring", value: rentalStats.expiringThisMonth },
+          { label: "Expired", value: rentalStats.expiredLeases },
+          { label: "Pending Req.", value: rentalStats.pendingRentRequests },
+        ],
+        color: "#7C3AED",
+      });
+
+      // 6. Gate Entry Logs
+      builtSections.push({
+        id: "gates", title: "Gate Entry Logs", description: `${gateStats.totalGates} gates — ${gateStats.todayEntries} entries today`,
+        icon: <LogIn style={{ width: "14px", height: "14px", color: "#0891B2" }} />,
+        data: [
+          { label: "Today Entries", value: gateStats.todayEntries },
+          { label: "Currently In", value: gateStats.currentlyInside },
+          { label: "Visitors", value: gateStats.todayVisitors },
+          { label: "Deliveries", value: gateStats.todayDeliveries },
+        ],
+        color: "#0891B2",
+      });
+
+      // 7. Facility Bookings
+      const facilityData: ChartPoint[] = facilityStats.bookingsByFacility.length > 0
+        ? facilityStats.bookingsByFacility.map((f) => ({ label: f.facilityName, value: f.totalBookings, secondary: f.revenue }))
+        : [
+            { label: "Today", value: facilityStats.bookingsToday },
+            { label: "Pending", value: facilityStats.pendingApprovals },
+            { label: "Active Fac.", value: facilityStats.activeFacilities },
+          ];
+      builtSections.push({
+        id: "facilities", title: "Facility Bookings", description: `${facilityStats.totalFacilities} facilities — ${facilityStats.bookingsToday} bookings today`,
+        icon: <Activity style={{ width: "14px", height: "14px", color: "#059669" }} />,
+        data: facilityData,
+        color: "#059669",
+        ...(facilityStats.bookingsByFacility.length > 0 ? { secondaryColor: "#6EE7B7", primaryLabel: "Bookings", secondaryLabel: "Revenue" } : {}),
+      });
+
+      // 8. Survey Responses
+      builtSections.push({
+        id: "surveys", title: "Survey Responses", description: `${surveyStats.total} surveys — ${surveyStats.avgResponseRate.toFixed(0)}% avg response rate`,
+        icon: <BarChart2 style={{ width: "14px", height: "14px", color: "#0D9488" }} />,
+        data: [
+          { label: "Active", value: surveyStats.active },
+          { label: "Draft", value: surveyStats.draft },
+          { label: "Closed", value: surveyStats.closed },
+          { label: "Responses", value: surveyStats.totalResponses },
+        ],
+        color: "#0D9488",
+      });
+
+      // 9. Reports Generated
+      builtSections.push({
+        id: "reports", title: "Generated Reports", description: `${reportStats.totalGenerated} total — ${reportStats.activeSchedules} active schedules`,
+        icon: <FileText style={{ width: "14px", height: "14px", color: "#6366F1" }} />,
+        data: [
+          { label: "Total", value: reportStats.totalGenerated },
+          { label: "This Month", value: reportStats.generatedThisMonth },
+          { label: "Schedules", value: reportStats.activeSchedules },
+        ],
+        color: "#6366F1",
+      });
+
+      setSections(builtSections);
+    } catch {
+      toast.error("Failed to load analytics");
     } finally {
-      setIsCreatingSchedule(false);
+      setLoading(false);
     }
-  }, [scheduleForm, loadSchedules, loadStats]);
+  }, [range]);
 
-  useEffect(() => {
-    void loadStats();
-    void loadHistory();
-    void loadSchedules();
-  }, [loadStats, loadHistory, loadSchedules]);
+  useEffect(() => { void load(); }, [load]);
 
-  const getFormatBadgeColor = (format: string) => {
-    const f = format.toLowerCase();
-    if (f === "csv") return "bg-emerald-100 text-emerald-700";
-    if (f === "xlsx") return "bg-blue-100 text-blue-700";
-    if (f === "pdf") return "bg-red-100 text-red-700";
-    return "bg-amber-100 text-amber-700";
+  const handleExportAll = async () => {
+    setExporting(true);
+    try {
+      // Export all sections into a single CSV
+      const lines: string[] = [];
+      for (const section of sections) {
+        const hasSecondary = section.data.some((d) => d.secondary !== undefined);
+        lines.push(`"${section.title}"`);
+        lines.push(hasSecondary ? "Label,Value,Secondary" : "Label,Value");
+        for (const d of section.data) {
+          lines.push(hasSecondary ? `"${d.label}",${d.value},${d.secondary ?? ""}` : `"${d.label}",${d.value}`);
+        }
+        lines.push(""); // blank separator
+      }
+      const csv = lines.join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "analytics_report_all.csv";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success("Report exported successfully");
+    } catch {
+      toast.error("Export failed");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const inputStyle: React.CSSProperties = {
+    padding: "6px 10px", borderRadius: "7px", border: "1px solid #E5E7EB",
+    fontSize: "12.5px", color: "#111827", background: "#FFF", outline: "none",
+    fontFamily: "'Work Sans', sans-serif", height: "34px", boxSizing: "border-box" as const,
   };
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Reports & Analytics"
-        description="Generate, download, and schedule automated reports"
-        variant="light"
-        actions={
-          <Button variant="outline" size="sm" onClick={() => { void loadStats(); void loadHistory(); void loadSchedules(); }} disabled={isLoading}>
-            <RefreshCw className={`w-4 h-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
+    <div style={{ fontFamily: "'Work Sans', sans-serif" }}>
+      {/* ── Header ─── */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px", marginBottom: "20px", flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ fontSize: "18px", fontWeight: 900, color: "#111827", letterSpacing: "-0.02em", margin: 0 }}>Reports & Analytics</h1>
+          <p style={{ marginTop: "4px", fontSize: "13px", color: "#6B7280" }}>Platform-wide performance metrics and trend analysis.</p>
+        </div>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button type="button" onClick={() => void load()} disabled={loading}
+            style={{ display: "flex", alignItems: "center", gap: "6px", padding: "8px 14px", borderRadius: "8px", background: "#FFF", color: "#374151", border: "1px solid #E5E7EB", cursor: loading ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 600, fontFamily: "'Work Sans', sans-serif", opacity: loading ? 0.6 : 1 }}>
+            <RefreshCw style={{ width: "13px", height: "13px", animation: loading ? "spin 1s linear infinite" : "none" }} />
             Refresh
-          </Button>
-        }
-      />
-
-      {/* KPI Cards */}
-      <div className="grid grid-cols-4 gap-4">
-        <Card className="p-6 border border-[#E2E8F0]">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-[#64748B] uppercase tracking-wider">Total Generated</p>
-              <p className="text-3xl font-bold text-[#0F172A] mt-2">{stats.totalGenerated}</p>
-            </div>
-            <FileText className="w-10 h-10 text-blue-300" />
-          </div>
-        </Card>
-        <Card className="p-6 border border-[#E2E8F0]">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-[#64748B] uppercase tracking-wider">This Month</p>
-              <p className="text-3xl font-bold text-[#0F172A] mt-2">{stats.generatedThisMonth}</p>
-            </div>
-            <CalendarClock className="w-10 h-10 text-emerald-300" />
-          </div>
-        </Card>
-        <Card className="p-6 border border-[#E2E8F0]">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-[#64748B] uppercase tracking-wider">Active Schedules</p>
-              <p className="text-3xl font-bold text-[#0F172A] mt-2">{stats.activeSchedules}</p>
-            </div>
-            <CheckCircle2 className="w-10 h-10 text-amber-300" />
-          </div>
-        </Card>
-        <Card className="p-6 border border-[#E2E8F0]">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs font-medium text-[#64748B] uppercase tracking-wider">Last Generated</p>
-              <p className="text-sm font-medium text-[#0F172A] mt-2">{stats.lastGeneratedAt ? formatDateTime(stats.lastGeneratedAt) : "—"}</p>
-            </div>
-            <RefreshCw className="w-10 h-10 text-cyan-300" />
-          </div>
-        </Card>
+          </button>
+          <ExportButton onExport={() => void handleExportAll()} loading={exporting} />
+        </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-[#E2E8F0]">
-        <button
-          onClick={() => setActiveTab("reports")}
-          className={`px-4 py-3 text-sm font-medium border-b-2 transition ${activeTab === "reports" ? "border-blue-600 text-blue-600" : "border-transparent text-[#64748B] hover:text-[#334155]"}`}
-        >
-          <FileText className="w-4 h-4 inline mr-2" />
-          Reports
-        </button>
-        <button
-          onClick={() => setActiveTab("schedules")}
-          className={`px-4 py-3 text-sm font-medium border-b-2 transition ${activeTab === "schedules" ? "border-blue-600 text-blue-600" : "border-transparent text-[#64748B] hover:text-[#334155]"}`}
-        >
-          <CalendarClock className="w-4 h-4 inline mr-2" />
-          Schedules
-        </button>
+      {/* ── KPI cards ─── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px", marginBottom: "16px" }}>
+        {kpis.map((k) => <StatCard key={k.key} icon={k.icon} title={k.label} value={String(k.value)} />)}
       </div>
 
-      {activeTab === "reports" ? (
-        <div className="space-y-6">
-          {/* Report Type Cards Grid */}
-          <div>
-            <p className="text-sm text-[#64748B] mb-4">Click any card to generate an instant report</p>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-              {REPORT_OPTIONS.map(({ key, label, description, icon: Icon, bgColor, textColor }) => (
-                <Card
-                  key={key}
-                  className="border border-[#E2E8F0] p-4 rounded-xl hover:border-blue-400 hover:shadow-sm transition cursor-pointer group"
-                  onClick={() => { setSelectedReportType(key); setShowGenerateModal(true); }}
-                >
-                  <div className={`w-9 h-9 rounded-lg ${bgColor} flex items-center justify-center mb-3`}>
-                    <Icon className={`w-4 h-4 ${textColor}`} />
-                  </div>
-                  <p className="text-sm font-semibold text-[#0F172A] mb-1">{label}</p>
-                  <p className="text-xs text-[#64748B] line-clamp-2">{description}</p>
-                  <div className="mt-3 flex items-center gap-1 text-blue-500 text-xs opacity-0 group-hover:opacity-100 transition">
-                    <Download className="w-3 h-3" />
-                    <span>Generate</span>
-                  </div>
-                </Card>
-              ))}
+      {/* ── Filter bar ─── */}
+      <div style={{ borderRadius: "10px", border: "1px solid #EBEBEB", background: "#FFF", overflow: "hidden", marginBottom: "14px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 14px", borderBottom: filtersOpen && range === "custom" ? "1px solid #F3F4F6" : "none" }}>
+          <Calendar style={{ width: "13px", height: "13px", color: "#9CA3AF", flexShrink: 0 }} />
+          <span style={{ fontSize: "12.5px", color: "#6B7280", fontWeight: 500 }}>Time range:</span>
+          <div style={{ display: "flex", gap: "4px" }}>
+            {(["7d", "30d", "90d", "12m", "custom"] as DateRange[]).map((r) => (
+              <button key={r} type="button" onClick={() => { setRange(r); if (r !== "custom") setFiltersOpen(false); else setFiltersOpen(true); }}
+                style={{ padding: "4px 10px", borderRadius: "5px", fontSize: "11.5px", fontWeight: 700, fontFamily: "'Work Sans', sans-serif", cursor: "pointer", border: `1px solid ${range === r ? "#2563EB40" : "#E5E7EB"}`, background: range === r ? "#EFF6FF" : "#FAFAFA", color: range === r ? "#2563EB" : "#6B7280", transition: "all 120ms ease" }}>
+                {r === "7d" ? "7 days" : r === "30d" ? "30 days" : r === "90d" ? "90 days" : r === "12m" ? "12 months" : "Custom"}
+              </button>
+            ))}
+          </div>
+          <button type="button" onClick={() => setFiltersOpen((p) => !p)}
+            style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "5px", padding: "5px 10px", borderRadius: "6px", border: "1px solid #E5E7EB", background: "#FAFAFA", color: "#6B7280", fontSize: "11.5px", fontWeight: 600, cursor: "pointer", fontFamily: "'Work Sans', sans-serif" }}>
+            <SlidersHorizontal style={{ width: "11px", height: "11px" }} />
+            Filters
+            <ChevronDown style={{ width: "10px", height: "10px", transform: filtersOpen ? "rotate(180deg)" : "none", transition: "transform 150ms" }} />
+          </button>
+        </div>
+        {filtersOpen && (
+          <div style={{ padding: "10px 14px", display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <label style={{ fontSize: "10.5px", fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.06em" }}>From</label>
+              <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} style={{ ...inputStyle, width: "140px" }} />
             </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <label style={{ fontSize: "10.5px", fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.06em" }}>To</label>
+              <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} style={{ ...inputStyle, width: "140px" }} />
+            </div>
+            <button type="button" onClick={() => void load()}
+              style={{ alignSelf: "flex-end", padding: "7px 14px", borderRadius: "7px", background: "#111827", color: "#FFF", border: "none", cursor: "pointer", fontSize: "12.5px", fontWeight: 700, fontFamily: "'Work Sans', sans-serif", height: "34px" }}>
+              Apply
+            </button>
           </div>
+        )}
+      </div>
 
-          {/* Recent Reports Table */}
-          <div>
-            <h2 className="text-base font-semibold text-[#0F172A] mb-3">Generated Reports</h2>
-            {(() => {
-              const cols: DataTableColumn<HistoryRow>[] = [
-                { key: "name", header: "Report Name", render: (r) => <span className="text-[#0F172A] font-medium">{r.label}</span> },
-                { key: "type", header: "Type", render: (r) => <span className="text-[#64748B] text-sm">{humanizeEnum(r.reportType)}</span> },
-                { key: "format", header: "Format", render: (r) => <Badge className={getFormatBadgeColor(r.format)}>{r.format.toUpperCase()}</Badge> },
-                { key: "rows", header: "Rows", render: (r) => <span className="text-[#334155] font-medium">{r.rowCount}</span> },
-                { key: "generated", header: "Generated", render: (r) => <span className="text-[#64748B] text-sm">{formatDateTime(r.generatedAt)}</span> },
-                { key: "actions", header: "Actions", render: (r) => (
-                  <Button variant="ghost" size="sm" onClick={() => void downloadReport(r.id, r.filename)} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50">
-                    <Download className="w-4 h-4" />
-                  </Button>
-                )},
-              ];
-              return (
-                <Card className="border border-[#E2E8F0] rounded-xl overflow-hidden">
-                  <DataTable columns={cols} rows={history} rowKey={(r) => r.id} emptyTitle="No reports generated yet" emptyDescription="Generated reports will appear here" />
-                </Card>
-              );
-            })()}
-          </div>
+      {/* ── Report sections ─── */}
+      {loading ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} style={{ height: "68px", borderRadius: "10px", background: "linear-gradient(90deg, #F3F4F6 25%, #E9EAEC 50%, #F3F4F6 75%)", backgroundSize: "200% 100%" }} />
+          ))}
         </div>
       ) : (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-[#64748B]">Manage automatic report generation schedules</p>
-            <Button onClick={() => setShowScheduleModal(true)} className="bg-[#0B5FFF] text-white hover:bg-[#0B5FFF]/90">
-              <CalendarClock className="w-4 h-4 mr-2" />
-              Create Schedule
-            </Button>
-          </div>
-
-          <div className="grid gap-3">
-            {schedules.length === 0 ? (
-              <Card className="border border-[#E2E8F0] rounded-xl p-12 text-center">
-                <CalendarClock className="w-12 h-12 text-[#CBD5E1] mx-auto mb-3" />
-                <p className="text-[#64748B]">No schedules created yet</p>
-              </Card>
-            ) : (
-              schedules.map((schedule) => (
-                <Card key={schedule.id} className="border border-[#E2E8F0] rounded-xl p-5 hover:shadow-sm transition">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <p className="text-[#0F172A] font-semibold">{schedule.label}</p>
-                        <Badge className={schedule.isEnabled ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}>
-                          {schedule.isEnabled ? "Active" : "Paused"}
-                        </Badge>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-3 text-xs text-[#64748B]">
-                        <span>{humanizeEnum(schedule.reportType)}</span>
-                        <span>•</span>
-                        <span>{schedule.format.toUpperCase()}</span>
-                        <span>•</span>
-                        <span>{schedule.frequency}</span>
-                        <span>•</span>
-                        <span>Next: {schedule.nextRunAt ? formatDateTime(schedule.nextRunAt) : "—"}</span>
-                      </div>
-                      {schedule.recipientEmails && schedule.recipientEmails.length > 0 && (
-                        <p className="text-xs text-[#64748B] mt-1">📧 {schedule.recipientEmails.join(", ")}</p>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Button variant="ghost" size="sm" onClick={() => void runScheduleNow(schedule.id)} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50">
-                        <Play className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => void toggleSchedule(schedule.id, !schedule.isEnabled)}
-                        className={schedule.isEnabled ? "text-amber-600 hover:text-amber-700 hover:bg-amber-50" : "text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50"}
-                      >
-                        {schedule.isEnabled ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                      </Button>
-                    </div>
-                  </div>
-                </Card>
-              ))
-            )}
-          </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+          {sections.map((s) => <ReportCard key={s.id} section={s} />)}
         </div>
       )}
 
-      {/* Generate Report Modal */}
-      {showGenerateModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4" onClick={() => setShowGenerateModal(false)}>
-          <Card className="bg-white border border-[#E2E8F0] rounded-xl p-6 w-[420px] shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-base font-semibold text-[#0F172A]">
-                Generate {REPORT_OPTIONS.find((r) => r.key === selectedReportType)?.label}
-              </h2>
-              <button onClick={() => setShowGenerateModal(false)} className="p-1 rounded text-[#64748B] hover:text-[#334155] hover:bg-[#F1F5F9]">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div className="space-y-1.5">
-                <Label className="text-[#334155]">Date Range</Label>
-                <div className="grid grid-cols-2 gap-3">
-                  <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} placeholder="From" />
-                  <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} placeholder="To" />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-[#334155]">Export Format</Label>
-                <div className="grid grid-cols-4 gap-2">
-                  {(["csv", "xlsx", "pdf", "json"] as const).map((fmt) => (
-                    <button
-                      key={fmt}
-                      onClick={() => setExportFormat(fmt)}
-                      className={`py-2 px-3 rounded-lg text-xs font-medium border transition ${exportFormat === fmt ? "bg-blue-600 text-white border-blue-600" : "bg-white text-[#334155] border-[#CBD5E1] hover:border-blue-400"}`}
-                    >
-                      {fmt.toUpperCase()}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-3 mt-6">
-              <Button variant="outline" onClick={() => setShowGenerateModal(false)}>Cancel</Button>
-              <Button onClick={() => { void generateReport(selectedReportType); }} disabled={isGenerating} className="bg-[#0B5FFF] text-white hover:bg-[#0B5FFF]/90">
-                {isGenerating ? <Loader className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
-                {isGenerating ? "Generating..." : "Generate & Download"}
-              </Button>
-            </div>
-          </Card>
-        </div>
-      )}
-
-      {/* Create Schedule Modal */}
-      {showScheduleModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4" onClick={() => setShowScheduleModal(false)}>
-          <Card className="bg-white border border-[#E2E8F0] rounded-xl p-6 w-[480px] shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-base font-semibold text-[#0F172A]">Create Report Schedule</h2>
-              <button onClick={() => setShowScheduleModal(false)} className="p-1 rounded text-[#64748B] hover:text-[#334155] hover:bg-[#F1F5F9]">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              <div className="space-y-1.5">
-                <Label className="text-[#334155]">Schedule Label</Label>
-                <Input
-                  value={scheduleForm.label}
-                  onChange={(e) => setScheduleForm((prev) => ({ ...prev, label: e.target.value }))}
-                  placeholder="e.g. Weekly Occupancy Report"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-[#334155]">Report Type</Label>
-                <Select value={scheduleForm.reportType} onValueChange={(v) => setScheduleForm((prev) => ({ ...prev, reportType: v as ReportKey }))}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {REPORT_OPTIONS.map((r) => (
-                      <SelectItem key={r.key} value={r.key}>{r.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label className="text-[#334155]">Format</Label>
-                  <Select value={scheduleForm.format} onValueChange={(v) => setScheduleForm((prev) => ({ ...prev, format: v as ExportFormat }))}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(["csv", "xlsx", "pdf", "json"] as const).map((fmt) => (
-                        <SelectItem key={fmt} value={fmt}>{fmt.toUpperCase()}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label className="text-[#334155]">Frequency</Label>
-                  <Select value={scheduleForm.frequency} onValueChange={(v) => setScheduleForm((prev) => ({ ...prev, frequency: v }))}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {FREQUENCY_OPTIONS.map((f) => (
-                        <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-[#334155]">Recipient Emails (optional, comma-separated)</Label>
-                <Input
-                  value={scheduleForm.recipientEmails}
-                  onChange={(e) => setScheduleForm((prev) => ({ ...prev, recipientEmails: e.target.value }))}
-                  placeholder="admin@company.com, finance@company.com"
-                />
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-3 mt-6">
-              <Button variant="outline" onClick={() => setShowScheduleModal(false)}>Cancel</Button>
-              <Button onClick={() => void createSchedule()} disabled={isCreatingSchedule} className="bg-[#0B5FFF] text-white hover:bg-[#0B5FFF]/90">
-                {isCreatingSchedule ? <Loader className="w-4 h-4 mr-2 animate-spin" /> : <CalendarClock className="w-4 h-4 mr-2" />}
-                {isCreatingSchedule ? "Creating..." : "Create Schedule"}
-              </Button>
-            </div>
-          </Card>
-        </div>
-      )}
+      <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
     </div>
   );
 }

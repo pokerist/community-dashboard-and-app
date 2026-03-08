@@ -1,443 +1,352 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Card } from "../ui/card";
-import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
 import { toast } from "sonner";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogFooter,
-} from "../ui/dialog";
-import { Label } from "../ui/label";
-import { Input } from "../ui/input";
-import { Textarea } from "../ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { DataTable, type DataTableColumn } from "../DataTable";
-import { AlertTriangle, CheckCircle, Clock, Flame, Video } from "lucide-react";
+  AlertTriangle, CheckCircle, Clock, Video, Flame,
+  RefreshCw, Plus, X, Check, Shield,
+} from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog";
+import { StatCard } from "../StatCard";
+import { StatusBadge } from "../StatusBadge";
 import apiClient from "../../lib/api-client";
-import {
-  errorMessage,
-  extractRows,
-  formatDateTime,
-  getPriorityColorClass,
-  getStatusColorClass,
-  humanizeEnum,
-} from "../../lib/live-data";
+import { errorMessage, extractRows, formatDateTime, humanizeEnum, getPriorityColorClass, getStatusColorClass } from "../../lib/live-data";
+
+// ─── Types ────────────────────────────────────────────────────
+
+type Incident = {
+  id: string; incidentNumber?: string; type: string; location?: string | null;
+  residentName?: string | null; description: string; priority: string;
+  status: string; responseTime?: string | null; reportedAt?: string; createdAt?: string;
+  unit?: { unitNumber: string } | null;
+};
+
+type FireStatus = {
+  active?: boolean; triggeredAt?: string | null;
+  counters?: { totalRecipients: number; acknowledged: number; pending: number };
+  pendingRecipients?: Array<{ userId: string; name?: string }>;
+};
+
+// ─── Design tokens ────────────────────────────────────────────
+
+const inputStyle: React.CSSProperties = {
+  width: "100%", padding: "8px 10px", borderRadius: "7px", border: "1px solid #E5E7EB",
+  fontSize: "13px", color: "#111827", background: "#FFF", outline: "none",
+  fontFamily: "'Work Sans', sans-serif", boxSizing: "border-box", height: "36px",
+};
+const textareaStyle: React.CSSProperties = { ...inputStyle, height: "auto", resize: "vertical" as const };
+const selectStyle: React.CSSProperties = { ...inputStyle, cursor: "pointer" };
+
+// ─── Primitives ───────────────────────────────────────────────
+
+function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+      <label style={{ fontSize: "10.5px", fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: "'Work Sans', sans-serif" }}>
+        {label}{required && <span style={{ color: "#DC2626", marginLeft: "3px" }}>*</span>}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+function SectionLabel({ icon, label }: { icon: React.ReactNode; label: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "10px", paddingBottom: "8px", borderBottom: "1px solid #F3F4F6" }}>
+      <span style={{ color: "#9CA3AF" }}>{icon}</span>
+      <span style={{ fontSize: "11px", fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: "'Work Sans', sans-serif" }}>{label}</span>
+    </div>
+  );
+}
+
+// ─── Incident row ─────────────────────────────────────────────
+
+function IncidentRow({ row }: { row: Incident }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto auto auto auto auto auto", alignItems: "center", gap: "12px", padding: "11px 14px", borderBottom: "1px solid #F9FAFB", transition: "background 100ms" }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "#FAFAFA"; }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}>
+      <span style={{ fontSize: "11px", fontFamily: "'DM Mono', monospace", color: "#9CA3AF", whiteSpace: "nowrap" }}>{row.incidentNumber ?? row.id.slice(0, 8)}</span>
+      <div style={{ minWidth: 0 }}>
+        <p style={{ fontSize: "13px", fontWeight: 600, color: "#111827", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.type}</p>
+        {row.description && <p style={{ fontSize: "11.5px", color: "#9CA3AF", margin: "1px 0 0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.description}</p>}
+      </div>
+      <span style={{ fontSize: "12px", color: "#6B7280", whiteSpace: "nowrap" }}>{row.location ?? row.unit?.unitNumber ?? "—"}</span>
+      <span style={{ fontSize: "12px", color: "#374151", whiteSpace: "nowrap" }}>{row.residentName ?? "—"}</span>
+      <span className={getPriorityColorClass(row.priority)} style={{ fontSize: "11.5px", fontWeight: 700, padding: "2px 7px", borderRadius: "5px", whiteSpace: "nowrap" }}>{humanizeEnum(row.priority)}</span>
+      <StatusBadge value={row.status} />
+      <span style={{ fontSize: "11.5px", color: "#9CA3AF", fontFamily: "'DM Mono', monospace", whiteSpace: "nowrap" }}>{row.responseTime ?? "—"}</span>
+      <span style={{ fontSize: "11.5px", color: "#9CA3AF", fontFamily: "'DM Mono', monospace", whiteSpace: "nowrap" }}>{formatDateTime(row.reportedAt ?? row.createdAt ?? "")}</span>
+    </div>
+  );
+}
+
+// ─── Main ─────────────────────────────────────────────────────
 
 export function SecurityEmergency() {
-  const [isReportDialogOpen, setIsReportDialogOpen] = useState(false);
-  const [incidentsData, setIncidentsData] = useState<any[]>([]);
-  const [cards, setCards] = useState<any>({});
-  const [isLoading, setIsLoading] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [cards, setCards] = useState<Record<string, unknown>>({});
+  const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [fireStatus, setFireStatus] = useState<any | null>(null);
-  const [fireMessageEn, setFireMessageEn] = useState(
-    "Emergency alarm triggered. Please evacuate immediately and confirm once you are safe.",
-  );
-  const [fireMessageAr, setFireMessageAr] = useState(
-    "تم إطلاق إنذار حريق. يرجى الإخلاء فورًا وتأكيد الوصول إلى مكان آمن.",
-  );
-  const [isFireDialogOpen, setIsFireDialogOpen] = useState(false);
-  const [isFireTriggering, setIsFireTriggering] = useState(false);
-  const [isFireResolving, setIsFireResolving] = useState(false);
-  const [reportFormData, setReportFormData] = useState({
-    type: "",
-    location: "",
-    resident: "",
-    description: "",
-    priority: "MEDIUM",
-  });
+  const [fireStatus, setFireStatus] = useState<FireStatus | null>(null);
+
+  // Report dialog
+  const [reportOpen, setReportOpen] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [reportForm, setReportForm] = useState({ type: "", location: "", resident: "", description: "", priority: "MEDIUM" });
+
+  // Fire dialog
+  const [fireDialogOpen, setFireDialogOpen] = useState(false);
+  const [fireTriggering, setFireTriggering] = useState(false);
+  const [fireResolving, setFireResolving] = useState(false);
+  const [fireMessageEn, setFireMessageEn] = useState("Emergency alarm triggered. Please evacuate immediately and confirm once you are safe.");
+  const [fireMessageAr, setFireMessageAr] = useState("تم إطلاق إنذار الطوارئ. يرجى الإخلاء فورًا وتأكيد الوصول إلى مكان آمن.");
 
   const loadIncidents = useCallback(async () => {
-    setIsLoading(true);
-    setLoadError(null);
+    setLoading(true); setLoadError(null);
     try {
       const [cardsRes, listRes, fireRes] = await Promise.all([
         apiClient.get("/incidents/cards"),
         apiClient.get("/incidents/list", { params: { page: 1, limit: 100 } }),
         apiClient.get("/fire-evacuation/admin/status").catch(() => ({ data: null })),
       ]);
-      setCards(cardsRes.data ?? {});
-      setIncidentsData(extractRows(listRes.data));
-      setFireStatus(fireRes?.data ?? null);
-    } catch (error) {
-      const msg = errorMessage(error);
-      setLoadError(msg);
-      toast.error("Failed to load incidents", { description: msg });
-    } finally {
-      setIsLoading(false);
-    }
+      setCards(cardsRes.data ?? {}); setIncidents(extractRows(listRes.data)); setFireStatus(fireRes?.data ?? null);
+    } catch (e) { const msg = errorMessage(e); setLoadError(msg); toast.error("Failed to load incidents", { description: msg }); }
+    finally { setLoading(false); }
   }, []);
 
-  const handleTriggerFireEvacuation = useCallback(async () => {
-    setIsFireTriggering(true);
-    try {
-      const response = await apiClient.post("/fire-evacuation/admin/trigger", {
-        messageEn: fireMessageEn,
-        messageAr: fireMessageAr,
-      });
-      setFireStatus(response.data ?? null);
-      setIsFireDialogOpen(false);
-      toast.success("Fire evacuation alert triggered");
-    } catch (error) {
-      toast.error("Failed to trigger fire evacuation", { description: errorMessage(error) });
-    } finally {
-      setIsFireTriggering(false);
-    }
-  }, [fireMessageAr, fireMessageEn]);
+  useEffect(() => { void loadIncidents(); }, [loadIncidents]);
 
-  const handleResolveFireEvacuation = useCallback(async () => {
-    setIsFireResolving(true);
+  const handleReport = async () => {
+    if (!reportForm.type || !reportForm.description || !reportForm.priority) { toast.error("Fill all required fields"); return; }
+    setSubmitting(true);
     try {
-      const response = await apiClient.post("/fire-evacuation/admin/resolve", {
-        note: "Evacuation alert closed by admin",
-      });
-      setFireStatus(response.data ?? null);
-      toast.success("Fire evacuation alert resolved");
-    } catch (error) {
-      toast.error("Failed to resolve fire evacuation", { description: errorMessage(error) });
-    } finally {
-      setIsFireResolving(false);
-    }
-  }, []);
+      await apiClient.post("/incidents", { type: reportForm.type, location: reportForm.location || undefined, residentName: reportForm.resident || undefined, description: reportForm.description, priority: reportForm.priority });
+      toast.success("Incident reported"); setReportOpen(false); setReportForm({ type: "", location: "", resident: "", description: "", priority: "MEDIUM" }); await loadIncidents();
+    } catch (e) { toast.error("Failed to report", { description: errorMessage(e) }); }
+    finally { setSubmitting(false); }
+  };
 
-  useEffect(() => {
-    void loadIncidents();
-  }, [loadIncidents]);
-
-  const handleReportEmergency = async () => {
-    if (!reportFormData.type || !reportFormData.description || !reportFormData.priority) {
-      toast.error("Please fill in all required fields");
-      return;
-    }
-    setIsSubmitting(true);
+  const triggerFire = async () => {
+    setFireTriggering(true);
     try {
-      await apiClient.post("/incidents", {
-        type: reportFormData.type,
-        location: reportFormData.location || undefined,
-        residentName: reportFormData.resident || undefined,
-        description: reportFormData.description,
-        priority: reportFormData.priority,
-      });
-      toast.success("Incident reported");
-      setIsReportDialogOpen(false);
-      setReportFormData({ type: "", location: "", resident: "", description: "", priority: "MEDIUM" });
-      await loadIncidents();
-    } catch (error) {
-      toast.error("Failed to report incident", { description: errorMessage(error) });
-    } finally {
-      setIsSubmitting(false);
-    }
+      const res = await apiClient.post("/fire-evacuation/admin/trigger", { messageEn: fireMessageEn, messageAr: fireMessageAr });
+      setFireStatus(res.data ?? null); setFireDialogOpen(false); toast.success("Emergency alarm triggered — notifications sent to all residents");
+    } catch (e) { toast.error("Failed to trigger", { description: errorMessage(e) }); }
+    finally { setFireTriggering(false); }
+  };
+
+  const resolveFire = async () => {
+    setFireResolving(true);
+    try {
+      const res = await apiClient.post("/fire-evacuation/admin/resolve", { note: "Evacuation alert closed by admin" });
+      setFireStatus(res.data ?? null); toast.success("Emergency alarm resolved");
+    } catch (e) { toast.error("Failed to resolve", { description: errorMessage(e) }); }
+    finally { setFireResolving(false); }
   };
 
   const activeIncidents = Number(cards?.activeIncidents ?? 0);
   const resolvedToday = Number(cards?.incidentsResolvedToday ?? 0);
-  const avgResponseTime = Number(cards?.averageResponseTime ?? 0);
+  const avgResponse = Number(cards?.averageResponseTime ?? 0);
   const totalCameras = Number(cards?.totalCCTVCameras ?? 0);
 
-  const openRows = useMemo(
-    () => incidentsData.filter((i) => String(i.status || "").toUpperCase() !== "RESOLVED"),
-    [incidentsData],
-  );
+  const fireActive = !!fireStatus?.active;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div style={{ fontFamily: "'Work Sans', sans-serif" }}>
+      {/* ── Header ─── */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px", marginBottom: "20px", flexWrap: "wrap" }}>
         <div>
-          <h1 className="text-[#1E293B]">Security & Emergency</h1>
-          <p className="text-[#64748B] mt-1">Live incident monitoring and emergency reporting</p>
+          <h1 style={{ fontSize: "18px", fontWeight: 900, color: "#111827", letterSpacing: "-0.02em", margin: 0 }}>Emergency & Safety</h1>
+          <p style={{ marginTop: "4px", fontSize: "13px", color: "#6B7280" }}>Live incident monitoring and emergency reporting.</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => void loadIncidents()} disabled={isLoading}>
-            {isLoading ? "Refreshing..." : "Refresh"}
-          </Button>
-          <Dialog open={isReportDialogOpen} onOpenChange={setIsReportDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="bg-[#EF4444] hover:bg-[#EF4444]/90 text-white rounded-lg gap-2">
-                <AlertTriangle className="w-4 h-4" />
-                Report Emergency
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-lg">
-              <DialogHeader>
-                <DialogTitle>Report Security Incident</DialogTitle>
-                <DialogDescription>Creates a real incident record via backend.</DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label htmlFor="incidentType">Incident Type</Label>
-                  <Input
-                    id="incidentType"
-                    placeholder="Security Breach / Medical Emergency..."
-                    value={reportFormData.type}
-                    onChange={(e) => setReportFormData((p) => ({ ...p, type: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="location">Location</Label>
-                  <Input
-                    id="location"
-                    placeholder="Block C - Main Entrance"
-                    value={reportFormData.location}
-                    onChange={(e) => setReportFormData((p) => ({ ...p, location: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="residentName">Resident Name (Optional)</Label>
-                  <Input
-                    id="residentName"
-                    placeholder="Resident involved"
-                    value={reportFormData.resident}
-                    onChange={(e) => setReportFormData((p) => ({ ...p, resident: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="priority">Priority</Label>
-                  <Select
-                    value={reportFormData.priority}
-                    onValueChange={(value) => setReportFormData((p) => ({ ...p, priority: value }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select priority" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="LOW">Low</SelectItem>
-                      <SelectItem value="MEDIUM">Medium</SelectItem>
-                      <SelectItem value="HIGH">High</SelectItem>
-                      <SelectItem value="CRITICAL">Critical</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="description">Description</Label>
-                  <Textarea
-                    id="description"
-                    placeholder="Describe the incident..."
-                    rows={3}
-                    value={reportFormData.description}
-                    onChange={(e) => setReportFormData((p) => ({ ...p, description: e.target.value }))}
-                  />
-                </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setIsReportDialogOpen(false)}>Cancel</Button>
-                <Button className="bg-[#EF4444] hover:bg-[#EF4444]/90 text-white" onClick={() => void handleReportEmergency()} disabled={isSubmitting}>
-                  {isSubmitting ? "Reporting..." : "Report Now"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button type="button" onClick={() => void loadIncidents()} disabled={loading}
+            style={{ display: "flex", alignItems: "center", gap: "6px", padding: "8px 14px", borderRadius: "8px", background: "#FFF", color: "#374151", border: "1px solid #E5E7EB", cursor: loading ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 600, fontFamily: "'Work Sans', sans-serif", opacity: loading ? 0.6 : 1 }}>
+            <RefreshCw style={{ width: "13px", height: "13px", animation: loading ? "spin 1s linear infinite" : "none" }} />
+            Refresh
+          </button>
+          <button type="button" onClick={() => setReportOpen(true)}
+            style={{ display: "flex", alignItems: "center", gap: "6px", padding: "8px 16px", borderRadius: "8px", background: "#DC2626", color: "#FFF", border: "none", cursor: "pointer", fontSize: "13px", fontWeight: 700, fontFamily: "'Work Sans', sans-serif", boxShadow: "0 2px 6px rgba(220,38,38,0.3)" }}>
+            <AlertTriangle style={{ width: "13px", height: "13px" }} /> Report Incident
+          </button>
         </div>
       </div>
 
-      {loadError ? (
-        <Card className="p-4 border border-[#FECACA] bg-[#FEF2F2] text-[#991B1B] rounded-xl">{loadError}</Card>
-      ) : null}
+      {loadError && (
+        <div style={{ padding: "12px 14px", borderRadius: "8px", border: "1px solid #FECACA", background: "#FEF2F2", color: "#991B1B", fontSize: "13px", marginBottom: "16px" }}>{loadError}</div>
+      )}
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="p-6 shadow-card rounded-xl">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[#64748B] mb-2">Active Incidents</p>
-              <h3 className="text-[#1E293B]">{activeIncidents}</h3>
-              <p className="text-xs text-[#EF4444] mt-1">{openRows.length} open in table</p>
-            </div>
-            <div className="w-12 h-12 rounded-xl bg-[#EF4444]/10 flex items-center justify-center">
-              <AlertTriangle className="w-6 h-6 text-[#EF4444]" />
-            </div>
-          </div>
-        </Card>
-        <Card className="p-6 shadow-card rounded-xl">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[#64748B] mb-2">Resolved Today</p>
-              <h3 className="text-[#1E293B]">{resolvedToday}</h3>
-            </div>
-            <div className="w-12 h-12 rounded-xl bg-[#10B981]/10 flex items-center justify-center">
-              <CheckCircle className="w-6 h-6 text-[#10B981]" />
-            </div>
-          </div>
-        </Card>
-        <Card className="p-6 shadow-card rounded-xl">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[#64748B] mb-2">Avg Response Time</p>
-              <h3 className="text-[#1E293B]">{avgResponseTime || 0} min</h3>
-            </div>
-            <div className="w-12 h-12 rounded-xl bg-[#3B82F6]/10 flex items-center justify-center">
-              <Clock className="w-6 h-6 text-[#3B82F6]" />
-            </div>
-          </div>
-        </Card>
-        <Card className="p-6 shadow-card rounded-xl">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[#64748B] mb-2">CCTV Cameras</p>
-              <h3 className="text-[#1E293B]">{totalCameras}</h3>
-              <p className="text-xs text-[#64748B] mt-1">From incident cards endpoint</p>
-            </div>
-            <div className="w-12 h-12 rounded-xl bg-[#0B5FFF]/10 flex items-center justify-center">
-              <Video className="w-6 h-6 text-[#0B5FFF]" />
-            </div>
-          </div>
-        </Card>
+      {/* ── Stats ─── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px", marginBottom: "16px" }}>
+        <StatCard title="Active Incidents" value={String(activeIncidents)} icon="complaints-open" />
+        <StatCard title="Resolved Today" value={String(resolvedToday)} icon="active-users" />
+        <StatCard title="Avg Response" value={`${avgResponse}m`} icon="tickets" />
+        <StatCard title="CCTV Cameras" value={String(totalCameras)} icon="devices" />
       </div>
 
-      <Card className="p-5 shadow-card rounded-xl border border-[#FCA5A5] bg-gradient-to-r from-[#FEF2F2] to-[#FFF7ED]">
-        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <Flame className="w-5 h-5 text-[#DC2626]" />
-              <h3 className="text-[#7F1D1D]">Fire Evacuation</h3>
-              {fireStatus?.active ? (
-                <Badge className="bg-[#DC2626] text-white">Active Alarm</Badge>
-              ) : (
-                <Badge variant="secondary" className="bg-[#E2E8F0] text-[#334155]">Standby</Badge>
+      {/* ── Emergency Alarm panel ─── */}
+      <div style={{
+        borderRadius: "10px", border: `1px solid ${fireActive ? "#FECACA" : "#EBEBEB"}`,
+        background: fireActive ? "linear-gradient(135deg, #FEF2F2 0%, #FFF7ED 100%)" : "#FFF",
+        padding: "16px", marginBottom: "16px", transition: "all 300ms ease",
+      }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px", flexWrap: "wrap" }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "5px" }}>
+              <Flame style={{ width: "16px", height: "16px", color: fireActive ? "#DC2626" : "#9CA3AF" }} />
+              <span style={{ fontSize: "13px", fontWeight: 800, color: fireActive ? "#7F1D1D" : "#111827" }}>Emergency Alarm</span>
+              <span style={{ fontSize: "10px", fontWeight: 700, padding: "2px 7px", borderRadius: "4px", background: fireActive ? "#DC2626" : "#F3F4F6", color: fireActive ? "#FFF" : "#9CA3AF", fontFamily: "'Work Sans', sans-serif" }}>
+                {fireActive ? "ACTIVE ALARM" : "Standby"}
+              </span>
+            </div>
+            <p style={{ fontSize: "12.5px", color: fireActive ? "#991B1B" : "#6B7280", margin: 0 }}>Trigger emergency alarm for all residents and track acknowledgements in real time.</p>
+            {fireStatus?.triggeredAt && <p style={{ fontSize: "11.5px", color: "#9CA3AF", margin: "4px 0 0", fontFamily: "'DM Mono', monospace" }}>Last: {formatDateTime(fireStatus.triggeredAt)}</p>}
+          </div>
+          <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+            <button type="button" onClick={() => setFireDialogOpen(true)}
+              style={{ display: "flex", alignItems: "center", gap: "6px", padding: "8px 18px", borderRadius: "8px", background: "#DC2626", color: "#FFF", border: "2px solid #B91C1C", cursor: "pointer", fontSize: "13px", fontWeight: 800, fontFamily: "'Work Sans', sans-serif", boxShadow: "0 3px 8px rgba(220,38,38,0.4)", letterSpacing: "0.02em", transition: "all 150ms ease" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#B91C1C"; e.currentTarget.style.boxShadow = "0 4px 12px rgba(185,28,28,0.5)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "#DC2626"; e.currentTarget.style.boxShadow = "0 3px 8px rgba(220,38,38,0.4)"; }}>
+              <Flame style={{ width: "14px", height: "14px" }} /> Trigger Alarm
+            </button>
+            <button type="button" onClick={() => void resolveFire()} disabled={!fireActive || fireResolving}
+              style={{ display: "flex", alignItems: "center", gap: "5px", padding: "7px 14px", borderRadius: "7px", background: "#FFF", color: "#B91C1C", border: "1px solid #FECACA", cursor: !fireActive || fireResolving ? "not-allowed" : "pointer", fontSize: "12.5px", fontWeight: 600, fontFamily: "'Work Sans', sans-serif", opacity: !fireActive || fireResolving ? 0.5 : 1 }}>
+              <CheckCircle style={{ width: "12px", height: "12px" }} /> {fireResolving ? "Resolving…" : "Mark All Clear"}
+            </button>
+          </div>
+        </div>
+
+        {/* Fire counters */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px", marginTop: "14px" }}>
+          <div style={{ padding: "10px 12px", borderRadius: "7px", border: "1px solid #FECACA", background: "#FFF" }}>
+            <p style={{ fontSize: "10.5px", fontWeight: 700, color: "#7F1D1D", textTransform: "uppercase", letterSpacing: "0.06em", margin: "0 0 3px" }}>Targeted</p>
+            <p style={{ fontSize: "20px", fontWeight: 900, color: "#7F1D1D", margin: 0, fontFamily: "'DM Mono', monospace" }}>{Number(fireStatus?.counters?.totalRecipients ?? 0)}</p>
+          </div>
+          <div style={{ padding: "10px 12px", borderRadius: "7px", border: "1px solid #A7F3D0", background: "#FFF" }}>
+            <p style={{ fontSize: "10.5px", fontWeight: 700, color: "#065F46", textTransform: "uppercase", letterSpacing: "0.06em", margin: "0 0 3px" }}>Confirmed</p>
+            <p style={{ fontSize: "20px", fontWeight: 900, color: "#059669", margin: 0, fontFamily: "'DM Mono', monospace" }}>{Number(fireStatus?.counters?.acknowledged ?? 0)}</p>
+          </div>
+          <div style={{ padding: "10px 12px", borderRadius: "7px", border: "1px solid #FDE68A", background: "#FFF" }}>
+            <p style={{ fontSize: "10.5px", fontWeight: 700, color: "#92400E", textTransform: "uppercase", letterSpacing: "0.06em", margin: "0 0 3px" }}>Pending</p>
+            <p style={{ fontSize: "20px", fontWeight: 900, color: "#D97706", margin: 0, fontFamily: "'DM Mono', monospace" }}>{Number(fireStatus?.counters?.pending ?? 0)}</p>
+          </div>
+        </div>
+
+        {/* Pending residents */}
+        {Array.isArray(fireStatus?.pendingRecipients) && fireStatus!.pendingRecipients.length > 0 && (
+          <div style={{ marginTop: "12px" }}>
+            <p style={{ fontSize: "10.5px", fontWeight: 700, color: "#7F1D1D", textTransform: "uppercase", letterSpacing: "0.06em", margin: "0 0 6px" }}>Pending confirmations</p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "5px" }}>
+              {fireStatus!.pendingRecipients.slice(0, 12).map((r) => (
+                <span key={r.userId} style={{ fontSize: "11px", fontWeight: 600, padding: "2px 8px", borderRadius: "4px", background: "#FEE2E2", color: "#991B1B" }}>{r.name ?? r.userId}</span>
+              ))}
+              {fireStatus!.pendingRecipients.length > 12 && (
+                <span style={{ fontSize: "11px", fontWeight: 600, padding: "2px 8px", borderRadius: "4px", background: "#F3F4F6", color: "#6B7280" }}>+{fireStatus!.pendingRecipients.length - 12} more</span>
               )}
             </div>
-            <p className="text-sm text-[#7F1D1D]/90">
-              Trigger emergency alarm for residents and track confirmations in real time.
-            </p>
-            {fireStatus?.triggeredAt ? (
-              <p className="text-xs text-[#991B1B]">
-                Last trigger: {formatDateTime(fireStatus.triggeredAt)}
-              </p>
-            ) : null}
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Dialog open={isFireDialogOpen} onOpenChange={setIsFireDialogOpen}>
-              <DialogTrigger asChild>
-                <Button
-                  variant="dangerSolid"
-                  className="rounded-lg gap-2 bg-[#B91C1C] text-white hover:bg-[#991B1B]"
-                >
-                  <Flame className="w-4 h-4" />
-                  Trigger Fire Alarm
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-xl">
-                <DialogHeader>
-                  <DialogTitle>Trigger Fire Evacuation Alarm</DialogTitle>
-                  <DialogDescription>
-                    Sends emergency alert to all active residents (in-app + push if configured).
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="space-y-4 py-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="fireMessageEn">English Message</Label>
-                    <Textarea
-                      id="fireMessageEn"
-                      rows={3}
-                      value={fireMessageEn}
-                      onChange={(e) => setFireMessageEn(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="fireMessageAr">Arabic Message</Label>
-                    <Textarea
-                      id="fireMessageAr"
-                      rows={3}
-                      value={fireMessageAr}
-                      onChange={(e) => setFireMessageAr(e.target.value)}
-                    />
-                  </div>
-                </div>
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setIsFireDialogOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button
-                    variant="dangerSolid"
-                    className="bg-[#B91C1C] text-white hover:bg-[#991B1B]"
-                    onClick={() => void handleTriggerFireEvacuation()}
-                    disabled={isFireTriggering}
-                  >
-                    {isFireTriggering ? "Sending..." : "Send Alarm"}
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+        )}
+      </div>
 
-            <Button
-              variant="outline"
-              className="border-[#DC2626]/30 text-[#B91C1C] hover:bg-[#FEE2E2]"
-              onClick={() => void handleResolveFireEvacuation()}
-              disabled={!fireStatus?.active || isFireResolving}
-            >
-              {isFireResolving ? "Resolving..." : "Mark All Clear"}
-            </Button>
-
-            <Button variant="outline" onClick={() => void loadIncidents()} disabled={isLoading}>
-              Refresh Status
-            </Button>
-          </div>
+      {/* ── Incidents table ─── */}
+      <div style={{ borderRadius: "10px", border: "1px solid #EBEBEB", background: "#FFF", overflow: "hidden" }}>
+        <div style={{ padding: "10px 14px", borderBottom: "1px solid #F3F4F6", display: "flex", alignItems: "center", gap: "6px" }}>
+          <Shield style={{ width: "12px", height: "12px", color: "#9CA3AF" }} />
+          <span style={{ fontSize: "12px", fontWeight: 700, color: "#374151" }}>Emergency Incidents</span>
+          <span style={{ fontSize: "10.5px", fontWeight: 700, padding: "1px 6px", borderRadius: "4px", background: "#F3F4F6", color: "#9CA3AF", fontFamily: "'DM Mono', monospace", marginLeft: "2px" }}>{incidents.length}</span>
         </div>
-
-        <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="rounded-lg border border-[#FECACA] bg-white p-3">
-            <p className="text-xs text-[#7F1D1D]">Targeted Residents</p>
-            <p className="text-xl font-semibold text-[#7F1D1D]">
-              {Number(fireStatus?.counters?.totalRecipients ?? 0)}
-            </p>
-          </div>
-          <div className="rounded-lg border border-[#BBF7D0] bg-white p-3">
-            <p className="text-xs text-[#166534]">Confirmed Evacuated</p>
-            <p className="text-xl font-semibold text-[#166534]">
-              {Number(fireStatus?.counters?.acknowledged ?? 0)}
-            </p>
-          </div>
-          <div className="rounded-lg border border-[#FCD34D] bg-white p-3">
-            <p className="text-xs text-[#92400E]">Still Pending</p>
-            <p className="text-xl font-semibold text-[#92400E]">
-              {Number(fireStatus?.counters?.pending ?? 0)}
-            </p>
-          </div>
+        <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto auto auto auto auto auto", gap: "12px", padding: "9px 14px", borderBottom: "1px solid #F3F4F6", background: "#FAFAFA" }}>
+          {["ID", "Type / Description", "Location", "Resident", "Priority", "Status", "Response", "Reported"].map((h) => (
+            <span key={h} style={{ fontSize: "10.5px", fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: "'Work Sans', sans-serif", whiteSpace: "nowrap" }}>{h}</span>
+          ))}
         </div>
-
-        {Array.isArray(fireStatus?.pendingRecipients) && fireStatus.pendingRecipients.length > 0 ? (
-          <div className="mt-4">
-            <p className="text-xs font-medium text-[#7F1D1D] mb-2">Pending confirmations</p>
-            <div className="flex flex-wrap gap-2">
-              {fireStatus.pendingRecipients.slice(0, 12).map((resident: any) => (
-                <Badge key={resident.userId} variant="secondary" className="bg-[#FEE2E2] text-[#991B1B]">
-                  {resident.name || resident.userId}
-                </Badge>
-              ))}
-              {fireStatus.pendingRecipients.length > 12 ? (
-                <Badge variant="secondary" className="bg-[#F1F5F9] text-[#475569]">
-                  +{fireStatus.pendingRecipients.length - 12} more
-                </Badge>
-              ) : null}
-            </div>
+        {loading ? (
+          Array.from({ length: 5 }).map((_, i) => <div key={i} style={{ height: "54px", margin: "6px 10px", borderRadius: "7px", background: "linear-gradient(90deg, #F3F4F6 25%, #E9EAEC 50%, #F3F4F6 75%)", backgroundSize: "200% 100%" }} />)
+        ) : incidents.length === 0 ? (
+          <div style={{ padding: "40px", textAlign: "center" }}>
+            <Shield style={{ width: "28px", height: "28px", color: "#E5E7EB", margin: "0 auto 8px" }} />
+            <p style={{ fontSize: "13px", color: "#9CA3AF" }}>No incidents found</p>
           </div>
-        ) : null}
-      </Card>
+        ) : incidents.map((row) => <IncidentRow key={row.id} row={row} />)}
+      </div>
 
-      <Card className="shadow-card rounded-xl overflow-hidden">
-        <div className="p-4 border-b border-[#E5E7EB]">
-          <h3 className="text-[#1E293B]">Security Incidents</h3>
-        </div>
-        {(() => {
-          const cols: DataTableColumn<any>[] = [
-            { key: "id", header: "Incident ID", render: (i) => <span className="font-medium text-[#1E293B]">{i.incidentNumber ?? i.id}</span> },
-            { key: "type", header: "Type", render: (i) => <Badge variant="secondary" className="bg-[#F3F4F6] text-[#1E293B]">{i.type}</Badge> },
-            { key: "location", header: "Location", render: (i) => <span className="text-[#64748B]">{i.location ?? i.unit?.unitNumber ?? "—"}</span> },
-            { key: "resident", header: "Resident", render: (i) => <span className="text-[#1E293B]">{i.residentName || "—"}</span> },
-            { key: "description", header: "Description", render: (i) => <span className="text-[#64748B] max-w-xs truncate block">{i.description}</span> },
-            { key: "priority", header: "Priority", render: (i) => <Badge className={getPriorityColorClass(i.priority)}>{humanizeEnum(i.priority)}</Badge> },
-            { key: "status", header: "Status", render: (i) => <Badge className={getStatusColorClass(i.status)}>{humanizeEnum(i.status)}</Badge> },
-            { key: "responseTime", header: "Response Time", render: (i) => <span className="text-[#1E293B]">{i.responseTime ?? "—"}</span> },
-            { key: "reportedAt", header: "Reported At", render: (i) => <span className="text-[#64748B]">{formatDateTime(i.reportedAt ?? i.createdAt)}</span> },
-          ];
-          return <DataTable columns={cols} rows={incidentsData} rowKey={(i) => i.id} loading={isLoading} emptyTitle="No incidents found" />;
-        })()}
-      </Card>
+      {/* ══ Report incident dialog ════════════════════════════════ */}
+      <Dialog open={reportOpen} onOpenChange={setReportOpen}>
+        <DialogContent style={{ maxWidth: "480px", padding: 0, borderRadius: "12px", overflow: "hidden", border: "1px solid #EBEBEB", fontFamily: "'Work Sans', sans-serif", maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
+          <div style={{ height: "3px", background: "linear-gradient(90deg, #DC2626, #F97316)", flexShrink: 0 }} />
+          <div style={{ padding: "18px 24px 10px", flexShrink: 0 }}>
+            <DialogHeader>
+              <DialogTitle style={{ fontSize: "15px", fontWeight: 800, color: "#111827", margin: 0 }}>Report Emergency Incident</DialogTitle>
+              <p style={{ fontSize: "12px", color: "#9CA3AF", marginTop: "3px" }}>Creates a real incident record.</p>
+            </DialogHeader>
+          </div>
+          <div style={{ overflowY: "auto", padding: "0 24px 16px", display: "flex", flexDirection: "column", gap: "12px" }}>
+            <SectionLabel icon={<AlertTriangle style={{ width: "12px", height: "12px" }} />} label="Incident Details" />
+            <Field label="Incident Type" required>
+              <input value={reportForm.type} onChange={(e) => setReportForm((p) => ({ ...p, type: e.target.value }))} placeholder="e.g. Security Breach, Medical Emergency…" style={inputStyle} />
+            </Field>
+            <Field label="Location">
+              <input value={reportForm.location} onChange={(e) => setReportForm((p) => ({ ...p, location: e.target.value }))} placeholder="e.g. Block C – Main Entrance" style={inputStyle} />
+            </Field>
+            <Field label="Resident Name">
+              <input value={reportForm.resident} onChange={(e) => setReportForm((p) => ({ ...p, resident: e.target.value }))} placeholder="Resident involved (optional)" style={inputStyle} />
+            </Field>
+            <Field label="Priority" required>
+              <select value={reportForm.priority} onChange={(e) => setReportForm((p) => ({ ...p, priority: e.target.value }))} style={selectStyle}>
+                <option value="LOW">Low</option>
+                <option value="MEDIUM">Medium</option>
+                <option value="HIGH">High</option>
+                <option value="CRITICAL">Critical</option>
+              </select>
+            </Field>
+            <Field label="Description" required>
+              <textarea value={reportForm.description} onChange={(e) => setReportForm((p) => ({ ...p, description: e.target.value }))} rows={3} placeholder="Describe the incident…" style={textareaStyle} />
+            </Field>
+          </div>
+          <div style={{ padding: "12px 24px 20px", borderTop: "1px solid #F3F4F6", display: "flex", justifyContent: "flex-end", gap: "8px", flexShrink: 0, background: "#FFF" }}>
+            <button type="button" onClick={() => setReportOpen(false)} style={{ display: "flex", alignItems: "center", gap: "5px", padding: "7px 14px", borderRadius: "7px", border: "1px solid #E5E7EB", background: "#FFF", color: "#6B7280", cursor: "pointer", fontSize: "12.5px", fontWeight: 500, fontFamily: "'Work Sans', sans-serif" }}>
+              <X style={{ width: "12px", height: "12px" }} /> Cancel
+            </button>
+            <button type="button" onClick={() => void handleReport()} disabled={submitting}
+              style={{ display: "flex", alignItems: "center", gap: "5px", padding: "7px 20px", borderRadius: "7px", background: submitting ? "#9CA3AF" : "#DC2626", color: "#FFF", border: "none", cursor: submitting ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+              <Check style={{ width: "13px", height: "13px" }} />
+              {submitting ? "Reporting…" : "Report Now"}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
+      {/* ══ Emergency alarm dialog ════════════════════════════════ */}
+      <Dialog open={fireDialogOpen} onOpenChange={setFireDialogOpen}>
+        <DialogContent style={{ maxWidth: "520px", padding: 0, borderRadius: "12px", overflow: "hidden", border: "1px solid #FECACA", fontFamily: "'Work Sans', sans-serif", maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
+          <div style={{ height: "3px", background: "linear-gradient(90deg, #B91C1C, #DC2626)", flexShrink: 0 }} />
+          <div style={{ padding: "18px 24px 10px", flexShrink: 0 }}>
+            <DialogHeader>
+              <DialogTitle style={{ fontSize: "15px", fontWeight: 800, color: "#7F1D1D", margin: 0 }}>Trigger Emergency Alarm</DialogTitle>
+              <p style={{ fontSize: "12px", color: "#9CA3AF", marginTop: "3px" }}>Sends emergency alarm to all active residents via in-app notification and push.</p>
+            </DialogHeader>
+          </div>
+          <div style={{ overflowY: "auto", padding: "0 24px 16px", display: "flex", flexDirection: "column", gap: "12px" }}>
+            <Field label="English Message">
+              <textarea value={fireMessageEn} onChange={(e) => setFireMessageEn(e.target.value)} rows={3} style={textareaStyle} />
+            </Field>
+            <Field label="Arabic Message">
+              <textarea value={fireMessageAr} onChange={(e) => setFireMessageAr(e.target.value)} rows={3} style={{ ...textareaStyle, direction: "rtl" }} />
+            </Field>
+          </div>
+          <div style={{ padding: "12px 24px 20px", borderTop: "1px solid #F3F4F6", display: "flex", justifyContent: "flex-end", gap: "8px", flexShrink: 0, background: "#FFF" }}>
+            <button type="button" onClick={() => setFireDialogOpen(false)} style={{ display: "flex", alignItems: "center", gap: "5px", padding: "7px 14px", borderRadius: "7px", border: "1px solid #E5E7EB", background: "#FFF", color: "#6B7280", cursor: "pointer", fontSize: "12.5px", fontWeight: 500, fontFamily: "'Work Sans', sans-serif" }}>
+              <X style={{ width: "12px", height: "12px" }} /> Cancel
+            </button>
+            <button type="button" onClick={() => void triggerFire()} disabled={fireTriggering}
+              style={{ display: "flex", alignItems: "center", gap: "5px", padding: "7px 20px", borderRadius: "7px", background: fireTriggering ? "#9CA3AF" : "#B91C1C", color: "#FFF", border: "none", cursor: fireTriggering ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 700, fontFamily: "'Work Sans', sans-serif", boxShadow: "0 2px 5px rgba(185,28,28,0.3)" }}>
+              <Flame style={{ width: "13px", height: "13px" }} />
+              {fireTriggering ? "Sending…" : "Send Alarm"}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
     </div>
   );
 }

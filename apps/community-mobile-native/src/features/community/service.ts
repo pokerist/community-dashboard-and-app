@@ -189,8 +189,6 @@ export async function createComplaint(
     {
       unitId: payload.unitId,
       title: payload.title?.trim(),
-      team: payload.team?.trim(),
-      category: payload.team?.trim() || 'GENERAL',
       description: payload.body?.trim(),
     },
     {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppSidebar } from "./components/AppSidebar";
+import type { SidebarBadgeCounts } from "./components/AppSidebar";
 import { DashboardOverview } from "./components/pages/DashboardOverview";
 import { ResidentManagement } from "./components/pages/ResidentManagement";
 import { DashboardUsersPage } from "./components/pages/DashboardUsersPage";
@@ -176,7 +177,7 @@ const SECTION_LABELS: Record<string, string> = {
   notifications: "Notifications",
   ordering: "Ordering",
   surveys: "Surveys",
-  security: "Security & Emergency",
+  security: "Emergency & Safety",
   gates: "Gates",
   "gate-live": "Gate Live Feed",
   amenities: "Amenities",
@@ -193,6 +194,9 @@ export default function App() {
   const [footerPanel, setFooterPanel] = useState<FooterPanel>(null);
   const [unseenAdminNotifications, setUnseenAdminNotifications] = useState(0);
   const seenNotificationIdsRef = useRef<Set<string>>(new Set());
+  const [sidebarBadges, setSidebarBadges] = useState<SidebarBadgeCounts>({
+    violations: 0, permits: 0, rental: 0, amenities: 0, approvals: 0,
+  });
 
   const navigateToSection = useCallback((section: string) => {
     const next = normalizeSection(section);
@@ -300,6 +304,51 @@ export default function App() {
     const timer = window.setInterval(() => void pollNotifications(false), 15000);
     return () => { mounted = false; window.clearInterval(timer); };
   }, [authenticated, navigateToSection]);
+
+  /* ── Sidebar badge counts polling ─────────────────────────── */
+  useEffect(() => {
+    if (!authenticated) {
+      setSidebarBadges({ violations: 0, permits: 0, rental: 0, amenities: 0, approvals: 0 });
+      return;
+    }
+
+    let mounted = true;
+
+    const fetchBadgeCounts = async () => {
+      try {
+        const [violationsRes, permitsRes, rentalRes, amenitiesRes, approvalsRes] = await Promise.allSettled([
+          apiClient.get("/violations/stats"),
+          apiClient.get("/permits/stats"),
+          apiClient.get("/rental/stats"),
+          apiClient.get("/facilities/stats"),
+          apiClient.get("/approvals/stats"),
+        ]);
+
+        if (!mounted) return;
+
+        const val = (res: PromiseSettledResult<{ data: Record<string, unknown> }>, key: string): number => {
+          if (res.status !== "fulfilled") return 0;
+          const v = Number(res.value?.data?.[key]);
+          return Number.isFinite(v) ? Math.max(0, Math.round(v)) : 0;
+        };
+
+        const rentalPending = val(rentalRes, "pendingRentRequests");
+        const rentalExpiring = val(rentalRes, "expiringThisMonth");
+
+        setSidebarBadges({
+          violations: val(violationsRes, "pending"),
+          permits: val(permitsRes, "pendingRequests"),
+          rental: rentalPending + rentalExpiring,
+          amenities: val(amenitiesRes, "pendingApprovals"),
+          approvals: val(approvalsRes, "totalPending"),
+        });
+      } catch { /* Keep silent — badge polling should not break dashboard UX. */ }
+    };
+
+    void fetchBadgeCounts();
+    const timer = window.setInterval(fetchBadgeCounts, 45_000);
+    return () => { mounted = false; window.clearInterval(timer); };
+  }, [authenticated]);
 
   useEffect(() => {
     if (activeSection === "notifications") setUnseenAdminNotifications(0);
@@ -410,6 +459,7 @@ export default function App() {
               onNavigate={navigateToSection}
               activeSection={activeSection}
               unseenNotifications={unseenAdminNotifications}
+              badgeCounts={sidebarBadges}
             />
 
             {/* Content column */}

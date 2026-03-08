@@ -14,6 +14,7 @@ import { InvoicesService } from '../invoices/invoices.service';
 import { BookingDetailDto, BookingDetailInvoiceDto, BookingListItemDto, BookingListResponseDto } from './dto/booking-response.dto';
 import { BookingsQueryDto } from './dto/bookings-query.dto';
 import { CancelBookingDto } from './dto/cancel-booking.dto';
+import { CreateBookingDto } from './dto/create-booking.dto';
 import { RejectBookingDto } from './dto/reject-booking.dto';
 
 type BookingListRecord = Prisma.BookingGetPayload<{
@@ -212,6 +213,112 @@ export class BookingsService {
       throw new NotFoundException(`Booking ${id} not found`);
     }
     return row;
+  }
+
+  async listMyBookings(userId: string): Promise<BookingListItemDto[]> {
+    const rows = await this.prisma.booking.findMany({
+      where: { userId },
+      include: {
+        facility: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            requiresPrepayment: true,
+            price: true,
+            billingCycle: true,
+          },
+        },
+        user: { select: { id: true, nameEN: true, nameAR: true, email: true } },
+        unit: { select: { id: true, unitNumber: true } },
+        invoices: {
+          where: { type: InvoiceType.BOOKING_FEE },
+          select: { id: true, status: true, type: true },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return rows.map((row) => this.toBookingListItem(row));
+  }
+
+  async createBooking(dto: CreateBookingDto, userId: string): Promise<BookingDetailDto> {
+    const [facility, unit] = await Promise.all([
+      this.prisma.facility.findUnique({
+        where: { id: dto.facilityId },
+        select: {
+          id: true,
+          name: true,
+          isActive: true,
+          requiresPrepayment: true,
+          price: true,
+          billingCycle: true,
+        },
+      }),
+      this.prisma.unit.findUnique({
+        where: { id: dto.unitId },
+        select: { id: true },
+      }),
+    ]);
+
+    if (!facility) {
+      throw new NotFoundException('Facility not found');
+    }
+    if (!facility.isActive) {
+      throw new BadRequestException('Facility is not active');
+    }
+    if (!unit) {
+      throw new BadRequestException('Unit not found');
+    }
+
+    const startMinutes = this.parseTimeToMinutes(dto.startTime);
+    const endMinutes = this.parseTimeToMinutes(dto.endTime);
+    if (endMinutes <= startMinutes) {
+      throw new BadRequestException('endTime must be after startTime');
+    }
+
+    // Check for overlapping bookings on the same facility + date
+    const bookingDate = new Date(dto.date);
+    const overlapping = await this.prisma.booking.findFirst({
+      where: {
+        facilityId: dto.facilityId,
+        date: bookingDate,
+        status: { notIn: [BookingStatus.CANCELLED, BookingStatus.REJECTED] },
+        OR: [
+          { AND: [{ startTime: { lt: dto.endTime } }, { endTime: { gt: dto.startTime } }] },
+        ],
+      },
+      select: { id: true },
+    });
+
+    if (overlapping) {
+      throw new BadRequestException('Time slot is already booked for this facility');
+    }
+
+    const totalAmount = this.calculateTotalAmount({
+      startTime: dto.startTime,
+      endTime: dto.endTime,
+      price: facility.price,
+      billingCycle: facility.billingCycle,
+    });
+
+    const created = await this.prisma.booking.create({
+      data: {
+        facilityId: dto.facilityId,
+        userId,
+        unitId: dto.unitId,
+        date: bookingDate,
+        startTime: dto.startTime,
+        endTime: dto.endTime,
+        totalAmount,
+        status: BookingStatus.PENDING,
+      },
+      select: { id: true },
+    });
+
+    return this.getBookingDetail(created.id);
   }
 
   async listBookings(filters: BookingsQueryDto): Promise<BookingListResponseDto> {

@@ -10,6 +10,7 @@ import { DrawerForm } from '../DrawerForm';
 import { EmptyState } from '../EmptyState';
 import { StatusBadge } from '../StatusBadge';
 import gatesService, {
+  type ClusterOption,
   type GateAccessRole,
   type GateLogItem,
   type GateLogStatusFilter,
@@ -24,12 +25,12 @@ import { errorMessage, formatDateTime, humanizeEnum } from '../../lib/live-data'
 
 type GateFormState = {
   name: string;
-  code: string;
+  clusterId: string;
   allowedRoles: GateAccessRole[];
   etaMinutes: string;
 };
 
-const INITIAL_FORM: GateFormState = { name: '', code: '', allowedRoles: ['VISITOR'], etaMinutes: '' };
+const INITIAL_FORM: GateFormState = { name: '', clusterId: '', allowedRoles: ['VISITOR'], etaMinutes: '' };
 
 const EMPTY_STATS: GateStats = {
   totalGates: 0, activeGates: 0, currentlyInside: 0,
@@ -152,6 +153,8 @@ export function GatesManagement() {
   const [isSaving,            setIsSaving]            = useState(false);
   const [communities,         setCommunities]         = useState<Array<{ id: string; label: string }>>([]);
   const [selectedCommunityId, setSelectedCommunityId] = useState('');
+  const [clusters,            setClusters]            = useState<ClusterOption[]>([]);
+  const [isClustersLoading,   setIsClustersLoading]   = useState(false);
   const [gates,               setGates]               = useState<GateRow[]>([]);
   const [stats,               setStats]               = useState<GateStats>(EMPTY_STATS);
   const [logFilters,          setLogFilters]          = useState({ gateId: 'all', from: '', to: '', qrType: 'all', status: 'all', page: 1 });
@@ -165,7 +168,7 @@ export function GatesManagement() {
   const openCreate = () => { resetForm(); setDrawerOpen(true); };
   const openEdit = (gate: GateRow) => {
     setEditingGate(gate);
-    setForm({ name: gate.name, code: gate.code ?? '', allowedRoles: gate.allowedRoles, etaMinutes: gate.etaMinutes ? String(gate.etaMinutes) : '' });
+    setForm({ name: gate.name, clusterId: (gate as any).clusterId ?? '', allowedRoles: gate.allowedRoles, etaMinutes: gate.etaMinutes ? String(gate.etaMinutes) : '' });
     setDrawerOpen(true);
   };
 
@@ -201,6 +204,14 @@ export function GatesManagement() {
     finally { setIsLogLoading(false); }
   }, [logFilters, selectedCommunityId]);
 
+  const loadClusters = useCallback(async (cid: string) => {
+    if (!cid) { setClusters([]); return; }
+    setIsClustersLoading(true);
+    try { setClusters(await gatesService.listClusterOptions(cid)); }
+    catch (e) { toast.error('Failed to load clusters', { description: errorMessage(e) }); }
+    finally { setIsClustersLoading(false); }
+  }, []);
+
   const bootstrap = useCallback(async () => {
     setIsBootstrapping(true);
     try {
@@ -208,18 +219,18 @@ export function GatesManagement() {
       setCommunities(opts);
       const first = opts[0]?.id ?? '';
       setSelectedCommunityId(first);
-      if (first) await Promise.all([loadGates(first), loadStats(first)]);
+      if (first) await Promise.all([loadGates(first), loadStats(first), loadClusters(first)]);
     } catch (e) { toast.error('Failed to initialize', { description: errorMessage(e) }); }
     finally { setIsBootstrapping(false); }
-  }, [loadGates, loadStats]);
+  }, [loadGates, loadStats, loadClusters]);
 
   useEffect(() => { void bootstrap(); }, [bootstrap]);
   useEffect(() => {
     if (!selectedCommunityId) return;
-    void Promise.all([loadGates(selectedCommunityId), loadStats(selectedCommunityId)]).catch(
+    void Promise.all([loadGates(selectedCommunityId), loadStats(selectedCommunityId), loadClusters(selectedCommunityId)]).catch(
       (e: unknown) => toast.error('Failed to refresh', { description: errorMessage(e) }),
     );
-  }, [selectedCommunityId, loadGates, loadStats]);
+  }, [selectedCommunityId, loadGates, loadStats, loadClusters]);
   useEffect(() => { void loadLog(); }, [loadLog]);
 
   // ── Actions ───────────────────────────────────────────────────
@@ -235,11 +246,12 @@ export function GatesManagement() {
     }
     setIsSaving(true);
     try {
+      const clusterId = form.clusterId || undefined;
       if (editingGate) {
-        await gatesService.updateGate(editingGate.id, { name: form.name.trim(), code: form.code.trim() || undefined, allowedRoles: form.allowedRoles, etaMinutes });
+        await gatesService.updateGate(editingGate.id, { name: form.name.trim(), clusterId, allowedRoles: form.allowedRoles, etaMinutes });
         toast.success('Gate updated');
       } else {
-        await gatesService.createGate({ communityId: selectedCommunityId, name: form.name.trim(), code: form.code.trim() || undefined, allowedRoles: form.allowedRoles, etaMinutes });
+        await gatesService.createGate({ communityId: selectedCommunityId, name: form.name.trim(), clusterId, allowedRoles: form.allowedRoles, etaMinutes });
         toast.success('Gate created');
       }
       setDrawerOpen(false);
@@ -564,13 +576,16 @@ export function GatesManagement() {
               style={inputStyle}
             />
           </Field>
-          <Field label="Code" hint="Optional internal identifier">
-            <input
-              value={form.code}
-              onChange={(e) => setForm((p) => ({ ...p, code: e.target.value }))}
-              placeholder="GATE_MAIN"
-              style={{ ...inputStyle, fontFamily: "'DM Mono', monospace" }}
-            />
+          <Field label="Cluster" hint="Select the cluster this gate belongs to">
+            <select
+              value={form.clusterId}
+              onChange={(e) => setForm((p) => ({ ...p, clusterId: e.target.value }))}
+              disabled={isClustersLoading || clusters.length === 0}
+              style={selectStyle}
+            >
+              <option value="">{isClustersLoading ? 'Loading clusters…' : clusters.length === 0 ? 'No clusters available' : 'Select cluster'}</option>
+              {clusters.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+            </select>
           </Field>
           <Field label="ETA Minutes" hint="Shown to visitors as estimated arrival time (1–120)">
             <input

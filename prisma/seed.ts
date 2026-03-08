@@ -206,6 +206,94 @@ const PERMISSIONS = [
   // Referrals
   'referral.create',
   'referral.view_all',
+  'referral.validate',
+
+  // Dashboard
+  'dashboard.view',
+
+  // Reports
+  'report.view_all',
+  'report.generate',
+  'report.manage_schedules',
+
+  // Leases
+  'lease.view_all',
+  'lease.view_own',
+  'lease.create',
+  'lease.update',
+  'lease.delete',
+  'lease.add_tenant',
+  'lease.terminate',
+
+  // Delegates
+  'delegate.view_all',
+  'delegate.view_own',
+  'delegate.create',
+  'delegate.approve',
+  'delegate.revoke',
+  'delegate.update',
+  'delegate.delete',
+
+  // Clubhouse
+  'clubhouse.request',
+  'clubhouse.approve',
+  'clubhouse.reject',
+  'clubhouse.view_all',
+  'clubhouse.view_own',
+
+  // Household
+  'household.create_request',
+  'household.view_own',
+  'household.view_all',
+  'household.review',
+
+  // Surveys
+  'survey.view_all',
+  'survey.view_own',
+  'survey.create',
+  'survey.update',
+  'survey.delete',
+  'survey.publish',
+  'survey.close',
+  'survey.respond',
+
+  // Restaurants
+  'restaurant.view_all',
+  'restaurant.view_own',
+  'restaurant.create',
+  'restaurant.update',
+  'restaurant.delete',
+
+  // Orders
+  'order.view_all',
+  'order.view_own',
+  'order.update_status',
+  'order.cancel',
+
+  // Hospitality
+  'hospitality.view',
+
+  // Resident Vehicles
+  'vehicle.view_own',
+  'vehicle.create',
+  'vehicle.update',
+  'vehicle.delete',
+
+  // Workers
+  'worker.view_all',
+  'worker.view_own',
+  'worker.create',
+  'worker.update',
+  'worker.generate_qr',
+
+  // Contractors
+  'contractor.view_all',
+  'contractor.view_own',
+  'contractor.create',
+
+  // Owner Self-Service
+  'owner.manage_profile',
+  'owner.manage_family',
 ];
 
 const ROLES = {
@@ -320,6 +408,65 @@ const ROLES = {
     'incidents.resolve',
 
     'referral.view_all',
+    'referral.validate',
+
+    // Dashboard / Reports
+    'dashboard.view',
+    'report.view_all',
+    'report.generate',
+    'report.manage_schedules',
+
+    // Leases
+    'lease.view_all',
+    'lease.create',
+    'lease.update',
+    'lease.delete',
+    'lease.add_tenant',
+    'lease.terminate',
+
+    // Delegates
+    'delegate.view_all',
+    'delegate.approve',
+    'delegate.revoke',
+    'delegate.update',
+    'delegate.delete',
+
+    // Clubhouse
+    'clubhouse.approve',
+    'clubhouse.reject',
+    'clubhouse.view_all',
+
+    // Household
+    'household.view_all',
+    'household.review',
+
+    // Surveys
+    'survey.view_all',
+    'survey.create',
+    'survey.update',
+    'survey.delete',
+    'survey.publish',
+    'survey.close',
+
+    // Restaurants / Orders
+    'restaurant.view_all',
+    'restaurant.create',
+    'restaurant.update',
+    'restaurant.delete',
+    'order.view_all',
+    'order.update_status',
+    'order.cancel',
+
+    // Hospitality
+    'hospitality.view',
+
+    // Workers / Contractors
+    'worker.view_all',
+    'worker.create',
+    'worker.update',
+    'worker.generate_qr',
+    'contractor.view_all',
+    'contractor.create',
   ],
 
   OPERATOR: [
@@ -340,6 +487,23 @@ const ROLES = {
     // Incidents
     'incidents.view',
     'incidents.resolve',
+
+    // Surveys (view only)
+    'survey.view_all',
+
+    // Orders (view + update status)
+    'order.view_all',
+    'order.update_status',
+
+    // Workers
+    'worker.view_all',
+
+    // Leases (view)
+    'lease.view_all',
+
+    // Household
+    'household.view_all',
+    'household.review',
   ],
 
   SUPPORT: [
@@ -354,6 +518,12 @@ const ROLES = {
 
     // Incidents
     'incidents.view',
+
+    // Surveys (view only)
+    'survey.view_all',
+
+    // Orders (view only)
+    'order.view_all',
   ],
 
   COMMUNITY_USER: [
@@ -374,6 +544,7 @@ const ROLES = {
     // Complaints / Violations
     'complaint.view_own',
     'complaint.report',
+    'complaint.delete_own',
     'violation.view_own',
 
     // QR Codes / Bookings
@@ -391,6 +562,50 @@ const ROLES = {
 
     // Notifications
     'notification.view_own',
+
+    // Leases (view own)
+    'lease.view_own',
+
+    // Delegates (create/view own)
+    'delegate.create',
+    'delegate.view_own',
+
+    // Clubhouse (request/view own)
+    'clubhouse.request',
+    'clubhouse.view_own',
+
+    // Household (create/view own)
+    'household.create_request',
+    'household.view_own',
+
+    // Surveys (view/respond)
+    'survey.view_own',
+    'survey.respond',
+
+    // Restaurants/Orders (view own)
+    'restaurant.view_own',
+    'order.view_own',
+
+    // Hospitality
+    'hospitality.view',
+
+    // Vehicles (self-service)
+    'vehicle.view_own',
+    'vehicle.create',
+    'vehicle.update',
+    'vehicle.delete',
+
+    // Workers (delegate creates workers for their units)
+    'worker.view_own',
+    'worker.create',
+    'worker.update',
+    'worker.generate_qr',
+    'contractor.view_own',
+    'contractor.create',
+
+    // Owner self-service
+    'owner.manage_profile',
+    'owner.manage_family',
   ],
 } as const;
 

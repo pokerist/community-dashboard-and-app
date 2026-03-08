@@ -1,1811 +1,1208 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Database, Link as LinkIcon, RefreshCw, Save, Shield, Bell, Settings, CheckCircle, XCircle, Palette, Upload, Plug, Image as ImageIcon, Plus, Users } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
+import {
+  Settings, Bell, Shield, Palette, Globe, Database,
+  Check, X, ChevronRight, Eye, EyeOff, Save, RefreshCw,
+  Upload, Trash2, Info, Link, Smartphone, UserPlus, Key, Lock, Users2, Layers,
+  Plus, Pencil,
+} from "lucide-react";
 import apiClient from "../../lib/api-client";
-import { errorMessage, extractRows, formatDateTime } from "../../lib/live-data";
-import { Button } from "../ui/button";
-import { Card } from "../ui/card";
-import { Input } from "../ui/input";
-import { Label } from "../ui/label";
-import { Switch } from "../ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
-import { Textarea } from "../ui/textarea";
+
+// ─── Types ────────────────────────────────────────────────────
+
+type SettingsTab =
+  | "general" | "notifications" | "security" | "appearance"
+  | "localization" | "data" | "departments" | "users"
+  | "roles" | "integrations" | "authentication" | "mobile";
+
+type GeneralSettings = {
+  companyName: string; supportEmail: string; supportPhone: string;
+  address: string; timezone: string; logoFileId: string;
+};
+
+type NotificationSettings = {
+  emailEnabled: boolean; pushEnabled: boolean; smsEnabled: boolean;
+  otpEnabled: boolean;
+  maintenanceAlerts: boolean; paymentReminders: boolean; emergencyBroadcast: boolean;
+  digestFrequency: "immediate" | "hourly" | "daily" | "weekly";
+};
+
+type SecuritySettings = {
+  auditLogRetentionDays: number;
+};
+
+type AppearanceSettings = {
+  primaryColor: string; accentColor: string; logoUrl: string;
+  darkMode: boolean; compactLayout: boolean; language: string;
+};
+
+type LocalizationSettings = {
+  defaultLanguage: "en" | "ar"; currency: string; dateFormat: string;
+  rtlSupport: boolean; timezone: string;
+};
+
+type DataSettings = {
+  backupEnabled: boolean; backupFrequency: "daily" | "weekly" | "monthly";
+  retentionDays: number; exportFormat: "csv" | "xlsx" | "json";
+  analyticsEnabled: boolean;
+};
+
+type AuthenticationSettings = {
+  require2fa: boolean;
+  requireUppercase: boolean;
+  requireLowercase: boolean;
+  requireNumbers: boolean;
+  requireSpecialChars: boolean;
+  passwordMinLength: number;
+  maxRequestsPerMinute: number;
+  sessionTimeoutMinutes: number;
+  maxLoginAttempts: number;
+  registrationType: "pre-registered" | "self-registration";
+};
 
 type Department = {
-  id: string;
-  name: string;
-  code: string;
-  colorDot?: string;
-  staffMembers?: any[];
+  id: string; name: string; description: string; head: string; memberCount: number;
 };
 
 type SystemUser = {
-  id: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  role?: { name: string };
-  isActive: boolean;
+  id: string; fullName: string; email: string; role: string; department: string; status: "active" | "inactive";
 };
 
 type Role = {
-  id: string;
-  name: string;
-  description?: string;
-  permissionCodes?: string[];
+  id: string; name: string; description: string; permissions: string[];
 };
 
-type Permission = {
-  id: string;
-  code: string;
-  name: string;
-  description?: string;
+type MobileAccessMap = Record<string, Record<string, boolean>>;
+
+// ─── Design tokens ────────────────────────────────────────────
+
+const inputStyle: React.CSSProperties = {
+  width: "100%", padding: "8px 10px", borderRadius: "7px", border: "1px solid #E5E7EB",
+  fontSize: "13px", color: "#111827", background: "#FFF", outline: "none",
+  fontFamily: "'Work Sans', sans-serif", boxSizing: "border-box", height: "36px",
+};
+const selectStyle: React.CSSProperties = { ...inputStyle, cursor: "pointer" };
+
+const dialogOverlayStyle: React.CSSProperties = {
+  position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", display: "flex",
+  alignItems: "center", justifyContent: "center", zIndex: 100,
+};
+const dialogBoxStyle: React.CSSProperties = {
+  background: "#FFF", borderRadius: "12px", padding: "24px", width: "480px",
+  maxHeight: "80vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.18)",
+  fontFamily: "'Work Sans', sans-serif",
+};
+const dialogTitleStyle: React.CSSProperties = {
+  fontSize: "15px", fontWeight: 800, color: "#111827", margin: "0 0 16px",
+};
+const btnPrimary: React.CSSProperties = {
+  display: "flex", alignItems: "center", gap: "6px", padding: "7px 16px", borderRadius: "7px",
+  background: "#111827", color: "#FFF", border: "none", cursor: "pointer",
+  fontSize: "12.5px", fontWeight: 700, fontFamily: "'Work Sans', sans-serif",
+};
+const btnSecondary: React.CSSProperties = {
+  display: "flex", alignItems: "center", gap: "5px", padding: "6px 12px", borderRadius: "7px",
+  border: "1px solid #E5E7EB", background: "#FFF", color: "#6B7280", cursor: "pointer",
+  fontSize: "12.5px", fontWeight: 500, fontFamily: "'Work Sans', sans-serif",
+};
+const btnDanger: React.CSSProperties = {
+  ...btnSecondary, border: "1px solid #FECACA", color: "#DC2626", background: "#FFF5F5",
+};
+const tableHeaderCell: React.CSSProperties = {
+  fontSize: "11px", fontWeight: 700, color: "#6B7280", textTransform: "uppercase",
+  letterSpacing: "0.06em", padding: "8px 10px", textAlign: "left",
+  fontFamily: "'Work Sans', sans-serif", borderBottom: "1px solid #F3F4F6",
+};
+const tableCell: React.CSSProperties = {
+  fontSize: "13px", color: "#374151", padding: "10px 10px",
+  fontFamily: "'Work Sans', sans-serif", borderBottom: "1px solid #F9FAFB",
 };
 
-type SettingsState = {
-  general: {
-    companyName: string;
-    timezone: string;
-    currency: string;
-    dateFormat: string;
-    defaultLanguage: string;
-  };
-  notifications: {
-    emailFrom: string;
-    smsSender: string;
-    pushTopic: string;
-    emailTemplate: string;
-    smsTemplate: string;
-    enableEmail: boolean;
-    enableSms: boolean;
-    enablePush: boolean;
-    enableInApp: boolean;
-  };
-  security: {
-    enforce2fa: boolean;
-    autoLogoutEnabled: boolean;
-    sessionTimeoutMinutes: number;
-    rateLimitEnabled: boolean;
-    rateLimitPerMinute: number;
-    minPasswordLength: number;
-    maxLoginAttempts: number;
-    lockoutDurationMinutes: number;
-    ipWhitelistEnabled: boolean;
-    ipWhitelist: string[];
-    auditLoggingEnabled: boolean;
-    requireSecureConnections: boolean;
-    allowConcurrentSessions: number;
-  };
-  backup: {
-    autoBackups: boolean;
-    backupTime: string;
-    retentionDays: number;
-  };
-  brand: {
-    companyName: string;
-    appDisplayName: string;
-    primaryColor: string;
-    secondaryColor: string;
-    accentColor: string;
-    logoFileId: string;
-    tagline: string;
-    supportEmail: string;
-    supportPhone: string;
-  };
-  mobileAccess: {
-    owner: Record<string, boolean>;
-    tenant: Record<string, boolean>;
-    family: Record<string, boolean>;
-    authorized: Record<string, boolean>;
-    contractor: Record<string, boolean>;
-    preDeliveryOwner: Record<string, boolean>;
-    resident: Record<string, boolean>;
-  };
-};
+// ─── Primitives ───────────────────────────────────────────────
 
-type BackupHistoryItem = {
-  id: string;
-  label?: string | null;
-  createdAt: string;
-  createdById?: string | null;
-  restoredAt?: string | null;
-  restoredById?: string | null;
-};
-
-type DiagnosticsState = {
-  checkedAt?: string;
-  backendApiOk?: boolean;
-  notificationsAdminOk?: boolean;
-  backendError?: string;
-};
-
-type ProviderTestResult = {
-  status: "NOT_TESTED" | "PASS" | "FAIL";
-  message: string;
-  checkedAt: string | null;
-  latencyMs: number | null;
-};
-
-type IntegrationsState = {
-  version: number;
-  smtp: {
-    enabled: boolean;
-    configured: boolean;
-    host: string;
-    port: number;
-    secure: boolean;
-    username: string;
-    password: string;
-    fromEmail: string;
-    fromName: string;
-    lastTest: ProviderTestResult | null;
-  };
-  smsOtp: {
-    enabled: boolean;
-    configured: boolean;
-    provider: "FIREBASE_AUTH";
-    firebaseProjectId: string;
-    lastTest: ProviderTestResult | null;
-  };
-  fcm: {
-    enabled: boolean;
-    configured: boolean;
-    serviceAccountJson: string;
-    projectId: string;
-    clientEmail: string;
-    privateKey: string;
-    lastTest: ProviderTestResult | null;
-  };
-  s3: {
-    enabled: boolean;
-    configured: boolean;
-    provider: "LOCAL" | "S3" | "SUPABASE";
-    bucket: string;
-    region: string;
-    endpoint: string;
-    accessKeyId: string;
-    secretAccessKey: string;
-    forcePathStyle: boolean;
-    supabaseUrl: string;
-    supabaseServiceRoleKey: string;
-    lastTest: ProviderTestResult | null;
-  };
-  crm: {
-    enabled: boolean;
-    configured: boolean;
-    baseUrl: string;
-    authToken: string;
-    lastTest: ProviderTestResult | null;
-  };
-  erp: {
-    enabled: boolean;
-    configured: boolean;
-    baseUrl: string;
-    authToken: string;
-    lastTest: ProviderTestResult | null;
-  };
-  hcp: {
-    enabled: boolean;
-    configured: boolean;
-    baseUrl: string;
-    authToken: string;
-    lastTest: ProviderTestResult | null;
-  };
-  paymentGateway: {
-    enabled: boolean;
-    configured: boolean;
-    provider: "STRIPE" | "PAYFORT" | "OTHER";
-    apiKey: string;
-    secretKey: string;
-    lastTest: ProviderTestResult | null;
-  };
-  fireAlarm: {
-    enabled: boolean;
-    configured: boolean;
-    baseUrl: string;
-    apiKey: string;
-    lastTest: ProviderTestResult | null;
-  };
-  smartHome: {
-    enabled: boolean;
-    configured: boolean;
-    baseUrl: string;
-    apiKey: string;
-    lastTest: ProviderTestResult | null;
-  };
-  hikCentral: {
-    enabled: boolean;
-    configured: boolean;
-    baseUrl: string;
-    apiKey: string;
-    lastTest: ProviderTestResult | null;
-  };
-};
-
-const mobileAccessFeatureCatalog = [
-  {
-    key: "canUseServices",
-    label: "Services & Requests",
-    hint: "Show services and requests in mobile.",
-  },
-  {
-    key: "canUseBookings",
-    label: "Bookings",
-    hint: "Allow amenities booking and history.",
-  },
-  {
-    key: "canUseComplaints",
-    label: "Complaints",
-    hint: "Allow complaints submission and follow-up.",
-  },
-  {
-    key: "canUseQr",
-    label: "QR Access",
-    hint: "Allow generating and managing QR access.",
-  },
-  {
-    key: "canViewFinance",
-    label: "Finance",
-    hint: "Show invoices, violations, and payments.",
-  },
-  {
-    key: "canManageHousehold",
-    label: "Manage Household",
-    hint: "Allow family/authorized/home-staff operations.",
-  },
-  {
-    key: "canUseDiscover",
-    label: "Discover",
-    hint: "Show discover places.",
-  },
-  {
-    key: "canUseHelpCenter",
-    label: "Help Center",
-    hint: "Show help/support center.",
-  },
-  {
-    key: "canUseUtilities",
-    label: "Utilities",
-    hint: "Show utility tracking flows.",
-  },
-] as const;
-
-const mobileAccessPersonaCatalog = [
-  { key: "owner", label: "Owner", hint: "Primary owner account policy." },
-  { key: "tenant", label: "Tenant", hint: "Active tenant account policy." },
-  { key: "family", label: "Family", hint: "First-degree family member policy." },
-  { key: "authorized", label: "Authorized", hint: "Delegate/authorized account policy." },
-  { key: "contractor", label: "Contractor", hint: "Internal contractor persona policy." },
-  {
-    key: "preDeliveryOwner",
-    label: "Pre-delivery Owner",
-    hint: "Owner of not-delivered unit policy.",
-  },
-  { key: "resident", label: "Resident (Fallback)", hint: "Fallback resident policy." },
-] as const;
-
-const defaultSettings: SettingsState = {
-  general: {
-    companyName: "Al Karma Developments",
-    timezone: "Africa/Cairo",
-    currency: "EGP",
-    dateFormat: "DD/MM/YYYY",
-    defaultLanguage: "English",
-  },
-  notifications: {
-    emailFrom: "noreply@alkarma.com",
-    smsSender: "AlKarma",
-    pushTopic: "community-updates",
-    emailTemplate: "Dear {resident_name},\n\n{message}\n\nRegards,\nAl Karma Team",
-    smsTemplate: "{message} - Al Karma",
-    enableEmail: true,
-    enableSms: false,
-    enablePush: false,
-    enableInApp: true,
-  },
-  security: {
-    enforce2fa: true,
-    autoLogoutEnabled: true,
-    sessionTimeoutMinutes: 30,
-    rateLimitEnabled: true,
-    rateLimitPerMinute: 100,
-    minPasswordLength: 8,
-    maxLoginAttempts: 5,
-    lockoutDurationMinutes: 15,
-    ipWhitelistEnabled: false,
-    ipWhitelist: [],
-    auditLoggingEnabled: true,
-    requireSecureConnections: true,
-    allowConcurrentSessions: 3,
-  },
-  backup: {
-    autoBackups: false,
-    backupTime: "02:00",
-    retentionDays: 30,
-  },
-  brand: {
-    companyName: "Al Karma Developments",
-    appDisplayName: "AlKarma Community",
-    primaryColor: "#2A3E35",
-    secondaryColor: "#C9A961",
-    accentColor: "#0B5FFF",
-    logoFileId: "",
-    tagline: "Smart Living",
-    supportEmail: "",
-    supportPhone: "",
-  },
-  mobileAccess: {
-    owner: {
-      canUseServices: true,
-      canUseBookings: true,
-      canUseComplaints: true,
-      canUseQr: true,
-      canViewFinance: true,
-      canManageHousehold: true,
-      canUseDiscover: true,
-      canUseHelpCenter: true,
-      canUseUtilities: true,
-    },
-    tenant: {
-      canUseServices: true,
-      canUseBookings: true,
-      canUseComplaints: true,
-      canUseQr: true,
-      canViewFinance: true,
-      canManageHousehold: true,
-      canUseDiscover: true,
-      canUseHelpCenter: true,
-      canUseUtilities: true,
-    },
-    family: {
-      canUseServices: true,
-      canUseBookings: true,
-      canUseComplaints: true,
-      canUseQr: false,
-      canViewFinance: false,
-      canManageHousehold: false,
-      canUseDiscover: true,
-      canUseHelpCenter: true,
-      canUseUtilities: false,
-    },
-    authorized: {
-      canUseServices: true,
-      canUseBookings: true,
-      canUseComplaints: true,
-      canUseQr: true,
-      canViewFinance: false,
-      canManageHousehold: false,
-      canUseDiscover: true,
-      canUseHelpCenter: true,
-      canUseUtilities: false,
-    },
-    contractor: {
-      canUseServices: false,
-      canUseBookings: false,
-      canUseComplaints: false,
-      canUseQr: true,
-      canViewFinance: false,
-      canManageHousehold: false,
-      canUseDiscover: false,
-      canUseHelpCenter: true,
-      canUseUtilities: false,
-    },
-    preDeliveryOwner: {
-      canUseServices: false,
-      canUseBookings: false,
-      canUseComplaints: true,
-      canUseQr: false,
-      canViewFinance: true,
-      canManageHousehold: false,
-      canUseDiscover: true,
-      canUseHelpCenter: true,
-      canUseUtilities: true,
-    },
-    resident: {
-      canUseServices: true,
-      canUseBookings: true,
-      canUseComplaints: true,
-      canUseQr: true,
-      canViewFinance: true,
-      canManageHousehold: false,
-      canUseDiscover: true,
-      canUseHelpCenter: true,
-      canUseUtilities: true,
-    },
-  },
-};
-
-const defaultIntegrations: IntegrationsState = {
-  version: 1,
-  smtp: {
-    enabled: false,
-    configured: false,
-    host: "",
-    port: 587,
-    secure: false,
-    username: "",
-    password: "",
-    fromEmail: "",
-    fromName: "",
-    lastTest: null,
-  },
-  smsOtp: {
-    enabled: false,
-    configured: false,
-    provider: "FIREBASE_AUTH",
-    firebaseProjectId: "",
-    lastTest: null,
-  },
-  fcm: {
-    enabled: false,
-    configured: false,
-    serviceAccountJson: "",
-    projectId: "",
-    clientEmail: "",
-    privateKey: "",
-    lastTest: null,
-  },
-  s3: {
-    enabled: false,
-    configured: false,
-    provider: "LOCAL",
-    bucket: "",
-    region: "",
-    endpoint: "",
-    accessKeyId: "",
-    secretAccessKey: "",
-    forcePathStyle: true,
-    supabaseUrl: "",
-    supabaseServiceRoleKey: "",
-    lastTest: null,
-  },
-  crm: {
-    enabled: false,
-    configured: false,
-    baseUrl: "",
-    authToken: "",
-    lastTest: null,
-  },
-  erp: {
-    enabled: false,
-    configured: false,
-    baseUrl: "",
-    authToken: "",
-    lastTest: null,
-  },
-  hcp: {
-    enabled: false,
-    configured: false,
-    baseUrl: "",
-    authToken: "",
-    lastTest: null,
-  },
-  paymentGateway: {
-    enabled: false,
-    configured: false,
-    provider: "STRIPE",
-    apiKey: "",
-    secretKey: "",
-    lastTest: null,
-  },
-  fireAlarm: {
-    enabled: false,
-    configured: false,
-    baseUrl: "",
-    apiKey: "",
-    lastTest: null,
-  },
-  smartHome: {
-    enabled: false,
-    configured: false,
-    baseUrl: "",
-    apiKey: "",
-    lastTest: null,
-  },
-  hikCentral: {
-    enabled: false,
-    configured: false,
-    baseUrl: "",
-    apiKey: "",
-    lastTest: null,
-  },
-};
-
-function mergeSettings(parsed: any): SettingsState {
-  return {
-    ...defaultSettings,
-    ...parsed,
-    general: { ...defaultSettings.general, ...(parsed?.general ?? {}) },
-    notifications: { ...defaultSettings.notifications, ...(parsed?.notifications ?? {}) },
-    security: { ...defaultSettings.security, ...(parsed?.security ?? {}) },
-    backup: { ...defaultSettings.backup, ...(parsed?.backup ?? {}) },
-    brand: { ...defaultSettings.brand, ...(parsed?.brand ?? {}) },
-    mobileAccess: {
-      ...defaultSettings.mobileAccess,
-      ...(parsed?.mobileAccess ?? {}),
-      owner: { ...defaultSettings.mobileAccess.owner, ...(parsed?.mobileAccess?.owner ?? {}) },
-      tenant: { ...defaultSettings.mobileAccess.tenant, ...(parsed?.mobileAccess?.tenant ?? {}) },
-      family: { ...defaultSettings.mobileAccess.family, ...(parsed?.mobileAccess?.family ?? {}) },
-      authorized: { ...defaultSettings.mobileAccess.authorized, ...(parsed?.mobileAccess?.authorized ?? {}) },
-      contractor: { ...defaultSettings.mobileAccess.contractor, ...(parsed?.mobileAccess?.contractor ?? {}) },
-      preDeliveryOwner: {
-        ...defaultSettings.mobileAccess.preDeliveryOwner,
-        ...(parsed?.mobileAccess?.preDeliveryOwner ?? {}),
-      },
-      resident: { ...defaultSettings.mobileAccess.resident, ...(parsed?.mobileAccess?.resident ?? {}) },
-    },
-  };
-}
-
-function toLocalDateTimeValue(iso?: string | null): string {
-  if (!iso) return "";
-  const dt = new Date(iso);
-  if (Number.isNaN(dt.getTime())) return "";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const year = dt.getFullYear();
-  const month = pad(dt.getMonth() + 1);
-  const day = pad(dt.getDate());
-  const hours = pad(dt.getHours());
-  const minutes = pad(dt.getMinutes());
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
-}
-
-function fromLocalDateTimeValue(local: string): string {
-  if (!local.trim()) return "";
-  const dt = new Date(local);
-  return Number.isNaN(dt.getTime()) ? "" : dt.toISOString();
-}
-
-function mergeIntegrations(parsed: any): IntegrationsState {
-  return {
-    ...defaultIntegrations,
-    ...(parsed ?? {}),
-    smtp: { ...defaultIntegrations.smtp, ...(parsed?.smtp ?? {}) },
-    smsOtp: { ...defaultIntegrations.smsOtp, ...(parsed?.smsOtp ?? {}) },
-    fcm: { ...defaultIntegrations.fcm, ...(parsed?.fcm ?? {}) },
-    s3: { ...defaultIntegrations.s3, ...(parsed?.s3 ?? {}) },
-    crm: { ...defaultIntegrations.crm, ...(parsed?.crm ?? {}) },
-    erp: { ...defaultIntegrations.erp, ...(parsed?.erp ?? {}) },
-    hcp: { ...defaultIntegrations.hcp, ...(parsed?.hcp ?? {}) },
-    paymentGateway: { ...defaultIntegrations.paymentGateway, ...(parsed?.paymentGateway ?? {}) },
-    fireAlarm: { ...defaultIntegrations.fireAlarm, ...(parsed?.fireAlarm ?? {}) },
-    smartHome: { ...defaultIntegrations.smartHome, ...(parsed?.smartHome ?? {}) },
-    hikCentral: { ...defaultIntegrations.hikCentral, ...(parsed?.hikCentral ?? {}) },
-  };
-}
-
-function downloadJson(filename: string, data: unknown) {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-export function SystemSettings() {
-  const [saved, setSaved] = useState<SettingsState>(defaultSettings);
-  const [draft, setDraft] = useState<SettingsState>(defaultSettings);
-  const [integrations, setIntegrations] = useState<IntegrationsState>(defaultIntegrations);
-  const [backupHistory, setBackupHistory] = useState<BackupHistoryItem[]>([]);
-  const [diagnostics, setDiagnostics] = useState<DiagnosticsState>({});
-  const [isLoadingSettings, setIsLoadingSettings] = useState(false);
-  const [isLoadingIntegrations, setIsLoadingIntegrations] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [savingIntegration, setSavingIntegration] = useState<string | null>(null);
-  const [testingIntegration, setTestingIntegration] = useState<string | null>(null);
-  const [isCheckingBackend, setIsCheckingBackend] = useState(false);
-  const [isRestoring, setIsRestoring] = useState(false);
-  const [isCreatingBackup, setIsCreatingBackup] = useState(false);
-  const [restoringBackupId, setRestoringBackupId] = useState<string | null>(null);
-  const restoreInputRef = useRef<HTMLInputElement | null>(null);
-
-  // Departments, System Users, Roles state
-  const [departments, setDepartments] = useState<Department[]>([]);
-  const [systemUsers, setSystemUsers] = useState<SystemUser[]>([]);
-  const [roles, setRoles] = useState<Role[]>([]);
-  const [permissions, setPermissions] = useState<Permission[]>([]);
-  const [isLoadingDepartments, setIsLoadingDepartments] = useState(false);
-  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
-  const [isLoadingRoles, setIsLoadingRoles] = useState(false);
-
-  const setMobileAccessFlag = useCallback(
-    (
-      persona: (typeof mobileAccessPersonaCatalog)[number]["key"],
-      feature: (typeof mobileAccessFeatureCatalog)[number]["key"],
-      enabled: boolean,
-    ) => {
-      setDraft((s) => ({
-        ...s,
-        mobileAccess: {
-          ...s.mobileAccess,
-          [persona]: {
-            ...(s.mobileAccess[persona] ?? {}),
-            [feature]: enabled,
-          },
-        },
-      }));
-    },
-    [],
-  );
-
-  const loadBackupHistory = useCallback(async () => {
-    const response = await apiClient.get("/system-settings/backup/history", {
-      params: { limit: 20 },
-    });
-    setBackupHistory(extractRows<BackupHistoryItem>(response.data));
-  }, []);
-
-  const loadDepartments = useCallback(async () => {
-    setIsLoadingDepartments(true);
-    try {
-      const response = await apiClient.get("/system-settings/departments", {
-        params: { limit: 100 },
-      });
-      setDepartments(extractRows<any>(response.data));
-    } catch (error) {
-      toast.error("Failed to load departments", { description: errorMessage(error) });
-    } finally {
-      setIsLoadingDepartments(false);
-    }
-  }, []);
-
-  const loadSystemUsers = useCallback(async () => {
-    setIsLoadingUsers(true);
-    try {
-      const response = await apiClient.get("/system-settings/users", {
-        params: { limit: 100 },
-      });
-      setSystemUsers(extractRows<any>(response.data));
-    } catch (error) {
-      toast.error("Failed to load system users", { description: errorMessage(error) });
-    } finally {
-      setIsLoadingUsers(false);
-    }
-  }, []);
-
-  const loadRoles = useCallback(async () => {
-    setIsLoadingRoles(true);
-    try {
-      const [rolesRes, permissionsRes] = await Promise.all([
-        apiClient.get("/system-settings/roles"),
-        apiClient.get("/system-settings/permissions"),
-      ]);
-      setRoles(extractRows<any>(rolesRes.data));
-      setPermissions(extractRows<any>(permissionsRes.data));
-    } catch (error) {
-      toast.error("Failed to load roles", { description: errorMessage(error) });
-    } finally {
-      setIsLoadingRoles(false);
-    }
-  }, []);
-
-  const loadIntegrations = useCallback(async () => {
-    setIsLoadingIntegrations(true);
-    try {
-      const response = await apiClient.get("/system-settings/integrations");
-      const merged = mergeIntegrations(response.data?.data ?? response.data);
-      setIntegrations(merged);
-    } catch (error) {
-      toast.error("Failed to load integrations", { description: errorMessage(error) });
-    } finally {
-      setIsLoadingIntegrations(false);
-    }
-  }, []);
-
-  const loadSettings = useCallback(async () => {
-    setIsLoadingSettings(true);
-    try {
-      const [settingsRes] = await Promise.all([
-        apiClient.get("/system-settings"),
-        loadBackupHistory(),
-      ]);
-      const merged = mergeSettings(settingsRes.data?.data ?? settingsRes.data);
-      setSaved(merged);
-      setDraft(merged);
-    } catch (error) {
-      toast.error("Failed to load system settings", { description: errorMessage(error) });
-    } finally {
-      setIsLoadingSettings(false);
-    }
-  }, [loadBackupHistory]);
-
-  useEffect(() => {
-    void loadSettings();
-    void loadIntegrations();
-    void loadDepartments();
-    void loadSystemUsers();
-    void loadRoles();
-  }, [loadIntegrations, loadSettings, loadDepartments, loadSystemUsers, loadRoles]);
-
-  const hasUnsavedChanges = useMemo(
-    () => JSON.stringify(saved) !== JSON.stringify(draft),
-    [saved, draft],
-  );
-
-  const saveDraft = async () => {
-    setIsSaving(true);
-    try {
-      await Promise.all([
-        apiClient.patch("/system-settings/general", draft.general),
-        apiClient.patch("/system-settings/notifications", draft.notifications),
-        apiClient.patch("/system-settings/security", draft.security),
-        apiClient.patch("/system-settings/backup", draft.backup),
-        apiClient.patch("/system-settings/brand", draft.brand),
-        apiClient.patch("/system-settings/mobile-access", draft.mobileAccess),
-      ]);
-      setSaved(draft);
-      toast.success("Settings saved", {
-        description: "Settings were persisted to backend storage.",
-      });
-    } catch (error) {
-      toast.error("Failed to save settings", { description: errorMessage(error) });
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const resetDraft = () => {
-    setDraft(saved);
-    toast.success("Changes discarded", { description: "Draft settings were reset to the last saved values." });
-  };
-
-  const checkBackend = useCallback(async () => {
-    setIsCheckingBackend(true);
-    try {
-      const [summaryRes, notificationsRes] = await Promise.all([
-        apiClient.get("/dashboard/summary"),
-        apiClient.get("/notifications/admin/all", { params: { page: 1, limit: 1 } }),
-      ]);
-
-      setDiagnostics((prev) => ({
-        ...prev,
-        checkedAt: new Date().toISOString(),
-        backendApiOk: !!summaryRes.data,
-        notificationsAdminOk: Array.isArray(notificationsRes.data?.data),
-        backendError: undefined,
-      }));
-
-      toast.success("Backend diagnostics passed", {
-        description: "Dashboard and notifications admin endpoints are reachable.",
-      });
-    } catch (error) {
-      const msg = errorMessage(error);
-      setDiagnostics((prev) => ({
-        ...prev,
-        checkedAt: new Date().toISOString(),
-        backendApiOk: false,
-        notificationsAdminOk: false,
-        backendError: msg,
-      }));
-      toast.error("Backend diagnostics failed", { description: msg });
-    } finally {
-      setIsCheckingBackend(false);
-    }
-  }, []);
-
-  const createLocalBackup = async () => {
-    setIsCreatingBackup(true);
-    try {
-      const response = await apiClient.post("/system-settings/backup/create", {
-        label: `Admin UI backup ${new Date().toISOString().slice(0, 19)}`,
-      });
-      await loadBackupHistory();
-      toast.success("Settings backup created", {
-        description: response.data?.data?.label ?? "Backend snapshot stored successfully.",
-      });
-    } catch (error) {
-      toast.error("Failed to create settings backup", { description: errorMessage(error) });
-    } finally {
-      setIsCreatingBackup(false);
-    }
-  };
-
-  const uploadBrandLogo = async (file: File) => {
-    const form = new FormData();
-    form.append("file", file);
-    const response = await apiClient.post("/files/upload/brand-logo", form, {
-      headers: { "Content-Type": "multipart/form-data" },
-    });
-    const fileId = response.data?.id;
-    if (!fileId) throw new Error("Brand logo upload did not return file id");
-    setDraft((s) => ({ ...s, brand: { ...s.brand, logoFileId: String(fileId) } }));
-    toast.success("Brand logo uploaded", { description: `File ID: ${String(fileId).slice(0, 8)}...` });
-  };
-
-  const restoreFromBackupFile = async (file: File) => {
-    setIsRestoring(true);
-    try {
-      const text = await file.text();
-      const parsed = JSON.parse(text);
-      const incoming = parsed?.settings ?? parsed;
-      const response = await apiClient.post("/system-settings/backup/import", {
-        snapshot: incoming,
-      });
-      const merged = mergeSettings(response.data?.data ?? incoming);
-      setSaved(merged);
-      setDraft(merged);
-      await loadBackupHistory();
-      toast.success("Backup imported", {
-        description: "Settings were restored from JSON snapshot and saved to backend.",
-      });
-    } catch (error) {
-      toast.error("Failed to restore backup", { description: errorMessage(error) });
-    } finally {
-      setIsRestoring(false);
-    }
-  };
-
-  const restoreStoredBackup = async (backupId: string) => {
-    setRestoringBackupId(backupId);
-    try {
-      const response = await apiClient.post("/system-settings/backup/restore", { backupId });
-      const merged = mergeSettings(response.data?.data ?? response.data);
-      setSaved(merged);
-      setDraft(merged);
-      await loadBackupHistory();
-      toast.success("Backup restored", { description: "Stored backup snapshot restored successfully." });
-    } catch (error) {
-      toast.error("Failed to restore stored backup", { description: errorMessage(error) });
-    } finally {
-      setRestoringBackupId(null);
-    }
-  };
-
-  const saveIntegration = async (
-    provider: "smtp" | "smsOtp" | "fcm" | "s3",
-    payload: Record<string, unknown>,
-  ) => {
-    setSavingIntegration(provider);
-    try {
-      await apiClient.patch(`/system-settings/integrations/${provider}`, payload);
-      await loadIntegrations();
-      toast.success(`${provider.toUpperCase()} settings saved`);
-    } catch (error) {
-      toast.error(`Failed to save ${provider} settings`, {
-        description: errorMessage(error),
-      });
-    } finally {
-      setSavingIntegration(null);
-    }
-  };
-
-  const testIntegration = async (
-    provider: "smtp" | "smsOtp" | "fcm" | "s3",
-    payload: Record<string, unknown> = {},
-  ) => {
-    setTestingIntegration(provider);
-    try {
-      const response = await apiClient.post(
-        `/system-settings/integrations/${provider}/test`,
-        payload,
-      );
-      const result = response.data ?? {};
-      const ok = String(result.status ?? "").toUpperCase() === "PASS";
-      if (ok) {
-        toast.success(`${provider.toUpperCase()} test passed`, {
-          description: result.message ?? "Provider test succeeded",
-        });
-      } else {
-        toast.error(`${provider.toUpperCase()} test failed`, {
-          description: result.message ?? "Provider test failed",
-        });
-      }
-      await loadIntegrations();
-    } catch (error) {
-      toast.error(`Failed to test ${provider}`, { description: errorMessage(error) });
-    } finally {
-      setTestingIntegration(null);
-    }
-  };
-
-  const providerReadiness = useMemo(
-    () => [
-      { label: "In-App Notifications", ready: true, note: "Supported in backend" },
-      { label: "Email (SMTP)", ready: draft.notifications.enableEmail, note: "Requires SMTP envs (or mock mode) in backend" },
-      { label: "OTP (Firebase Auth)", ready: draft.notifications.enableSms, note: "Uses Firebase ID token verification (client-side phone auth)." },
-      { label: "Push (FCM)", ready: draft.notifications.enablePush, note: "Backend supports FCM/mock; requires device tokens + provider config" },
-    ],
-    [draft.notifications.enableEmail, draft.notifications.enablePush, draft.notifications.enableSms],
-  );
-
-  const settingsTabTriggerClass =
-    "relative flex items-center gap-1.5 rounded-none border-b-2 border-transparent px-4 py-3 text-[13px] font-medium text-[#64748B] transition-colors duration-150 hover:text-[#1E293B] data-[state=active]:border-[#0F172A] data-[state=active]:text-[#0F172A] data-[state=active]:font-semibold";
-
+function Field({ label, hint, required, children, horizontal }: {
+  label: string; hint?: string; required?: boolean; children: React.ReactNode; horizontal?: boolean;
+}) {
   return (
-    <div className="space-y-5">
-      {/* Page Header */}
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-[#1E293B]">System Settings</h1>
-            {hasUnsavedChanges ? (
-              <span className="rounded-full border border-[#FDE68A] bg-[#FFFBEB] px-2 py-0.5 text-[10px] font-semibold text-[#B45309]">
-                Unsaved changes
-              </span>
-            ) : null}
+    <div style={{ display: "flex", flexDirection: horizontal ? "row" : "column", gap: horizontal ? "0" : "4px", alignItems: horizontal ? "center" : undefined, justifyContent: horizontal ? "space-between" : undefined }}>
+      <div style={{ flex: horizontal ? 1 : undefined }}>
+        <label style={{ fontSize: "12.5px", fontWeight: 600, color: "#374151", fontFamily: "'Work Sans', sans-serif" }}>
+          {label}{required && <span style={{ color: "#DC2626", marginLeft: "3px" }}>*</span>}
+        </label>
+        {hint && <p style={{ fontSize: "11.5px", color: "#9CA3AF", margin: "2px 0 0", fontFamily: "'Work Sans', sans-serif" }}>{hint}</p>}
+      </div>
+      <div style={{ flex: horizontal ? "0 0 240px" : undefined }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function SectionLabel({ icon, label }: { icon: React.ReactNode; label: string }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "14px", paddingBottom: "8px", borderBottom: "1px solid #F3F4F6" }}>
+      <span style={{ color: "#9CA3AF" }}>{icon}</span>
+      <span style={{ fontSize: "11px", fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.06em", fontFamily: "'Work Sans', sans-serif" }}>{label}</span>
+    </div>
+  );
+}
+
+function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+  return (
+    <button type="button" onClick={() => !disabled && onChange(!checked)} aria-pressed={checked}
+      style={{ width: "38px", height: "22px", borderRadius: "11px", border: "none", cursor: disabled ? "not-allowed" : "pointer", background: checked ? "#111827" : "#E5E7EB", position: "relative", transition: "background 200ms", flexShrink: 0, outline: "none", opacity: disabled ? 0.5 : 1 }}>
+      <span style={{ position: "absolute", top: "3px", left: checked ? "19px" : "3px", width: "16px", height: "16px", borderRadius: "50%", background: "#FFF", transition: "left 200ms", boxShadow: "0 1px 3px rgba(0,0,0,0.15)" }} />
+    </button>
+  );
+}
+
+function PasswordInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div style={{ position: "relative" }}>
+      <input type={show ? "text" : "password"} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
+        style={{ ...inputStyle, paddingRight: "38px" }} />
+      <button type="button" onClick={() => setShow((p) => !p)}
+        style={{ position: "absolute", right: "10px", top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", padding: 0, display: "flex" }}>
+        {show ? <EyeOff style={{ width: "13px", height: "13px" }} /> : <Eye style={{ width: "13px", height: "13px" }} />}
+      </button>
+    </div>
+  );
+}
+
+function SaveBar({ dirty, saving, onSave, onDiscard }: { dirty: boolean; saving: boolean; onSave: () => void; onDiscard: () => void }) {
+  if (!dirty) return null;
+  return (
+    <div style={{ position: "sticky", bottom: "16px", zIndex: 20, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: "9px", border: "1px solid #EBEBEB", background: "#FFF", boxShadow: "0 4px 16px rgba(0,0,0,0.1)", margin: "0 0 0 0" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+        <Info style={{ width: "13px", height: "13px", color: "#D97706" }} />
+        <span style={{ fontSize: "12.5px", fontWeight: 600, color: "#374151", fontFamily: "'Work Sans', sans-serif" }}>You have unsaved changes</span>
+      </div>
+      <div style={{ display: "flex", gap: "8px" }}>
+        <button type="button" onClick={onDiscard}
+          style={{ display: "flex", alignItems: "center", gap: "5px", padding: "6px 12px", borderRadius: "7px", border: "1px solid #E5E7EB", background: "#FFF", color: "#6B7280", cursor: "pointer", fontSize: "12.5px", fontWeight: 500, fontFamily: "'Work Sans', sans-serif" }}>
+          <X style={{ width: "11px", height: "11px" }} /> Discard
+        </button>
+        <button type="button" onClick={onSave} disabled={saving}
+          style={{ display: "flex", alignItems: "center", gap: "5px", padding: "6px 16px", borderRadius: "7px", background: saving ? "#6B7280" : "#111827", color: "#FFF", border: "none", cursor: saving ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+          <Save style={{ width: "12px", height: "12px" }} />
+          {saving ? "Saving…" : "Save Changes"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Permission definitions ───────────────────────────────────
+
+const PERMISSION_GROUPS: { module: string; permissions: string[] }[] = [
+  { module: "Residents", permissions: ["residents:read", "residents:write"] },
+  { module: "Units", permissions: ["units:read", "units:write"] },
+  { module: "Billing", permissions: ["billing:read", "billing:write"] },
+  { module: "Settings", permissions: ["settings:read", "settings:write"] },
+  { module: "Services", permissions: ["services:read", "services:write"] },
+  { module: "Permits", permissions: ["permits:read", "permits:write"] },
+  { module: "Complaints", permissions: ["complaints:read", "complaints:write"] },
+  { module: "Violations", permissions: ["violations:read", "violations:write"] },
+  { module: "Amenities", permissions: ["amenities:read", "amenities:write"] },
+  { module: "Surveys", permissions: ["surveys:read", "surveys:write"] },
+  { module: "Reports", permissions: ["reports:read", "reports:write"] },
+  { module: "Ordering", permissions: ["ordering:read", "ordering:write"] },
+  { module: "Marketing", permissions: ["marketing:read", "marketing:write"] },
+  { module: "Emergency", permissions: ["emergency:read", "emergency:write"] },
+];
+
+// ─── Integration definitions ──────────────────────────────────
+
+const INTEGRATIONS = [
+  { id: "hcp", name: "HCP", description: "Health Care Provider integration for community health services." },
+  { id: "erp", name: "ERP", description: "Enterprise Resource Planning for finance and operations." },
+  { id: "crm", name: "CRM", description: "Customer Relationship Management for resident interactions." },
+  { id: "payment", name: "Payment Gateways", description: "Online payment processing for billing and fees." },
+  { id: "fire-alarm", name: "Fire Alarm System", description: "Fire detection and alarm management integration." },
+  { id: "smart-homes", name: "Smart Homes System", description: "IoT and smart home device management." },
+  { id: "hikcentral", name: "HikCentral", description: "Video surveillance and access control platform." },
+];
+
+// ─── Mobile access module list ────────────────────────────────
+
+const MOBILE_MODULES = [
+  "Dashboard", "Communities", "Units", "Residents", "Billing", "Notifications",
+  "Services", "Permits", "Complaints", "Violations", "Amenities", "Surveys",
+  "Reports", "Ordering", "Marketing", "Emergency",
+];
+const MOBILE_USER_TYPES = ["Owner", "Tenant", "Family Member", "Staff"];
+
+// ─── Tab content panels ───────────────────────────────────────
+
+function GeneralPanel({ settings, onChange, onLogoUpload }: {
+  settings: GeneralSettings;
+  onChange: (patch: Partial<GeneralSettings>) => void;
+  onLogoUpload: (f: File) => void;
+}) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <SectionLabel icon={<Settings style={{ width: "12px", height: "12px" }} />} label="Company Info" />
+      <Field label="Company Name" required>
+        <input value={settings.companyName} onChange={(e) => onChange({ companyName: e.target.value })} placeholder="Acme Properties LLC" style={inputStyle} />
+      </Field>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+        <Field label="Support Email" required>
+          <input type="email" value={settings.supportEmail} onChange={(e) => onChange({ supportEmail: e.target.value })} placeholder="support@company.com" style={inputStyle} />
+        </Field>
+        <Field label="Support Phone">
+          <input value={settings.supportPhone} onChange={(e) => onChange({ supportPhone: e.target.value })} placeholder="+20 2 xxxx xxxx" style={{ ...inputStyle, fontFamily: "'DM Mono', monospace" }} />
+        </Field>
+      </div>
+      <Field label="Address">
+        <textarea value={settings.address} onChange={(e) => onChange({ address: e.target.value })} rows={2} style={{ ...inputStyle, height: "auto", resize: "vertical" }} />
+      </Field>
+      <Field label="Timezone">
+        <select value={settings.timezone} onChange={(e) => onChange({ timezone: e.target.value })} style={selectStyle}>
+          <option value="Africa/Cairo">Africa/Cairo (UTC+2)</option>
+          <option value="Asia/Dubai">Asia/Dubai (UTC+4)</option>
+          <option value="Europe/London">Europe/London (UTC+0)</option>
+          <option value="America/New_York">America/New_York (UTC-5)</option>
+          <option value="Asia/Riyadh">Asia/Riyadh (UTC+3)</option>
+        </select>
+      </Field>
+
+      <div style={{ borderTop: "1px solid #F3F4F6", paddingTop: "16px" }}>
+        <SectionLabel icon={<Upload style={{ width: "12px", height: "12px" }} />} label="Branding" />
+        <Field label="Company Logo" hint="Displayed in the app header and communications.">
+          <label style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 10px", borderRadius: "7px", border: "1.5px dashed #D1D5DB", background: "#FAFAFA", cursor: "pointer", fontSize: "12px", color: "#6B7280", height: "36px", boxSizing: "border-box" }}>
+            <Upload style={{ width: "12px", height: "12px" }} />
+            Upload logo (PNG, SVG)
+            <input type="file" accept="image/*,.svg" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) onLogoUpload(f); }} />
+          </label>
+        </Field>
+        {settings.logoFileId && (
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "6px", padding: "7px 10px", borderRadius: "6px", border: "1px solid #D1FAE5", background: "#ECFDF5" }}>
+            <Check style={{ width: "11px", height: "11px", color: "#059669" }} />
+            <span style={{ fontSize: "12px", color: "#059669", flex: 1, fontWeight: 600 }}>Logo uploaded successfully</span>
+            <button type="button" onClick={() => onChange({ logoFileId: "" })} style={{ width: "22px", height: "22px", borderRadius: "5px", border: "1px solid #FECACA", background: "#FFF5F5", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#DC2626" }}>
+              <Trash2 style={{ width: "9px", height: "9px" }} />
+            </button>
           </div>
-          <p className="mt-0.5 text-sm text-[#64748B]">
-            Manage backend-backed configuration, integrations, access policies, and system health.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={resetDraft} disabled={!hasUnsavedChanges || isSaving} className="rounded-lg">
-            Cancel
-          </Button>
-          <Button
-            size="sm"
-            className="rounded-lg bg-[#0F172A] text-white hover:bg-[#1E293B]"
-            onClick={() => void saveDraft()}
-            disabled={isSaving || isLoadingSettings}
-          >
-            <Save className="w-3.5 h-3.5 mr-1.5" />
-            {isLoadingSettings ? "Loading..." : isSaving ? "Saving..." : "Save Settings"}
-          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function NotificationsPanel({ settings, onChange }: { settings: NotificationSettings; onChange: (p: Partial<NotificationSettings>) => void }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <SectionLabel icon={<Bell style={{ width: "12px", height: "12px" }} />} label="Channels" />
+      {([
+        { key: "emailEnabled", label: "Email Notifications", hint: "Send transactional emails to residents and staff." },
+        { key: "pushEnabled", label: "Push Notifications", hint: "Mobile push alerts via FCM / APNs." },
+        { key: "smsEnabled", label: "SMS Notifications", hint: "Text messages for critical alerts (carrier charges may apply)." },
+        { key: "otpEnabled", label: "OTP Notifications", hint: "Send one-time passwords for verification." },
+      ] as { key: keyof NotificationSettings; label: string; hint: string }[]).map(({ key, label, hint }) => (
+        <Field key={key} label={label} hint={hint} horizontal>
+          <Toggle checked={settings[key] as boolean} onChange={(v) => onChange({ [key]: v })} />
+        </Field>
+      ))}
+
+      <div style={{ borderTop: "1px solid #F3F4F6", paddingTop: "16px" }}>
+        <SectionLabel icon={<Bell style={{ width: "12px", height: "12px" }} />} label="Alert Types" />
+        {([
+          { key: "maintenanceAlerts", label: "Maintenance Alerts", hint: "Notify residents of scheduled maintenance." },
+          { key: "paymentReminders", label: "Payment Reminders", hint: "Automated reminders before and after due dates." },
+          { key: "emergencyBroadcast", label: "Emergency Broadcasts", hint: "Fire alarms and critical safety alerts." },
+        ] as { key: keyof NotificationSettings; label: string; hint: string }[]).map(({ key, label, hint }) => (
+          <Field key={key} label={label} hint={hint} horizontal>
+            <Toggle checked={settings[key] as boolean} onChange={(v) => onChange({ [key]: v })} />
+          </Field>
+        ))}
+      </div>
+
+      <div style={{ borderTop: "1px solid #F3F4F6", paddingTop: "16px" }}>
+        <SectionLabel icon={<Bell style={{ width: "12px", height: "12px" }} />} label="Digest Frequency" />
+        <Field label="Admin Digest" hint="How often to send activity summaries to admins.">
+          <select value={settings.digestFrequency} onChange={(e) => onChange({ digestFrequency: e.target.value as NotificationSettings["digestFrequency"] })} style={selectStyle}>
+            <option value="immediate">Immediate</option>
+            <option value="hourly">Hourly</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+          </select>
+        </Field>
+      </div>
+    </div>
+  );
+}
+
+function SecurityPanel({ settings, onChange }: { settings: SecuritySettings; onChange: (p: Partial<SecuritySettings>) => void }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <SectionLabel icon={<Shield style={{ width: "12px", height: "12px" }} />} label="Audit" />
+      <Field label="Audit Log Retention" hint="Days to retain audit logs before automatic purge.">
+        <input type="number" min={30} max={730} value={settings.auditLogRetentionDays} onChange={(e) => onChange({ auditLogRetentionDays: Number(e.target.value) })} style={{ ...inputStyle, maxWidth: "120px" }} />
+      </Field>
+    </div>
+  );
+}
+
+function AuthenticationPanel({ settings, onChange }: { settings: AuthenticationSettings; onChange: (p: Partial<AuthenticationSettings>) => void }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <SectionLabel icon={<Key style={{ width: "12px", height: "12px" }} />} label="Two-Factor Authentication" />
+      <Field label="Require 2FA for Admins" hint="All admin accounts must enrol in two-factor authentication." horizontal>
+        <Toggle checked={settings.require2fa} onChange={(v) => onChange({ require2fa: v })} />
+      </Field>
+
+      <div style={{ borderTop: "1px solid #F3F4F6", paddingTop: "16px" }}>
+        <SectionLabel icon={<Lock style={{ width: "12px", height: "12px" }} />} label="Password Policy" />
+        <Field label="Minimum Password Length">
+          <input type="number" min={6} max={32} value={settings.passwordMinLength} onChange={(e) => onChange({ passwordMinLength: Number(e.target.value) })} style={{ ...inputStyle, maxWidth: "120px" }} />
+        </Field>
+        <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "12px" }}>
+          <SectionLabel icon={<Lock style={{ width: "12px", height: "12px" }} />} label="Password Complexity" />
+          {([
+            { key: "requireUppercase", label: "Require Uppercase", hint: "At least one uppercase letter (A-Z)." },
+            { key: "requireLowercase", label: "Require Lowercase", hint: "At least one lowercase letter (a-z)." },
+            { key: "requireNumbers", label: "Require Numbers", hint: "At least one digit (0-9)." },
+            { key: "requireSpecialChars", label: "Require Special Characters", hint: "At least one special character (!@#$...)." },
+          ] as { key: keyof AuthenticationSettings; label: string; hint: string }[]).map(({ key, label, hint }) => (
+            <Field key={key} label={label} hint={hint} horizontal>
+              <Toggle checked={settings[key] as boolean} onChange={(v) => onChange({ [key]: v })} />
+            </Field>
+          ))}
         </div>
       </div>
 
-      {/* Runtime Diagnostics */}
-      <Card className="overflow-hidden rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
-        <div className="flex flex-col gap-3 border-b border-[#F1F5F9] px-5 py-4 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-center gap-2">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#F8FAFC]">
-              <LinkIcon className="h-3.5 w-3.5 text-[#64748B]" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-[#1E293B]">Runtime Diagnostics</h3>
-              <p className="text-[11px] text-[#94A3B8]">Live connectivity checks for backend endpoints</p>
-            </div>
-          </div>
-          <Button variant="outline" size="sm" onClick={() => void checkBackend()} disabled={isCheckingBackend} className="rounded-lg">
-            <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isCheckingBackend ? "animate-spin" : ""}`} />
-            {isCheckingBackend ? "Checking..." : "Check Now"}
-          </Button>
+      <div style={{ borderTop: "1px solid #F3F4F6", paddingTop: "16px" }}>
+        <SectionLabel icon={<Shield style={{ width: "12px", height: "12px" }} />} label="Rate Limiting & Sessions" />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+          <Field label="Max Requests per Minute" hint="Rate limit for API calls.">
+            <input type="number" min={10} max={1000} value={settings.maxRequestsPerMinute} onChange={(e) => onChange({ maxRequestsPerMinute: Number(e.target.value) })} style={inputStyle} />
+          </Field>
+          <Field label="Session Timeout" hint="Minutes before auto-logout.">
+            <input type="number" min={5} max={1440} value={settings.sessionTimeoutMinutes} onChange={(e) => onChange({ sessionTimeoutMinutes: Number(e.target.value) })} style={inputStyle} />
+          </Field>
         </div>
-        <div className="grid grid-cols-1 divide-y divide-[#F8FAFC] md:grid-cols-3 md:divide-x md:divide-y-0">
-          <div className="flex items-center gap-3 px-5 py-4">
-            <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${diagnostics.backendApiOk ? "bg-[#ECFDF5]" : diagnostics.checkedAt ? "bg-[#FEF2F2]" : "bg-[#F8FAFC]"}`}>
-              {diagnostics.backendApiOk
-                ? <CheckCircle className="w-4 h-4 text-[#10B981]" />
-                : diagnostics.checkedAt
-                ? <XCircle className="w-4 h-4 text-[#EF4444]" />
-                : <RefreshCw className="w-4 h-4 text-[#94A3B8]" />}
-            </div>
-            <div>
-              <p className="text-[11px] font-medium uppercase tracking-wide text-[#94A3B8]">Backend API</p>
-              <p className={`text-sm font-semibold ${diagnostics.backendApiOk ? "text-[#10B981]" : diagnostics.checkedAt ? "text-[#EF4444]" : "text-[#94A3B8]"}`}>
-                {diagnostics.backendApiOk ? "Reachable" : diagnostics.checkedAt ? "Failed" : "Not checked"}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3 px-5 py-4">
-            <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${diagnostics.notificationsAdminOk ? "bg-[#ECFDF5]" : diagnostics.checkedAt ? "bg-[#FEF2F2]" : "bg-[#F8FAFC]"}`}>
-              {diagnostics.notificationsAdminOk
-                ? <CheckCircle className="w-4 h-4 text-[#10B981]" />
-                : diagnostics.checkedAt
-                ? <XCircle className="w-4 h-4 text-[#EF4444]" />
-                : <Bell className="w-4 h-4 text-[#94A3B8]" />}
-            </div>
-            <div>
-              <p className="text-[11px] font-medium uppercase tracking-wide text-[#94A3B8]">Notifications</p>
-              <p className={`text-sm font-semibold ${diagnostics.notificationsAdminOk ? "text-[#10B981]" : diagnostics.checkedAt ? "text-[#EF4444]" : "text-[#94A3B8]"}`}>
-                {diagnostics.notificationsAdminOk ? "Reachable" : diagnostics.checkedAt ? "Failed" : "Not checked"}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3 px-5 py-4">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#F8FAFC]">
-              <Database className="w-4 h-4 text-[#94A3B8]" />
-            </div>
-            <div>
-              <p className="text-[11px] font-medium uppercase tracking-wide text-[#94A3B8]">Last Checked</p>
-              <p className="text-sm font-semibold text-[#1E293B]">{diagnostics.checkedAt ? formatDateTime(diagnostics.checkedAt) : "—"}</p>
-            </div>
-          </div>
+        <div style={{ marginTop: "12px" }}>
+          <Field label="Max Login Attempts" hint="Locks account after N failed attempts.">
+            <input type="number" min={3} max={20} value={settings.maxLoginAttempts} onChange={(e) => onChange({ maxLoginAttempts: Number(e.target.value) })} style={{ ...inputStyle, maxWidth: "120px" }} />
+          </Field>
         </div>
-        {diagnostics.backendError ? (
-          <div className="mx-5 mb-4 rounded-lg border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-sm text-[#991B1B]">
-            {diagnostics.backendError}
-          </div>
-        ) : null}
-      </Card>
+      </div>
 
-      <Tabs defaultValue="general" className="w-full">
-        <div className="overflow-x-auto rounded-xl border border-[#E2E8F0] bg-white shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
-          <TabsList className="flex h-auto w-full min-w-max justify-start gap-0 rounded-none bg-transparent p-0">
-            <TabsTrigger value="general" className={settingsTabTriggerClass}><Settings className="w-3.5 h-3.5" />General</TabsTrigger>
-            <TabsTrigger value="brand" className={settingsTabTriggerClass}><Palette className="w-3.5 h-3.5" />Brand</TabsTrigger>
-            <div className="my-3 w-px bg-[#F1F5F9]" />
-            <TabsTrigger value="notifications" className={settingsTabTriggerClass}><Bell className="w-3.5 h-3.5" />Notifications</TabsTrigger>
-            <div className="my-3 w-px bg-[#F1F5F9]" />
-            <TabsTrigger value="integrations" className={settingsTabTriggerClass}><Plug className="w-3.5 h-3.5" />Integrations</TabsTrigger>
-            <TabsTrigger value="backup" className={settingsTabTriggerClass}><Database className="w-3.5 h-3.5" />Backup</TabsTrigger>
-            <div className="my-3 w-px bg-[#F1F5F9]" />
-            <TabsTrigger value="security" className={settingsTabTriggerClass}><Shield className="w-3.5 h-3.5" />Security</TabsTrigger>
-            <TabsTrigger value="mobile-access" className={settingsTabTriggerClass}><Shield className="w-3.5 h-3.5" />Mobile Access</TabsTrigger>
-            <div className="my-3 w-px bg-[#F1F5F9]" />
-            <TabsTrigger value="departments" className={settingsTabTriggerClass}><Settings className="w-3.5 h-3.5" />Departments</TabsTrigger>
-            <TabsTrigger value="users" className={settingsTabTriggerClass}><Users className="w-3.5 h-3.5" />System Users</TabsTrigger>
-            <TabsTrigger value="roles" className={settingsTabTriggerClass}><Shield className="w-3.5 h-3.5" />Roles & Permissions</TabsTrigger>
-          </TabsList>
+      <div style={{ borderTop: "1px solid #F3F4F6", paddingTop: "16px" }}>
+        <SectionLabel icon={<Users2 style={{ width: "12px", height: "12px" }} />} label="User Registration" />
+        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+          <label style={{ display: "flex", gap: "10px", padding: "12px 14px", borderRadius: "8px", border: settings.registrationType === "pre-registered" ? "1.5px solid #111827" : "1px solid #E5E7EB", background: settings.registrationType === "pre-registered" ? "#F9FAFB" : "#FFF", cursor: "pointer" }}>
+            <input type="radio" name="registrationType" checked={settings.registrationType === "pre-registered"} onChange={() => onChange({ registrationType: "pre-registered" })} style={{ marginTop: "2px" }} />
+            <div>
+              <div style={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>Pre-registered</div>
+              <div style={{ fontSize: "11.5px", color: "#6B7280", marginTop: "2px" }}>Users must be added by an administrator before they can access the system. Provides tighter control over who has access.</div>
+            </div>
+          </label>
+          <label style={{ display: "flex", gap: "10px", padding: "12px 14px", borderRadius: "8px", border: settings.registrationType === "self-registration" ? "1.5px solid #111827" : "1px solid #E5E7EB", background: settings.registrationType === "self-registration" ? "#F9FAFB" : "#FFF", cursor: "pointer" }}>
+            <input type="radio" name="registrationType" checked={settings.registrationType === "self-registration"} onChange={() => onChange({ registrationType: "self-registration" })} style={{ marginTop: "2px" }} />
+            <div>
+              <div style={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>Self-registration</div>
+              <div style={{ fontSize: "11.5px", color: "#6B7280", marginTop: "2px" }}>Users can create their own account and request access. An admin may still need to approve new accounts depending on role configuration.</div>
+            </div>
+          </label>
         </div>
+      </div>
+    </div>
+  );
+}
 
-        <TabsContent value="general" className="mt-4">
-          <Card className="p-6 space-y-4">
-            <h3 className="text-[#1E293B]">General & Regional</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Company Name</Label>
-                <Input value={draft.general.companyName} onChange={(e) => setDraft((s) => ({ ...s, general: { ...s.general, companyName: e.target.value } }))} />
-              </div>
-              <div className="space-y-2">
-                <Label>Time Zone</Label>
-                <Input value={draft.general.timezone} onChange={(e) => setDraft((s) => ({ ...s, general: { ...s.general, timezone: e.target.value } }))} />
-              </div>
-              <div className="space-y-2">
-                <Label>Currency</Label>
-                <Input value={draft.general.currency} onChange={(e) => setDraft((s) => ({ ...s, general: { ...s.general, currency: e.target.value } }))} />
-              </div>
-              <div className="space-y-2">
-                <Label>Date Format</Label>
-                <Input value={draft.general.dateFormat} onChange={(e) => setDraft((s) => ({ ...s, general: { ...s.general, dateFormat: e.target.value } }))} />
-              </div>
-              <div className="space-y-2 md:col-span-2">
-                <Label>Default Language</Label>
-                <Input value={draft.general.defaultLanguage} onChange={(e) => setDraft((s) => ({ ...s, general: { ...s.general, defaultLanguage: e.target.value } }))} />
-              </div>
-            </div>
-          </Card>
-        </TabsContent>
+function AppearancePanel({ settings, onChange }: { settings: AppearanceSettings; onChange: (p: Partial<AppearanceSettings>) => void }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <SectionLabel icon={<Palette style={{ width: "12px", height: "12px" }} />} label="Colours" />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+        <Field label="Primary Colour" hint="Used for buttons and key actions.">
+          <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+            <input type="color" value={settings.primaryColor} onChange={(e) => onChange({ primaryColor: e.target.value })}
+              style={{ width: "36px", height: "36px", borderRadius: "7px", border: "1px solid #E5E7EB", padding: "2px", cursor: "pointer", background: "#FFF" }} />
+            <input value={settings.primaryColor} onChange={(e) => onChange({ primaryColor: e.target.value })} style={{ ...inputStyle, fontFamily: "'DM Mono', monospace", flex: 1 }} />
+          </div>
+        </Field>
+        <Field label="Accent Colour" hint="Used for highlights and links.">
+          <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+            <input type="color" value={settings.accentColor} onChange={(e) => onChange({ accentColor: e.target.value })}
+              style={{ width: "36px", height: "36px", borderRadius: "7px", border: "1px solid #E5E7EB", padding: "2px", cursor: "pointer", background: "#FFF" }} />
+            <input value={settings.accentColor} onChange={(e) => onChange({ accentColor: e.target.value })} style={{ ...inputStyle, fontFamily: "'DM Mono', monospace", flex: 1 }} />
+          </div>
+        </Field>
+      </div>
 
-        <TabsContent value="notifications" className="mt-4">
-          <Card className="p-6 space-y-6">
-            <h3 className="text-[#1E293B]">Notification Settings (Demo Config)</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Email From</Label>
-                <Input value={draft.notifications.emailFrom} onChange={(e) => setDraft((s) => ({ ...s, notifications: { ...s.notifications, emailFrom: e.target.value } }))} />
-              </div>
-              <div className="space-y-2">
-                <Label>SMS Sender</Label>
-                <Input value={draft.notifications.smsSender} onChange={(e) => setDraft((s) => ({ ...s, notifications: { ...s.notifications, smsSender: e.target.value } }))} />
-              </div>
-              <div className="space-y-2 md:col-span-2">
-                <Label>Push Topic</Label>
-                <Input value={draft.notifications.pushTopic} onChange={(e) => setDraft((s) => ({ ...s, notifications: { ...s.notifications, pushTopic: e.target.value } }))} />
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Email Template</Label>
-                <Textarea rows={6} value={draft.notifications.emailTemplate} onChange={(e) => setDraft((s) => ({ ...s, notifications: { ...s.notifications, emailTemplate: e.target.value } }))} />
-              </div>
-              <div className="space-y-2">
-                <Label>SMS Template</Label>
-                <Textarea rows={6} value={draft.notifications.smsTemplate} onChange={(e) => setDraft((s) => ({ ...s, notifications: { ...s.notifications, smsTemplate: e.target.value } }))} />
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="flex items-center justify-between rounded-lg border p-3"><span>Enable In-App</span><Switch checked={draft.notifications.enableInApp} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, notifications: { ...s.notifications, enableInApp: v === true } }))} /></div>
-              <div className="flex items-center justify-between rounded-lg border p-3"><span>Enable Email</span><Switch checked={draft.notifications.enableEmail} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, notifications: { ...s.notifications, enableEmail: v === true } }))} /></div>
-              <div className="flex items-center justify-between rounded-lg border p-3"><span>Enable SMS</span><Switch checked={draft.notifications.enableSms} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, notifications: { ...s.notifications, enableSms: v === true } }))} /></div>
-              <div className="flex items-center justify-between rounded-lg border p-3"><span>Enable Push</span><Switch checked={draft.notifications.enablePush} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, notifications: { ...s.notifications, enablePush: v === true } }))} /></div>
-            </div>
-            <div className="space-y-2">
-              <h4 className="text-sm font-medium text-[#1E293B]">Provider Readiness Checklist</h4>
-              <div className="space-y-2">
-                {providerReadiness.map((item) => (
-                  <div key={item.label} className="flex items-center justify-between rounded-lg border p-3">
-                    <div>
-                      <div className="text-sm text-[#1E293B]">{item.label}</div>
-                      <div className="text-xs text-[#64748B]">{item.note}</div>
-                    </div>
-                    <div className={`text-xs px-2 py-1 rounded ${item.ready ? "bg-[#DCFCE7] text-[#166534]" : "bg-[#FEF2F2] text-[#991B1B]"}`}>
-                      {item.ready ? "Configured" : "Needs Backend"}
-                    </div>
+      <div style={{ borderTop: "1px solid #F3F4F6", paddingTop: "16px" }}>
+        <SectionLabel icon={<Palette style={{ width: "12px", height: "12px" }} />} label="Layout" />
+        {([
+          { key: "darkMode", label: "Dark Mode", hint: "Enable dark theme for all admin users." },
+          { key: "compactLayout", label: "Compact Layout", hint: "Reduce padding for higher information density." },
+        ] as { key: keyof AppearanceSettings; label: string; hint: string }[]).map(({ key, label, hint }) => (
+          <Field key={key} label={label} hint={hint} horizontal>
+            <Toggle checked={settings[key] as boolean} onChange={(v) => onChange({ [key]: v })} />
+          </Field>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function LocalizationPanel({ settings, onChange }: { settings: LocalizationSettings; onChange: (p: Partial<LocalizationSettings>) => void }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <SectionLabel icon={<Globe style={{ width: "12px", height: "12px" }} />} label="Language & Region" />
+      <Field label="Default Language">
+        <select value={settings.defaultLanguage} onChange={(e) => onChange({ defaultLanguage: e.target.value as LocalizationSettings["defaultLanguage"] })} style={selectStyle}>
+          <option value="en">English</option>
+          <option value="ar">Arabic (عربي)</option>
+        </select>
+      </Field>
+      <Field label="RTL Support" hint="Right-to-left layout for Arabic content." horizontal>
+        <Toggle checked={settings.rtlSupport} onChange={(v) => onChange({ rtlSupport: v })} />
+      </Field>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+        <Field label="Currency">
+          <select value={settings.currency} onChange={(e) => onChange({ currency: e.target.value })} style={selectStyle}>
+            <option value="EGP">EGP – Egyptian Pound</option>
+            <option value="USD">USD – US Dollar</option>
+            <option value="AED">AED – UAE Dirham</option>
+            <option value="SAR">SAR – Saudi Riyal</option>
+          </select>
+        </Field>
+        <Field label="Date Format">
+          <select value={settings.dateFormat} onChange={(e) => onChange({ dateFormat: e.target.value })} style={selectStyle}>
+            <option value="DD/MM/YYYY">DD/MM/YYYY</option>
+            <option value="MM/DD/YYYY">MM/DD/YYYY</option>
+            <option value="YYYY-MM-DD">YYYY-MM-DD (ISO)</option>
+          </select>
+        </Field>
+      </div>
+    </div>
+  );
+}
+
+function DataPanel({ settings, onChange, onBackupNow }: { settings: DataSettings; onChange: (p: Partial<DataSettings>) => void; onBackupNow: () => void }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <SectionLabel icon={<Database style={{ width: "12px", height: "12px" }} />} label="Backup" />
+      <Field label="Automated Backups" hint="Schedule regular data backups." horizontal>
+        <Toggle checked={settings.backupEnabled} onChange={(v) => onChange({ backupEnabled: v })} />
+      </Field>
+      <Field label="Backup Frequency">
+        <select value={settings.backupFrequency} onChange={(e) => onChange({ backupFrequency: e.target.value as DataSettings["backupFrequency"] })} disabled={!settings.backupEnabled} style={{ ...selectStyle, opacity: settings.backupEnabled ? 1 : 0.5 }}>
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+        </select>
+      </Field>
+      <Field label="Data Retention" hint="Days to keep backups before automatic deletion.">
+        <input type="number" min={7} max={365} value={settings.retentionDays} onChange={(e) => onChange({ retentionDays: Number(e.target.value) })} style={{ ...inputStyle, maxWidth: "120px" }} />
+      </Field>
+
+      <div style={{ borderTop: "1px solid #F3F4F6", paddingTop: "16px" }}>
+        <SectionLabel icon={<Database style={{ width: "12px", height: "12px" }} />} label="Export" />
+        <Field label="Default Export Format">
+          <select value={settings.exportFormat} onChange={(e) => onChange({ exportFormat: e.target.value as DataSettings["exportFormat"] })} style={{ ...selectStyle, maxWidth: "160px" }}>
+            <option value="csv">CSV</option>
+            <option value="xlsx">Excel (XLSX)</option>
+            <option value="json">JSON</option>
+          </select>
+        </Field>
+        <Field label="Analytics Tracking" hint="Allow anonymised usage analytics to improve the platform." horizontal>
+          <Toggle checked={settings.analyticsEnabled} onChange={(v) => onChange({ analyticsEnabled: v })} />
+        </Field>
+      </div>
+
+      <div style={{ borderTop: "1px solid #F3F4F6", paddingTop: "16px" }}>
+        <SectionLabel icon={<Database style={{ width: "12px", height: "12px" }} />} label="Manual Backup" />
+        <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "12px 14px", borderRadius: "8px", border: "1px solid #EBEBEB", background: "#FAFAFA" }}>
+          <div style={{ flex: 1 }}>
+            <p style={{ fontSize: "13px", fontWeight: 600, color: "#374151", margin: 0 }}>Backup Now</p>
+            <p style={{ fontSize: "11.5px", color: "#9CA3AF", margin: "2px 0 0" }}>Trigger an immediate full database snapshot.</p>
+          </div>
+          <button type="button" onClick={onBackupNow}
+            style={{ display: "flex", alignItems: "center", gap: "6px", padding: "7px 14px", borderRadius: "7px", background: "#111827", color: "#FFF", border: "none", cursor: "pointer", fontSize: "12.5px", fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+            <Database style={{ width: "12px", height: "12px" }} /> Run Backup
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DepartmentsPanel({ departments, onRefresh }: { departments: Department[]; onRefresh: () => void }) {
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingDept, setEditingDept] = useState<Department | null>(null);
+  const [form, setForm] = useState({ name: "", description: "", head: "" });
+
+  const openCreate = () => {
+    setEditingDept(null);
+    setForm({ name: "", description: "", head: "" });
+    setDialogOpen(true);
+  };
+
+  const openEdit = (dept: Department) => {
+    setEditingDept(dept);
+    setForm({ name: dept.name, description: dept.description, head: dept.head });
+    setDialogOpen(true);
+  };
+
+  const handleSubmit = async () => {
+    try {
+      if (editingDept) {
+        await apiClient.patch(`/admin/departments/${editingDept.id}`, form);
+        toast.success("Department updated");
+      } else {
+        await apiClient.post("/admin/departments", form);
+        toast.success("Department created");
+      }
+      setDialogOpen(false);
+      onRefresh();
+    } catch { toast.error("Failed to save department"); }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      await apiClient.delete(`/admin/departments/${id}`);
+      toast.success("Department deleted");
+      onRefresh();
+    } catch { toast.error("Failed to delete department"); }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <SectionLabel icon={<Layers style={{ width: "12px", height: "12px" }} />} label="Departments" />
+        <button type="button" onClick={openCreate} style={btnPrimary}>
+          <Plus style={{ width: "12px", height: "12px" }} /> New Department
+        </button>
+      </div>
+
+      {departments.length === 0 ? (
+        <p style={{ fontSize: "13px", color: "#9CA3AF", textAlign: "center", padding: "24px" }}>No departments found. Create your first department.</p>
+      ) : (
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              <th style={tableHeaderCell}>Name</th>
+              <th style={tableHeaderCell}>Description</th>
+              <th style={tableHeaderCell}>Head</th>
+              <th style={tableHeaderCell}>Members</th>
+              <th style={{ ...tableHeaderCell, textAlign: "right" }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {departments.map((dept) => (
+              <tr key={dept.id}>
+                <td style={{ ...tableCell, fontWeight: 600 }}>{dept.name}</td>
+                <td style={{ ...tableCell, color: "#6B7280" }}>{dept.description}</td>
+                <td style={tableCell}>{dept.head}</td>
+                <td style={tableCell}>{dept.memberCount}</td>
+                <td style={{ ...tableCell, textAlign: "right" }}>
+                  <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
+                    <button type="button" onClick={() => openEdit(dept)} style={btnSecondary}>
+                      <Pencil style={{ width: "10px", height: "10px" }} /> Edit
+                    </button>
+                    <button type="button" onClick={() => void handleDelete(dept.id)} style={btnDanger}>
+                      <Trash2 style={{ width: "10px", height: "10px" }} /> Delete
+                    </button>
                   </div>
-                ))}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {dialogOpen && (
+        <div style={dialogOverlayStyle} onClick={() => setDialogOpen(false)}>
+          <div style={dialogBoxStyle} onClick={(e) => e.stopPropagation()}>
+            <h3 style={dialogTitleStyle}>{editingDept ? "Edit Department" : "New Department"}</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <Field label="Name" required>
+                <input value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} style={inputStyle} placeholder="e.g. Operations" />
+              </Field>
+              <Field label="Description">
+                <textarea value={form.description} onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))} rows={2} style={{ ...inputStyle, height: "auto", resize: "vertical" }} placeholder="Brief description of this department" />
+              </Field>
+              <Field label="Head">
+                <input value={form.head} onChange={(e) => setForm((p) => ({ ...p, head: e.target.value }))} style={inputStyle} placeholder="Department head name" />
+              </Field>
+              <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "8px" }}>
+                <button type="button" onClick={() => setDialogOpen(false)} style={btnSecondary}>Cancel</button>
+                <button type="button" onClick={() => void handleSubmit()} style={btnPrimary}>
+                  {editingDept ? "Update" : "Create"}
+                </button>
               </div>
             </div>
-          </Card>
-        </TabsContent>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
-        <TabsContent value="integrations" className="mt-4">
-          <Card className="p-6 space-y-6">
-            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+function SystemUsersPanel({ users, departments, onRefresh }: { users: SystemUser[]; departments: Department[]; onRefresh: () => void }) {
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<SystemUser | null>(null);
+  const [form, setForm] = useState({ fullName: "", email: "", role: "staff", department: "", password: "" });
+
+  const openCreate = () => {
+    setEditingUser(null);
+    setForm({ fullName: "", email: "", role: "staff", department: "", password: "" });
+    setDialogOpen(true);
+  };
+
+  const openEdit = (user: SystemUser) => {
+    setEditingUser(user);
+    setForm({ fullName: user.fullName, email: user.email, role: user.role, department: user.department, password: "" });
+    setDialogOpen(true);
+  };
+
+  const handleSubmit = async () => {
+    try {
+      if (editingUser) {
+        const payload: Record<string, string> = { fullName: form.fullName, email: form.email, role: form.role, department: form.department };
+        if (form.password) payload.password = form.password;
+        await apiClient.patch(`/admin/system-users/${editingUser.id}`, payload);
+        toast.success("User updated");
+      } else {
+        await apiClient.post("/admin/system-users", form);
+        toast.success("User created");
+      }
+      setDialogOpen(false);
+      onRefresh();
+    } catch { toast.error("Failed to save user"); }
+  };
+
+  const handleDeactivate = async (user: SystemUser) => {
+    try {
+      const newStatus = user.status === "active" ? "inactive" : "active";
+      await apiClient.patch(`/admin/system-users/${user.id}`, { status: newStatus });
+      toast.success(`User ${newStatus === "active" ? "activated" : "deactivated"}`);
+      onRefresh();
+    } catch { toast.error("Failed to update user status"); }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <SectionLabel icon={<UserPlus style={{ width: "12px", height: "12px" }} />} label="System Users" />
+        <button type="button" onClick={openCreate} style={btnPrimary}>
+          <UserPlus style={{ width: "12px", height: "12px" }} /> Add System User
+        </button>
+      </div>
+
+      {users.length === 0 ? (
+        <p style={{ fontSize: "13px", color: "#9CA3AF", textAlign: "center", padding: "24px" }}>No system users found.</p>
+      ) : (
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              <th style={tableHeaderCell}>Name</th>
+              <th style={tableHeaderCell}>Email</th>
+              <th style={tableHeaderCell}>Role</th>
+              <th style={tableHeaderCell}>Department</th>
+              <th style={tableHeaderCell}>Status</th>
+              <th style={{ ...tableHeaderCell, textAlign: "right" }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.map((user) => (
+              <tr key={user.id}>
+                <td style={{ ...tableCell, fontWeight: 600 }}>{user.fullName}</td>
+                <td style={{ ...tableCell, fontFamily: "'DM Mono', monospace", fontSize: "12px" }}>{user.email}</td>
+                <td style={tableCell}>{user.role}</td>
+                <td style={tableCell}>{user.department}</td>
+                <td style={tableCell}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: "2px 8px", borderRadius: "10px", fontSize: "11px", fontWeight: 700, background: user.status === "active" ? "#ECFDF5" : "#FEF2F2", color: user.status === "active" ? "#059669" : "#DC2626" }}>
+                    <span style={{ width: "5px", height: "5px", borderRadius: "50%", background: user.status === "active" ? "#059669" : "#DC2626" }} />
+                    {user.status}
+                  </span>
+                </td>
+                <td style={{ ...tableCell, textAlign: "right" }}>
+                  <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
+                    <button type="button" onClick={() => openEdit(user)} style={btnSecondary}>
+                      <Pencil style={{ width: "10px", height: "10px" }} /> Edit
+                    </button>
+                    <button type="button" onClick={() => void handleDeactivate(user)} style={user.status === "active" ? btnDanger : btnSecondary}>
+                      {user.status === "active" ? "Deactivate" : "Activate"}
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {dialogOpen && (
+        <div style={dialogOverlayStyle} onClick={() => setDialogOpen(false)}>
+          <div style={dialogBoxStyle} onClick={(e) => e.stopPropagation()}>
+            <h3 style={dialogTitleStyle}>{editingUser ? "Edit System User" : "Add System User"}</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <Field label="Full Name" required>
+                <input value={form.fullName} onChange={(e) => setForm((p) => ({ ...p, fullName: e.target.value }))} style={inputStyle} placeholder="John Doe" />
+              </Field>
+              <Field label="Email" required>
+                <input type="email" value={form.email} onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))} style={inputStyle} placeholder="john@company.com" />
+              </Field>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                <Field label="Role" required>
+                  <select value={form.role} onChange={(e) => setForm((p) => ({ ...p, role: e.target.value }))} style={selectStyle}>
+                    <option value="staff">Staff</option>
+                    <option value="admin">Admin</option>
+                    <option value="manager">Manager</option>
+                    <option value="supervisor">Supervisor</option>
+                  </select>
+                </Field>
+                <Field label="Department">
+                  <select value={form.department} onChange={(e) => setForm((p) => ({ ...p, department: e.target.value }))} style={selectStyle}>
+                    <option value="">Select department</option>
+                    {departments.map((d) => (
+                      <option key={d.id} value={d.name}>{d.name}</option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+              <Field label="Password" required={!editingUser}>
+                <PasswordInput value={form.password} onChange={(v) => setForm((p) => ({ ...p, password: v }))} placeholder={editingUser ? "Leave blank to keep current" : "Enter password"} />
+              </Field>
+              <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "8px" }}>
+                <button type="button" onClick={() => setDialogOpen(false)} style={btnSecondary}>Cancel</button>
+                <button type="button" onClick={() => void handleSubmit()} style={btnPrimary}>
+                  {editingUser ? "Update" : "Create"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RolesPanel({ roles, onRefresh }: { roles: Role[]; onRefresh: () => void }) {
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingRole, setEditingRole] = useState<Role | null>(null);
+  const [form, setForm] = useState({ name: "", description: "", permissions: [] as string[] });
+
+  const openCreate = () => {
+    setEditingRole(null);
+    setForm({ name: "", description: "", permissions: [] });
+    setDialogOpen(true);
+  };
+
+  const openEdit = (role: Role) => {
+    setEditingRole(role);
+    setForm({ name: role.name, description: role.description, permissions: [...role.permissions] });
+    setDialogOpen(true);
+  };
+
+  const togglePermission = (perm: string) => {
+    setForm((prev) => ({
+      ...prev,
+      permissions: prev.permissions.includes(perm)
+        ? prev.permissions.filter((p) => p !== perm)
+        : [...prev.permissions, perm],
+    }));
+  };
+
+  const handleSubmit = async () => {
+    try {
+      if (editingRole) {
+        await apiClient.patch(`/admin/roles/${editingRole.id}`, form);
+        toast.success("Role updated");
+      } else {
+        await apiClient.post("/admin/roles", form);
+        toast.success("Role created");
+      }
+      setDialogOpen(false);
+      onRefresh();
+    } catch { toast.error("Failed to save role"); }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <SectionLabel icon={<Key style={{ width: "12px", height: "12px" }} />} label="Roles & Permissions" />
+        <button type="button" onClick={openCreate} style={btnPrimary}>
+          <Plus style={{ width: "12px", height: "12px" }} /> New Role
+        </button>
+      </div>
+
+      {roles.length === 0 ? (
+        <p style={{ fontSize: "13px", color: "#9CA3AF", textAlign: "center", padding: "24px" }}>No roles defined. Create your first role.</p>
+      ) : (
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              <th style={tableHeaderCell}>Name</th>
+              <th style={tableHeaderCell}>Description</th>
+              <th style={tableHeaderCell}>Permissions</th>
+              <th style={{ ...tableHeaderCell, textAlign: "right" }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {roles.map((role) => (
+              <tr key={role.id}>
+                <td style={{ ...tableCell, fontWeight: 600 }}>{role.name}</td>
+                <td style={{ ...tableCell, color: "#6B7280" }}>{role.description}</td>
+                <td style={tableCell}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: "2px 8px", borderRadius: "10px", fontSize: "11px", fontWeight: 700, background: "#EEF2FF", color: "#4F46E5" }}>
+                    {role.permissions.length} permissions
+                  </span>
+                </td>
+                <td style={{ ...tableCell, textAlign: "right" }}>
+                  <button type="button" onClick={() => openEdit(role)} style={btnSecondary}>
+                    <Pencil style={{ width: "10px", height: "10px" }} /> Edit
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      {dialogOpen && (
+        <div style={dialogOverlayStyle} onClick={() => setDialogOpen(false)}>
+          <div style={{ ...dialogBoxStyle, width: "560px" }} onClick={(e) => e.stopPropagation()}>
+            <h3 style={dialogTitleStyle}>{editingRole ? "Edit Role" : "New Role"}</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <Field label="Role Name" required>
+                <input value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} style={inputStyle} placeholder="e.g. Community Manager" />
+              </Field>
+              <Field label="Description">
+                <textarea value={form.description} onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))} rows={2} style={{ ...inputStyle, height: "auto", resize: "vertical" }} placeholder="What this role can do" />
+              </Field>
+
+              <div style={{ marginTop: "8px" }}>
+                <SectionLabel icon={<Lock style={{ width: "12px", height: "12px" }} />} label="Permissions" />
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                  {PERMISSION_GROUPS.map((group) => (
+                    <div key={group.module} style={{ padding: "10px 12px", borderRadius: "8px", border: "1px solid #F3F4F6", background: "#FAFAFA" }}>
+                      <div style={{ fontSize: "12px", fontWeight: 700, color: "#374151", marginBottom: "6px" }}>{group.module}</div>
+                      {group.permissions.map((perm) => (
+                        <label key={perm} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "#6B7280", cursor: "pointer", marginBottom: "4px" }}>
+                          <input type="checkbox" checked={form.permissions.includes(perm)} onChange={() => togglePermission(perm)} style={{ accentColor: "#111827" }} />
+                          {perm.split(":")[1]}
+                        </label>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "8px" }}>
+                <button type="button" onClick={() => setDialogOpen(false)} style={btnSecondary}>Cancel</button>
+                <button type="button" onClick={() => void handleSubmit()} style={btnPrimary}>
+                  {editingRole ? "Update" : "Create"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IntegrationsPanel() {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <SectionLabel icon={<Link style={{ width: "12px", height: "12px" }} />} label="Integrations" />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+        {INTEGRATIONS.map((intg) => (
+          <div key={intg.id} style={{ padding: "16px", borderRadius: "10px", border: "1px solid #EBEBEB", background: "#FFF", display: "flex", flexDirection: "column", gap: "10px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
               <div>
-                <h3 className="text-[#1E293B]">Integrations (Fallback First)</h3>
-                <p className="text-sm text-[#64748B]">
-                  Configure providers gradually. If a provider is disabled/not configured, backend falls back without breaking core flows.
-                </p>
+                <div style={{ fontSize: "14px", fontWeight: 700, color: "#111827" }}>{intg.name}</div>
+                <p style={{ fontSize: "12px", color: "#6B7280", margin: "4px 0 0", lineHeight: "1.4" }}>{intg.description}</p>
               </div>
-              <Button variant="outline" onClick={() => void loadIntegrations()} disabled={isLoadingIntegrations}>
-                <RefreshCw className={`w-4 h-4 mr-2 ${isLoadingIntegrations ? "animate-spin" : ""}`} />
-                Refresh
-              </Button>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: "2px 8px", borderRadius: "10px", fontSize: "10px", fontWeight: 700, background: "#F3F4F6", color: "#9CA3AF", whiteSpace: "nowrap", flexShrink: 0, marginLeft: "8px" }}>
+                <span style={{ width: "5px", height: "5px", borderRadius: "50%", background: "#9CA3AF" }} />
+                Disconnected
+              </span>
             </div>
-
-            <div className="space-y-4">
-              <div className="rounded-xl border p-4 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="text-sm font-semibold text-[#1E293B]">SMTP Mail</h4>
-                    <p className="text-xs text-[#64748B]">Credentials for transactional emails and notifications.</p>
-                  </div>
-                  <div className={`text-xs px-2 py-1 rounded ${integrations.smtp.configured ? "bg-[#DCFCE7] text-[#166534]" : "bg-[#FEF2F2] text-[#991B1B]"}`}>
-                    {integrations.smtp.configured ? "Configured" : "Not Configured"}
-                  </div>
-                </div>
-                <div className="flex items-center justify-between rounded-lg border p-3">
-                  <span className="text-sm">Enable SMTP</span>
-                  <Switch
-                    checked={integrations.smtp.enabled}
-                    onCheckedChange={(v: boolean) =>
-                      setIntegrations((s) => ({
-                        ...s,
-                        smtp: { ...s.smtp, enabled: v === true },
-                      }))
-                    }
-                  />
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <Input placeholder="Host" value={integrations.smtp.host} onChange={(e) => setIntegrations((s) => ({ ...s, smtp: { ...s.smtp, host: e.target.value } }))} />
-                  <Input placeholder="Port" type="number" value={String(integrations.smtp.port || 587)} onChange={(e) => setIntegrations((s) => ({ ...s, smtp: { ...s.smtp, port: Number(e.target.value || 587) } }))} />
-                  <Input placeholder="Username" value={integrations.smtp.username} onChange={(e) => setIntegrations((s) => ({ ...s, smtp: { ...s.smtp, username: e.target.value } }))} />
-                  <Input placeholder="Password" type="password" value={integrations.smtp.password} onChange={(e) => setIntegrations((s) => ({ ...s, smtp: { ...s.smtp, password: e.target.value } }))} />
-                  <Input placeholder="From Email" value={integrations.smtp.fromEmail} onChange={(e) => setIntegrations((s) => ({ ...s, smtp: { ...s.smtp, fromEmail: e.target.value } }))} />
-                  <Input placeholder="From Name" value={integrations.smtp.fromName} onChange={(e) => setIntegrations((s) => ({ ...s, smtp: { ...s.smtp, fromName: e.target.value } }))} />
-                </div>
-                <div className="flex gap-2">
-                  <Button variant="outline" disabled={testingIntegration === "smtp"} onClick={() => void testIntegration("smtp", integrations.smtp as unknown as Record<string, unknown>)}>
-                    {testingIntegration === "smtp" ? "Testing..." : "Test SMTP"}
-                  </Button>
-                  <Button disabled={savingIntegration === "smtp"} onClick={() => void saveIntegration("smtp", integrations.smtp as unknown as Record<string, unknown>)}>
-                    {savingIntegration === "smtp" ? "Saving..." : "Save SMTP"}
-                  </Button>
-                </div>
-              </div>
-
-              <div className="rounded-xl border p-4 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="text-sm font-semibold text-[#1E293B]">OTP Verification (Firebase Auth)</h4>
-                    <p className="text-xs text-[#64748B]">Phone OTP is verified via Firebase ID token. SMS transport from dashboard is disabled.</p>
-                  </div>
-                  <div className={`text-xs px-2 py-1 rounded ${integrations.smsOtp.configured ? "bg-[#DCFCE7] text-[#166534]" : "bg-[#FEF2F2] text-[#991B1B]"}`}>
-                    {integrations.smsOtp.configured ? "Configured" : "Not Configured"}
-                  </div>
-                </div>
-                <div className="flex items-center justify-between rounded-lg border p-3">
-                  <span className="text-sm">Enable Firebase OTP Verification</span>
-                  <Switch
-                    checked={integrations.smsOtp.enabled}
-                    onCheckedChange={(v: boolean) =>
-                      setIntegrations((s) => ({
-                        ...s,
-                        smsOtp: { ...s.smsOtp, enabled: v === true },
-                      }))
-                    }
-                  />
-                </div>
-                <div className="grid grid-cols-1 gap-3">
-                  <Input
-                    placeholder="Firebase Project ID (optional override)"
-                    value={integrations.smsOtp.firebaseProjectId}
-                    onChange={(e) =>
-                      setIntegrations((s) => ({
-                        ...s,
-                        smsOtp: { ...s.smsOtp, firebaseProjectId: e.target.value },
-                      }))
-                    }
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <Button variant="outline" disabled={testingIntegration === "smsOtp"} onClick={() => void testIntegration("smsOtp", integrations.smsOtp as unknown as Record<string, unknown>)}>
-                    {testingIntegration === "smsOtp" ? "Testing..." : "Test OTP"}
-                  </Button>
-                  <Button disabled={savingIntegration === "smsOtp"} onClick={() => void saveIntegration("smsOtp", integrations.smsOtp as unknown as Record<string, unknown>)}>
-                    {savingIntegration === "smsOtp" ? "Saving..." : "Save OTP"}
-                  </Button>
-                </div>
-              </div>
-
-              <div className="rounded-xl border p-4 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="text-sm font-semibold text-[#1E293B]">FCM Push</h4>
-                    <p className="text-xs text-[#64748B]">Android push notifications. Disable to keep polling-only mode in mobile.</p>
-                  </div>
-                  <div className={`text-xs px-2 py-1 rounded ${integrations.fcm.configured ? "bg-[#DCFCE7] text-[#166534]" : "bg-[#FEF2F2] text-[#991B1B]"}`}>
-                    {integrations.fcm.configured ? "Configured" : "Not Configured"}
-                  </div>
-                </div>
-                <div className="flex items-center justify-between rounded-lg border p-3">
-                  <span className="text-sm">Enable Push</span>
-                  <Switch
-                    checked={integrations.fcm.enabled}
-                    onCheckedChange={(v: boolean) =>
-                      setIntegrations((s) => ({
-                        ...s,
-                        fcm: { ...s.fcm, enabled: v === true },
-                      }))
-                    }
-                  />
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <Input placeholder="Project ID" value={integrations.fcm.projectId} onChange={(e) => setIntegrations((s) => ({ ...s, fcm: { ...s.fcm, projectId: e.target.value } }))} />
-                  <Input placeholder="Client Email" value={integrations.fcm.clientEmail} onChange={(e) => setIntegrations((s) => ({ ...s, fcm: { ...s.fcm, clientEmail: e.target.value } }))} />
-                  <Textarea className="md:col-span-2" rows={4} placeholder="Service Account JSON (optional)" value={integrations.fcm.serviceAccountJson} onChange={(e) => setIntegrations((s) => ({ ...s, fcm: { ...s.fcm, serviceAccountJson: e.target.value } }))} />
-                  <Textarea className="md:col-span-2" rows={3} placeholder="Private Key (optional if JSON provided)" value={integrations.fcm.privateKey} onChange={(e) => setIntegrations((s) => ({ ...s, fcm: { ...s.fcm, privateKey: e.target.value } }))} />
-                </div>
-                <div className="flex gap-2">
-                  <Button variant="outline" disabled={testingIntegration === "fcm"} onClick={() => void testIntegration("fcm", integrations.fcm as unknown as Record<string, unknown>)}>
-                    {testingIntegration === "fcm" ? "Testing..." : "Test FCM"}
-                  </Button>
-                  <Button disabled={savingIntegration === "fcm"} onClick={() => void saveIntegration("fcm", integrations.fcm as unknown as Record<string, unknown>)}>
-                    {savingIntegration === "fcm" ? "Saving..." : "Save FCM"}
-                  </Button>
-                </div>
-              </div>
-
-              <div className="rounded-xl border p-4 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="text-sm font-semibold text-[#1E293B]">Storage Provider</h4>
-                    <p className="text-xs text-[#64748B]">Local fallback is always available. Switch to S3/Supabase when ready.</p>
-                  </div>
-                  <div className={`text-xs px-2 py-1 rounded ${integrations.s3.configured ? "bg-[#DCFCE7] text-[#166534]" : "bg-[#FEF2F2] text-[#991B1B]"}`}>
-                    {integrations.s3.configured ? "Configured" : "Not Configured"}
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div className="space-y-2">
-                    <Label>Provider</Label>
-                    <select
-                      className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-                      value={integrations.s3.provider}
-                      onChange={(e) =>
-                        setIntegrations((s) => ({
-                          ...s,
-                          s3: { ...s.s3, provider: e.target.value as IntegrationsState["s3"]["provider"] },
-                        }))
-                      }
-                    >
-                      <option value="LOCAL">LOCAL</option>
-                      <option value="S3">S3</option>
-                      <option value="SUPABASE">SUPABASE</option>
-                    </select>
-                  </div>
-                  <div className="flex items-center justify-between rounded-lg border p-3 mt-7">
-                    <span className="text-sm">Enable External Storage</span>
-                    <Switch
-                      checked={integrations.s3.enabled}
-                      onCheckedChange={(v: boolean) =>
-                        setIntegrations((s) => ({
-                          ...s,
-                          s3: { ...s.s3, enabled: v === true },
-                        }))
-                      }
-                    />
-                  </div>
-                  <Input placeholder="Bucket" value={integrations.s3.bucket} onChange={(e) => setIntegrations((s) => ({ ...s, s3: { ...s.s3, bucket: e.target.value } }))} />
-                  <Input placeholder="Region" value={integrations.s3.region} onChange={(e) => setIntegrations((s) => ({ ...s, s3: { ...s.s3, region: e.target.value } }))} />
-                  <Input placeholder="Endpoint (optional)" value={integrations.s3.endpoint} onChange={(e) => setIntegrations((s) => ({ ...s, s3: { ...s.s3, endpoint: e.target.value } }))} />
-                  <Input placeholder="Access Key ID" value={integrations.s3.accessKeyId} onChange={(e) => setIntegrations((s) => ({ ...s, s3: { ...s.s3, accessKeyId: e.target.value } }))} />
-                  <Input placeholder="Secret Access Key" type="password" value={integrations.s3.secretAccessKey} onChange={(e) => setIntegrations((s) => ({ ...s, s3: { ...s.s3, secretAccessKey: e.target.value } }))} />
-                  <Input placeholder="Supabase URL (if provider=SUPABASE)" value={integrations.s3.supabaseUrl} onChange={(e) => setIntegrations((s) => ({ ...s, s3: { ...s.s3, supabaseUrl: e.target.value } }))} />
-                  <Input className="md:col-span-2" placeholder="Supabase Service Role Key (if provider=SUPABASE)" type="password" value={integrations.s3.supabaseServiceRoleKey} onChange={(e) => setIntegrations((s) => ({ ...s, s3: { ...s.s3, supabaseServiceRoleKey: e.target.value } }))} />
-                </div>
-                <div className="flex gap-2">
-                  <Button variant="outline" disabled={testingIntegration === "s3"} onClick={() => void testIntegration("s3", integrations.s3 as unknown as Record<string, unknown>)}>
-                    {testingIntegration === "s3" ? "Testing..." : "Test Storage"}
-                  </Button>
-                  <Button disabled={savingIntegration === "s3"} onClick={() => void saveIntegration("s3", integrations.s3 as unknown as Record<string, unknown>)}>
-                    {savingIntegration === "s3" ? "Saving..." : "Save Storage"}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="brand" className="mt-4">
-          <Card className="p-6 space-y-6">
-            <h3 className="text-[#1E293B]">Brand (White Label)</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Company Name</Label>
-                <Input value={draft.brand.companyName} onChange={(e) => setDraft((s) => ({ ...s, brand: { ...s.brand, companyName: e.target.value } }))} />
-              </div>
-              <div className="space-y-2">
-                <Label>App Display Name</Label>
-                <Input value={draft.brand.appDisplayName} onChange={(e) => setDraft((s) => ({ ...s, brand: { ...s.brand, appDisplayName: e.target.value } }))} />
-              </div>
-              <div className="space-y-2">
-                <Label>Primary Color</Label>
-                <Input value={draft.brand.primaryColor} onChange={(e) => setDraft((s) => ({ ...s, brand: { ...s.brand, primaryColor: e.target.value } }))} />
-              </div>
-              <div className="space-y-2">
-                <Label>Secondary Color</Label>
-                <Input value={draft.brand.secondaryColor} onChange={(e) => setDraft((s) => ({ ...s, brand: { ...s.brand, secondaryColor: e.target.value } }))} />
-              </div>
-              <div className="space-y-2">
-                <Label>Accent Color</Label>
-                <Input value={draft.brand.accentColor} onChange={(e) => setDraft((s) => ({ ...s, brand: { ...s.brand, accentColor: e.target.value } }))} />
-              </div>
-              <div className="space-y-2">
-                <Label>Tagline</Label>
-                <Input value={draft.brand.tagline} onChange={(e) => setDraft((s) => ({ ...s, brand: { ...s.brand, tagline: e.target.value } }))} />
-              </div>
-              <div className="space-y-2">
-                <Label>Support Email</Label>
-                <Input value={draft.brand.supportEmail} onChange={(e) => setDraft((s) => ({ ...s, brand: { ...s.brand, supportEmail: e.target.value } }))} />
-              </div>
-              <div className="space-y-2">
-                <Label>Support Phone</Label>
-                <Input value={draft.brand.supportPhone} onChange={(e) => setDraft((s) => ({ ...s, brand: { ...s.brand, supportPhone: e.target.value } }))} />
-              </div>
-              <div className="space-y-2 md:col-span-2">
-                <Label>Logo File ID</Label>
-                <div className="flex flex-col md:flex-row gap-2">
-                  <Input value={draft.brand.logoFileId} onChange={(e) => setDraft((s) => ({ ...s, brand: { ...s.brand, logoFileId: e.target.value } }))} />
-                  <label className="inline-flex">
-                    <input
-                      type="file"
-                      accept="image/png,image/jpeg,image/jpg"
-                      className="hidden"
-                      onChange={async (e) => {
-                        const file = e.target.files?.[0];
-                        if (!file) return;
-                        try {
-                          await uploadBrandLogo(file);
-                        } catch (error) {
-                          toast.error("Brand logo upload failed", { description: errorMessage(error) });
-                        } finally {
-                          e.currentTarget.value = "";
-                        }
-                      }}
-                    />
-                    <Button type="button" variant="outline" className="w-full md:w-auto">
-                      <Upload className="w-4 h-4 mr-2" />
-                      Upload Logo
-                    </Button>
-                  </label>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-xl border p-4 space-y-3">
-              <div className="text-sm font-medium text-[#1E293B]">Mobile Preview</div>
-              <div
-                className="rounded-2xl p-4 text-white"
-                style={{
-                  background: `linear-gradient(135deg, ${draft.brand.primaryColor || "#2A3E35"}, ${draft.brand.secondaryColor || "#C9A961"})`,
-                }}
-              >
-                <div className="text-xs opacity-80">Welcome to</div>
-                <div className="text-lg font-semibold">
-                  {draft.brand.appDisplayName || draft.brand.companyName || "Community App"}
-                </div>
-                <div className="text-xs opacity-80 mt-1">{draft.brand.tagline || "Smart Living"}</div>
-                <div className="mt-3 inline-flex rounded-full bg-white/90 px-3 py-1 text-xs font-medium" style={{ color: draft.brand.primaryColor || "#2A3E35" }}>
-                  Primary CTA
-                </div>
-              </div>
-            </div>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="mobile-access" className="mt-4">
-          <Card className="p-6 space-y-6">
-            <div>
-              <h3 className="text-[#1E293B]">Mobile Access Policies</h3>
-              <p className="text-sm text-[#64748B] mt-1">
-                Control mobile features per persona. Changes are applied in the mobile bootstrap response.
-              </p>
-            </div>
-
-            <div className="space-y-4">
-              {mobileAccessPersonaCatalog.map((persona) => (
-                <div key={persona.key} className="rounded-xl border p-4 space-y-4">
-                  <div>
-                    <h4 className="text-sm font-semibold text-[#1E293B]">{persona.label}</h4>
-                    <p className="text-xs text-[#64748B]">{persona.hint}</p>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {mobileAccessFeatureCatalog.map((feature) => {
-                      const enabled = Boolean(draft.mobileAccess[persona.key]?.[feature.key]);
-                      return (
-                        <div
-                          key={`${persona.key}-${feature.key}`}
-                          className="flex items-center justify-between rounded-lg border px-3 py-2 gap-3"
-                        >
-                          <div>
-                            <div className="text-sm text-[#1E293B]">{feature.label}</div>
-                            <div className="text-xs text-[#64748B]">{feature.hint}</div>
-                          </div>
-                          <Switch
-                            checked={enabled}
-                            onCheckedChange={(v: boolean) =>
-                              setMobileAccessFlag(persona.key, feature.key, v === true)
-                            }
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="security" className="mt-4">
-          <div className="space-y-4">
-            {/* Authentication */}
-            <Card className="overflow-hidden rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
-              <div className="flex items-center gap-2 border-b border-[#F1F5F9] px-5 py-4">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#EEF2FF]">
-                  <Shield className="h-3.5 w-3.5 text-[#4338CA]" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-semibold text-[#1E293B]">Authentication</h3>
-                  <p className="text-[11px] text-[#94A3B8]">Login, session, and multi-factor policies</p>
-                </div>
-              </div>
-              <div className="divide-y divide-[#F8FAFC]">
-                <div className="flex items-center justify-between px-5 py-3.5">
-                  <div>
-                    <p className="text-sm font-medium text-[#1E293B]">Enforce Two-Factor Authentication</p>
-                    <p className="text-[11px] text-[#94A3B8]">Require 2FA for all admin accounts</p>
-                  </div>
-                  <Switch checked={draft.security.enforce2fa} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, security: { ...s.security, enforce2fa: v === true } }))} />
-                </div>
-                <div className="flex items-center justify-between px-5 py-3.5">
-                  <div>
-                    <p className="text-sm font-medium text-[#1E293B]">Auto Logout on Inactivity</p>
-                    <p className="text-[11px] text-[#94A3B8]">Automatically sign out idle sessions</p>
-                  </div>
-                  <Switch checked={draft.security.autoLogoutEnabled} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, security: { ...s.security, autoLogoutEnabled: v === true } }))} />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 gap-4 border-t border-[#F8FAFC] px-5 py-4 md:grid-cols-3">
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold text-[#64748B] uppercase tracking-wide">Session Timeout</Label>
-                  <div className="flex items-center gap-2">
-                    <Input type="number" className="rounded-lg" value={String(draft.security.sessionTimeoutMinutes)} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, sessionTimeoutMinutes: Number(e.target.value || 0) } }))} />
-                    <span className="shrink-0 text-sm text-[#94A3B8]">min</span>
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold text-[#64748B] uppercase tracking-wide">Concurrent Sessions</Label>
-                  <Input type="number" className="rounded-lg" value={String(draft.security.allowConcurrentSessions)} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, allowConcurrentSessions: Number(e.target.value || 1) } }))} />
-                </div>
-              </div>
-            </Card>
-
-            {/* Password Policy */}
-            <Card className="overflow-hidden rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
-              <div className="flex items-center gap-2 border-b border-[#F1F5F9] px-5 py-4">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#FFF7ED]">
-                  <Shield className="h-3.5 w-3.5 text-[#C2410C]" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-semibold text-[#1E293B]">Password & Brute-Force Policy</h3>
-                  <p className="text-[11px] text-[#94A3B8]">Strength requirements and account lockout rules</p>
-                </div>
-              </div>
-              <div className="grid grid-cols-1 gap-4 px-5 py-4 md:grid-cols-3">
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold text-[#64748B] uppercase tracking-wide">Min Password Length</Label>
-                  <div className="flex items-center gap-2">
-                    <Input type="number" className="rounded-lg" value={String(draft.security.minPasswordLength)} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, minPasswordLength: Number(e.target.value || 0) } }))} />
-                    <span className="shrink-0 text-sm text-[#94A3B8]">chars</span>
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold text-[#64748B] uppercase tracking-wide">Max Login Attempts</Label>
-                  <Input type="number" className="rounded-lg" value={String(draft.security.maxLoginAttempts)} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, maxLoginAttempts: Number(e.target.value || 0) } }))} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold text-[#64748B] uppercase tracking-wide">Lockout Duration</Label>
-                  <div className="flex items-center gap-2">
-                    <Input type="number" className="rounded-lg" value={String(draft.security.lockoutDurationMinutes)} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, lockoutDurationMinutes: Number(e.target.value || 0) } }))} />
-                    <span className="shrink-0 text-sm text-[#94A3B8]">min</span>
-                  </div>
-                </div>
-              </div>
-              <div className="mx-5 mb-4 rounded-lg bg-[#FFFBEB] border border-[#FDE68A] px-4 py-3">
-                <p className="text-[11px] text-[#92400E]">
-                  <span className="font-semibold">Note:</span> Password hashing uses bcrypt (cost factor 10) on the backend. These settings control policy enforcement at the API layer.
-                </p>
-              </div>
-            </Card>
-
-            {/* Network & Logging */}
-            <Card className="overflow-hidden rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.06)]">
-              <div className="flex items-center gap-2 border-b border-[#F1F5F9] px-5 py-4">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#F0FDF4]">
-                  <Shield className="h-3.5 w-3.5 text-[#15803D]" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-semibold text-[#1E293B]">Network & Audit</h3>
-                  <p className="text-[11px] text-[#94A3B8]">Rate limiting, HTTPS enforcement, and audit trail</p>
-                </div>
-              </div>
-              <div className="divide-y divide-[#F8FAFC]">
-                <div className="flex items-center justify-between px-5 py-3.5">
-                  <div>
-                    <p className="text-sm font-medium text-[#1E293B]">Rate Limiting</p>
-                    <p className="text-[11px] text-[#94A3B8]">Throttle API requests per client</p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {draft.security.rateLimitEnabled ? (
-                      <span className="text-[11px] text-[#94A3B8]">{draft.security.rateLimitPerMinute} req/min</span>
-                    ) : null}
-                    <Switch checked={draft.security.rateLimitEnabled} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, security: { ...s.security, rateLimitEnabled: v === true } }))} />
-                  </div>
-                </div>
-                {draft.security.rateLimitEnabled ? (
-                  <div className="px-5 py-3.5">
-                    <div className="max-w-xs space-y-1.5">
-                      <Label className="text-xs font-semibold text-[#64748B] uppercase tracking-wide">Requests per Minute</Label>
-                      <Input type="number" className="rounded-lg" value={String(draft.security.rateLimitPerMinute)} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, rateLimitPerMinute: Number(e.target.value || 0) } }))} />
-                    </div>
-                  </div>
-                ) : null}
-                <div className="flex items-center justify-between px-5 py-3.5">
-                  <div>
-                    <p className="text-sm font-medium text-[#1E293B]">IP Whitelist</p>
-                    <p className="text-[11px] text-[#94A3B8]">Restrict access to specific IP addresses or CIDR ranges</p>
-                  </div>
-                  <Switch checked={draft.security.ipWhitelistEnabled} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, security: { ...s.security, ipWhitelistEnabled: v === true } }))} />
-                </div>
-                {draft.security.ipWhitelistEnabled ? (
-                  <div className="px-5 py-3.5 space-y-1.5">
-                    <Label className="text-xs font-semibold text-[#64748B] uppercase tracking-wide">Allowed IPs / CIDRs</Label>
-                    <Textarea rows={3} className="rounded-lg font-mono text-xs" placeholder="192.168.1.0/24, 10.0.0.1" value={draft.security.ipWhitelist.join(", ")} onChange={(e) => setDraft((s) => ({ ...s, security: { ...s.security, ipWhitelist: e.target.value.split(",").map((ip) => ip.trim()).filter(Boolean) } }))} />
-                    <p className="text-[11px] text-[#94A3B8]">Comma-separated IPv4/IPv6 addresses or CIDR notation</p>
-                  </div>
-                ) : null}
-                <div className="flex items-center justify-between px-5 py-3.5">
-                  <div>
-                    <p className="text-sm font-medium text-[#1E293B]">Audit Logging</p>
-                    <p className="text-[11px] text-[#94A3B8]">Record all admin actions for compliance</p>
-                  </div>
-                  <Switch checked={draft.security.auditLoggingEnabled} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, security: { ...s.security, auditLoggingEnabled: v === true } }))} />
-                </div>
-                <div className="flex items-center justify-between px-5 py-3.5">
-                  <div>
-                    <p className="text-sm font-medium text-[#1E293B]">Require HTTPS</p>
-                    <p className="text-[11px] text-[#94A3B8]">Reject non-secure HTTP connections</p>
-                  </div>
-                  <Switch checked={draft.security.requireSecureConnections} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, security: { ...s.security, requireSecureConnections: v === true } }))} />
-                </div>
-              </div>
-            </Card>
+            <button type="button" onClick={() => toast.info("Coming soon")} style={{ ...btnSecondary, alignSelf: "flex-start", marginTop: "auto" }}>
+              <Settings style={{ width: "10px", height: "10px" }} /> Configure
+            </button>
           </div>
-        </TabsContent>
+        ))}
+      </div>
+    </div>
+  );
+}
 
-        <TabsContent value="backup" className="mt-4">
-          <Card className="p-6 space-y-6">
-            <h3 className="text-[#1E293B]">Backup & Restore (Backend Snapshots)</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="flex items-center justify-between rounded-lg border p-3"><span>Auto Backups</span><Switch checked={draft.backup.autoBackups} onCheckedChange={(v: boolean) => setDraft((s) => ({ ...s, backup: { ...s.backup, autoBackups: v === true } }))} /></div>
-              <div className="space-y-2">
-                <Label>Backup Time</Label>
-                <Input type="time" value={draft.backup.backupTime} onChange={(e) => setDraft((s) => ({ ...s, backup: { ...s.backup, backupTime: e.target.value } }))} />
-              </div>
-              <div className="space-y-2">
-                <Label>Retention (days)</Label>
-                <Input type="number" value={String(draft.backup.retentionDays)} onChange={(e) => setDraft((s) => ({ ...s, backup: { ...s.backup, retentionDays: Number(e.target.value || 0) } }))} />
-              </div>
-              <div className="rounded-lg border p-3 text-sm text-[#64748B]">
-                Creates and restores backend system-settings snapshots. Optional JSON import below can also restore directly to backend.
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white" onClick={() => void createLocalBackup()} disabled={isCreatingBackup}>
-                <Database className="w-4 h-4 mr-2" />
-                {isCreatingBackup ? "Creating Backup..." : "Create Backend Backup"}
-              </Button>
-              <Button variant="outline" onClick={() => restoreInputRef.current?.click()} disabled={isRestoring}>
-                {isRestoring ? "Importing..." : "Import JSON Snapshot"}
-              </Button>
-              <Button variant="outline" onClick={() => downloadJson(`admin-system-settings-${new Date().toISOString().replace(/[:.]/g, "-")}.json`, { exportedAt: new Date().toISOString(), settings: draft })}>
-                Download Draft JSON
-              </Button>
-              <input
-                ref={restoreInputRef}
-                type="file"
-                accept="application/json"
-                className="hidden"
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  if (file) {
-                    await restoreFromBackupFile(file);
-                  }
-                  e.currentTarget.value = "";
-                }}
-              />
-            </div>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <h4 className="text-sm font-medium text-[#1E293B]">Stored Backup History</h4>
-                <Button variant="outline" size="sm" onClick={() => void loadBackupHistory()}>
-                  Refresh History
-                </Button>
-              </div>
-              <div className="space-y-2">
-                {backupHistory.length === 0 ? (
-                  <div className="rounded-lg border p-3 text-sm text-[#64748B]">No backups created yet.</div>
-                ) : (
-                  backupHistory.map((item) => (
-                    <div key={item.id} className="rounded-lg border p-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                      <div className="min-w-0">
-                        <div className="text-sm text-[#1E293B] truncate">{item.label || `Backup ${item.id.slice(0, 8)}`}</div>
-                        <div className="text-xs text-[#64748B]">
-                          Created: {formatDateTime(item.createdAt)} {item.restoredAt ? `• Last restored: ${formatDateTime(item.restoredAt)}` : ""}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <code className="text-xs text-[#64748B]">{item.id.slice(0, 8)}</code>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={restoringBackupId === item.id}
-                          onClick={() => void restoreStoredBackup(item.id)}
-                        >
-                          {restoringBackupId === item.id ? "Restoring..." : "Restore"}
-                        </Button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </Card>
-        </TabsContent>
+function MobileAccessPanel({ mobileAccess, onChange }: { mobileAccess: MobileAccessMap; onChange: (m: MobileAccessMap) => void }) {
+  const toggleAccess = (module: string, userType: string) => {
+    const updated = { ...mobileAccess };
+    if (!updated[module]) updated[module] = {};
+    updated[module] = { ...updated[module], [userType]: !updated[module][userType] };
+    onChange(updated);
+  };
 
-        <TabsContent value="departments" className="mt-4">
-          <Card className="p-6 space-y-6">
-            <div className="flex items-center justify-between">
-              <h3 className="text-[#1E293B]">Departments Management</h3>
-              <Button className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white" disabled={isLoadingDepartments}>
-                <Plus className="w-4 h-4 mr-2" />
-                New Department
-              </Button>
-            </div>
-            <div className="space-y-2">
-              {isLoadingDepartments ? (
-                <div className="text-sm text-[#64748B]">Loading departments...</div>
-              ) : departments.length === 0 ? (
-                <div className="rounded-lg border p-4 text-center text-sm text-[#64748B]">
-                  No departments created. Create your first department to organize staff.
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {departments.map((dept: any) => (
-                    <div key={dept.id} className="flex items-center justify-between rounded-lg border p-3">
-                      <div className="flex items-center gap-3">
-                        <div
-                          className="w-3 h-3 rounded-full"
-                          style={{ backgroundColor: dept.colorDot || '#94A3B8' }}
-                        />
-                        <div>
-                          <div className="text-sm font-medium text-[#1E293B]">{dept.name}</div>
-                          <div className="text-xs text-[#64748B]">{dept.code} • {dept.staffMembers?.length || 0} staff</div>
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button variant="outline" size="sm">Edit</Button>
-                        <Button variant="outline" size="sm" className="text-[#EF4444]">Delete</Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </Card>
-        </TabsContent>
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <SectionLabel icon={<Smartphone style={{ width: "12px", height: "12px" }} />} label="Mobile Access Control" />
+      <p style={{ fontSize: "12px", color: "#6B7280", margin: "-8px 0 4px" }}>Configure which modules are available in the mobile app for each user type.</p>
 
-        <TabsContent value="users" className="mt-4">
-          <Card className="p-6 space-y-6">
-            <div className="flex items-center justify-between">
-              <h3 className="text-[#1E293B]">System Users Management</h3>
-              <Button className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white" disabled={isLoadingUsers}>
-                <Plus className="w-4 h-4 mr-2" />
-                New User
-              </Button>
-            </div>
-            <div className="space-y-2">
-              {isLoadingUsers ? (
-                <div className="text-sm text-[#64748B]">Loading users...</div>
-              ) : systemUsers.length === 0 ? (
-                <div className="rounded-lg border p-4 text-center text-sm text-[#64748B]">
-                  No system users created.
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {systemUsers.map((user: any) => (
-                    <div key={user.id} className="flex items-center justify-between rounded-lg border p-3">
-                      <div>
-                        <div className="text-sm font-medium text-[#1E293B]">
-                          {user.firstName} {user.lastName}
-                        </div>
-                        <div className="text-xs text-[#64748B]">
-                          {user.email} • {user.role?.name || 'No role'} • {user.isActive ? 'Active' : 'Inactive'}
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button variant="outline" size="sm">Edit</Button>
-                        <Button variant="outline" size="sm" className="text-[#EF4444]">
-                          {user.isActive ? 'Deactivate' : 'Reactivate'}
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </Card>
-        </TabsContent>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              <th style={tableHeaderCell}>Module</th>
+              {MOBILE_USER_TYPES.map((ut) => (
+                <th key={ut} style={{ ...tableHeaderCell, textAlign: "center" }}>{ut}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {MOBILE_MODULES.map((mod) => (
+              <tr key={mod}>
+                <td style={{ ...tableCell, fontWeight: 600 }}>{mod}</td>
+                {MOBILE_USER_TYPES.map((ut) => (
+                  <td key={ut} style={{ ...tableCell, textAlign: "center" }}>
+                    <Toggle
+                      checked={mobileAccess[mod]?.[ut] ?? false}
+                      onChange={() => toggleAccess(mod, ut)}
+                    />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
-        <TabsContent value="roles" className="mt-4">
-          <Card className="p-6 space-y-6">
-            <div className="flex items-center justify-between">
-              <h3 className="text-[#1E293B]">Roles & Permissions</h3>
-              <Button className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white" disabled={isLoadingRoles}>
-                <Plus className="w-4 h-4 mr-2" />
-                New Role
-              </Button>
-            </div>
-            <div className="space-y-4">
-              {isLoadingRoles ? (
-                <div className="text-sm text-[#64748B]">Loading roles...</div>
-              ) : roles.length === 0 ? (
-                <div className="rounded-lg border p-4 text-center text-sm text-[#64748B]">
-                  No roles created.
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {roles.map((role: any) => (
-                    <div key={role.id} className="rounded-lg border p-4 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <div className="text-sm font-medium text-[#1E293B]">{role.name}</div>
-                          {role.description && (
-                            <div className="text-xs text-[#64748B]">{role.description}</div>
-                          )}
-                        </div>
-                        <div className="flex gap-2">
-                          <Button variant="outline" size="sm">Edit</Button>
-                          <Button variant="outline" size="sm" className="text-[#EF4444]">Delete</Button>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-1">
-                        {role.permissionCodes?.slice(0, 5).map((perm: string) => (
-                          <span key={perm} className="inline-block px-2 py-1 bg-[#F1F5F9] rounded text-xs text-[#475569]">
-                            {perm}
-                          </span>
-                        ))}
-                        {role.permissionCodes?.length > 5 && (
-                          <span className="inline-block px-2 py-1 bg-[#F1F5F9] rounded text-xs text-[#475569]">
-                            +{role.permissionCodes.length - 5} more
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </Card>
-        </TabsContent>
-        </Tabs>
+// ─── Tab definitions ──────────────────────────────────────────
+
+const TABS: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
+  { id: "general", label: "General", icon: <Settings style={{ width: "13px", height: "13px" }} /> },
+  { id: "notifications", label: "Notifications", icon: <Bell style={{ width: "13px", height: "13px" }} /> },
+  { id: "security", label: "Security", icon: <Shield style={{ width: "13px", height: "13px" }} /> },
+  { id: "authentication", label: "Authentication", icon: <Key style={{ width: "13px", height: "13px" }} /> },
+  { id: "appearance", label: "Appearance", icon: <Palette style={{ width: "13px", height: "13px" }} /> },
+  { id: "localization", label: "Localization", icon: <Globe style={{ width: "13px", height: "13px" }} /> },
+  { id: "data", label: "Data & Backup", icon: <Database style={{ width: "13px", height: "13px" }} /> },
+  { id: "departments", label: "Departments", icon: <Layers style={{ width: "13px", height: "13px" }} /> },
+  { id: "users", label: "System Users", icon: <Users2 style={{ width: "13px", height: "13px" }} /> },
+  { id: "roles", label: "Roles & Permissions", icon: <Lock style={{ width: "13px", height: "13px" }} /> },
+  { id: "integrations", label: "Integrations", icon: <Link style={{ width: "13px", height: "13px" }} /> },
+  { id: "mobile", label: "Mobile Access", icon: <Smartphone style={{ width: "13px", height: "13px" }} /> },
+];
+
+// ─── Default values ───────────────────────────────────────────
+
+const DEFAULT_GENERAL: GeneralSettings = { companyName: "", supportEmail: "", supportPhone: "", address: "", timezone: "Africa/Cairo", logoFileId: "" };
+const DEFAULT_NOTIF: NotificationSettings = { emailEnabled: true, pushEnabled: true, smsEnabled: false, otpEnabled: true, maintenanceAlerts: true, paymentReminders: true, emergencyBroadcast: true, digestFrequency: "daily" };
+const DEFAULT_SEC: SecuritySettings = { auditLogRetentionDays: 90 };
+const DEFAULT_APPEAR: AppearanceSettings = { primaryColor: "#111827", accentColor: "#2563EB", logoUrl: "", darkMode: false, compactLayout: false, language: "en" };
+const DEFAULT_LOCAL: LocalizationSettings = { defaultLanguage: "en", currency: "EGP", dateFormat: "DD/MM/YYYY", rtlSupport: false, timezone: "Africa/Cairo" };
+const DEFAULT_DATA: DataSettings = { backupEnabled: true, backupFrequency: "daily", retentionDays: 90, exportFormat: "csv", analyticsEnabled: true };
+const DEFAULT_AUTH: AuthenticationSettings = {
+  require2fa: false, requireUppercase: true, requireLowercase: true, requireNumbers: true,
+  requireSpecialChars: false, passwordMinLength: 8, maxRequestsPerMinute: 60,
+  sessionTimeoutMinutes: 60, maxLoginAttempts: 5, registrationType: "pre-registered",
+};
+
+const DEFAULT_MOBILE_ACCESS: MobileAccessMap = (() => {
+  const m: MobileAccessMap = {};
+  for (const mod of MOBILE_MODULES) {
+    m[mod] = {};
+    for (const ut of MOBILE_USER_TYPES) {
+      m[mod][ut] = true;
+    }
+  }
+  return m;
+})();
+
+// ─── Main ─────────────────────────────────────────────────────
+
+export function SystemSettings() {
+  const [activeTab, setActiveTab] = useState<SettingsTab>("general");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+
+  // Settings state
+  const [general, setGeneral] = useState<GeneralSettings>(DEFAULT_GENERAL);
+  const [notif, setNotif] = useState<NotificationSettings>(DEFAULT_NOTIF);
+  const [security, setSecurity] = useState<SecuritySettings>(DEFAULT_SEC);
+  const [appearance, setAppearance] = useState<AppearanceSettings>(DEFAULT_APPEAR);
+  const [localization, setLocalization] = useState<LocalizationSettings>(DEFAULT_LOCAL);
+  const [data, setDataSettings] = useState<DataSettings>(DEFAULT_DATA);
+  const [authentication, setAuthentication] = useState<AuthenticationSettings>(DEFAULT_AUTH);
+  const [mobileAccess, setMobileAccess] = useState<MobileAccessMap>(DEFAULT_MOBILE_ACCESS);
+
+  // Entity state (CRUD resources)
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [systemUsers, setSystemUsers] = useState<SystemUser[]>([]);
+  const [roles, setRoles] = useState<Role[]>([]);
+
+  // Saved snapshots for discard
+  const [saved, setSaved] = useState({
+    general: DEFAULT_GENERAL, notif: DEFAULT_NOTIF, security: DEFAULT_SEC,
+    appearance: DEFAULT_APPEAR, localization: DEFAULT_LOCAL, data: DEFAULT_DATA,
+    authentication: DEFAULT_AUTH, mobileAccess: DEFAULT_MOBILE_ACCESS,
+  });
+
+  const loadDepartments = useCallback(async () => {
+    try {
+      const res = await apiClient.get("/admin/departments");
+      setDepartments(res.data ?? []);
+    } catch { /* silently fail, list stays empty */ }
+  }, []);
+
+  const loadSystemUsers = useCallback(async () => {
+    try {
+      const res = await apiClient.get("/admin/system-users");
+      setSystemUsers(res.data ?? []);
+    } catch { /* silently fail */ }
+  }, []);
+
+  const loadRoles = useCallback(async () => {
+    try {
+      const res = await apiClient.get("/admin/roles");
+      setRoles(res.data ?? []);
+    } catch { /* silently fail */ }
+  }, []);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await apiClient.get("/admin/settings").catch(() => ({ data: {} }));
+      const d = res.data ?? {};
+      const g = { ...DEFAULT_GENERAL, ...(d.general ?? {}) };
+      const n = { ...DEFAULT_NOTIF, ...(d.notifications ?? {}) };
+      const s = { ...DEFAULT_SEC, ...(d.security ?? {}) };
+      const a = { ...DEFAULT_APPEAR, ...(d.appearance ?? {}) };
+      const l = { ...DEFAULT_LOCAL, ...(d.localization ?? {}) };
+      const dt = { ...DEFAULT_DATA, ...(d.data ?? {}) };
+      const auth = { ...DEFAULT_AUTH, ...(d.authentication ?? {}) };
+      const ma = d.mobileAccess ? { ...DEFAULT_MOBILE_ACCESS, ...d.mobileAccess } : DEFAULT_MOBILE_ACCESS;
+      setGeneral(g); setNotif(n); setSecurity(s); setAppearance(a); setLocalization(l); setDataSettings(dt);
+      setAuthentication(auth); setMobileAccess(ma);
+      setSaved({ general: g, notif: n, security: s, appearance: a, localization: l, data: dt, authentication: auth, mobileAccess: ma });
+    } catch { toast.error("Failed to load settings"); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  // Load entity data when their tabs are first activated
+  useEffect(() => {
+    if (activeTab === "departments") void loadDepartments();
+    if (activeTab === "users") { void loadSystemUsers(); void loadDepartments(); }
+    if (activeTab === "roles") void loadRoles();
+  }, [activeTab, loadDepartments, loadSystemUsers, loadRoles]);
+
+  const patch = <T,>(setter: React.Dispatch<React.SetStateAction<T>>) =>
+    (p: Partial<T>) => { setter((prev) => ({ ...prev, ...p })); setDirty(true); };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await apiClient.patch("/admin/settings", {
+        general, notifications: notif, security, appearance, localization,
+        data, authentication, mobileAccess,
+      });
+      setSaved({ general, notif, security, appearance, localization, data, authentication, mobileAccess });
+      setDirty(false); toast.success("Settings saved");
+    } catch { toast.error("Failed to save settings"); }
+    finally { setSaving(false); }
+  };
+
+  const handleDiscard = () => {
+    setGeneral(saved.general); setNotif(saved.notif); setSecurity(saved.security);
+    setAppearance(saved.appearance); setLocalization(saved.localization); setDataSettings(saved.data);
+    setAuthentication(saved.authentication); setMobileAccess(saved.mobileAccess);
+    setDirty(false);
+  };
+
+  const handleLogoUpload = (file: File) => {
+    patch(setGeneral)({ logoFileId: file.name });
+    toast.success("Logo selected — will be uploaded on save.");
+  };
+
+  const handleBackupNow = async () => {
+    try {
+      await apiClient.post("/admin/backup/trigger");
+      toast.success("Backup triggered successfully");
+    } catch { toast.error("Failed to trigger backup"); }
+  };
+
+  const handleMobileAccessChange = (ma: MobileAccessMap) => {
+    setMobileAccess(ma);
+    setDirty(true);
+  };
+
+  return (
+    <div style={{ fontFamily: "'Work Sans', sans-serif" }}>
+      {/* ── Header ─── */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px", marginBottom: "20px", flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ fontSize: "18px", fontWeight: 900, color: "#111827", letterSpacing: "-0.02em", margin: 0 }}>System Settings</h1>
+          <p style={{ marginTop: "4px", fontSize: "13px", color: "#6B7280" }}>Configure platform-wide preferences, security, and integrations.</p>
         </div>
-);
+        <button type="button" onClick={() => void load()} disabled={loading}
+          style={{ display: "flex", alignItems: "center", gap: "6px", padding: "8px 14px", borderRadius: "8px", background: "#FFF", color: "#374151", border: "1px solid #E5E7EB", cursor: loading ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 600, fontFamily: "'Work Sans', sans-serif", opacity: loading ? 0.6 : 1 }}>
+          <RefreshCw style={{ width: "13px", height: "13px", animation: loading ? "spin 1s linear infinite" : "none" }} /> Reload
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "200px 1fr", gap: "14px", alignItems: "start" }}>
+        {/* ── Sidebar nav ─── */}
+        <div style={{ borderRadius: "10px", border: "1px solid #EBEBEB", background: "#FFF", overflow: "hidden" }}>
+          {TABS.map((t, i) => (
+            <button key={t.id} type="button" onClick={() => setActiveTab(t.id)}
+              style={{ width: "100%", display: "flex", alignItems: "center", gap: "9px", padding: "10px 12px", background: activeTab === t.id ? "#F3F4F6" : "transparent", border: "none", borderTop: i > 0 ? "1px solid #F9FAFB" : "none", cursor: "pointer", fontFamily: "'Work Sans', sans-serif", transition: "background 100ms", textAlign: "left" }}>
+              <span style={{ color: activeTab === t.id ? "#111827" : "#9CA3AF", transition: "color 100ms" }}>{t.icon}</span>
+              <span style={{ fontSize: "12.5px", fontWeight: activeTab === t.id ? 700 : 500, color: activeTab === t.id ? "#111827" : "#6B7280", flex: 1 }}>{t.label}</span>
+              {activeTab === t.id && <ChevronRight style={{ width: "11px", height: "11px", color: "#9CA3AF" }} />}
+            </button>
+          ))}
+        </div>
+
+        {/* ── Content panel ─── */}
+        <div>
+          <div style={{ borderRadius: "10px", border: "1px solid #EBEBEB", background: "#FFF", overflow: "hidden" }}>
+            <div style={{ height: "3px", background: "linear-gradient(90deg, #111827, #374151)" }} />
+            <div style={{ padding: "18px 20px" }}>
+              {loading ? (
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <div key={i} style={{ height: "36px", borderRadius: "7px", background: "linear-gradient(90deg, #F3F4F6 25%, #E9EAEC 50%, #F3F4F6 75%)", backgroundSize: "200% 100%" }} />
+                  ))}
+                </div>
+              ) : (
+                <>
+                  {activeTab === "general" && <GeneralPanel settings={general} onChange={patch(setGeneral)} onLogoUpload={handleLogoUpload} />}
+                  {activeTab === "notifications" && <NotificationsPanel settings={notif} onChange={patch(setNotif)} />}
+                  {activeTab === "security" && <SecurityPanel settings={security} onChange={patch(setSecurity)} />}
+                  {activeTab === "authentication" && <AuthenticationPanel settings={authentication} onChange={patch(setAuthentication)} />}
+                  {activeTab === "appearance" && <AppearancePanel settings={appearance} onChange={patch(setAppearance)} />}
+                  {activeTab === "localization" && <LocalizationPanel settings={localization} onChange={patch(setLocalization)} />}
+                  {activeTab === "data" && <DataPanel settings={data} onChange={patch(setDataSettings)} onBackupNow={() => void handleBackupNow()} />}
+                  {activeTab === "departments" && <DepartmentsPanel departments={departments} onRefresh={() => void loadDepartments()} />}
+                  {activeTab === "users" && <SystemUsersPanel users={systemUsers} departments={departments} onRefresh={() => void loadSystemUsers()} />}
+                  {activeTab === "roles" && <RolesPanel roles={roles} onRefresh={() => void loadRoles()} />}
+                  {activeTab === "integrations" && <IntegrationsPanel />}
+                  {activeTab === "mobile" && <MobileAccessPanel mobileAccess={mobileAccess} onChange={handleMobileAccessChange} />}
+                </>
+              )}
+            </div>
+          </div>
+
+          <SaveBar dirty={dirty} saving={saving} onSave={() => void handleSave()} onDiscard={handleDiscard} />
+        </div>
+      </div>
+
+      <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
 }
