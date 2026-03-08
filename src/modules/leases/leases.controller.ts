@@ -24,6 +24,7 @@ import { CreateLeaseDto, UpdateLeaseDto } from './dto/create-lease.dto';
 import { AddTenantToLeaseDto } from './dto/add-tenant-to-lease.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { Permissions } from '../auth/decorators/permissions.decorator';
 import { FileService } from '../file/file.service';
 
 const IDENTITY_DOCS_BUCKET = 'identity-docs';
@@ -66,6 +67,7 @@ export class LeasesController {
   // - JSON body with contractFileId + nationalIdFileId
   // - multipart/form-data with files: contractFile, nationalIdPhoto
   @Post()
+  @Permissions('lease.create')
   @UseInterceptors(
     FileFieldsInterceptor([
       { name: 'contractFile', maxCount: 1 },
@@ -121,24 +123,28 @@ export class LeasesController {
 
   // GET /leases
   @Get()
+  @Permissions('lease.view_all')
   findAll() {
     return this.leasesService.findAll();
   }
 
   // GET /leases/unit/:unitId
   @Get('unit/:unitId')
+  @Permissions('lease.view_all', 'lease.view_own')
   findByUnit(@Param('unitId') unitId: string) {
     return this.leasesService.findByUnit(unitId);
   }
 
   // GET /leases/:id
   @Get(':id')
+  @Permissions('lease.view_all', 'lease.view_own')
   findOne(@Param('id') id: string) {
     return this.leasesService.findOne(id);
   }
 
   // PATCH /leases/:id
   @Patch(':id')
+  @Permissions('lease.update')
   update(
     @Param('id') id: string,
     @Body() updateLeaseDto: UpdateLeaseDto,
@@ -149,12 +155,14 @@ export class LeasesController {
 
   // DELETE /leases/:id
   @Delete(':id')
+  @Permissions('lease.delete')
   remove(@Param('id') id: string, @Req() req: any) {
     return this.leasesService.remove(id, req.user.id);
   }
 
   // POST /leases/:leaseId/add-tenant
   @Post(':leaseId/add-tenant')
+  @Permissions('lease.add_tenant')
   @UseInterceptors(FileInterceptor('nationalIdPhoto'))
   async addTenantToLease(
     @Param('leaseId') leaseId: string,
@@ -189,6 +197,7 @@ export class LeasesController {
 
   // POST /leases/:leaseId/terminate
   @Post(':leaseId/terminate')
+  @Permissions('lease.terminate')
   terminateLease(
     @Param('leaseId') leaseId: string,
     @Body() dto: { reason?: string; terminationDate?: string },

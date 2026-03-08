@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowDown, ArrowUp, Plus, RefreshCw, Search, Upload } from 'lucide-react';
 import { toast } from 'sonner';
-import { DataTable, type DataTableColumn } from '../DataTable';
-import { EmptyState } from '../EmptyState';
-import { PageHeader } from '../PageHeader';
-import { SkeletonTable } from '../SkeletonTable';
+import {
+  Plus, RefreshCw, Search, ArrowUp, ArrowDown, Upload,
+  X, Check, Image, Layers, Tag, SlidersHorizontal, ChevronDown,
+} from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 import { StatCard } from '../StatCard';
 import { StatusBadge } from '../StatusBadge';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '../ui/dialog';
 import marketingService, {
   type BannerAudience,
   type BannerPriority,
@@ -21,916 +20,757 @@ import marketingService, {
 } from '../../lib/marketingService';
 import { errorMessage, formatDateTime, humanizeEnum } from '../../lib/live-data';
 
-const audienceOptions: BannerAudience[] = ['ALL', 'SPECIFIC_RESIDENCES', 'SPECIFIC_BLOCKS', 'SPECIFIC_UNITS'];
-const priorityOptions: BannerPriority[] = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
-const statusOptions: BannerStatus[] = ['ACTIVE', 'INACTIVE', 'EXPIRED'];
-const secondaryActionButtonClass = 'marketing-btn marketing-btn-secondary';
-const primaryActionButtonClass = 'marketing-btn marketing-btn-primary';
-const tableSecondaryActionButtonClass = 'marketing-btn marketing-btn-secondary marketing-btn-table';
-const tableSecondaryIconButtonClass = 'marketing-btn marketing-btn-secondary marketing-btn-icon disabled:opacity-40';
-const tableDangerActionButtonClass = 'marketing-btn marketing-btn-danger marketing-btn-table';
+// ─── Constants ────────────────────────────────────────────────
 
-type CampaignFormState = {
-  id: string | null;
-  titleEn: string;
-  titleAr: string;
-  description: string;
-  ctaText: string;
-  ctaUrl: string;
-  targetAudience: BannerAudience;
-  audienceValues: string;
-  startDateLocal: string;
-  endDateLocal: string;
-  status: BannerStatus;
-  displayPriority: BannerPriority;
-  imageFileId: string;
-  imageFile: File | null;
+const AUDIENCE_OPTIONS: BannerAudience[] = ['ALL', 'SPECIFIC_RESIDENCES', 'SPECIFIC_BLOCKS', 'SPECIFIC_UNITS'];
+const PRIORITY_OPTIONS: BannerPriority[] = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+const STATUS_OPTIONS: BannerStatus[] = ['ACTIVE', 'INACTIVE', 'EXPIRED'];
+
+// ─── Types ────────────────────────────────────────────────────
+
+type BannerFormState = {
+  id: string | null; titleEn: string; titleAr: string; descriptionEn: string; descriptionAr: string;
+  ctaUrl: string; targetAudience: BannerAudience; audienceValues: string;
+  startDateLocal: string; endDateLocal: string; status: BannerStatus;
+  displayPriority: BannerPriority; imageFileId: string; imageFile: File | null;
 };
 
-type SlideFormState = {
-  title: string;
-  subtitle: string;
-  description: string;
-  imageUrl: string;
-};
+type SlideFormState = { title: string; subtitle: string; description: string; imageUrl: string };
 
 type OfferFormState = {
-  id: string | null;
-  title: string;
-  subtitle: string;
-  description: string;
-  imageUrl: string;
-  imageFileId: string;
-  linkUrl: string;
-  priority: string;
-  active: boolean;
-  startAtLocal: string;
-  endAtLocal: string;
-  imageFile: File | null;
+  id: string | null; title: string; subtitle: string; description: string;
+  imageUrl: string; imageFileId: string; linkUrl: string; priority: string;
+  active: boolean; startAtLocal: string; endAtLocal: string; imageFile: File | null;
 };
 
 type OnboardingRow = { id: string; index: number; slide: OnboardingSlide };
 type OfferRow = { id: string; index: number; offer: OfferBanner };
 
-function splitCsv(value: string): string[] {
-  return value.split(',').map((part) => part.trim()).filter((part) => part.length > 0);
-}
+// ─── Helpers ──────────────────────────────────────────────────
 
-function toLocalDateTimeValue(iso?: string | null): string {
+function splitCsv(v: string): string[] { return v.split(',').map((p) => p.trim()).filter(Boolean); }
+function toLocalDT(iso?: string | null): string {
   if (!iso) return '';
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return '';
-  const adjusted = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return adjusted.toISOString().slice(0, 16);
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
-
-function fromLocalDateTimeValue(local: string): string {
+function fromLocalDT(local: string): string {
   if (!local.trim()) return '';
-  const date = new Date(local);
-  return Number.isNaN(date.getTime()) ? '' : date.toISOString();
+  const d = new Date(local);
+  return Number.isNaN(d.getTime()) ? '' : d.toISOString();
 }
-
 function readArray(meta: Record<string, unknown> | null, key: string): string[] {
   if (!meta) return [];
   const raw = meta[key];
   if (!Array.isArray(raw)) return [];
-  return raw.map((item) => (typeof item === 'string' ? item.trim() : '')).filter((item) => item.length > 0);
+  return raw.map((i) => (typeof i === 'string' ? i.trim() : '')).filter(Boolean);
+}
+function readAudienceValues(audience: BannerAudience, meta: Record<string, unknown> | null): string {
+  if (audience === 'ALL') return '';
+  if (audience === 'SPECIFIC_RESIDENCES') { const u = readArray(meta, 'userIds'); return u.length > 0 ? u.join(', ') : readArray(meta, 'communityIds').join(', '); }
+  if (audience === 'SPECIFIC_BLOCKS') return readArray(meta, 'blocks').join(', ');
+  return readArray(meta, 'unitIds').join(', ');
+}
+function buildAudienceMeta(audience: BannerAudience, values: string): Record<string, unknown> | undefined {
+  if (audience === 'ALL') return {};
+  const v = splitCsv(values);
+  if (!v.length) return undefined;
+  if (audience === 'SPECIFIC_RESIDENCES') return { userIds: v };
+  if (audience === 'SPECIFIC_BLOCKS') return { blocks: v };
+  return { unitIds: v };
+}
+function moveItem<T>(items: T[], from: number, to: number): T[] {
+  if (to < 0 || to >= items.length) return items;
+  const n = [...items]; const [m] = n.splice(from, 1); if (m === undefined) return items;
+  n.splice(to, 0, m); return n;
 }
 
-function readAudienceValues(targetAudience: BannerAudience, audienceMeta: Record<string, unknown> | null): string {
-  if (targetAudience === 'ALL') return '';
-  if (targetAudience === 'SPECIFIC_RESIDENCES') {
-    const userIds = readArray(audienceMeta, 'userIds');
-    if (userIds.length > 0) return userIds.join(', ');
-    return readArray(audienceMeta, 'communityIds').join(', ');
-  }
-  if (targetAudience === 'SPECIFIC_BLOCKS') return readArray(audienceMeta, 'blocks').join(', ');
-  return readArray(audienceMeta, 'unitIds').join(', ');
+function createDefaultBannerForm(): BannerFormState {
+  const now = new Date(); const end = new Date(now.getTime() + 7 * 864e5);
+  return { id: null, titleEn: '', titleAr: '', descriptionEn: '', descriptionAr: '', ctaUrl: '', targetAudience: 'ALL', audienceValues: '', startDateLocal: toLocalDT(now.toISOString()), endDateLocal: toLocalDT(end.toISOString()), status: 'ACTIVE', displayPriority: 'MEDIUM', imageFileId: '', imageFile: null };
+}
+function createDefaultOfferForm(priority: number): OfferFormState {
+  return { id: null, title: '', subtitle: '', description: '', imageUrl: '', imageFileId: '', linkUrl: '', priority: String(priority), active: true, startAtLocal: '', endAtLocal: '', imageFile: null };
+}
+const DEFAULT_SLIDE: SlideFormState = { title: '', subtitle: '', description: '', imageUrl: '' };
+
+// ─── Design tokens ────────────────────────────────────────────
+
+const inputStyle: React.CSSProperties = {
+  width: '100%', padding: '8px 10px', borderRadius: '7px',
+  border: '1px solid #E5E7EB', fontSize: '13px', color: '#111827',
+  background: '#FFF', outline: 'none', fontFamily: "'Work Sans', sans-serif",
+  boxSizing: 'border-box', height: '36px',
+};
+const selectStyle: React.CSSProperties = { ...inputStyle, cursor: 'pointer' };
+const textareaStyle: React.CSSProperties = { ...inputStyle, height: 'auto', resize: 'vertical' as const };
+
+// ─── Primitives ───────────────────────────────────────────────
+
+function Field({ label, required, children, span2 }: {
+  label: string; required?: boolean; children: React.ReactNode; span2?: boolean;
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', gridColumn: span2 ? 'span 2' : undefined }}>
+      <label style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'Work Sans', sans-serif" }}>
+        {label}{required && <span style={{ color: '#DC2626', marginLeft: '3px' }}>*</span>}
+      </label>
+      {children}
+    </div>
+  );
 }
 
-function buildAudienceMeta(targetAudience: BannerAudience, audienceValues: string): Record<string, unknown> | undefined {
-  if (targetAudience === 'ALL') return {};
-  const values = splitCsv(audienceValues);
-  if (values.length === 0) return undefined;
-  if (targetAudience === 'SPECIFIC_RESIDENCES') return { userIds: values };
-  if (targetAudience === 'SPECIFIC_BLOCKS') return { blocks: values };
-  return { unitIds: values };
+function SectionLabel({ icon, label }: { icon: React.ReactNode; label: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '10px', paddingBottom: '8px', borderBottom: '1px solid #F3F4F6' }}>
+      <span style={{ color: '#9CA3AF' }}>{icon}</span>
+      <span style={{ fontSize: '11px', fontWeight: 700, color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'Work Sans', sans-serif" }}>{label}</span>
+    </div>
+  );
 }
 
-function moveItem<T>(items: T[], fromIndex: number, toIndex: number): T[] {
-  if (toIndex < 0 || toIndex >= items.length) return items;
-  const next = [...items];
-  const [moved] = next.splice(fromIndex, 1);
-  if (moved === undefined) return items;
-  next.splice(toIndex, 0, moved);
-  return next;
+function IconBtn({ onClick, disabled, danger, children }: { onClick: () => void; disabled?: boolean; danger?: boolean; children: React.ReactNode }) {
+  return (
+    <button type="button" onClick={onClick} disabled={disabled}
+      style={{ width: '28px', height: '28px', borderRadius: '6px', border: `1px solid ${danger ? '#FECACA' : '#E5E7EB'}`, background: danger ? '#FFF5F5' : '#FFF', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: disabled ? 'not-allowed' : 'pointer', color: danger ? '#DC2626' : '#6B7280', opacity: disabled ? 0.35 : 1, transition: 'all 120ms ease', flexShrink: 0 }}
+      onMouseEnter={(e) => { if (!disabled) { e.currentTarget.style.background = danger ? '#DC2626' : '#111827'; e.currentTarget.style.color = '#FFF'; } }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = danger ? '#FFF5F5' : '#FFF'; e.currentTarget.style.color = danger ? '#DC2626' : '#6B7280'; }}>
+      {children}
+    </button>
+  );
 }
 
-function createDefaultCampaignForm(): CampaignFormState {
-  const now = new Date();
-  const end = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-  return {
-    id: null,
-    titleEn: '',
-    titleAr: '',
-    description: '',
-    ctaText: '',
-    ctaUrl: '',
-    targetAudience: 'ALL',
-    audienceValues: '',
-    startDateLocal: toLocalDateTimeValue(now.toISOString()),
-    endDateLocal: toLocalDateTimeValue(end.toISOString()),
-    status: 'ACTIVE',
-    displayPriority: 'MEDIUM',
-    imageFileId: '',
-    imageFile: null,
-  };
+// ─── Banner row ───────────────────────────────────────────────
+
+function BannerRow({ row, onEdit, onToggle, onDelete }: { row: CampaignBanner; onEdit: () => void; onToggle: () => void; onDelete: () => void }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto auto auto auto', alignItems: 'center', gap: '12px', padding: '11px 14px', borderBottom: '1px solid #F9FAFB', transition: 'background 100ms' }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = '#FAFAFA'; }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}>
+      {/* Title */}
+      <div style={{ minWidth: 0 }}>
+        <p style={{ fontSize: '13px', fontWeight: 600, color: '#111827', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.titleEn}</p>
+        {row.description && <p style={{ fontSize: '11.5px', color: '#9CA3AF', margin: '2px 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.description}</p>}
+      </div>
+      {/* Audience */}
+      <span style={{ fontSize: '12px', color: '#6B7280', whiteSpace: 'nowrap' }}>{humanizeEnum(row.targetAudience)}</span>
+      {/* Schedule */}
+      <div style={{ textAlign: 'right' }}>
+        <p style={{ fontSize: '11.5px', color: '#374151', margin: 0, fontFamily: "'DM Mono', monospace" }}>{formatDateTime(row.startDate)}</p>
+        <p style={{ fontSize: '11px', color: '#9CA3AF', margin: '1px 0 0', fontFamily: "'DM Mono', monospace" }}>→ {formatDateTime(row.endDate)}</p>
+      </div>
+      {/* Priority */}
+      <StatusBadge value={row.displayPriority} />
+      {/* Status */}
+      <StatusBadge value={row.status} />
+      {/* Performance */}
+      <div style={{ textAlign: 'right' }}>
+        <p style={{ fontSize: '12px', color: '#374151', margin: 0 }}>{row.views}v / {row.clicks}c</p>
+        <p style={{ fontSize: '11px', color: '#9CA3AF', margin: '1px 0 0' }}>CTR {row.ctr.toFixed(1)}%</p>
+      </div>
+      {/* Actions */}
+      <div style={{ display: 'flex', gap: '4px' }}>
+        <button type="button" onClick={onEdit}
+          style={{ padding: '0 8px', height: '28px', borderRadius: '6px', border: '1px solid #E5E7EB', background: '#FFF', cursor: 'pointer', fontSize: '11.5px', fontWeight: 600, color: '#6B7280', fontFamily: "'Work Sans', sans-serif", transition: 'all 120ms ease' }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = '#111827'; e.currentTarget.style.color = '#FFF'; e.currentTarget.style.borderColor = '#111827'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = '#FFF'; e.currentTarget.style.color = '#6B7280'; e.currentTarget.style.borderColor = '#E5E7EB'; }}>
+          Edit
+        </button>
+        <button type="button" onClick={onToggle}
+          style={{ padding: '0 8px', height: '28px', borderRadius: '6px', border: '1px solid #E5E7EB', background: '#FFF', cursor: 'pointer', fontSize: '11.5px', fontWeight: 600, color: '#6B7280', fontFamily: "'Work Sans', sans-serif", transition: 'all 120ms ease' }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = '#F3F4F6'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = '#FFF'; }}>
+          {row.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
+        </button>
+        <IconBtn onClick={onDelete} danger><X style={{ width: '10px', height: '10px' }} /></IconBtn>
+      </div>
+    </div>
+  );
 }
 
-const defaultSlideForm: SlideFormState = { title: '', subtitle: '', description: '', imageUrl: '' };
+// ─── Onboarding row ───────────────────────────────────────────
 
-function createDefaultOfferForm(priorityValue: number): OfferFormState {
-  return {
-    id: null,
-    title: '',
-    subtitle: '',
-    description: '',
-    imageUrl: '',
-    imageFileId: '',
-    linkUrl: '',
-    priority: String(priorityValue),
-    active: true,
-    startAtLocal: '',
-    endAtLocal: '',
-    imageFile: null,
-  };
+function OnboardingRow({ row, total, onMoveUp, onMoveDown, onEdit, onDelete }: {
+  row: OnboardingRow; total: number;
+  onMoveUp: () => void; onMoveDown: () => void; onEdit: () => void; onDelete: () => void;
+}) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '28px 1fr auto auto auto', alignItems: 'center', gap: '12px', padding: '11px 14px', borderBottom: '1px solid #F9FAFB', transition: 'background 100ms' }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = '#FAFAFA'; }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}>
+      <span style={{ fontSize: '11px', fontWeight: 700, color: '#D1D5DB', fontFamily: "'DM Mono', monospace", textAlign: 'center' }}>{row.index + 1}</span>
+      <div style={{ minWidth: 0 }}>
+        <p style={{ fontSize: '13px', fontWeight: 600, color: '#111827', margin: 0 }}>{row.slide.title}</p>
+        {row.slide.subtitle && <p style={{ fontSize: '11.5px', color: '#9CA3AF', margin: '2px 0 0' }}>{row.slide.subtitle}</p>}
+      </div>
+      {row.slide.imageUrl ? (
+        <a href={row.slide.imageUrl} target="_blank" rel="noreferrer" style={{ fontSize: '11.5px', color: '#2563EB', textDecoration: 'underline' }}>Image</a>
+      ) : <span style={{ fontSize: '11.5px', color: '#D1D5DB' }}>No image</span>}
+      <div style={{ display: 'flex', gap: '4px' }}>
+        <IconBtn onClick={onMoveUp} disabled={row.index === 0}><ArrowUp style={{ width: '10px', height: '10px' }} /></IconBtn>
+        <IconBtn onClick={onMoveDown} disabled={row.index === total - 1}><ArrowDown style={{ width: '10px', height: '10px' }} /></IconBtn>
+        <button type="button" onClick={onEdit}
+          style={{ padding: '0 8px', height: '28px', borderRadius: '6px', border: '1px solid #E5E7EB', background: '#FFF', cursor: 'pointer', fontSize: '11.5px', fontWeight: 600, color: '#6B7280', fontFamily: "'Work Sans', sans-serif", transition: 'all 120ms ease' }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = '#111827'; e.currentTarget.style.color = '#FFF'; e.currentTarget.style.borderColor = '#111827'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = '#FFF'; e.currentTarget.style.color = '#6B7280'; e.currentTarget.style.borderColor = '#E5E7EB'; }}>
+          Edit
+        </button>
+        <IconBtn onClick={onDelete} danger><X style={{ width: '10px', height: '10px' }} /></IconBtn>
+      </div>
+    </div>
+  );
 }
+
+// ─── Offer row ────────────────────────────────────────────────
+
+function OfferRowItem({ row, total, onMoveUp, onMoveDown, onEdit, onDelete }: {
+  row: OfferRow; total: number;
+  onMoveUp: () => void; onMoveDown: () => void; onEdit: () => void; onDelete: () => void;
+}) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto auto', alignItems: 'center', gap: '12px', padding: '11px 14px', borderBottom: '1px solid #F9FAFB', transition: 'background 100ms' }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = '#FAFAFA'; }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}>
+      <div>
+        <p style={{ fontSize: '13px', fontWeight: 600, color: '#111827', margin: 0 }}>{row.offer.title}</p>
+        {row.offer.subtitle && <p style={{ fontSize: '11.5px', color: '#9CA3AF', margin: '2px 0 0' }}>{row.offer.subtitle}</p>}
+      </div>
+      <div style={{ textAlign: 'right' }}>
+        <p style={{ fontSize: '11.5px', color: '#374151', margin: 0, fontFamily: "'DM Mono', monospace" }}>{row.offer.startAt ? formatDateTime(row.offer.startAt) : '\u2014'}</p>
+        <p style={{ fontSize: '11px', color: '#9CA3AF', margin: '1px 0 0', fontFamily: "'DM Mono', monospace" }}>{row.offer.endAt ? `\u2192 ${formatDateTime(row.offer.endAt)}` : '\u2014'}</p>
+      </div>
+      <StatusBadge value={row.offer.active ? 'ACTIVE' : 'INACTIVE'} />
+      <div style={{ display: 'flex', gap: '4px' }}>
+        <IconBtn onClick={onMoveUp} disabled={row.index === 0}><ArrowUp style={{ width: '10px', height: '10px' }} /></IconBtn>
+        <IconBtn onClick={onMoveDown} disabled={row.index === total - 1}><ArrowDown style={{ width: '10px', height: '10px' }} /></IconBtn>
+        <button type="button" onClick={onEdit}
+          style={{ padding: '0 8px', height: '28px', borderRadius: '6px', border: '1px solid #E5E7EB', background: '#FFF', cursor: 'pointer', fontSize: '11.5px', fontWeight: 600, color: '#6B7280', fontFamily: "'Work Sans', sans-serif", transition: 'all 120ms ease' }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = '#111827'; e.currentTarget.style.color = '#FFF'; e.currentTarget.style.borderColor = '#111827'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = '#FFF'; e.currentTarget.style.color = '#6B7280'; e.currentTarget.style.borderColor = '#E5E7EB'; }}>
+          Edit
+        </button>
+        <IconBtn onClick={onDelete} danger><X style={{ width: '10px', height: '10px' }} /></IconBtn>
+      </div>
+    </div>
+  );
+}
+
+// ─── Table column header row ──────────────────────────────────
+
+function TableHeader({ columns }: { columns: string[] }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: `repeat(${columns.length}, 1fr)`, gap: '12px', padding: '9px 14px', borderBottom: '1px solid #F3F4F6', background: '#FAFAFA' }}>
+      {columns.map((c) => (
+        <span key={c} style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'Work Sans', sans-serif" }}>{c}</span>
+      ))}
+    </div>
+  );
+}
+
+// ─── Main ─────────────────────────────────────────────────────
 
 export function MarketingCenter() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [campaigns, setCampaigns] = useState<CampaignBanner[]>([]);
+  const [banners, setBanners] = useState<CampaignBanner[]>([]);
   const [onboarding, setOnboarding] = useState<OnboardingSettings>({ enabled: true, slides: [] });
   const [offers, setOffers] = useState<OffersSettings>({ enabled: false, banners: [] });
 
-  const [campaignSearch, setCampaignSearch] = useState('');
-  const [campaignStatusFilter, setCampaignStatusFilter] = useState<BannerStatus | 'all'>('ACTIVE');
-  const [campaignAudienceFilter, setCampaignAudienceFilter] = useState<BannerAudience | 'all'>('all');
-  const [campaignPriorityFilter, setCampaignPriorityFilter] = useState<BannerPriority | 'all'>('all');
+  // Banner filters
+  const [bannerSearch, setBannerSearch] = useState('');
+  const [bannerStatusFilter, setBannerStatusFilter] = useState<BannerStatus | 'all'>('ACTIVE');
+  const [bannerAudienceFilter, setBannerAudienceFilter] = useState<BannerAudience | 'all'>('all');
+  const [bannerPriorityFilter, setBannerPriorityFilter] = useState<BannerPriority | 'all'>('all');
+  const [bannerFiltersOpen, setBannerFiltersOpen] = useState(false);
 
+  // Offer filters
   const [offerSearch, setOfferSearch] = useState('');
   const [offerActivityFilter, setOfferActivityFilter] = useState<'all' | 'active' | 'inactive'>('all');
 
-  const [campaignDrawerOpen, setCampaignDrawerOpen] = useState(false);
-  const [campaignForm, setCampaignForm] = useState<CampaignFormState>(createDefaultCampaignForm);
-  const [campaignSaving, setCampaignSaving] = useState(false);
+  // Banner dialog
+  const [bannerDialogOpen, setBannerDialogOpen] = useState(false);
+  const [bannerForm, setBannerForm] = useState<BannerFormState>(createDefaultBannerForm);
+  const [bannerSaving, setBannerSaving] = useState(false);
 
-  const [slideDrawerOpen, setSlideDrawerOpen] = useState(false);
-  const [slideForm, setSlideForm] = useState<SlideFormState>(defaultSlideForm);
+  // Slide dialog
+  const [slideDialogOpen, setSlideDialogOpen] = useState(false);
+  const [slideForm, setSlideForm] = useState<SlideFormState>(DEFAULT_SLIDE);
   const [slideEditingIndex, setSlideEditingIndex] = useState<number | null>(null);
   const [onboardingSaving, setOnboardingSaving] = useState(false);
 
-  const [offerDrawerOpen, setOfferDrawerOpen] = useState(false);
+  // Offer dialog
+  const [offerDialogOpen, setOfferDialogOpen] = useState(false);
   const [offerForm, setOfferForm] = useState<OfferFormState>(() => createDefaultOfferForm(1));
   const [offerEditingIndex, setOfferEditingIndex] = useState<number | null>(null);
   const [offerSaving, setOfferSaving] = useState(false);
   const [offersSaving, setOffersSaving] = useState(false);
 
   const loadData = useCallback(async (silent = false) => {
-    if (silent) setRefreshing(true);
-    else setLoading(true);
-
+    if (silent) setRefreshing(true); else setLoading(true);
     try {
-      const [campaignResponse, settingsResponse] = await Promise.all([
+      const [campRes, settingsRes] = await Promise.all([
         marketingService.listCampaigns({ page: 1, limit: 200 }),
         marketingService.getMarketingSettings(),
       ]);
-
-      const sortedCampaigns = [...campaignResponse.data].sort(
-        (left, right) => new Date(right.startDate).getTime() - new Date(left.startDate).getTime(),
-      );
-
-      setCampaigns(sortedCampaigns);
-      setOnboarding(settingsResponse.onboarding);
-      setOffers(settingsResponse.offers);
-    } catch (error: unknown) {
-      toast.error('Failed to load marketing data', { description: errorMessage(error) });
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
+      setBanners([...campRes.data].sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime()));
+      setOnboarding(settingsRes.onboarding);
+      setOffers(settingsRes.offers);
+    } catch (e) { toast.error('Failed to load marketing data', { description: errorMessage(e) }); }
+    finally { setLoading(false); setRefreshing(false); }
   }, []);
 
-  useEffect(() => {
-    void loadData();
-  }, [loadData]);
+  useEffect(() => { void loadData(); }, [loadData]);
 
-  const campaignStats = useMemo(() => {
+  const bannerStats = useMemo(() => {
     const now = Date.now();
-    const activeRows = campaigns.filter((row) => row.status === 'ACTIVE');
-    const liveNow = activeRows.filter((row) => {
-      const start = new Date(row.startDate).getTime();
-      const end = new Date(row.endDate).getTime();
-      return start <= now && now <= end;
-    }).length;
-    const scheduled = activeRows.filter((row) => new Date(row.startDate).getTime() > now).length;
-    const totalClicks = activeRows.reduce((sum, row) => sum + row.clicks, 0);
-    return { activeCampaigns: activeRows.length, liveNow, scheduled, totalClicks };
-  }, [campaigns]);
+    const active = banners.filter((b) => b.status === 'ACTIVE');
+    return {
+      activeBanners: active.length,
+      liveNow: active.filter((b) => new Date(b.startDate).getTime() <= now && now <= new Date(b.endDate).getTime()).length,
+      scheduled: active.filter((b) => new Date(b.startDate).getTime() > now).length,
+      totalClicks: active.reduce((s, b) => s + b.clicks, 0),
+    };
+  }, [banners]);
 
-  const filteredCampaigns = useMemo(() => {
-    const searchNeedle = campaignSearch.trim().toLowerCase();
-    return campaigns.filter((row) => {
-      if (campaignStatusFilter !== 'all' && row.status !== campaignStatusFilter) return false;
-      if (campaignAudienceFilter !== 'all' && row.targetAudience !== campaignAudienceFilter) return false;
-      if (campaignPriorityFilter !== 'all' && row.displayPriority !== campaignPriorityFilter) return false;
-      if (!searchNeedle) return true;
-      const blob = [row.titleEn, row.titleAr ?? '', row.description ?? '', row.ctaText ?? ''].join(' ').toLowerCase();
-      return blob.includes(searchNeedle);
+  const filteredBanners = useMemo(() => {
+    const needle = bannerSearch.trim().toLowerCase();
+    return banners.filter((b) => {
+      if (bannerStatusFilter !== 'all' && b.status !== bannerStatusFilter) return false;
+      if (bannerAudienceFilter !== 'all' && b.targetAudience !== bannerAudienceFilter) return false;
+      if (bannerPriorityFilter !== 'all' && b.displayPriority !== bannerPriorityFilter) return false;
+      if (!needle) return true;
+      return [b.titleEn, b.titleAr ?? '', b.description ?? ''].join(' ').toLowerCase().includes(needle);
     });
-  }, [campaigns, campaignSearch, campaignStatusFilter, campaignAudienceFilter, campaignPriorityFilter]);
+  }, [banners, bannerSearch, bannerStatusFilter, bannerAudienceFilter, bannerPriorityFilter]);
 
-  const filteredOfferRows = useMemo(() => {
+  const filteredOfferRows = useMemo<OfferRow[]>(() => {
     const needle = offerSearch.trim().toLowerCase();
-    return offers.banners
-      .map((offer, index) => ({ offer, index }))
+    return offers.banners.map((o, i) => ({ offer: o, index: i, id: o.id || `offer-${i}` }))
       .filter(({ offer }) => {
         if (offerActivityFilter === 'active' && !offer.active) return false;
         if (offerActivityFilter === 'inactive' && offer.active) return false;
         if (!needle) return true;
-        const blob = [offer.title, offer.subtitle, offer.description, offer.linkUrl].join(' ').toLowerCase();
-        return blob.includes(needle);
-      })
-      .map<OfferRow>(({ offer, index }) => ({ id: offer.id || `offer-${index + 1}`, index, offer }));
-  }, [offerActivityFilter, offerSearch, offers.banners]);
+        return [offer.title, offer.subtitle, offer.description].join(' ').toLowerCase().includes(needle);
+      });
+  }, [offerSearch, offerActivityFilter, offers.banners]);
 
-  const onboardingRows = useMemo<OnboardingRow[]>(() => onboarding.slides.map((slide, index) => ({ id: `slide-${index + 1}`, index, slide })), [onboarding.slides]);
+  const onboardingRows = useMemo<OnboardingRow[]>(
+    () => onboarding.slides.map((s, i) => ({ id: `slide-${i}`, index: i, slide: s })),
+    [onboarding.slides],
+  );
 
-  const openCreateCampaign = () => {
-    setCampaignForm(createDefaultCampaignForm());
-    setCampaignDrawerOpen(true);
+  // ── Banner CRUD ──────────────────────────────────────────────
+
+  const openCreateBanner = () => { setBannerForm(createDefaultBannerForm()); setBannerDialogOpen(true); };
+  const openEditBanner = (b: CampaignBanner) => {
+    setBannerForm({ id: b.id, titleEn: b.titleEn, titleAr: b.titleAr ?? '', descriptionEn: (b as any).descriptionEn ?? b.description ?? '', descriptionAr: (b as any).descriptionAr ?? '', ctaUrl: b.ctaUrl ?? '', targetAudience: b.targetAudience, audienceValues: readAudienceValues(b.targetAudience, b.audienceMeta), startDateLocal: toLocalDT(b.startDate), endDateLocal: toLocalDT(b.endDate), status: b.status, displayPriority: b.displayPriority, imageFileId: b.imageFileId ?? '', imageFile: null });
+    setBannerDialogOpen(true);
   };
 
-  const openEditCampaign = (campaign: CampaignBanner) => {
-    setCampaignForm({
-      id: campaign.id,
-      titleEn: campaign.titleEn,
-      titleAr: campaign.titleAr ?? '',
-      description: campaign.description ?? '',
-      ctaText: campaign.ctaText ?? '',
-      ctaUrl: campaign.ctaUrl ?? '',
-      targetAudience: campaign.targetAudience,
-      audienceValues: readAudienceValues(campaign.targetAudience, campaign.audienceMeta),
-      startDateLocal: toLocalDateTimeValue(campaign.startDate),
-      endDateLocal: toLocalDateTimeValue(campaign.endDate),
-      status: campaign.status,
-      displayPriority: campaign.displayPriority,
-      imageFileId: campaign.imageFileId ?? '',
-      imageFile: null,
-    });
-    setCampaignDrawerOpen(true);
-  };
-  const saveCampaign = async () => {
-    if (!campaignForm.titleEn.trim()) {
-      toast.error('Campaign title is required');
-      return;
-    }
-
-    const startDateIso = fromLocalDateTimeValue(campaignForm.startDateLocal);
-    const endDateIso = fromLocalDateTimeValue(campaignForm.endDateLocal);
-    if (!startDateIso || !endDateIso) {
-      toast.error('Campaign start and end are required');
-      return;
-    }
-    if (new Date(startDateIso).getTime() >= new Date(endDateIso).getTime()) {
-      toast.error('Campaign end must be after start');
-      return;
-    }
-
-    const audienceMeta = buildAudienceMeta(campaignForm.targetAudience, campaignForm.audienceValues);
-    if (campaignForm.targetAudience !== 'ALL' && !audienceMeta) {
-      toast.error('Audience values are required for the selected audience');
-      return;
-    }
-
-    setCampaignSaving(true);
+  const saveBanner = async () => {
+    if (!bannerForm.titleEn.trim()) { toast.error('Banner title is required'); return; }
+    const start = fromLocalDT(bannerForm.startDateLocal); const end = fromLocalDT(bannerForm.endDateLocal);
+    if (!start || !end) { toast.error('Start and end date are required'); return; }
+    if (new Date(start) >= new Date(end)) { toast.error('End must be after start'); return; }
+    const audienceMeta = buildAudienceMeta(bannerForm.targetAudience, bannerForm.audienceValues);
+    if (bannerForm.targetAudience !== 'ALL' && !audienceMeta) { toast.error('Audience values required'); return; }
+    setBannerSaving(true);
     try {
-      let imageFileId = campaignForm.imageFileId.trim();
-      if (campaignForm.imageFile) {
-        const uploaded = await marketingService.uploadCampaignImage(campaignForm.imageFile);
-        imageFileId = uploaded.id;
-      }
-
-      const payload: UpsertCampaignPayload = {
-        titleEn: campaignForm.titleEn.trim(),
-        titleAr: campaignForm.titleAr.trim() || undefined,
-        description: campaignForm.description.trim() || undefined,
-        ctaText: campaignForm.ctaText.trim() || undefined,
-        ctaUrl: campaignForm.ctaUrl.trim() || undefined,
-        targetAudience: campaignForm.targetAudience,
-        audienceMeta,
-        startDate: startDateIso,
-        endDate: endDateIso,
-        status: campaignForm.status,
-        displayPriority: campaignForm.displayPriority,
-        imageFileId: imageFileId || undefined,
-      };
-
-      if (campaignForm.id) await marketingService.updateCampaign(campaignForm.id, payload);
+      let imageFileId = bannerForm.imageFileId.trim() || crypto.randomUUID();
+      if (bannerForm.imageFile) { const u = await marketingService.uploadCampaignImage(bannerForm.imageFile); imageFileId = u.id; }
+      const payload: UpsertCampaignPayload = { titleEn: bannerForm.titleEn.trim(), titleAr: bannerForm.titleAr.trim() || undefined, description: bannerForm.descriptionEn.trim() || undefined, ctaUrl: bannerForm.ctaUrl.trim() || undefined, targetAudience: bannerForm.targetAudience, audienceMeta, startDate: start, endDate: end, status: bannerForm.status, displayPriority: bannerForm.displayPriority, imageFileId: imageFileId || undefined };
+      if (bannerForm.id) await marketingService.updateCampaign(bannerForm.id, payload);
       else await marketingService.createCampaign(payload);
-
-      setCampaignDrawerOpen(false);
-      setCampaignForm(createDefaultCampaignForm());
-      await loadData(true);
-      toast.success(campaignForm.id ? 'Campaign updated' : 'Campaign created');
-    } catch (error: unknown) {
-      toast.error('Failed to save campaign', { description: errorMessage(error) });
-    } finally {
-      setCampaignSaving(false);
-    }
+      setBannerDialogOpen(false); await loadData(true);
+      toast.success(bannerForm.id ? 'Banner updated' : 'Banner created');
+    } catch (e) { toast.error('Failed to save banner', { description: errorMessage(e) }); }
+    finally { setBannerSaving(false); }
   };
 
-  const deleteCampaign = async (campaign: CampaignBanner) => {
-    const ok = window.confirm(`Delete campaign "${campaign.titleEn}"?`);
-    if (!ok) return;
-    try {
-      await marketingService.deleteCampaign(campaign.id);
-      toast.success('Campaign deleted');
-      await loadData(true);
-    } catch (error: unknown) {
-      toast.error('Failed to delete campaign', { description: errorMessage(error) });
-    }
+  const deleteBanner = async (b: CampaignBanner) => {
+    if (!window.confirm(`Delete banner "${b.titleEn}"?`)) return;
+    try { await marketingService.deleteCampaign(b.id); toast.success('Banner deleted'); await loadData(true); }
+    catch (e) { toast.error('Failed to delete', { description: errorMessage(e) }); }
   };
 
-  const toggleCampaignStatus = async (campaign: CampaignBanner) => {
-    const nextStatus: BannerStatus = campaign.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
-    try {
-      await marketingService.updateCampaignStatus(campaign.id, nextStatus);
-      toast.success(`Campaign ${nextStatus.toLowerCase()}`);
-      await loadData(true);
-    } catch (error: unknown) {
-      toast.error('Failed to update campaign status', { description: errorMessage(error) });
-    }
+  const toggleBannerStatus = async (b: CampaignBanner) => {
+    const next: BannerStatus = b.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE';
+    try { await marketingService.updateCampaignStatus(b.id, next); toast.success(`Banner ${next.toLowerCase()}`); await loadData(true); }
+    catch (e) { toast.error('Failed to update status', { description: errorMessage(e) }); }
   };
 
-  const openCreateSlide = () => {
-    setSlideEditingIndex(null);
-    setSlideForm(defaultSlideForm);
-    setSlideDrawerOpen(true);
-  };
+  // ── Slide CRUD ───────────────────────────────────────────────
 
-  const openEditSlide = (index: number) => {
-    const slide = onboarding.slides[index];
-    if (!slide) return;
-    setSlideEditingIndex(index);
-    setSlideForm({ title: slide.title, subtitle: slide.subtitle, description: slide.description, imageUrl: slide.imageUrl });
-    setSlideDrawerOpen(true);
-  };
-
+  const openCreateSlide = () => { setSlideEditingIndex(null); setSlideForm(DEFAULT_SLIDE); setSlideDialogOpen(true); };
+  const openEditSlide = (i: number) => { const s = onboarding.slides[i]; if (!s) return; setSlideEditingIndex(i); setSlideForm({ title: s.title, subtitle: s.subtitle, description: s.description, imageUrl: s.imageUrl }); setSlideDialogOpen(true); };
   const saveSlideDraft = () => {
-    if (!slideForm.title.trim()) {
-      toast.error('Slide title is required');
-      return;
-    }
-
-    const nextSlide: OnboardingSlide = {
-      title: slideForm.title.trim(),
-      subtitle: slideForm.subtitle.trim(),
-      description: slideForm.description.trim(),
-      imageUrl: slideForm.imageUrl.trim(),
-    };
-
-    setOnboarding((current) => {
-      if (slideEditingIndex === null) {
-        if (current.slides.length >= 8) {
-          toast.error('Onboarding is limited to 8 slides');
-          return current;
-        }
-        return { ...current, slides: [...current.slides, nextSlide] };
-      }
-      const nextSlides = [...current.slides];
-      nextSlides[slideEditingIndex] = nextSlide;
-      return { ...current, slides: nextSlides };
+    if (!slideForm.title.trim()) { toast.error('Slide title is required'); return; }
+    const next: OnboardingSlide = { title: slideForm.title.trim(), subtitle: slideForm.subtitle.trim(), description: slideForm.description.trim(), imageUrl: slideForm.imageUrl.trim() };
+    setOnboarding((cur) => {
+      if (slideEditingIndex === null) { if (cur.slides.length >= 8) { toast.error('Max 8 slides'); return cur; } return { ...cur, slides: [...cur.slides, next] }; }
+      const s = [...cur.slides]; s[slideEditingIndex] = next; return { ...cur, slides: s };
     });
-
-    setSlideDrawerOpen(false);
-    setSlideEditingIndex(null);
-    setSlideForm(defaultSlideForm);
+    setSlideDialogOpen(false);
   };
-
-  const deleteSlide = (index: number) => {
-    if (onboarding.slides.length <= 1) {
-      toast.error('At least one onboarding slide is required');
-      return;
-    }
-    setOnboarding((current) => ({ ...current, slides: current.slides.filter((_, position) => position !== index) }));
-  };
-
-  const moveSlide = (index: number, direction: 'up' | 'down') => {
-    const toIndex = direction === 'up' ? index - 1 : index + 1;
-    setOnboarding((current) => ({ ...current, slides: moveItem(current.slides, index, toIndex) }));
-  };
+  const deleteSlide = (i: number) => { if (onboarding.slides.length <= 1) { toast.error('At least one slide required'); return; } setOnboarding((c) => ({ ...c, slides: c.slides.filter((_, idx) => idx !== i) })); };
+  const moveSlide = (i: number, dir: 'up' | 'down') => setOnboarding((c) => ({ ...c, slides: moveItem(c.slides, i, dir === 'up' ? i - 1 : i + 1) }));
 
   const persistOnboarding = async () => {
-    if (onboarding.slides.length === 0) {
-      toast.error('At least one onboarding slide is required');
-      return;
-    }
+    if (!onboarding.slides.length) { toast.error('At least one slide required'); return; }
     setOnboardingSaving(true);
-    try {
-      const updated = await marketingService.updateOnboarding({ enabled: onboarding.enabled, slides: onboarding.slides });
-      setOnboarding(updated);
-      toast.success('Onboarding settings saved');
-    } catch (error: unknown) {
-      toast.error('Failed to save onboarding settings', { description: errorMessage(error) });
-    } finally {
-      setOnboardingSaving(false);
-    }
+    try { const u = await marketingService.updateOnboarding({ enabled: onboarding.enabled, slides: onboarding.slides }); setOnboarding(u); toast.success('Onboarding saved'); }
+    catch (e) { toast.error('Failed to save onboarding', { description: errorMessage(e) }); }
+    finally { setOnboardingSaving(false); }
   };
 
-  const openCreateOffer = () => {
-    setOfferEditingIndex(null);
-    setOfferForm(createDefaultOfferForm(offers.banners.length + 1));
-    setOfferDrawerOpen(true);
-  };
+  // ── Offer CRUD ───────────────────────────────────────────────
 
-  const openEditOffer = (index: number) => {
-    const offer = offers.banners[index];
-    if (!offer) return;
-    setOfferEditingIndex(index);
-    setOfferForm({
-      id: offer.id,
-      title: offer.title,
-      subtitle: offer.subtitle,
-      description: offer.description,
-      imageUrl: offer.imageUrl,
-      imageFileId: offer.imageFileId,
-      linkUrl: offer.linkUrl,
-      priority: String(offer.priority),
-      active: offer.active,
-      startAtLocal: toLocalDateTimeValue(offer.startAt),
-      endAtLocal: toLocalDateTimeValue(offer.endAt),
-      imageFile: null,
-    });
-    setOfferDrawerOpen(true);
+  const openCreateOffer = () => { setOfferEditingIndex(null); setOfferForm(createDefaultOfferForm(offers.banners.length + 1)); setOfferDialogOpen(true); };
+  const openEditOffer = (i: number) => {
+    const o = offers.banners[i]; if (!o) return;
+    setOfferEditingIndex(i);
+    setOfferForm({ id: o.id, title: o.title, subtitle: o.subtitle, description: o.description, imageUrl: o.imageUrl, imageFileId: o.imageFileId, linkUrl: o.linkUrl, priority: String(o.priority), active: o.active, startAtLocal: toLocalDT(o.startAt), endAtLocal: toLocalDT(o.endAt), imageFile: null });
+    setOfferDialogOpen(true);
   };
-
   const saveOfferDraft = async () => {
-    if (!offerForm.title.trim()) {
-      toast.error('Offer title is required');
-      return;
-    }
+    if (!offerForm.title.trim()) { toast.error('Offer title required'); return; }
     setOfferSaving(true);
     try {
       let imageFileId = offerForm.imageFileId.trim();
-      if (offerForm.imageFile) {
-        const uploaded = await marketingService.uploadOfferImage(offerForm.imageFile);
-        imageFileId = uploaded.id;
-      }
-      if (!offerForm.imageUrl.trim() && !imageFileId) {
-        toast.error('Offer must include image URL or uploaded image');
-        return;
-      }
-
-      const startAt = fromLocalDateTimeValue(offerForm.startAtLocal);
-      const endAt = fromLocalDateTimeValue(offerForm.endAtLocal);
-      if (startAt && endAt && new Date(endAt).getTime() < new Date(startAt).getTime()) {
-        toast.error('Offer end time must be after start time');
-        return;
-      }
-
-      const parsedPriority = Number.parseInt(offerForm.priority, 10);
-      const priority = Number.isFinite(parsedPriority) && parsedPriority > 0 ? parsedPriority : 1;
-
-      const nextOffer: OfferBanner = {
-        id: offerForm.id?.trim() || `offer-${Date.now()}`,
-        title: offerForm.title.trim(),
-        subtitle: offerForm.subtitle.trim(),
-        description: offerForm.description.trim(),
-        imageUrl: offerForm.imageUrl.trim(),
-        imageFileId,
-        linkUrl: offerForm.linkUrl.trim(),
-        priority,
-        active: offerForm.active,
-        startAt,
-        endAt,
-      };
-
-      setOffers((current) => {
-        if (offerEditingIndex === null) return { ...current, banners: [...current.banners, nextOffer] };
-        const nextBanners = [...current.banners];
-        nextBanners[offerEditingIndex] = nextOffer;
-        return { ...current, banners: nextBanners };
-      });
-
-      setOfferDrawerOpen(false);
-      setOfferEditingIndex(null);
-      setOfferForm(createDefaultOfferForm(offers.banners.length + 1));
-    } catch (error: unknown) {
-      toast.error('Failed to save offer draft', { description: errorMessage(error) });
-    } finally {
-      setOfferSaving(false);
-    }
+      if (offerForm.imageFile) { const u = await marketingService.uploadOfferImage(offerForm.imageFile); imageFileId = u.id; }
+      const startAt = fromLocalDT(offerForm.startAtLocal); const endAt = fromLocalDT(offerForm.endAtLocal);
+      if (startAt && endAt && new Date(endAt) < new Date(startAt)) { toast.error('End must be after start'); return; }
+      const priority = Math.max(1, parseInt(offerForm.priority, 10) || 1);
+      const next: OfferBanner = { id: offerForm.id?.trim() || `offer-${Date.now()}`, title: offerForm.title.trim(), subtitle: offerForm.subtitle.trim(), description: offerForm.description.trim(), imageUrl: offerForm.imageUrl.trim(), imageFileId, linkUrl: offerForm.linkUrl.trim(), priority, active: offerForm.active, startAt, endAt };
+      setOffers((cur) => { if (offerEditingIndex === null) return { ...cur, banners: [...cur.banners, next] }; const b = [...cur.banners]; b[offerEditingIndex] = next; return { ...cur, banners: b }; });
+      setOfferDialogOpen(false);
+    } catch (e) { toast.error('Failed to save offer', { description: errorMessage(e) }); }
+    finally { setOfferSaving(false); }
   };
-
-  const deleteOffer = (index: number) => {
-    setOffers((current) => ({ ...current, banners: current.banners.filter((_, position) => position !== index) }));
-  };
-
-  const moveOffer = (index: number, direction: 'up' | 'down') => {
-    const toIndex = direction === 'up' ? index - 1 : index + 1;
-    setOffers((current) => ({ ...current, banners: moveItem(current.banners, index, toIndex) }));
-  };
+  const deleteOffer = (i: number) => setOffers((c) => ({ ...c, banners: c.banners.filter((_, idx) => idx !== i) }));
+  const moveOffer = (i: number, dir: 'up' | 'down') => setOffers((c) => ({ ...c, banners: moveItem(c.banners, i, dir === 'up' ? i - 1 : i + 1) }));
 
   const persistOffers = async () => {
-    for (let i = 0; i < offers.banners.length; i += 1) {
-      const offer = offers.banners[i];
-      if (!offer.title.trim()) {
-        toast.error(`Offer ${i + 1} is missing title`);
-        return;
-      }
-      if (!offer.imageUrl.trim() && !offer.imageFileId.trim()) {
-        toast.error(`Offer ${i + 1} must include image URL or image file`);
-        return;
-      }
+    for (let i = 0; i < offers.banners.length; i++) {
+      const o = offers.banners[i];
+      if (!o?.title.trim()) { toast.error(`Offer ${i + 1} missing title`); return; }
+      if (!o.imageUrl.trim() && !o.imageFileId.trim()) { toast.error(`Offer ${i + 1} needs an image`); return; }
     }
-
     setOffersSaving(true);
-    try {
-      const updated = await marketingService.updateOffers({ enabled: offers.enabled, banners: offers.banners });
-      setOffers(updated);
-      toast.success('Promotional offers saved');
-    } catch (error: unknown) {
-      toast.error('Failed to save offers', { description: errorMessage(error) });
-    } finally {
-      setOffersSaving(false);
-    }
+    try { const u = await marketingService.updateOffers({ enabled: offers.enabled, banners: offers.banners }); setOffers(u); toast.success('Offers saved'); }
+    catch (e) { toast.error('Failed to save offers', { description: errorMessage(e) }); }
+    finally { setOffersSaving(false); }
   };
 
-  const campaignColumns: DataTableColumn<CampaignBanner>[] = useMemo(
-    () => [
-      { key: 'campaign', header: 'Campaign', className: 'py-4 px-4 min-w-[220px]', render: (row) => <div><p className="text-sm text-gray-900">{row.titleEn}</p>{row.description ? <p className="text-xs text-gray-400 mt-1 line-clamp-2">{row.description}</p> : null}</div> },
-      { key: 'audience', header: 'Audience', className: 'py-4 px-4', render: (row) => <div><p className="text-sm text-gray-700">{humanizeEnum(row.targetAudience)}</p>{row.targetAudience !== 'ALL' ? <p className="text-xs text-gray-400 mt-1">{readAudienceValues(row.targetAudience, row.audienceMeta) || 'No targeting values'}</p> : null}</div> },
-      { key: 'schedule', header: 'Schedule', className: 'py-4 px-4', render: (row) => <div><p className="text-sm text-gray-700">{formatDateTime(row.startDate)}</p><p className="text-xs text-gray-400 mt-1">to {formatDateTime(row.endDate)}</p></div> },
-      { key: 'priority', header: 'Priority', className: 'py-4 px-4', render: (row) => <StatusBadge value={row.displayPriority} /> },
-      { key: 'status', header: 'Status', className: 'py-4 px-4', render: (row) => <StatusBadge value={row.status} /> },
-      { key: 'performance', header: 'Performance', className: 'py-4 px-4', render: (row) => <div><p className="text-sm text-gray-700">{row.views} views / {row.clicks} clicks</p><p className="text-xs text-gray-400 mt-1">CTR {row.ctr.toFixed(2)}%</p></div> },
-      { key: 'actions', header: 'Actions', className: 'py-4 px-4 text-right', render: (row) => <div className="flex items-center justify-end gap-2"><button type="button" onClick={() => openEditCampaign(row)} className={tableSecondaryActionButtonClass}>Edit</button><button type="button" onClick={() => void toggleCampaignStatus(row)} className={tableSecondaryActionButtonClass}>{row.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}</button><button type="button" onClick={() => void deleteCampaign(row)} className={tableDangerActionButtonClass}>Delete</button></div> },
-    ],
-    [],
-  );
+  const activeBannerFilters = [bannerStatusFilter !== 'all', bannerAudienceFilter !== 'all', bannerPriorityFilter !== 'all'].filter(Boolean).length;
 
-  const onboardingColumns: DataTableColumn<OnboardingRow>[] = useMemo(
-    () => [
-      { key: 'order', header: '#', className: 'py-4 px-4 w-16', render: (row) => <span className="text-sm text-gray-700">{row.index + 1}</span> },
-      { key: 'title', header: 'Screen', className: 'py-4 px-4 min-w-[220px]', render: (row) => <div><p className="text-sm text-gray-900">{row.slide.title}</p>{row.slide.subtitle ? <p className="text-xs text-gray-400 mt-1">{row.slide.subtitle}</p> : null}</div> },
-      { key: 'description', header: 'Description', className: 'py-4 px-4', render: (row) => <p className="text-sm text-gray-700 line-clamp-2">{row.slide.description || 'No description'}</p> },
-      { key: 'image', header: 'Image URL', className: 'py-4 px-4', render: (row) => row.slide.imageUrl ? <a href={row.slide.imageUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-400 hover:text-blue-300 underline">Open image</a> : <span className="text-xs text-gray-400">Not set</span> },
-      { key: 'actions', header: 'Actions', className: 'py-4 px-4 text-right', render: (row) => <div className="flex items-center justify-end gap-2"><button type="button" onClick={() => moveSlide(row.index, 'up')} disabled={row.index === 0} className={tableSecondaryIconButtonClass}><ArrowUp className="w-4 h-4" /></button><button type="button" onClick={() => moveSlide(row.index, 'down')} disabled={row.index === onboarding.slides.length - 1} className={tableSecondaryIconButtonClass}><ArrowDown className="w-4 h-4" /></button><button type="button" onClick={() => openEditSlide(row.index)} className={tableSecondaryActionButtonClass}>Edit</button><button type="button" onClick={() => deleteSlide(row.index)} className={tableDangerActionButtonClass}>Delete</button></div> },
-    ],
-    [onboarding.slides.length],
-  );
-
-  const offerColumns: DataTableColumn<OfferRow>[] = useMemo(
-    () => [
-      { key: 'offer', header: 'Offer', className: 'py-4 px-4 min-w-[220px]', render: (row) => <div><p className="text-sm text-gray-900">{row.offer.title}</p>{row.offer.subtitle ? <p className="text-xs text-gray-400 mt-1">{row.offer.subtitle}</p> : null}</div> },
-      { key: 'window', header: 'Display Window', className: 'py-4 px-4', render: (row) => <div><p className="text-sm text-gray-700">{row.offer.startAt ? formatDateTime(row.offer.startAt) : 'No start date'}</p><p className="text-xs text-gray-400 mt-1">{row.offer.endAt ? `to ${formatDateTime(row.offer.endAt)}` : 'No end date'}</p></div> },
-      { key: 'priority', header: 'Priority', className: 'py-4 px-4', render: (row) => <span className="text-sm text-gray-700">{row.offer.priority}</span> },
-      { key: 'status', header: 'Status', className: 'py-4 px-4', render: (row) => <StatusBadge value={row.offer.active ? 'ACTIVE' : 'INACTIVE'} /> },
-      { key: 'actions', header: 'Actions', className: 'py-4 px-4 text-right', render: (row) => <div className="flex items-center justify-end gap-2"><button type="button" onClick={() => moveOffer(row.index, 'up')} disabled={row.index === 0} className={tableSecondaryIconButtonClass}><ArrowUp className="w-4 h-4" /></button><button type="button" onClick={() => moveOffer(row.index, 'down')} disabled={row.index === offers.banners.length - 1} className={tableSecondaryIconButtonClass}><ArrowDown className="w-4 h-4" /></button><button type="button" onClick={() => openEditOffer(row.index)} className={tableSecondaryActionButtonClass}>Edit</button><button type="button" onClick={() => deleteOffer(row.index)} className={tableDangerActionButtonClass}>Delete</button></div> },
-    ],
-    [offers.banners.length],
-  );
+  // ─────────────────────────────────────────────────────────────
   return (
-    <div className="-m-6 bg-white p-8 min-h-[calc(100vh-120px)] text-gray-900 space-y-6">
-      <PageHeader
-        title="Marketing"
-        description="Campaign execution, onboarding screens, and promotional offers in one place."
-        actions={
-          <button
-            type="button"
-            onClick={() => void loadData(true)}
-            disabled={refreshing}
-            className={`${secondaryActionButtonClass} flex items-center gap-2 disabled:opacity-60`}
-          >
-            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
-        }
-      />
+    <div style={{ fontFamily: "'Work Sans', sans-serif" }}>
+      <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
 
-      <div className="grid grid-cols-4 gap-4">
-        <StatCard title="Active Campaigns" value={String(campaignStats.activeCampaigns)} icon="occupancy"  />
-        <StatCard title="Live Now" value={String(campaignStats.liveNow)} icon="active-users"  />
-        <StatCard title="Scheduled" value={String(campaignStats.scheduled)} icon="tickets"  />
-        <StatCard title="Total Clicks" value={String(campaignStats.totalClicks)} icon="visitors"  />
+      {/* ── Header ─── */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' }}>
+        <div>
+          <h1 style={{ fontSize: '18px', fontWeight: 900, color: '#111827', letterSpacing: '-0.02em', margin: 0 }}>Marketing</h1>
+          <p style={{ marginTop: '4px', fontSize: '13px', color: '#6B7280' }}>Banners, onboarding screens, and promotional offers.</p>
+        </div>
+        <button type="button" onClick={() => void loadData(true)} disabled={refreshing}
+          style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px', borderRadius: '8px', background: '#FFF', color: '#374151', border: '1px solid #E5E7EB', cursor: refreshing ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 600, fontFamily: "'Work Sans', sans-serif", opacity: refreshing ? 0.6 : 1 }}>
+          <RefreshCw style={{ width: '13px', height: '13px', animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
+          Refresh
+        </button>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 p-0">
-        <div className="p-4 border-b border-gray-200 flex items-center gap-3 flex-wrap">
-          <div className="relative flex-1 max-w-xs">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              value={campaignSearch}
-              onChange={(event) => setCampaignSearch(event.target.value)}
-              placeholder="Search campaigns"
-              className="w-full bg-white border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:border-blue-500/50"
-            />
-          </div>
-          <select value={campaignStatusFilter} onChange={(event) => setCampaignStatusFilter(event.target.value as BannerStatus | 'all')} className="w-40 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50 appearance-none">
-            <option value="all">All Statuses</option>
-            {statusOptions.map((status) => <option key={status} value={status}>{humanizeEnum(status)}</option>)}
-          </select>
-          <select value={campaignAudienceFilter} onChange={(event) => setCampaignAudienceFilter(event.target.value as BannerAudience | 'all')} className="w-44 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50 appearance-none">
-            <option value="all">All Audiences</option>
-            {audienceOptions.map((audience) => <option key={audience} value={audience}>{humanizeEnum(audience)}</option>)}
-          </select>
-          <select value={campaignPriorityFilter} onChange={(event) => setCampaignPriorityFilter(event.target.value as BannerPriority | 'all')} className="w-40 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50 appearance-none">
-            <option value="all">All Priority</option>
-            {priorityOptions.map((priority) => <option key={priority} value={priority}>{humanizeEnum(priority)}</option>)}
-          </select>
-          <div className="ml-auto flex items-center gap-2">
-            <button type="button" onClick={openCreateCampaign} className={`${primaryActionButtonClass} flex items-center gap-2`}>
-              <Plus className="w-4 h-4" />
-              Add Campaign
+      {/* ── Stats ─── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '16px' }}>
+        <StatCard title="Active Banners" value={String(bannerStats.activeBanners)} icon="occupancy" />
+        <StatCard title="Live Now" value={String(bannerStats.liveNow)} icon="active-users" />
+        <StatCard title="Scheduled" value={String(bannerStats.scheduled)} icon="tickets" />
+        <StatCard title="Total Clicks" value={String(bannerStats.totalClicks)} icon="visitors" />
+      </div>
+
+      {/* ══ Banners section ══════════════════════════════════════ */}
+      <div style={{ borderRadius: '10px', border: '1px solid #EBEBEB', background: '#FFF', overflow: 'hidden', marginBottom: '16px' }}>
+        {/* Filter bar */}
+        <div style={{ borderBottom: bannerFiltersOpen ? '1px solid #F3F4F6' : 'none' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px' }}>
+            <Search style={{ width: '13px', height: '13px', color: '#9CA3AF', flexShrink: 0 }} />
+            <input placeholder="Search banners\u2026" value={bannerSearch} onChange={(e) => setBannerSearch(e.target.value)}
+              style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: '13px', color: '#111827', fontFamily: "'Work Sans', sans-serif" }} />
+            <button type="button" onClick={() => setBannerFiltersOpen((p) => !p)}
+              style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 10px', borderRadius: '6px', border: `1px solid ${activeBannerFilters > 0 ? '#2563EB40' : '#E5E7EB'}`, background: activeBannerFilters > 0 ? '#EFF6FF' : '#FAFAFA', color: activeBannerFilters > 0 ? '#2563EB' : '#6B7280', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer', fontFamily: "'Work Sans', sans-serif" }}>
+              <SlidersHorizontal style={{ width: '11px', height: '11px' }} />
+              Filters
+              {activeBannerFilters > 0 && <span style={{ width: '15px', height: '15px', borderRadius: '50%', background: '#2563EB', color: '#FFF', fontSize: '9px', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{activeBannerFilters}</span>}
+              <ChevronDown style={{ width: '10px', height: '10px', transform: bannerFiltersOpen ? 'rotate(180deg)' : 'none', transition: 'transform 150ms' }} />
+            </button>
+            <button type="button" onClick={openCreateBanner}
+              style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '7px 14px', borderRadius: '7px', background: '#111827', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+              <Plus style={{ width: '11px', height: '11px' }} /> New Banner
             </button>
           </div>
-        </div>
-        <div className="p-6">
-          {loading ? (
-            <SkeletonTable columns={7} rows={6}  />
-          ) : (
-            <DataTable columns={campaignColumns} rows={filteredCampaigns} rowKey={(row) => row.id}  emptyTitle="No campaigns found" emptyDescription="Create a campaign or adjust filters." />
+          {bannerFiltersOpen && (
+            <div style={{ padding: '10px 14px', borderTop: '1px solid #F3F4F6', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <select value={bannerStatusFilter} onChange={(e) => setBannerStatusFilter(e.target.value as BannerStatus | 'all')} style={{ ...selectStyle, width: '140px' }}>
+                <option value="all">All Statuses</option>
+                {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{humanizeEnum(s)}</option>)}
+              </select>
+              <select value={bannerAudienceFilter} onChange={(e) => setBannerAudienceFilter(e.target.value as BannerAudience | 'all')} style={{ ...selectStyle, width: '160px' }}>
+                <option value="all">All Audiences</option>
+                {AUDIENCE_OPTIONS.map((a) => <option key={a} value={a}>{humanizeEnum(a)}</option>)}
+              </select>
+              <select value={bannerPriorityFilter} onChange={(e) => setBannerPriorityFilter(e.target.value as BannerPriority | 'all')} style={{ ...selectStyle, width: '140px' }}>
+                <option value="all">All Priorities</option>
+                {PRIORITY_OPTIONS.map((p) => <option key={p} value={p}>{humanizeEnum(p)}</option>)}
+              </select>
+            </div>
           )}
+        </div>
+        {/* Table */}
+        <div style={{ padding: '0 0 4px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto auto auto auto auto auto', gap: '12px', padding: '9px 14px', borderBottom: '1px solid #F3F4F6', background: '#FAFAFA' }}>
+            {['Banner', 'Audience', 'Schedule', 'Priority', 'Status', 'Performance', 'Actions'].map((h) => (
+              <span key={h} style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'Work Sans', sans-serif" }}>{h}</span>
+            ))}
+          </div>
+          {loading ? (
+            Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} style={{ height: '54px', margin: '6px 10px', borderRadius: '7px', background: 'linear-gradient(90deg, #F3F4F6 25%, #E9EAEC 50%, #F3F4F6 75%)', backgroundSize: '200% 100%' }} />
+            ))
+          ) : filteredBanners.length === 0 ? (
+            <div style={{ padding: '40px', textAlign: 'center' }}>
+              <Image style={{ width: '28px', height: '28px', color: '#E5E7EB', margin: '0 auto 8px' }} />
+              <p style={{ fontSize: '13px', color: '#9CA3AF' }}>No banners found</p>
+            </div>
+          ) : filteredBanners.map((b) => (
+            <BannerRow key={b.id} row={b} onEdit={() => openEditBanner(b)} onToggle={() => void toggleBannerStatus(b)} onDelete={() => void deleteBanner(b)} />
+          ))}
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 p-0">
-        <div className="p-4 border-b border-gray-200 flex items-center gap-3 flex-wrap">
-          <h3 className="text-sm font-semibold text-gray-900">Onboarding Screens</h3>
-          <select value={onboarding.enabled ? 'enabled' : 'disabled'} onChange={(event) => setOnboarding((current) => ({ ...current, enabled: event.target.value === 'enabled' }))} className="w-40 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50 appearance-none">
+      {/* ══ Onboarding section ═══════════════════════════════════ */}
+      <div style={{ borderRadius: '10px', border: '1px solid #EBEBEB', background: '#FFF', overflow: 'hidden', marginBottom: '16px' }}>
+        <div style={{ padding: '10px 14px', borderBottom: '1px solid #F3F4F6', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <Layers style={{ width: '12px', height: '12px', color: '#9CA3AF' }} />
+          <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151' }}>Onboarding Screens</span>
+          <span style={{ fontSize: '10.5px', fontWeight: 700, padding: '1px 6px', borderRadius: '4px', background: '#F3F4F6', color: '#9CA3AF', fontFamily: "'DM Mono', monospace" }}>{onboarding.slides.length}</span>
+          <select value={onboarding.enabled ? 'enabled' : 'disabled'} onChange={(e) => setOnboarding((c) => ({ ...c, enabled: e.target.value === 'enabled' }))} style={{ ...selectStyle, width: '120px', marginLeft: '4px' }}>
             <option value="enabled">Enabled</option>
             <option value="disabled">Disabled</option>
           </select>
-          <div className="ml-auto flex items-center gap-2">
-            <button type="button" onClick={openCreateSlide} className={`${secondaryActionButtonClass} flex items-center gap-2`}>
-              <Plus className="w-4 h-4" />
-              Add Screen
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
+            <button type="button" onClick={openCreateSlide}
+              style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '6px 12px', borderRadius: '7px', background: '#FFF', color: '#374151', border: '1px solid #E5E7EB', cursor: 'pointer', fontSize: '12px', fontWeight: 600, fontFamily: "'Work Sans', sans-serif" }}>
+              <Plus style={{ width: '11px', height: '11px' }} /> Add Screen
             </button>
-            <button type="button" onClick={() => void persistOnboarding()} disabled={onboardingSaving} className={`${primaryActionButtonClass} disabled:opacity-60`}>
-              {onboardingSaving ? 'Saving...' : 'Save Onboarding'}
+            <button type="button" onClick={() => void persistOnboarding()} disabled={onboardingSaving}
+              style={{ padding: '6px 14px', borderRadius: '7px', background: onboardingSaving ? '#9CA3AF' : '#111827', color: '#FFF', border: 'none', cursor: onboardingSaving ? 'not-allowed' : 'pointer', fontSize: '12px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+              {onboardingSaving ? 'Saving\u2026' : 'Save Onboarding'}
             </button>
           </div>
         </div>
-        <div className="p-6">
-          {loading ? (
-            <SkeletonTable columns={5} rows={4}  />
-          ) : onboardingRows.length === 0 ? (
-            <EmptyState  title="No onboarding screens" description="Add your first screen to guide app users." />
-          ) : (
-            <DataTable columns={onboardingColumns} rows={onboardingRows} rowKey={(row) => row.id}  emptyTitle="No onboarding screens" />
-          )}
-        </div>
+        {loading ? (
+          Array.from({ length: 3 }).map((_, i) => <div key={i} style={{ height: '44px', margin: '6px 10px', borderRadius: '7px', background: 'linear-gradient(90deg, #F3F4F6 25%, #E9EAEC 50%, #F3F4F6 75%)', backgroundSize: '200% 100%' }} />)
+        ) : onboardingRows.length === 0 ? (
+          <p style={{ padding: '24px', textAlign: 'center', fontSize: '13px', color: '#9CA3AF' }}>No onboarding screens. Add your first screen.</p>
+        ) : onboardingRows.map((row) => (
+          <OnboardingRow key={row.id} row={row} total={onboarding.slides.length}
+            onMoveUp={() => moveSlide(row.index, 'up')} onMoveDown={() => moveSlide(row.index, 'down')}
+            onEdit={() => openEditSlide(row.index)} onDelete={() => deleteSlide(row.index)} />
+        ))}
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 p-0">
-        <div className="p-4 border-b border-gray-200 flex items-center gap-3 flex-wrap">
-          <div className="relative flex-1 max-w-xs">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-            <input
-              value={offerSearch}
-              onChange={(event) => setOfferSearch(event.target.value)}
-              placeholder="Search offers"
-              className="w-full bg-white border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:border-blue-500/50"
-            />
-          </div>
-          <select value={offerActivityFilter} onChange={(event) => setOfferActivityFilter(event.target.value as 'all' | 'active' | 'inactive')} className="w-40 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50 appearance-none">
+      {/* ══ Offers section ═══════════════════════════════════════ */}
+      <div style={{ borderRadius: '10px', border: '1px solid #EBEBEB', background: '#FFF', overflow: 'hidden' }}>
+        <div style={{ padding: '10px 14px', borderBottom: '1px solid #F3F4F6', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <Search style={{ width: '13px', height: '13px', color: '#9CA3AF', flexShrink: 0 }} />
+          <input placeholder="Search offers\u2026" value={offerSearch} onChange={(e) => setOfferSearch(e.target.value)}
+            style={{ width: '180px', border: 'none', background: 'transparent', outline: 'none', fontSize: '13px', color: '#111827', fontFamily: "'Work Sans', sans-serif" }} />
+          <Tag style={{ width: '12px', height: '12px', color: '#9CA3AF' }} />
+          <span style={{ fontSize: '12px', fontWeight: 700, color: '#374151' }}>Promotional Offers</span>
+          <select value={offerActivityFilter} onChange={(e) => setOfferActivityFilter(e.target.value as 'all' | 'active' | 'inactive')} style={{ ...selectStyle, width: '130px' }}>
             <option value="all">All Offers</option>
             <option value="active">Active Only</option>
             <option value="inactive">Inactive Only</option>
           </select>
-          <select value={offers.enabled ? 'enabled' : 'disabled'} onChange={(event) => setOffers((current) => ({ ...current, enabled: event.target.value === 'enabled' }))} className="w-40 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50 appearance-none">
+          <select value={offers.enabled ? 'enabled' : 'disabled'} onChange={(e) => setOffers((c) => ({ ...c, enabled: e.target.value === 'enabled' }))} style={{ ...selectStyle, width: '120px' }}>
             <option value="enabled">Enabled</option>
             <option value="disabled">Disabled</option>
           </select>
-          <div className="ml-auto flex items-center gap-2">
-            <button type="button" onClick={openCreateOffer} className={`${secondaryActionButtonClass} flex items-center gap-2`}>
-              <Plus className="w-4 h-4" />
-              Add Offer
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: '6px' }}>
+            <button type="button" onClick={openCreateOffer}
+              style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '6px 12px', borderRadius: '7px', background: '#FFF', color: '#374151', border: '1px solid #E5E7EB', cursor: 'pointer', fontSize: '12px', fontWeight: 600, fontFamily: "'Work Sans', sans-serif" }}>
+              <Plus style={{ width: '11px', height: '11px' }} /> Add Offer
             </button>
-            <button type="button" onClick={() => void persistOffers()} disabled={offersSaving} className={`${primaryActionButtonClass} disabled:opacity-60`}>
-              {offersSaving ? 'Saving...' : 'Save Offers'}
+            <button type="button" onClick={() => void persistOffers()} disabled={offersSaving}
+              style={{ padding: '6px 14px', borderRadius: '7px', background: offersSaving ? '#9CA3AF' : '#111827', color: '#FFF', border: 'none', cursor: offersSaving ? 'not-allowed' : 'pointer', fontSize: '12px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+              {offersSaving ? 'Saving\u2026' : 'Save Offers'}
             </button>
           </div>
         </div>
-        <div className="p-6">
-          {loading ? (
-            <SkeletonTable columns={5} rows={4}  />
-          ) : (
-            <DataTable columns={offerColumns} rows={filteredOfferRows} rowKey={(row) => `${row.id}-${row.index}`}  emptyTitle="No promotional offers" emptyDescription="Create offers to highlight announcements and promotions." />
-          )}
-        </div>
+        {loading ? (
+          Array.from({ length: 3 }).map((_, i) => <div key={i} style={{ height: '44px', margin: '6px 10px', borderRadius: '7px', background: 'linear-gradient(90deg, #F3F4F6 25%, #E9EAEC 50%, #F3F4F6 75%)', backgroundSize: '200% 100%' }} />)
+        ) : filteredOfferRows.length === 0 ? (
+          <p style={{ padding: '24px', textAlign: 'center', fontSize: '13px', color: '#9CA3AF' }}>No promotional offers.</p>
+        ) : filteredOfferRows.map((row) => (
+          <OfferRowItem key={`${row.id}-${row.index}`} row={row} total={offers.banners.length}
+            onMoveUp={() => moveOffer(row.index, 'up')} onMoveDown={() => moveOffer(row.index, 'down')}
+            onEdit={() => openEditOffer(row.index)} onDelete={() => deleteOffer(row.index)} />
+        ))}
       </div>
-      <Dialog
-        open={campaignDrawerOpen}
-        onOpenChange={setCampaignDrawerOpen}
-      >
-        <DialogContent className="marketing-dialog-content max-w-4xl max-h-[92vh] overflow-y-auto p-0">
-          <DialogHeader className="marketing-dialog-header">
-            <DialogTitle className="text-base font-semibold text-gray-900">{campaignForm.id ? 'Edit Campaign' : 'Create Campaign'}</DialogTitle>
-            <DialogDescription className="marketing-dialog-description">Campaigns are delivered via the banners API.</DialogDescription>
-          </DialogHeader>
-          <div className="marketing-dialog-body space-y-4">
-          <div className="grid grid-cols-2 gap-3">
+
+      {/* ══ Banner dialog ════════════════════════════════════════ */}
+      <Dialog open={bannerDialogOpen} onOpenChange={setBannerDialogOpen}>
+        <DialogContent style={{ maxWidth: '640px', padding: 0, borderRadius: '12px', overflow: 'hidden', border: '1px solid #EBEBEB', fontFamily: "'Work Sans', sans-serif", maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ height: '3px', background: bannerForm.id ? 'linear-gradient(90deg, #2563EB, #0D9488)' : 'linear-gradient(90deg, #0D9488, #BE185D)', flexShrink: 0 }} />
+          <div style={{ padding: '18px 24px 10px', flexShrink: 0 }}>
+            <DialogHeader>
+              <DialogTitle style={{ fontSize: '15px', fontWeight: 800, color: '#111827', margin: 0 }}>{bannerForm.id ? 'Edit Banner' : 'New Banner'}</DialogTitle>
+              <p style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '3px' }}>Fill in required fields marked with *</p>
+            </DialogHeader>
+          </div>
+          <div style={{ overflowY: 'auto', padding: '0 24px 16px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+
             <div>
-              <label className="text-xs text-gray-500">Title (EN)</label>
-              <input value={campaignForm.titleEn} onChange={(event) => setCampaignForm((current) => ({ ...current, titleEn: event.target.value }))} className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50" />
+              <SectionLabel icon={<Image style={{ width: '12px', height: '12px' }} />} label="Content" />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <Field label="Title (EN)" required><input value={bannerForm.titleEn} onChange={(e) => setBannerForm((p) => ({ ...p, titleEn: e.target.value }))} style={inputStyle} /></Field>
+                <Field label="Title (AR)"><input value={bannerForm.titleAr} onChange={(e) => setBannerForm((p) => ({ ...p, titleAr: e.target.value }))} style={{ ...inputStyle, direction: 'rtl' }} /></Field>
+                <Field label="Description (EN)"><textarea value={bannerForm.descriptionEn} onChange={(e) => setBannerForm((p) => ({ ...p, descriptionEn: e.target.value }))} rows={2} style={textareaStyle} /></Field>
+                <Field label="Description (AR)"><textarea value={bannerForm.descriptionAr} onChange={(e) => setBannerForm((p) => ({ ...p, descriptionAr: e.target.value }))} rows={2} style={{ ...textareaStyle, direction: 'rtl' }} /></Field>
+                <Field label="CTA URL" span2><input value={bannerForm.ctaUrl} onChange={(e) => setBannerForm((p) => ({ ...p, ctaUrl: e.target.value }))} style={inputStyle} /></Field>
+              </div>
             </div>
+
             <div>
-              <label className="text-xs text-gray-500">Title (AR)</label>
-              <input value={campaignForm.titleAr} onChange={(event) => setCampaignForm((current) => ({ ...current, titleAr: event.target.value }))} className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50" />
+              <SectionLabel icon={<Upload style={{ width: '12px', height: '12px' }} />} label="Image" />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '12px' }}>
+                <Field label="Upload Image">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', borderRadius: '7px', border: '1px dashed #D1D5DB', background: '#FAFAFA', cursor: 'pointer', fontSize: '12px', color: '#6B7280', height: '36px', boxSizing: 'border-box' }}>
+                    <Upload style={{ width: '12px', height: '12px', flexShrink: 0 }} />
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{bannerForm.imageFile ? bannerForm.imageFile.name : 'Choose image'}</span>
+                    <input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => setBannerForm((p) => ({ ...p, imageFile: e.target.files?.[0] ?? null }))} />
+                  </label>
+                </Field>
+              </div>
+            </div>
+
+            <div>
+              <SectionLabel icon={<Tag style={{ width: '12px', height: '12px' }} />} label="Targeting & Schedule" />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <Field label="Audience">
+                  <select value={bannerForm.targetAudience} onChange={(e) => setBannerForm((p) => ({ ...p, targetAudience: e.target.value as BannerAudience, audienceValues: '' }))} style={selectStyle}>
+                    {AUDIENCE_OPTIONS.map((a) => <option key={a} value={a}>{humanizeEnum(a)}</option>)}
+                  </select>
+                </Field>
+                <Field label="Audience Values">
+                  <input value={bannerForm.audienceValues} onChange={(e) => setBannerForm((p) => ({ ...p, audienceValues: e.target.value }))} disabled={bannerForm.targetAudience === 'ALL'} placeholder={bannerForm.targetAudience === 'ALL' ? 'Not required' : 'Comma-separated IDs'} style={{ ...inputStyle, opacity: bannerForm.targetAudience === 'ALL' ? 0.5 : 1 }} />
+                </Field>
+                <Field label="Start"><input type="datetime-local" value={bannerForm.startDateLocal} onChange={(e) => setBannerForm((p) => ({ ...p, startDateLocal: e.target.value }))} style={inputStyle} /></Field>
+                <Field label="End"><input type="datetime-local" value={bannerForm.endDateLocal} onChange={(e) => setBannerForm((p) => ({ ...p, endDateLocal: e.target.value }))} style={inputStyle} /></Field>
+                <Field label="Status">
+                  <select value={bannerForm.status} onChange={(e) => setBannerForm((p) => ({ ...p, status: e.target.value as BannerStatus }))} style={selectStyle}>
+                    {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{humanizeEnum(s)}</option>)}
+                  </select>
+                </Field>
+                <Field label="Priority">
+                  <select value={bannerForm.displayPriority} onChange={(e) => setBannerForm((p) => ({ ...p, displayPriority: e.target.value as BannerPriority }))} style={selectStyle}>
+                    {PRIORITY_OPTIONS.map((p) => <option key={p} value={p}>{humanizeEnum(p)}</option>)}
+                  </select>
+                </Field>
+              </div>
             </div>
           </div>
-          <div>
-            <label className="text-xs text-gray-500">Description</label>
-            <textarea value={campaignForm.description} rows={3} onChange={(event) => setCampaignForm((current) => ({ ...current, description: event.target.value }))} className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50" />
+          <div style={{ padding: '12px 24px 20px', borderTop: '1px solid #F3F4F6', display: 'flex', justifyContent: 'flex-end', gap: '8px', flexShrink: 0, background: '#FFF' }}>
+            <button type="button" onClick={() => setBannerDialogOpen(false)} style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '7px 14px', borderRadius: '7px', border: '1px solid #E5E7EB', background: '#FFF', color: '#6B7280', cursor: 'pointer', fontSize: '12.5px', fontWeight: 500, fontFamily: "'Work Sans', sans-serif" }}>
+              <X style={{ width: '12px', height: '12px' }} /> Cancel
+            </button>
+            <button type="button" disabled={bannerSaving} onClick={() => void saveBanner()} style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '7px 20px', borderRadius: '7px', background: bannerSaving ? '#9CA3AF' : '#111827', color: '#FFF', border: 'none', cursor: bannerSaving ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+              <Check style={{ width: '13px', height: '13px' }} />
+              {bannerSaving ? 'Saving\u2026' : bannerForm.id ? 'Save Changes' : 'Create Banner'}
+            </button>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-gray-500">CTA Text</label>
-              <input value={campaignForm.ctaText} onChange={(event) => setCampaignForm((current) => ({ ...current, ctaText: event.target.value }))} className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50" />
-            </div>
-            <div>
-              <label className="text-xs text-gray-500">CTA URL</label>
-              <input value={campaignForm.ctaUrl} onChange={(event) => setCampaignForm((current) => ({ ...current, ctaUrl: event.target.value }))} className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50" />
-            </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ══ Slide dialog ═════════════════════════════════════════ */}
+      <Dialog open={slideDialogOpen} onOpenChange={setSlideDialogOpen}>
+        <DialogContent style={{ maxWidth: '480px', padding: 0, borderRadius: '12px', overflow: 'hidden', border: '1px solid #EBEBEB', fontFamily: "'Work Sans', sans-serif", maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ height: '3px', background: 'linear-gradient(90deg, #0D9488, #2563EB)', flexShrink: 0 }} />
+          <div style={{ padding: '18px 24px 10px', flexShrink: 0 }}>
+            <DialogHeader>
+              <DialogTitle style={{ fontSize: '15px', fontWeight: 800, color: '#111827', margin: 0 }}>{slideEditingIndex === null ? 'Add Onboarding Screen' : 'Edit Onboarding Screen'}</DialogTitle>
+              <p style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '3px' }}>Changes are local until you click Save Onboarding.</p>
+            </DialogHeader>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-gray-500">Audience</label>
-              <select value={campaignForm.targetAudience} onChange={(event) => setCampaignForm((current) => ({ ...current, targetAudience: event.target.value as BannerAudience, audienceValues: '' }))} className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50 appearance-none">
-                {audienceOptions.map((audience) => <option key={audience} value={audience}>{humanizeEnum(audience)}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-gray-500">Audience Values</label>
-              <input value={campaignForm.audienceValues} onChange={(event) => setCampaignForm((current) => ({ ...current, audienceValues: event.target.value }))} disabled={campaignForm.targetAudience === 'ALL'} placeholder={campaignForm.targetAudience === 'ALL' ? 'Not required for ALL' : 'Comma-separated values'} className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 disabled:opacity-60 focus:outline-none focus:border-blue-500/50" />
-            </div>
+          <div style={{ overflowY: 'auto', padding: '0 24px 16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <Field label="Title" required><input value={slideForm.title} onChange={(e) => setSlideForm((p) => ({ ...p, title: e.target.value }))} style={inputStyle} /></Field>
+            <Field label="Subtitle"><input value={slideForm.subtitle} onChange={(e) => setSlideForm((p) => ({ ...p, subtitle: e.target.value }))} style={inputStyle} /></Field>
+            <Field label="Description"><textarea value={slideForm.description} onChange={(e) => setSlideForm((p) => ({ ...p, description: e.target.value }))} rows={3} style={textareaStyle} /></Field>
+            <Field label="Image URL"><input value={slideForm.imageUrl} onChange={(e) => setSlideForm((p) => ({ ...p, imageUrl: e.target.value }))} style={inputStyle} /></Field>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-gray-500">Start</label>
-              <input type="datetime-local" value={campaignForm.startDateLocal} onChange={(event) => setCampaignForm((current) => ({ ...current, startDateLocal: event.target.value }))} className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50" />
-            </div>
-            <div>
-              <label className="text-xs text-gray-500">End</label>
-              <input type="datetime-local" value={campaignForm.endDateLocal} onChange={(event) => setCampaignForm((current) => ({ ...current, endDateLocal: event.target.value }))} className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50" />
-            </div>
+          <div style={{ padding: '12px 24px 20px', borderTop: '1px solid #F3F4F6', display: 'flex', justifyContent: 'flex-end', gap: '8px', flexShrink: 0, background: '#FFF' }}>
+            <button type="button" onClick={() => setSlideDialogOpen(false)} style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '7px 14px', borderRadius: '7px', border: '1px solid #E5E7EB', background: '#FFF', color: '#6B7280', cursor: 'pointer', fontSize: '12.5px', fontWeight: 500, fontFamily: "'Work Sans', sans-serif" }}>
+              <X style={{ width: '12px', height: '12px' }} /> Cancel
+            </button>
+            <button type="button" onClick={saveSlideDraft} style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '7px 20px', borderRadius: '7px', background: '#111827', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+              <Check style={{ width: '13px', height: '13px' }} /> Save Screen
+            </button>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-gray-500">Status</label>
-              <select value={campaignForm.status} onChange={(event) => setCampaignForm((current) => ({ ...current, status: event.target.value as BannerStatus }))} className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50 appearance-none">
-                {statusOptions.map((status) => <option key={status} value={status}>{humanizeEnum(status)}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-gray-500">Priority</label>
-              <select value={campaignForm.displayPriority} onChange={(event) => setCampaignForm((current) => ({ ...current, displayPriority: event.target.value as BannerPriority }))} className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50 appearance-none">
-                {priorityOptions.map((priority) => <option key={priority} value={priority}>{humanizeEnum(priority)}</option>)}
-              </select>
-            </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ══ Offer dialog ═════════════════════════════════════════ */}
+      <Dialog open={offerDialogOpen} onOpenChange={setOfferDialogOpen}>
+        <DialogContent style={{ maxWidth: '560px', padding: 0, borderRadius: '12px', overflow: 'hidden', border: '1px solid #EBEBEB', fontFamily: "'Work Sans', sans-serif", maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ height: '3px', background: 'linear-gradient(90deg, #BE185D, #0D9488)', flexShrink: 0 }} />
+          <div style={{ padding: '18px 24px 10px', flexShrink: 0 }}>
+            <DialogHeader>
+              <DialogTitle style={{ fontSize: '15px', fontWeight: 800, color: '#111827', margin: 0 }}>{offerEditingIndex === null ? 'Add Promotional Offer' : 'Edit Promotional Offer'}</DialogTitle>
+              <p style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '3px' }}>Changes are local until you click Save Offers.</p>
+            </DialogHeader>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-gray-500">Image File ID</label>
-              <input value={campaignForm.imageFileId} onChange={(event) => setCampaignForm((current) => ({ ...current, imageFileId: event.target.value }))} className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50" />
+          <div style={{ overflowY: 'auto', padding: '0 24px 16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <Field label="Title" required><input value={offerForm.title} onChange={(e) => setOfferForm((p) => ({ ...p, title: e.target.value }))} style={inputStyle} /></Field>
+              <Field label="Subtitle"><input value={offerForm.subtitle} onChange={(e) => setOfferForm((p) => ({ ...p, subtitle: e.target.value }))} style={inputStyle} /></Field>
             </div>
-            <div>
-              <label className="text-xs text-gray-500">Upload Image</label>
-              <label className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 flex items-center justify-between gap-2 cursor-pointer hover:border-gray-300 transition-colors">
-                <span className="truncate">{campaignForm.imageFile ? campaignForm.imageFile.name : 'Choose image'}</span>
-                <Upload className="w-4 h-4" />
-                <input type="file" accept="image/*" onChange={(event) => setCampaignForm((current) => ({ ...current, imageFile: event.target.files?.[0] ?? null }))} className="hidden" />
+            <Field label="Description"><textarea value={offerForm.description} onChange={(e) => setOfferForm((p) => ({ ...p, description: e.target.value }))} rows={2} style={textareaStyle} /></Field>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <Field label="Image URL"><input value={offerForm.imageUrl} onChange={(e) => setOfferForm((p) => ({ ...p, imageUrl: e.target.value }))} style={inputStyle} /></Field>
+              <Field label="Image File ID"><input value={offerForm.imageFileId} onChange={(e) => setOfferForm((p) => ({ ...p, imageFileId: e.target.value }))} style={inputStyle} /></Field>
+            </div>
+            <Field label="Upload Image">
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', borderRadius: '7px', border: '1px dashed #D1D5DB', background: '#FAFAFA', cursor: 'pointer', fontSize: '12px', color: '#6B7280', height: '36px', boxSizing: 'border-box' }}>
+                <Upload style={{ width: '12px', height: '12px', flexShrink: 0 }} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{offerForm.imageFile ? offerForm.imageFile.name : 'Choose image'}</span>
+                <input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => setOfferForm((p) => ({ ...p, imageFile: e.target.files?.[0] ?? null }))} />
               </label>
+            </Field>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <Field label="Link URL"><input value={offerForm.linkUrl} onChange={(e) => setOfferForm((p) => ({ ...p, linkUrl: e.target.value }))} style={inputStyle} /></Field>
+              <Field label="Priority"><input type="number" min={1} value={offerForm.priority} onChange={(e) => setOfferForm((p) => ({ ...p, priority: e.target.value }))} style={inputStyle} /></Field>
+              <Field label="Start"><input type="datetime-local" value={offerForm.startAtLocal} onChange={(e) => setOfferForm((p) => ({ ...p, startAtLocal: e.target.value }))} style={inputStyle} /></Field>
+              <Field label="End"><input type="datetime-local" value={offerForm.endAtLocal} onChange={(e) => setOfferForm((p) => ({ ...p, endAtLocal: e.target.value }))} style={inputStyle} /></Field>
             </div>
+            <Field label="Status">
+              <select value={offerForm.active ? 'ACTIVE' : 'INACTIVE'} onChange={(e) => setOfferForm((p) => ({ ...p, active: e.target.value === 'ACTIVE' }))} style={{ ...selectStyle, width: '140px' }}>
+                <option value="ACTIVE">Active</option>
+                <option value="INACTIVE">Inactive</option>
+              </select>
+            </Field>
           </div>
+          <div style={{ padding: '12px 24px 20px', borderTop: '1px solid #F3F4F6', display: 'flex', justifyContent: 'flex-end', gap: '8px', flexShrink: 0, background: '#FFF' }}>
+            <button type="button" onClick={() => setOfferDialogOpen(false)} style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '7px 14px', borderRadius: '7px', border: '1px solid #E5E7EB', background: '#FFF', color: '#6B7280', cursor: 'pointer', fontSize: '12.5px', fontWeight: 500, fontFamily: "'Work Sans', sans-serif" }}>
+              <X style={{ width: '12px', height: '12px' }} /> Cancel
+            </button>
+            <button type="button" disabled={offerSaving} onClick={() => void saveOfferDraft()} style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '7px 20px', borderRadius: '7px', background: offerSaving ? '#9CA3AF' : '#111827', color: '#FFF', border: 'none', cursor: offerSaving ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+              <Check style={{ width: '13px', height: '13px' }} />
+              {offerSaving ? 'Saving\u2026' : offerEditingIndex === null ? 'Create Offer' : 'Save Changes'}
+            </button>
           </div>
-          <DialogFooter className="marketing-dialog-footer">
-            <button type="button" onClick={() => setCampaignDrawerOpen(false)} className={secondaryActionButtonClass}>Cancel</button>
-            <button type="button" onClick={() => void saveCampaign()} disabled={campaignSaving} className={`${primaryActionButtonClass} disabled:opacity-60`}>{campaignSaving ? 'Saving...' : 'Save'}</button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={slideDrawerOpen}
-        onOpenChange={setSlideDrawerOpen}
-      >
-        <DialogContent className="marketing-dialog-content max-w-2xl max-h-[92vh] overflow-y-auto p-0">
-          <DialogHeader className="marketing-dialog-header">
-            <DialogTitle className="text-base font-semibold text-gray-900">{slideEditingIndex === null ? 'Add Onboarding Screen' : 'Edit Onboarding Screen'}</DialogTitle>
-            <DialogDescription className="marketing-dialog-description">Changes are local until you click Save Onboarding.</DialogDescription>
-          </DialogHeader>
-          <div className="marketing-dialog-body space-y-4">
-          <div>
-            <label className="text-xs text-gray-500">Title</label>
-            <input value={slideForm.title} onChange={(event) => setSlideForm((current) => ({ ...current, title: event.target.value }))} className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50" />
-          </div>
-          <div>
-            <label className="text-xs text-gray-500">Subtitle</label>
-            <input value={slideForm.subtitle} onChange={(event) => setSlideForm((current) => ({ ...current, subtitle: event.target.value }))} className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50" />
-          </div>
-          <div>
-            <label className="text-xs text-gray-500">Description</label>
-            <textarea value={slideForm.description} rows={3} onChange={(event) => setSlideForm((current) => ({ ...current, description: event.target.value }))} className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50" />
-          </div>
-          <div>
-            <label className="text-xs text-gray-500">Image URL</label>
-            <input value={slideForm.imageUrl} onChange={(event) => setSlideForm((current) => ({ ...current, imageUrl: event.target.value }))} className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50" />
-          </div>
-          </div>
-          <DialogFooter className="marketing-dialog-footer">
-            <button type="button" onClick={() => setSlideDrawerOpen(false)} className={secondaryActionButtonClass}>Cancel</button>
-            <button type="button" onClick={saveSlideDraft} className={primaryActionButtonClass}>Save</button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={offerDrawerOpen}
-        onOpenChange={setOfferDrawerOpen}
-      >
-        <DialogContent className="marketing-dialog-content max-w-4xl max-h-[92vh] overflow-y-auto p-0">
-          <DialogHeader className="marketing-dialog-header">
-            <DialogTitle className="text-base font-semibold text-gray-900">{offerEditingIndex === null ? 'Add Promotional Offer' : 'Edit Promotional Offer'}</DialogTitle>
-            <DialogDescription className="marketing-dialog-description">Changes are local until you click Save Offers.</DialogDescription>
-          </DialogHeader>
-          <div className="marketing-dialog-body space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-gray-500">Title</label>
-              <input value={offerForm.title} onChange={(event) => setOfferForm((current) => ({ ...current, title: event.target.value }))} className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50" />
-            </div>
-            <div>
-              <label className="text-xs text-gray-500">Subtitle</label>
-              <input value={offerForm.subtitle} onChange={(event) => setOfferForm((current) => ({ ...current, subtitle: event.target.value }))} className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50" />
-            </div>
-          </div>
-          <div>
-            <label className="text-xs text-gray-500">Description</label>
-            <textarea value={offerForm.description} rows={3} onChange={(event) => setOfferForm((current) => ({ ...current, description: event.target.value }))} className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50" />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-gray-500">Image URL</label>
-              <input value={offerForm.imageUrl} onChange={(event) => setOfferForm((current) => ({ ...current, imageUrl: event.target.value }))} className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50" />
-            </div>
-            <div>
-              <label className="text-xs text-gray-500">Image File ID</label>
-              <input value={offerForm.imageFileId} onChange={(event) => setOfferForm((current) => ({ ...current, imageFileId: event.target.value }))} className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50" />
-            </div>
-          </div>
-          <div>
-            <label className="text-xs text-gray-500">Upload Image</label>
-            <label className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 flex items-center justify-between gap-2 cursor-pointer hover:border-gray-300 transition-colors">
-              <span className="truncate">{offerForm.imageFile ? offerForm.imageFile.name : 'Choose image'}</span>
-              <Upload className="w-4 h-4" />
-              <input type="file" accept="image/*" onChange={(event) => setOfferForm((current) => ({ ...current, imageFile: event.target.files?.[0] ?? null }))} className="hidden" />
-            </label>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-gray-500">Link URL</label>
-              <input value={offerForm.linkUrl} onChange={(event) => setOfferForm((current) => ({ ...current, linkUrl: event.target.value }))} className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50" />
-            </div>
-            <div>
-              <label className="text-xs text-gray-500">Priority</label>
-              <input type="number" min={1} value={offerForm.priority} onChange={(event) => setOfferForm((current) => ({ ...current, priority: event.target.value }))} className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50" />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-gray-500">Start</label>
-              <input type="datetime-local" value={offerForm.startAtLocal} onChange={(event) => setOfferForm((current) => ({ ...current, startAtLocal: event.target.value }))} className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50" />
-            </div>
-            <div>
-              <label className="text-xs text-gray-500">End</label>
-              <input type="datetime-local" value={offerForm.endAtLocal} onChange={(event) => setOfferForm((current) => ({ ...current, endAtLocal: event.target.value }))} className="mt-1 w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50" />
-            </div>
-          </div>
-          <div>
-            <label className="text-xs text-gray-500">Status</label>
-            <select value={offerForm.active ? 'ACTIVE' : 'INACTIVE'} onChange={(event) => setOfferForm((current) => ({ ...current, active: event.target.value === 'ACTIVE' }))} className="mt-1 w-40 bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-700 focus:outline-none focus:border-blue-500/50 appearance-none">
-              <option value="ACTIVE">Active</option>
-              <option value="INACTIVE">Inactive</option>
-            </select>
-          </div>
-          </div>
-          <DialogFooter className="marketing-dialog-footer">
-            <button type="button" onClick={() => setOfferDrawerOpen(false)} className={secondaryActionButtonClass}>Cancel</button>
-            <button type="button" onClick={() => void saveOfferDraft()} disabled={offerSaving} className={`${primaryActionButtonClass} disabled:opacity-60`}>{offerSaving ? 'Saving...' : 'Save'}</button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

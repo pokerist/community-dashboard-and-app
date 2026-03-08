@@ -4,18 +4,20 @@ import {
   Controller,
   Get,
   Param,
+  Patch,
   Post,
   Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { Permissions } from '../auth/decorators/permissions.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { BookingsQueryDto } from './dto/bookings-query.dto';
 import { CancelBookingDto } from './dto/cancel-booking.dto';
+import { CreateBookingDto } from './dto/create-booking.dto';
 import { RejectBookingDto } from './dto/reject-booking.dto';
 import { BookingsService } from './bookings.service';
 
@@ -27,11 +29,22 @@ interface AuthenticatedRequest extends Request {
   user?: AuthUserContext;
 }
 
+@ApiBearerAuth()
 @ApiTags('Bookings')
 @Controller('bookings')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
 export class BookingsController {
   constructor(private readonly bookingsService: BookingsService) {}
+
+  @Get('me')
+  @Permissions('booking.view_own')
+  listMyBookings(@Req() req: AuthenticatedRequest) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new BadRequestException('Invalid auth context');
+    }
+    return this.bookingsService.listMyBookings(userId);
+  }
 
   @Get()
   @Permissions('booking.view_all')
@@ -43,6 +56,16 @@ export class BookingsController {
   @Permissions('booking.view_all', 'booking.view_own')
   getBookingDetail(@Param('id') id: string) {
     return this.bookingsService.getBookingDetail(id);
+  }
+
+  @Post()
+  @Permissions('booking.create')
+  createBooking(@Body() dto: CreateBookingDto, @Req() req: AuthenticatedRequest) {
+    const userId = req.user?.id;
+    if (!userId) {
+      throw new BadRequestException('Invalid auth context');
+    }
+    return this.bookingsService.createBooking(dto, userId);
   }
 
   @Post(':id/approve')
@@ -69,7 +92,7 @@ export class BookingsController {
     return this.bookingsService.rejectBooking(id, adminId, dto);
   }
 
-  @Post(':id/cancel')
+  @Patch(':id/cancel')
   @Permissions('booking.update', 'booking.cancel_own')
   cancelBooking(
     @Param('id') id: string,

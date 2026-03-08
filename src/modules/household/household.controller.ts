@@ -25,29 +25,33 @@ import { HouseholdRequestStatus } from '@prisma/client';
 @ApiTags('Household')
 @ApiBearerAuth()
 @Controller('household')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 export class HouseholdController {
   constructor(private readonly householdService: HouseholdService) {}
 
   @Post('family-requests')
+  @Permissions('household.create_request')
   @ApiOperation({ summary: 'Create family member access request (pending admin review)' })
   createFamilyRequest(@Body() dto: CreateFamilyRequestDto, @Req() req: any) {
     return this.householdService.createFamilyRequest(req.user.id, dto);
   }
 
   @Post('authorized-requests')
+  @Permissions('household.create_request')
   @ApiOperation({ summary: 'Create authorized person request (pending admin review)' })
   createAuthorizedRequest(@Body() dto: CreateAuthorizedRequestDto, @Req() req: any) {
     return this.householdService.createAuthorizedRequest(req.user.id, dto);
   }
 
   @Post('home-staff')
+  @Permissions('household.create_request')
   @ApiOperation({ summary: 'Create home staff access request (no mobile account)' })
   createHomeStaff(@Body() dto: CreateHomeStaffDto, @Req() req: any) {
     return this.householdService.createHomeStaffAccess(req.user.id, dto);
   }
 
   @Get('my-requests')
+  @Permissions('household.view_own')
   @ApiOperation({ summary: 'List my household requests by type' })
   listMyRequests(@Req() req: any, @Query('unitId') unitId?: string) {
     return this.householdService.listMyRequests(req.user.id, unitId);
@@ -55,16 +59,14 @@ export class HouseholdController {
 
   @Get('admin/requests')
   @ApiOperation({ summary: 'Admin list of household requests' })
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
-  @Permissions('admin.view')
+  @Permissions('household.view_all')
   listAdminRequests(@Query('status') status?: HouseholdRequestStatus | 'ALL') {
     return this.householdService.listAdminRequests(status);
   }
 
   @Patch('admin/family-requests/:id/review')
   @ApiOperation({ summary: 'Admin review family request' })
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
-  @Permissions('admin.update')
+  @Permissions('household.review')
   reviewFamilyRequest(
     @Param('id') id: string,
     @Body() dto: ReviewHouseholdRequestDto,
@@ -75,8 +77,7 @@ export class HouseholdController {
 
   @Patch('admin/authorized-requests/:id/review')
   @ApiOperation({ summary: 'Admin review authorized request' })
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
-  @Permissions('admin.update')
+  @Permissions('household.review')
   reviewAuthorizedRequest(
     @Param('id') id: string,
     @Body() dto: ReviewHouseholdRequestDto,
@@ -87,8 +88,7 @@ export class HouseholdController {
 
   @Patch('admin/home-staff/:id/review')
   @ApiOperation({ summary: 'Admin review home staff request' })
-  @UseGuards(JwtAuthGuard, PermissionsGuard)
-  @Permissions('admin.update')
+  @Permissions('household.review')
   reviewHomeStaffRequest(
     @Param('id') id: string,
     @Body() dto: ReviewHouseholdRequestDto,

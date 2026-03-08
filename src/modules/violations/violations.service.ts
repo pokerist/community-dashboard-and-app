@@ -28,6 +28,7 @@ import {
 import { ViolationsQueryDto } from './dto/violations-query.dto';
 import { CreateViolationDto } from './dto/create-violation.dto';
 import { UpdateViolationDto } from './dto/update-violation.dto';
+import { CreateViolationActionDto } from './dto/violation-action.dto';
 
 type ViolationListRecord = Prisma.ViolationGetPayload<{
   include: {
@@ -292,6 +293,123 @@ export class ViolationsService {
       throw new BadRequestException('Violation category is inactive');
     }
     return category;
+  }
+
+  async listMyViolations(userId: string): Promise<ViolationListItemDto[]> {
+    const rows = await this.prisma.violation.findMany({
+      where: { residentId: userId },
+      include: {
+        category: { select: { id: true, name: true } },
+        unit: { select: { unitNumber: true } },
+        resident: { select: { nameEN: true, nameAR: true, email: true } },
+        issuedBy: { select: { nameEN: true, nameAR: true, email: true } },
+        actionRequests: {
+          where: { type: ViolationActionType.APPEAL },
+          select: { id: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return rows.map((row) => this.toViolationListItem(row));
+  }
+
+  async listViolationActions(
+    violationId: string,
+  ): Promise<ViolationDetailActionRequestDto[]> {
+    const violation = await this.prisma.violation.findUnique({
+      where: { id: violationId },
+      select: { id: true },
+    });
+
+    if (!violation) {
+      throw new NotFoundException(`Violation ${violationId} not found`);
+    }
+
+    const actions = await this.prisma.violationActionRequest.findMany({
+      where: { violationId },
+      include: {
+        requestedBy: {
+          select: { id: true, nameEN: true, nameAR: true, email: true },
+        },
+        reviewedBy: {
+          select: { id: true, nameEN: true, nameAR: true, email: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return actions.map((action) => this.toActionRequestDto(action));
+  }
+
+  async submitViolationAction(
+    violationId: string,
+    dto: CreateViolationActionDto,
+    userId: string,
+  ): Promise<ViolationDetailActionRequestDto> {
+    const violation = await this.prisma.violation.findUnique({
+      where: { id: violationId },
+      select: { id: true, status: true, appealDeadline: true, residentId: true },
+    });
+
+    if (!violation) {
+      throw new NotFoundException(`Violation ${violationId} not found`);
+    }
+
+    if (violation.status !== ViolationStatus.PENDING) {
+      throw new BadRequestException('Violation is not in a state that allows actions');
+    }
+
+    if (dto.type === ViolationActionType.APPEAL && violation.appealDeadline) {
+      if (new Date() > violation.appealDeadline) {
+        throw new BadRequestException('Appeal deadline has passed');
+      }
+    }
+
+    // Check for existing pending action of same type
+    const existingPending = await this.prisma.violationActionRequest.findFirst({
+      where: {
+        violationId,
+        type: dto.type,
+        status: ViolationActionStatus.PENDING,
+      },
+      select: { id: true },
+    });
+
+    if (existingPending) {
+      throw new BadRequestException(
+        `A pending ${dto.type === ViolationActionType.APPEAL ? 'appeal' : 'fix submission'} already exists`,
+      );
+    }
+
+    const created = await this.prisma.violationActionRequest.create({
+      data: {
+        violationId,
+        type: dto.type,
+        note: dto.note?.trim() || null,
+        attachmentIds: dto.attachmentIds ?? [],
+        status: ViolationActionStatus.PENDING,
+        requestedById: userId,
+      },
+      include: {
+        requestedBy: {
+          select: { id: true, nameEN: true, nameAR: true, email: true },
+        },
+        reviewedBy: {
+          select: { id: true, nameEN: true, nameAR: true, email: true },
+        },
+      },
+    });
+
+    // Update violation appealStatus if this is an appeal
+    if (dto.type === ViolationActionType.APPEAL) {
+      await this.prisma.violation.update({
+        where: { id: violationId },
+        data: { appealStatus: 'PENDING' },
+      });
+    }
+
+    return this.toActionRequestDto(created);
   }
 
   async listViolations(filters: ViolationsQueryDto): Promise<ViolationListResponseDto> {
