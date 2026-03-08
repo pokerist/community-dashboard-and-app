@@ -1,562 +1,543 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Card } from "../ui/card";
-import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
-import { Input } from "../ui/input";
-import { Label } from "../ui/label";
 import { toast } from "sonner";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogFooter,
-} from "../ui/dialog";
-import { QrCode, Plus, Download, Ban, CheckCheck, Clock3, ShieldCheck } from "lucide-react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../ui/table";
+  QrCode, Ban, CheckCheck, Clock3, ShieldCheck, RefreshCw,
+  AlertCircle, CheckCircle2, XCircle, Search,
+  ChevronLeft, ChevronRight,
+} from "lucide-react";
+import { DataTable, type DataTableColumn } from "../DataTable";
+import { StatusBadge } from "../StatusBadge";
 import apiClient from "../../lib/api-client";
-import { errorMessage, formatDateTime, getStatusColorClass, humanizeEnum } from "../../lib/live-data";
+import { errorMessage, formatDateTime, humanizeEnum } from "../../lib/live-data";
+
+// ─── Types ────────────────────────────────────────────────────
+
+type QrRow = Record<string, any>;
+
+const QR_TYPES = ["VISITOR", "DELIVERY", "WORKER", "SERVICE_PROVIDER", "RIDESHARE", "SELF"];
+
+const TYPE_META: Record<string, { bg: string; color: string }> = {
+  VISITOR:          { bg: "#EFF6FF", color: "#2563EB" },
+  DELIVERY:         { bg: "#FFF7ED", color: "#EA580C" },
+  WORKER:           { bg: "#FFFBEB", color: "#D97706" },
+  SERVICE_PROVIDER: { bg: "#F5F3FF", color: "#7C3AED" },
+  RIDESHARE:        { bg: "#F0FDFA", color: "#0D9488" },
+  SELF:             { bg: "#F0FDF4", color: "#16A34A" },
+};
+
+const TABS = [
+  { key: "all",             label: "All" },
+  { key: "active",          label: "Active" },
+  { key: "pending",         label: "Pending" },
+  { key: "pending-workers", label: "Pending Workers" },
+  { key: "expired",         label: "Expired" },
+  { key: "used",            label: "Used" },
+];
+
+const PAGE_SIZE = 15;
+
+const DATE_RANGE_OPTIONS = [
+  { key: "all",       label: "All Time" },
+  { key: "today",     label: "Today" },
+  { key: "yesterday", label: "Yesterday" },
+  { key: "7d",        label: "Last 7 Days" },
+  { key: "30d",       label: "Last 30 Days" },
+  { key: "90d",       label: "Last 3 Months" },
+  { key: "custom",    label: "Custom Range" },
+];
+
+// ─── Shared styles ────────────────────────────────────────────
+
+const inputStyle: React.CSSProperties = { width: "100%", padding: "8px 10px", borderRadius: "7px", border: "1px solid #E5E7EB", fontSize: "13px", color: "#111827", background: "#FFF", outline: "none", fontFamily: "'Work Sans', sans-serif", boxSizing: "border-box", height: "36px" };
+const selectStyle: React.CSSProperties = { ...inputStyle, cursor: "pointer" };
+
+// ─── Primitives ───────────────────────────────────────────────
+
+function TypeChip({ type }: { type: string }) {
+  const meta = TYPE_META[type?.toUpperCase()] ?? { bg: "#F3F4F6", color: "#6B7280" };
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", padding: "2px 8px", borderRadius: "5px", fontSize: "10.5px", fontWeight: 700, background: meta.bg, color: meta.color, fontFamily: "'Work Sans', sans-serif" }}>
+      {humanizeEnum(type)}
+    </span>
+  );
+}
+
+function StatCard({ title, value, accent }: { title: string; value: number; accent: string }) {
+  return (
+    <div style={{ flex: 1, minWidth: 0, padding: "14px 16px", borderRadius: "10px", border: "1px solid #EBEBEB", background: "#FFF", borderTop: `3px solid ${accent}`, boxShadow: "0 1px 3px rgba(0,0,0,0.04)", fontFamily: "'Work Sans', sans-serif" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "7px", marginBottom: "5px" }}>
+        <div style={{ width: "24px", height: "24px", borderRadius: "6px", background: `${accent}15`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <QrCode style={{ width: "12px", height: "12px", color: accent }} />
+        </div>
+        <span style={{ fontSize: "10.5px", fontWeight: 600, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.05em" }}>{title}</span>
+      </div>
+      <p style={{ fontSize: "26px", fontWeight: 900, color: "#111827", letterSpacing: "-0.04em", lineHeight: 1, margin: 0, fontFamily: "'DM Mono', monospace" }}>{value}</p>
+    </div>
+  );
+}
+
+function TabBtn({ label, active, count, onClick }: { label: string; active: boolean; count?: number; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick}
+      style={{ display: "flex", alignItems: "center", gap: "5px", padding: "6px 14px", borderRadius: "7px", border: "none", background: active ? "#FFF" : "transparent", color: active ? "#111827" : "#9CA3AF", cursor: "pointer", fontSize: "12px", fontWeight: active ? 700 : 500, transition: "all 120ms ease", fontFamily: "'Work Sans', sans-serif", flexShrink: 0, boxShadow: active ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }}>
+      {label}
+      {count !== undefined && count > 0 && (
+        <span style={{ fontSize: "9.5px", fontWeight: 700, padding: "1px 5px", borderRadius: "10px", background: active ? "#D97706" : "#E5E7EB", color: active ? "#FFF" : "#6B7280", fontFamily: "'DM Mono', monospace" }}>{count}</span>
+      )}
+    </button>
+  );
+}
+
+// ─── Pending worker card ──────────────────────────────────────
+
+function PendingWorkerCard({ row, actionId, onApprove, onReject }: { row: QrRow; actionId: string | null; onApprove: () => void; onReject: () => void }) {
+  const busy = actionId === row.id;
+  const unitLabel = row.forUnit
+    ? [row.forUnit.projectName, row.forUnit.block ? `Block ${row.forUnit.block}` : null, row.forUnit.unitNumber ? `Unit ${row.forUnit.unitNumber}` : null].filter(Boolean).join(" – ")
+    : row.unit?.unitNumber ? `Unit ${row.unit.unitNumber}` : "—";
+  return (
+    <div style={{ padding: "11px 13px", borderRadius: "8px", border: "1px solid #FEF3C7", background: "#FFFBEB", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", flexWrap: "wrap" }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "3px" }}>
+          <AlertCircle style={{ width: "11px", height: "11px", color: "#D97706", flexShrink: 0 }} />
+          <p style={{ fontSize: "13px", fontWeight: 700, color: "#111827", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {row.visitorName || "Worker permit request"}
+          </p>
+          <span style={{ fontSize: "10.5px", padding: "1px 6px", borderRadius: "5px", background: "#F3F4F6", color: "#6B7280", fontWeight: 600, flexShrink: 0 }}>
+            {unitLabel}
+          </span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "#9CA3AF" }}>
+          <Clock3 style={{ width: "10px", height: "10px" }} />
+          <span style={{ fontFamily: "'DM Mono', monospace" }}>
+            {row.validFrom ? formatDateTime(row.validFrom) : "—"} → {row.validTo ? formatDateTime(row.validTo) : "—"}
+          </span>
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
+        <button type="button" disabled={busy} onClick={onReject}
+          style={{ display: "flex", alignItems: "center", gap: "4px", padding: "5px 10px", borderRadius: "6px", border: "1px solid #FECACA", background: "#FEF2F2", color: "#DC2626", cursor: busy ? "not-allowed" : "pointer", fontSize: "11.5px", fontWeight: 700, fontFamily: "'Work Sans', sans-serif", opacity: busy ? 0.5 : 1 }}>
+          <XCircle style={{ width: "10px", height: "10px" }} />{busy ? "Working..." : "Reject"}
+        </button>
+        <button type="button" disabled={busy} onClick={onApprove}
+          style={{ display: "flex", alignItems: "center", gap: "4px", padding: "5px 10px", borderRadius: "6px", border: "none", background: busy ? "#9CA3AF" : "#111827", color: "#FFF", cursor: busy ? "not-allowed" : "pointer", fontSize: "11.5px", fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+          <CheckCircle2 style={{ width: "10px", height: "10px" }} />{busy ? "Working..." : "Approve"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Helpers ──────────────────────────────────────────────────
+
+function buildUnitLabel(row: QrRow): string {
+  const u = row.forUnit;
+  if (u) {
+    return [u.projectName, u.block ? `Blk ${u.block}` : null, u.unitNumber ? `#${u.unitNumber}` : null].filter(Boolean).join(" – ");
+  }
+  if (row.unit?.unitNumber) return `Unit ${row.unit.unitNumber}`;
+  return "—";
+}
+
+function buildByLabel(row: QrRow): string {
+  const g = row.generatedBy;
+  if (g) {
+    const name = g.nameEN?.trim() || g.nameAR?.trim();
+    if (name) return name;
+    if (g.email) return g.email;
+    if (g.phone) return g.phone;
+  }
+  if (row.creator?.nameEN) return row.creator.nameEN;
+  if (row.createdBy?.nameEN) return row.createdBy.nameEN;
+  return "—";
+}
+
+function getDateRange(key: string): { from?: string; to?: string } {
+  const now = new Date();
+  const startOfDay = (d: Date) => { const c = new Date(d); c.setHours(0, 0, 0, 0); return c; };
+
+  switch (key) {
+    case "today":
+      return { from: startOfDay(now).toISOString() };
+    case "yesterday": {
+      const y = new Date(now);
+      y.setDate(y.getDate() - 1);
+      const start = startOfDay(y);
+      const end = new Date(start);
+      end.setHours(23, 59, 59, 999);
+      return { from: start.toISOString(), to: end.toISOString() };
+    }
+    case "7d": {
+      const d = new Date(now);
+      d.setDate(d.getDate() - 7);
+      return { from: startOfDay(d).toISOString() };
+    }
+    case "30d": {
+      const d = new Date(now);
+      d.setDate(d.getDate() - 30);
+      return { from: startOfDay(d).toISOString() };
+    }
+    case "90d": {
+      const d = new Date(now);
+      d.setDate(d.getDate() - 90);
+      return { from: startOfDay(d).toISOString() };
+    }
+    default:
+      return {};
+  }
+}
+
+// ─── Main component ───────────────────────────────────────────
 
 export function AccessControl() {
-  const [isGenerateDialogOpen, setIsGenerateDialogOpen] = useState(false);
-  const [accessRows, setAccessRows] = useState<any[]>([]);
-  const [unitOptions, setUnitOptions] = useState<Array<{ id: string; label: string }>>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [actionRowId, setActionRowId] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("all");
-  const [generateForm, setGenerateForm] = useState({
-    unitId: "",
-    type: "VISITOR",
-    visitorName: "",
-    validFrom: "",
-    validTo: "",
-    notes: "",
-  });
+  const [accessRows,    setAccessRows]    = useState<QrRow[]>([]);
+  const [isLoading,     setIsLoading]     = useState(false);
+  const [actionRowId,   setActionRowId]   = useState<string | null>(null);
+  const [loadError,     setLoadError]     = useState<string | null>(null);
+  const [activeTab,     setActiveTab]     = useState("all");
 
+  // Search & filters
+  const [searchQuery,   setSearchQuery]   = useState("");
+  const [filterType,    setFilterType]    = useState("all");
+  const [dateRange,     setDateRange]     = useState("all");
+  const [customFrom,    setCustomFrom]    = useState("");
+  const [customTo,      setCustomTo]      = useState("");
+
+  // Pagination
+  const [currentPage,   setCurrentPage]   = useState(1);
+
+  // ── Load ──────────────────────────────────────────────────────
   const loadAccessQrs = useCallback(async () => {
-    setIsLoading(true);
-    setLoadError(null);
+    setIsLoading(true); setLoadError(null);
     try {
-      const [response, unitsResponse] = await Promise.all([
-        apiClient.get("/access-qrcodes", { params: { includeInactive: true } }),
-        apiClient.get("/units", { params: { page: 1, limit: 100 } }),
-      ]);
-      setAccessRows(Array.isArray(response.data) ? response.data : []);
-      const units = Array.isArray(unitsResponse.data?.data)
-        ? unitsResponse.data.data
-        : Array.isArray(unitsResponse.data)
-          ? unitsResponse.data
-          : [];
-      setUnitOptions(
-        units.map((unit: any) => ({
-          id: String(unit.id),
-          label:
-            [unit.projectName, unit.block ? `Block ${unit.block}` : null, unit.unitNumber ? `Unit ${unit.unitNumber}` : null]
-              .filter(Boolean)
-              .join(" - ") || String(unit.id),
-        })),
-      );
-    } catch (error) {
-      const msg = errorMessage(error);
-      setLoadError(msg);
-      toast.error("Failed to load access QR codes", { description: msg });
-    } finally {
-      setIsLoading(false);
-    }
+      const res = await apiClient.get("/access-qrcodes", { params: { includeInactive: true } });
+      setAccessRows(Array.isArray(res.data) ? res.data : []);
+    } catch (e) { const m = errorMessage(e); setLoadError(m); toast.error("Failed to load QR codes", { description: m }); }
+    finally { setIsLoading(false); }
   }, []);
 
-  useEffect(() => {
-    void loadAccessQrs();
-  }, [loadAccessQrs]);
+  useEffect(() => { void loadAccessQrs(); }, [loadAccessQrs]);
 
-  const handleGenerateQr = async () => {
-    if (!generateForm.unitId) {
-      toast.error("Unit is required");
-      return;
-    }
-    if (generateForm.type === "VISITOR" && !generateForm.visitorName.trim()) {
-      toast.error("Visitor name is required for visitor QR");
-      return;
-    }
-
-    setIsGenerating(true);
-    try {
-      const payload: any = {
-        unitId: generateForm.unitId,
-        type: generateForm.type,
-        visitorName: generateForm.visitorName.trim() || undefined,
-        notes: generateForm.notes.trim() || undefined,
-      };
-      if (generateForm.validFrom) payload.validFrom = new Date(generateForm.validFrom).toISOString();
-      if (generateForm.validTo) payload.validTo = new Date(generateForm.validTo).toISOString();
-
-      const response = await apiClient.post("/access-qrcodes", payload);
-      const qrId = response.data?.qrCode?.qrId ?? response.data?.qrCode?.id;
-      toast.success("QR code generated", {
-        description: qrId ? `QR created: ${qrId}` : "Access QR created successfully.",
-      });
-      setIsGenerateDialogOpen(false);
-      setGenerateForm({
-        unitId: "",
-        type: "VISITOR",
-        visitorName: "",
-        validFrom: "",
-        validTo: "",
-        notes: "",
-      });
-      await loadAccessQrs();
-    } catch (error) {
-      toast.error("Failed to generate QR", { description: errorMessage(error) });
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
-  const handleRevokeQr = async (id: string) => {
+  // ── Actions ───────────────────────────────────────────────────
+  const handleRevoke = async (id: string) => {
     setActionRowId(id);
-    try {
-      await apiClient.patch(`/access-qrcodes/${id}/revoke`);
-      toast.success("QR code revoked");
-      await loadAccessQrs();
-    } catch (error) {
-      toast.error("Failed to revoke QR", { description: errorMessage(error) });
-    } finally {
-      setActionRowId(null);
-    }
+    try { await apiClient.patch(`/access-qrcodes/${id}/revoke`); toast.success("QR revoked"); await loadAccessQrs(); }
+    catch (e) { toast.error("Failed to revoke", { description: errorMessage(e) }); }
+    finally { setActionRowId(null); }
   };
 
-  const handleApproveWorkerQr = async (id: string) => {
+  const handleApprove = async (id: string) => {
     setActionRowId(id);
-    try {
-      const response = await apiClient.patch(`/access-qrcodes/${id}/approve`);
-      const qrId = response.data?.qrCode?.qrId ?? response.data?.qrCode?.id;
-      toast.success("Worker permit approved", {
-        description: qrId ? `QR ready: ${qrId}` : "Permit approved successfully.",
-      });
-      await loadAccessQrs();
-    } catch (error) {
-      toast.error("Failed to approve worker permit", { description: errorMessage(error) });
-    } finally {
-      setActionRowId(null);
-    }
+    try { const r = await apiClient.patch(`/access-qrcodes/${id}/approve`); const qrId = r.data?.qrCode?.qrId ?? r.data?.qrCode?.id; toast.success("Worker permit approved", { description: qrId ? `QR ready: ${qrId}` : undefined }); await loadAccessQrs(); }
+    catch (e) { toast.error("Failed to approve", { description: errorMessage(e) }); }
+    finally { setActionRowId(null); }
   };
 
-  const handleRejectWorkerQr = async (id: string) => {
-    const reason = window.prompt("Optional rejection reason", "") ?? "";
+  const handleReject = async (id: string) => {
+    const reason = window.prompt("Rejection reason (optional)", "") ?? "";
     setActionRowId(id);
-    try {
-      await apiClient.patch(`/access-qrcodes/${id}/reject`, {
-        reason: reason.trim() || undefined,
-      });
-      toast.success("Worker permit rejected");
-      await loadAccessQrs();
-    } catch (error) {
-      toast.error("Failed to reject worker permit", { description: errorMessage(error) });
-    } finally {
-      setActionRowId(null);
-    }
+    try { await apiClient.patch(`/access-qrcodes/${id}/reject`, { reason: reason.trim() || undefined }); toast.success("Worker permit rejected"); await loadAccessQrs(); }
+    catch (e) { toast.error("Failed to reject", { description: errorMessage(e) }); }
+    finally { setActionRowId(null); }
   };
 
-  const handleMarkQrUsed = async (id: string) => {
-    const gateName = window.prompt("Gate name (optional)", "");
-    if (gateName === null) return;
+  const handleMarkUsed = async (id: string) => {
+    const gate = window.prompt("Gate name (optional)", "");
+    if (gate === null) return;
     setActionRowId(id);
-    try {
-      await apiClient.patch(`/access-qrcodes/${id}/mark-used`, {
-        gateName: gateName.trim() || undefined,
-      });
-      toast.success("QR marked as used", {
-        description: "Arrival notification sent to owner.",
-      });
-      await loadAccessQrs();
-    } catch (error) {
-      toast.error("Failed to mark QR as used", { description: errorMessage(error) });
-    } finally {
-      setActionRowId(null);
-    }
+    try { await apiClient.patch(`/access-qrcodes/${id}/mark-used`, { gateName: gate.trim() || undefined }); toast.success("QR marked as used"); await loadAccessQrs(); }
+    catch (e) { toast.error("Failed to mark used", { description: errorMessage(e) }); }
+    finally { setActionRowId(null); }
   };
 
-  const stats = useMemo(() => {
-    const active = accessRows.filter((r) => String(r.status || "").toUpperCase() === "ACTIVE").length;
-    const visitors = accessRows.filter((r) => String(r.type || "").toUpperCase() === "VISITOR").length;
-    const workers = accessRows.filter((r) => String(r.type || "").toUpperCase() === "WORKER").length;
-    const deliveries = accessRows.filter((r) => String(r.type || "").toUpperCase() === "DELIVERY").length;
-    const pendingWorkers = accessRows.filter(
-      (r) =>
-        String(r.status || "").toUpperCase() === "PENDING" &&
-        String(r.type || "").toUpperCase() === "WORKER",
-    ).length;
-    return { active, visitors, workers, deliveries, pendingWorkers };
-  }, [accessRows]);
+  // ── Stats ─────────────────────────────────────────────────────
+  const stats = useMemo(() => ({
+    active:         accessRows.filter((r) => r.status?.toUpperCase() === "ACTIVE").length,
+    visitors:       accessRows.filter((r) => r.type?.toUpperCase()   === "VISITOR").length,
+    workers:        accessRows.filter((r) => r.type?.toUpperCase()   === "WORKER").length,
+    deliveries:     accessRows.filter((r) => r.type?.toUpperCase()   === "DELIVERY").length,
+    pendingWorkers: accessRows.filter((r) => r.status?.toUpperCase() === "PENDING" && r.type?.toUpperCase() === "WORKER").length,
+  }), [accessRows]);
 
-  const pendingWorkerRows = useMemo(
-    () =>
-      accessRows.filter(
-        (row) =>
-          String(row.status || "").toUpperCase() === "PENDING" &&
-          String(row.type || "").toUpperCase() === "WORKER",
-      ),
-    [accessRows],
-  );
+  const pendingWorkerRows = useMemo(() => accessRows.filter((r) => r.status?.toUpperCase() === "PENDING" && r.type?.toUpperCase() === "WORKER"), [accessRows]);
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+  // ── Filtered rows ───────────────────────────────────────────
+  const filteredRows = useMemo(() => {
+    let rows = accessRows;
+
+    // Tab filter
+    rows = rows.filter((r) => {
+      const s = r.status?.toUpperCase();
+      const t = r.type?.toUpperCase();
+      if (activeTab === "all")             return true;
+      if (activeTab === "active")          return s === "ACTIVE";
+      if (activeTab === "pending")         return s === "PENDING";
+      if (activeTab === "pending-workers") return s === "PENDING" && t === "WORKER";
+      if (activeTab === "expired")         return s === "EXPIRED";
+      if (activeTab === "used")            return s === "USED";
+      return true;
+    });
+
+    // Type filter
+    if (filterType !== "all") {
+      rows = rows.filter((r) => r.type?.toUpperCase() === filterType.toUpperCase());
+    }
+
+    // Date range filter
+    const range = dateRange === "custom"
+      ? {
+          from: customFrom ? new Date(`${customFrom}T00:00:00`).toISOString() : undefined,
+          to: customTo ? new Date(`${customTo}T23:59:59.999`).toISOString() : undefined,
+        }
+      : getDateRange(dateRange);
+
+    if (range.from) {
+      rows = rows.filter((r) => r.createdAt && new Date(r.createdAt) >= new Date(range.from!));
+    }
+    if (range.to) {
+      rows = rows.filter((r) => r.createdAt && new Date(r.createdAt) <= new Date(range.to!));
+    }
+
+    // Search filter
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      rows = rows.filter((r) => {
+        const visitorName = (r.visitorName ?? "").toLowerCase();
+        const unitLabel = buildUnitLabel(r).toLowerCase();
+        const byLabel = buildByLabel(r).toLowerCase();
+        const qrId = (r.qrId ?? r.code ?? r.qrCode ?? r.id ?? "").toLowerCase();
+        const type = (r.type ?? "").toLowerCase();
+        return visitorName.includes(q) || unitLabel.includes(q) || byLabel.includes(q) || qrId.includes(q) || type.includes(q);
+      });
+    }
+
+    return rows;
+  }, [accessRows, activeTab, filterType, dateRange, customFrom, customTo, searchQuery]);
+
+  // ── Pagination ──────────────────────────────────────────────
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+
+  const paginatedRows = useMemo(() => {
+    const start = (safePage - 1) * PAGE_SIZE;
+    return filteredRows.slice(start, start + PAGE_SIZE);
+  }, [filteredRows, safePage]);
+
+  // Reset page when filters change
+  useEffect(() => { setCurrentPage(1); }, [activeTab, filterType, dateRange, customFrom, customTo, searchQuery]);
+
+  // ── Columns ───────────────────────────────────────────────────
+  const columns: DataTableColumn<QrRow>[] = [
+    { key: "qrId", header: "QR ID", render: (r) => (
+      <span style={{ fontSize: "11.5px", fontFamily: "'DM Mono', monospace", color: "#374151", background: "#F3F4F6", padding: "2px 6px", borderRadius: "4px" }}>
+        {(r.qrId ?? r.code ?? r.qrCode ?? r.id ?? "").slice(0, 8)}...
+      </span>
+    )},
+    { key: "type", header: "Type", render: (r) => <TypeChip type={r.type} /> },
+    { key: "for",  header: "For",  render: (r) => <span style={{ fontSize: "13px", fontWeight: 600, color: "#111827" }}>{r.visitorName ?? r.worker?.name ?? r.serviceProviderName ?? "—"}</span> },
+    { key: "unit", header: "Unit", render: (r) => (
+      <span style={{ fontSize: "12px", color: "#374151", fontWeight: 500 }}>{buildUnitLabel(r)}</span>
+    )},
+    { key: "by", header: "Generated By", render: (r) => {
+      const g = r.generatedBy;
+      if (!g) return <span style={{ fontSize: "12px", color: "#9CA3AF" }}>—</span>;
+      const name = g.nameEN?.trim() || g.nameAR?.trim() || "Unknown";
+      return (
         <div>
-          <h1 className="text-[#1E293B]">Access Control & QR Management</h1>
-          <p className="text-[#64748B] mt-1">Live QR access records from backend</p>
+          <p style={{ fontSize: "12.5px", fontWeight: 600, color: "#111827", margin: 0, lineHeight: 1.3 }}>{name}</p>
+          {g.email && <p style={{ fontSize: "10.5px", color: "#9CA3AF", margin: 0, lineHeight: 1.3 }}>{g.email}</p>}
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => void loadAccessQrs()} disabled={isLoading}>
-            {isLoading ? "Refreshing..." : "Refresh"}
-          </Button>
-          <Dialog open={isGenerateDialogOpen} onOpenChange={setIsGenerateDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white rounded-lg gap-2">
-                <Plus className="w-4 h-4" />
-                Generate QR Code
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-lg">
-              <DialogHeader>
-                <DialogTitle>Generate Access QR Code</DialogTitle>
-                <DialogDescription>
-                  Generate a QR code for visitor, delivery, worker, or other access types.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-2">
-                <div className="space-y-2">
-                  <Label>Unit</Label>
-                  <Select
-                    value={generateForm.unitId || "none"}
-                    onValueChange={(value) =>
-                      setGenerateForm((p) => ({ ...p, unitId: value === "none" ? "" : value }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select unit" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Select unit</SelectItem>
-                      {unitOptions.map((unit) => (
-                        <SelectItem key={unit.id} value={unit.id}>
-                          {unit.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>QR Type</Label>
-                  <Select
-                    value={generateForm.type}
-                    onValueChange={(value) => setGenerateForm((p) => ({ ...p, type: value }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {["VISITOR", "DELIVERY", "WORKER", "SERVICE_PROVIDER", "RIDESHARE", "SELF"].map((type) => (
-                        <SelectItem key={type} value={type}>
-                          {humanizeEnum(type)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Visitor / Person Name {(generateForm.type === "VISITOR") ? "(Required)" : "(Optional)"}</Label>
-                  <Input
-                    value={generateForm.visitorName}
-                    onChange={(e) => setGenerateForm((p) => ({ ...p, visitorName: e.target.value }))}
-                    placeholder="John Visitor"
-                  />
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Valid From (optional)</Label>
-                    <Input
-                      type="datetime-local"
-                      value={generateForm.validFrom}
-                      onChange={(e) => setGenerateForm((p) => ({ ...p, validFrom: e.target.value }))}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Valid To (optional)</Label>
-                    <Input
-                      type="datetime-local"
-                      value={generateForm.validTo}
-                      onChange={(e) => setGenerateForm((p) => ({ ...p, validTo: e.target.value }))}
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label>Notes (optional)</Label>
-                  <Input
-                    value={generateForm.notes}
-                    onChange={(e) => setGenerateForm((p) => ({ ...p, notes: e.target.value }))}
-                    placeholder="Delivery driver - order #1234"
-                  />
-                </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setIsGenerateDialogOpen(false)} disabled={isGenerating}>
-                  Cancel
-                </Button>
-                <Button
-                  className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white"
-                  onClick={() => void handleGenerateQr()}
-                  disabled={isGenerating}
-                >
-                  {isGenerating ? "Generating..." : "Generate"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+      );
+    }},
+    { key: "valid", header: "Valid Period", render: (r) => (
+      <div style={{ fontFamily: "'DM Mono', monospace" }}>
+        <p style={{ fontSize: "11px", color: "#374151", margin: 0 }}>{r.validFrom ? formatDateTime(r.validFrom) : "—"}</p>
+        <p style={{ fontSize: "10.5px", color: "#9CA3AF", margin: "1px 0 0" }}>→ {r.validTo ? formatDateTime(r.validTo) : "—"}</p>
+      </div>
+    )},
+    { key: "status",  header: "Status",  render: (r) => <StatusBadge value={r.status} /> },
+    { key: "actions", header: "",        render: (r) => {
+      const s = r.status?.toUpperCase();
+      const t = r.type?.toUpperCase();
+      const busy = actionRowId === r.id;
+      if (s === "ACTIVE") return (
+        <div style={{ display: "flex", gap: "5px", justifyContent: "flex-end" }}>
+          <ActionBtn label={busy ? "Working..." : "Mark Used"} icon={<CheckCheck style={{ width: "10px", height: "10px" }} />} onClick={() => void handleMarkUsed(r.id)} disabled={busy} />
+          <ActionBtn label={busy ? "Working..." : "Revoke"}    icon={<Ban         style={{ width: "10px", height: "10px" }} />} variant="danger" onClick={() => void handleRevoke(r.id)} disabled={busy} />
+        </div>
+      );
+      if (s === "PENDING" && t === "WORKER") return (
+        <div style={{ display: "flex", gap: "5px", justifyContent: "flex-end" }}>
+          <ActionBtn label={busy ? "Working..." : "Reject"}  icon={<XCircle      style={{ width: "10px", height: "10px" }} />} variant="danger"   onClick={() => void handleReject(r.id)}  disabled={busy} />
+          <ActionBtn label={busy ? "Working..." : "Approve"} icon={<CheckCircle2 style={{ width: "10px", height: "10px" }} />} variant="success"  onClick={() => void handleApprove(r.id)} disabled={busy} />
+        </div>
+      );
+      return <span style={{ color: "#D1D5DB", fontSize: "11px" }}>—</span>;
+    }},
+  ];
+
+  // ─────────────────────────────────────────────────────────────
+  return (
+    <div style={{ fontFamily: "'Work Sans', sans-serif" }}>
+
+      {/* ── Header ─────────────────────────────────────────── */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px", marginBottom: "20px", flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ fontSize: "18px", fontWeight: 900, color: "#111827", letterSpacing: "-0.02em", margin: 0 }}>Access Control</h1>
+          <p style={{ marginTop: "4px", fontSize: "13px", color: "#6B7280" }}>Manage QR codes for visitors, workers, deliveries, and more.</p>
+        </div>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <button type="button" onClick={() => void loadAccessQrs()} disabled={isLoading}
+            style={{ display: "flex", alignItems: "center", gap: "6px", padding: "7px 14px", borderRadius: "7px", border: "1px solid #E5E7EB", background: "#FFF", color: "#6B7280", cursor: isLoading ? "not-allowed" : "pointer", fontSize: "12.5px", fontWeight: 600, fontFamily: "'Work Sans', sans-serif" }}>
+            <RefreshCw style={{ width: "13px", height: "13px", animation: isLoading ? "spin 1s linear infinite" : "none" }} />
+            Refresh
+          </button>
         </div>
       </div>
 
-      {loadError ? (
-        <Card className="p-4 border border-[#FECACA] bg-[#FEF2F2] text-[#991B1B] rounded-xl">{loadError}</Card>
-      ) : null}
+      <style>{`@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        {[
-          { label: "Active QR Codes", value: stats.active, color: "#0B5FFF" },
-          { label: "Visitors", value: stats.visitors, color: "#00B386" },
-          { label: "Workers", value: stats.workers, color: "#3B82F6" },
-          { label: "Deliveries", value: stats.deliveries, color: "#F59E0B" },
-        ].map((card) => (
-          <Card key={card.label} className="p-6 shadow-card rounded-xl">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-[#64748B] mb-1">{card.label}</p>
-                <h3 className="text-[#1E293B]">{card.value}</h3>
-              </div>
-              <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ backgroundColor: `${card.color}1A` }}>
-                <QrCode className="w-6 h-6" style={{ color: card.color }} />
-              </div>
+      {/* ── Error ──────────────────────────────────────────── */}
+      {loadError && (
+        <div style={{ padding: "10px 14px", borderRadius: "8px", border: "1px solid #FECACA", background: "#FEF2F2", color: "#B91C1C", fontSize: "13px", marginBottom: "14px" }}>
+          {loadError}
+        </div>
+      )}
+
+      {/* ── Stat strip ─────────────────────────────────────── */}
+      <div style={{ display: "flex", gap: "10px", marginBottom: "20px", overflowX: "auto" }}>
+        <StatCard title="Active QRs"  value={stats.active}     accent="#2563EB" />
+        <StatCard title="Visitors"    value={stats.visitors}   accent="#0D9488" />
+        <StatCard title="Workers"     value={stats.workers}    accent="#D97706" />
+        <StatCard title="Deliveries"  value={stats.deliveries} accent="#EA580C" />
+      </div>
+
+      {/* ── Pending workers callout ─────────────────────────── */}
+      {pendingWorkerRows.length > 0 && (
+        <div style={{ borderRadius: "10px", border: "1px solid #FDE68A", background: "#FFFBEB", overflow: "hidden", marginBottom: "16px" }}>
+          <div style={{ padding: "10px 16px", borderBottom: "1px solid #FDE68A", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "7px" }}>
+              <ShieldCheck style={{ width: "13px", height: "13px", color: "#D97706" }} />
+              <span style={{ fontSize: "13px", fontWeight: 800, color: "#92400E", letterSpacing: "-0.01em" }}>Pending Worker Permits</span>
+              <span style={{ fontSize: "10px", fontWeight: 700, padding: "1px 6px", borderRadius: "10px", background: "#D97706", color: "#FFF", fontFamily: "'DM Mono', monospace" }}>{stats.pendingWorkers}</span>
             </div>
-          </Card>
-        ))}
-      </div>
-
-      <Card className="shadow-card rounded-xl overflow-hidden">
-        <div className="p-4 border-b border-[#E5E7EB] flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <ShieldCheck className="w-4 h-4 text-[#0B5FFF]" />
-            <h3 className="text-[#1E293B]">Pending Worker Permits</h3>
-            <Badge className="bg-[#EEF2FF] text-[#3730A3]">{stats.pendingWorkers}</Badge>
+            <button type="button" onClick={() => setActiveTab("pending-workers")}
+              style={{ fontSize: "11.5px", fontWeight: 600, color: "#D97706", background: "none", border: "none", cursor: "pointer", fontFamily: "'Work Sans', sans-serif" }}>
+              View all →
+            </button>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="rounded-lg"
-            onClick={() => setActiveTab("pending-workers")}
-          >
-            View in table
-          </Button>
+          <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", gap: "6px" }}>
+            {pendingWorkerRows.slice(0, 5).map((row) => (
+              <PendingWorkerCard key={row.id} row={row} actionId={actionRowId}
+                onApprove={() => void handleApprove(row.id)}
+                onReject={() => void handleReject(row.id)} />
+            ))}
+          </div>
         </div>
-        <div className="p-4 space-y-3">
-          {pendingWorkerRows.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-[#CBD5E1] p-4 text-sm text-[#64748B]">
-              No pending worker permits right now.
+      )}
+
+      {/* ── Search & Filters bar ──────────────────────────── */}
+      <div style={{ borderRadius: "10px", border: "1px solid #EBEBEB", background: "#FFF", overflow: "hidden", marginBottom: "0" }}>
+        <div style={{ padding: "12px 16px", borderBottom: "1px solid #F3F4F6", display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "flex-end" }}>
+          {/* Search */}
+          <div style={{ flex: "1 1 250px", minWidth: "200px" }}>
+            <label style={{ fontSize: "10px", fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: "4px" }}>Search</label>
+            <div style={{ position: "relative" }}>
+              <Search style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", width: "14px", height: "14px", color: "#9CA3AF", pointerEvents: "none" }} />
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search by name, unit, QR ID..."
+                style={{ ...inputStyle, paddingLeft: "32px" }}
+              />
             </div>
-          ) : (
-            pendingWorkerRows.slice(0, 6).map((row) => (
-              <div
-                key={row.id}
-                className="rounded-lg border border-[#E5E7EB] p-3 flex flex-col md:flex-row md:items-center md:justify-between gap-3"
-              >
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <p className="text-[#1E293B] font-medium">{row.visitorName || "Worker permit request"}</p>
-                    <Badge variant="secondary" className="bg-[#F8FAFC] text-[#334155]">
-                      Unit {row.unit?.unitNumber ?? row.unitId ?? "—"}
-                    </Badge>
-                  </div>
-                  <div className="text-xs text-[#64748B] flex items-center gap-1">
-                    <Clock3 className="w-3 h-3" />
-                    {row.validFrom ? formatDateTime(row.validFrom) : "—"} to{" "}
-                    {row.validTo ? formatDateTime(row.validTo) : "—"}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void handleRejectWorkerQr(row.id)}
-                    disabled={actionRowId === row.id}
-                  >
-                    {actionRowId === row.id ? "Working..." : "Reject"}
-                  </Button>
-                  <Button
-                    size="sm"
-                    className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white"
-                    onClick={() => void handleApproveWorkerQr(row.id)}
-                    disabled={actionRowId === row.id}
-                  >
-                    {actionRowId === row.id ? "Working..." : "Approve"}
-                  </Button>
-                </div>
+          </div>
+
+          {/* Type filter */}
+          <div style={{ flex: "0 0 160px" }}>
+            <label style={{ fontSize: "10px", fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: "4px" }}>Type</label>
+            <select value={filterType} onChange={(e) => setFilterType(e.target.value)} style={selectStyle}>
+              <option value="all">All Types</option>
+              {QR_TYPES.map((t) => <option key={t} value={t}>{humanizeEnum(t)}</option>)}
+            </select>
+          </div>
+
+          {/* Date range */}
+          <div style={{ flex: "0 0 170px" }}>
+            <label style={{ fontSize: "10px", fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: "4px" }}>Date Range</label>
+            <select value={dateRange} onChange={(e) => setDateRange(e.target.value)} style={selectStyle}>
+              {DATE_RANGE_OPTIONS.map((opt) => <option key={opt.key} value={opt.key}>{opt.label}</option>)}
+            </select>
+          </div>
+
+          {/* Custom date inputs */}
+          {dateRange === "custom" && (
+            <>
+              <div style={{ flex: "0 0 150px" }}>
+                <label style={{ fontSize: "10px", fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: "4px" }}>From</label>
+                <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} style={inputStyle} />
               </div>
-            ))
+              <div style={{ flex: "0 0 150px" }}>
+                <label style={{ fontSize: "10px", fontWeight: 700, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: "4px" }}>To</label>
+                <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} style={inputStyle} />
+              </div>
+            </>
           )}
         </div>
-      </Card>
 
-      <Card className="shadow-card rounded-xl overflow-hidden">
-        <div className="p-4 border-b border-[#E5E7EB] flex items-center justify-between">
-          <h3 className="text-[#1E293B]">Access QR Logs</h3>
-          <Button variant="outline" size="sm" className="gap-2 rounded-lg" onClick={() => void loadAccessQrs()}>
-            <Download className="w-4 h-4" />
-            Reload
-          </Button>
+        {/* Tab bar */}
+        <div style={{ display: "flex", gap: "2px", padding: "6px 10px", borderBottom: "1px solid #F3F4F6", overflowX: "auto", background: "#FAFAFA" }}>
+          {TABS.map((tab) => (
+            <TabBtn key={tab.key} label={tab.label} active={activeTab === tab.key}
+              count={tab.key === "pending-workers" ? stats.pendingWorkers : undefined}
+              onClick={() => setActiveTab(tab.key)} />
+          ))}
         </div>
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="w-full justify-start border-b border-[#E5E7EB] rounded-none h-12 bg-transparent px-4">
-            <TabsTrigger value="all" className="rounded-lg">All</TabsTrigger>
-            <TabsTrigger value="active" className="rounded-lg">Active</TabsTrigger>
-            <TabsTrigger value="pending" className="rounded-lg">Pending</TabsTrigger>
-            <TabsTrigger value="pending-workers" className="rounded-lg">
-              Pending Workers ({stats.pendingWorkers})
-            </TabsTrigger>
-            <TabsTrigger value="expired" className="rounded-lg">Expired</TabsTrigger>
-            <TabsTrigger value="used" className="rounded-lg">Used</TabsTrigger>
-          </TabsList>
 
-          {["all", "active", "pending", "pending-workers", "expired", "used"].map((tab) => {
-            const tabRows = accessRows.filter((row) => {
-              if (tab === "all") return true;
-              const status = String(row.status || "").toUpperCase();
-              if (tab === "active") return status === "ACTIVE";
-              if (tab === "pending") return status === "PENDING";
-              if (tab === "pending-workers") {
-                return status === "PENDING" && String(row.type || "").toUpperCase() === "WORKER";
-              }
-              if (tab === "expired") return status === "EXPIRED";
-              if (tab === "used") return status === "USED";
-              return true;
-            });
-            return (
-              <TabsContent key={tab} value={tab} className="m-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-[#F9FAFB]">
-                      <TableHead>QR Code ID</TableHead>
-                      <TableHead>Type</TableHead>
-                      <TableHead>Generated By</TableHead>
-                      <TableHead>For</TableHead>
-                      <TableHead>Unit</TableHead>
-                      <TableHead>Valid Period</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {tabRows.map((row) => (
-                      <TableRow key={row.id} className="hover:bg-[#F9FAFB]">
-                        <TableCell className="font-medium text-[#1E293B]">
-                          {row.qrId ?? row.code ?? row.qrCode ?? row.id}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="secondary" className="bg-[#F3F4F6] text-[#1E293B]">
-                            {humanizeEnum(row.type)}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-[#64748B]">
-                          {row.creator?.nameEN ?? row.createdBy?.nameEN ?? row.generatedById ?? "—"}
-                        </TableCell>
-                        <TableCell className="text-[#1E293B]">
-                          {row.visitorName ?? row.worker?.name ?? row.serviceProviderName ?? "—"}
-                        </TableCell>
-                        <TableCell className="text-[#64748B]">
-                          {row.unit?.unitNumber ?? row.unitId ?? "—"}
-                        </TableCell>
-                        <TableCell className="text-[#64748B] text-sm">
-                          <div>{row.validFrom ? formatDateTime(row.validFrom) : "—"}</div>
-                          <div className="text-xs">to {row.validTo ? formatDateTime(row.validTo) : "—"}</div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge className={getStatusColorClass(row.status)}>{humanizeEnum(row.status)}</Badge>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {String(row.status || "").toUpperCase() === "ACTIVE" ? (
-                            <div className="flex justify-end gap-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="gap-2"
-                                onClick={() => void handleMarkQrUsed(row.id)}
-                                disabled={actionRowId === row.id}
-                              >
-                                <CheckCheck className="w-4 h-4" />
-                                {actionRowId === row.id ? "Working..." : "Mark Used"}
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="gap-2"
-                                onClick={() => void handleRevokeQr(row.id)}
-                                disabled={actionRowId === row.id}
-                              >
-                                <Ban className="w-4 h-4" />
-                                {actionRowId === row.id ? "Working..." : "Revoke"}
-                              </Button>
-                            </div>
-                          ) : String(row.status || "").toUpperCase() === "PENDING" &&
-                            String(row.type || "").toUpperCase() === "WORKER" ? (
-                            <div className="flex justify-end gap-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => void handleRejectWorkerQr(row.id)}
-                                disabled={actionRowId === row.id}
-                              >
-                                {actionRowId === row.id ? "Working..." : "Reject"}
-                              </Button>
-                              <Button
-                                size="sm"
-                                className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white"
-                                onClick={() => void handleApproveWorkerQr(row.id)}
-                                disabled={actionRowId === row.id}
-                              >
-                                {actionRowId === row.id ? "Working..." : "Approve"}
-                              </Button>
-                            </div>
-                          ) : (
-                            <span className="text-xs text-[#64748B]">—</span>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {!isLoading && tabRows.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={8} className="text-center py-10 text-[#64748B]">
-                          No access QR records in this tab.
-                        </TableCell>
-                      </TableRow>
-                    ) : null}
-                  </TableBody>
-                </Table>
-              </TabsContent>
-            );
-          })}
-        </Tabs>
-      </Card>
+        {/* Table */}
+        <div style={{ padding: "0" }}>
+          <DataTable columns={columns} rows={paginatedRows} rowKey={(r) => r.id} loading={isLoading} emptyTitle="No QR records" emptyDescription="No records match your search or filters." />
+        </div>
+
+        {/* Pagination */}
+        {filteredRows.length > PAGE_SIZE && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", borderTop: "1px solid #F3F4F6", background: "#FAFAFA" }}>
+            <span style={{ fontSize: "12px", color: "#6B7280" }}>
+              Showing {((safePage - 1) * PAGE_SIZE) + 1}–{Math.min(safePage * PAGE_SIZE, filteredRows.length)} of {filteredRows.length} records
+            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <button type="button" disabled={safePage <= 1} onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                style={{ display: "flex", alignItems: "center", gap: "4px", padding: "5px 10px", borderRadius: "6px", border: "1px solid #E5E7EB", background: safePage <= 1 ? "#F9FAFB" : "#FFF", color: safePage <= 1 ? "#D1D5DB" : "#374151", cursor: safePage <= 1 ? "not-allowed" : "pointer", fontSize: "12px", fontWeight: 600, fontFamily: "'Work Sans', sans-serif" }}>
+                <ChevronLeft style={{ width: "12px", height: "12px" }} /> Prev
+              </button>
+              <span style={{ fontSize: "12px", fontWeight: 700, color: "#374151", fontFamily: "'DM Mono', monospace", padding: "0 6px" }}>
+                {safePage} / {totalPages}
+              </span>
+              <button type="button" disabled={safePage >= totalPages} onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                style={{ display: "flex", alignItems: "center", gap: "4px", padding: "5px 10px", borderRadius: "6px", border: "1px solid #E5E7EB", background: safePage >= totalPages ? "#F9FAFB" : "#FFF", color: safePage >= totalPages ? "#D1D5DB" : "#374151", cursor: safePage >= totalPages ? "not-allowed" : "pointer", fontSize: "12px", fontWeight: 600, fontFamily: "'Work Sans', sans-serif" }}>
+                Next <ChevronRight style={{ width: "12px", height: "12px" }} />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
+  );
+}
+
+// ─── ActionBtn helper ─────────────────────────────────────────
+
+function ActionBtn({ label, icon, variant = "ghost", onClick, disabled }: { label: string; icon?: React.ReactNode; variant?: "ghost" | "danger" | "success"; onClick: () => void; disabled?: boolean }) {
+  const [hov, setHov] = useState(false);
+  const styles: Record<string, React.CSSProperties> = {
+    ghost:   { background: hov ? "#F3F4F6" : "#FFF",   color: "#374151",                       border: "1px solid #E5E7EB" },
+    danger:  { background: hov ? "#B91C1C" : "#FEF2F2", color: hov ? "#FFF" : "#DC2626",       border: "1px solid #FECACA" },
+    success: { background: hov ? "#047857" : "#ECFDF5", color: hov ? "#FFF" : "#059669",       border: "1px solid #A7F3D0" },
+  };
+  return (
+    <button type="button" onClick={onClick} disabled={disabled} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{ display: "flex", alignItems: "center", gap: "4px", padding: "4px 10px", borderRadius: "6px", cursor: disabled ? "not-allowed" : "pointer", fontSize: "11.5px", fontWeight: 700, transition: "all 120ms ease", fontFamily: "'Work Sans', sans-serif", opacity: disabled ? 0.4 : 1, ...styles[variant] }}>
+      {icon}{label}
+    </button>
   );
 }

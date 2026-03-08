@@ -8,7 +8,7 @@ import { Textarea } from "../ui/textarea";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
+import { DataTable, type DataTableColumn } from "../DataTable";
 import { Plus, RefreshCw, Search, Pencil, Trash2, Upload } from "lucide-react";
 import apiClient from "../../lib/api-client";
 import { errorMessage, extractMeta, extractRows, formatDateTime, getPriorityColorClass, getStatusColorClass, humanizeEnum } from "../../lib/live-data";
@@ -297,69 +297,59 @@ export function BannerManagement() {
 
       <Card className="rounded-xl overflow-hidden">
         <div className="p-4 border-b border-[#E5E7EB]"><h3 className="text-[#1E293B]">Banners</h3></div>
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-[#F9FAFB]">
-              <TableHead>Banner</TableHead>
-              <TableHead>Audience</TableHead>
-              <TableHead>Schedule</TableHead>
-              <TableHead>Priority</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Metrics</TableHead>
-              <TableHead className="text-right">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((b) => {
-              const audienceValues = readAudienceValues(b.targetAudience, b.audienceMeta);
+        {(() => {
+          const cols: DataTableColumn<Banner>[] = [
+            { key: "banner", header: "Banner", render: (b) => (
+              <div className="space-y-1 max-w-sm">
+                <div className="font-medium text-[#1E293B]">{b.titleEn}</div>
+                {b.titleAr ? <div className="text-xs text-[#64748B]">{b.titleAr}</div> : null}
+                {b.description ? <div className="text-xs text-[#64748B] truncate">{b.description}</div> : null}
+                <div className="flex flex-wrap gap-1">
+                  {b.ctaText ? <Badge variant="secondary" className="bg-[#EEF2FF] text-[#4338CA]">CTA: {b.ctaText}</Badge> : null}
+                  {b.imageFileId ? <Badge variant="secondary" className="bg-[#F3F4F6] text-[#334155]">Image</Badge> : null}
+                </div>
+              </div>
+            )},
+            { key: "audience", header: "Audience", render: (b) => (
+              <div>
+                <Badge variant="secondary" className="bg-[#F3F4F6] text-[#334155]">{humanizeEnum(b.targetAudience)}</Badge>
+                <div className="text-xs text-[#64748B] mt-1">{readAudienceValues(b.targetAudience, b.audienceMeta) || (b.targetAudience === "ALL" ? "All" : "No values")}</div>
+              </div>
+            )},
+            { key: "schedule", header: "Schedule", render: (b) => (
+              <div className="text-xs text-[#334155]">
+                <div>{formatDateTime(b.startDate)}</div>
+                <div>{formatDateTime(b.endDate)}</div>
+                <div className="text-[#64748B]">Created: {formatDateTime(b.createdAt)}</div>
+              </div>
+            )},
+            { key: "priority", header: "Priority", render: (b) => <Badge className={getPriorityColorClass(b.displayPriority)}>{humanizeEnum(b.displayPriority)}</Badge> },
+            { key: "status", header: "Status", render: (b) => <Badge className={getStatusColorClass(b.status)}>{humanizeEnum(b.status)}</Badge> },
+            { key: "metrics", header: "Metrics", render: (b) => {
               const ctr = Number(b.ctr ?? (b.views ? (Number(b.clicks || 0) / Number(b.views || 1)) * 100 : 0));
               return (
-                <TableRow key={b.id} className="hover:bg-[#F9FAFB]">
-                  <TableCell className="align-top">
-                    <div className="space-y-1 max-w-sm">
-                      <div className="font-medium text-[#1E293B]">{b.titleEn}</div>
-                      {b.titleAr ? <div className="text-xs text-[#64748B]">{b.titleAr}</div> : null}
-                      {b.description ? <div className="text-xs text-[#64748B] truncate">{b.description}</div> : null}
-                      <div className="flex flex-wrap gap-1">
-                        {b.ctaText ? <Badge variant="secondary" className="bg-[#EEF2FF] text-[#4338CA]">CTA: {b.ctaText}</Badge> : null}
-                        {b.imageFileId ? <Badge variant="secondary" className="bg-[#F3F4F6] text-[#334155]">Image</Badge> : null}
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell className="align-top">
-                    <Badge variant="secondary" className="bg-[#F3F4F6] text-[#334155]">{humanizeEnum(b.targetAudience)}</Badge>
-                    <div className="text-xs text-[#64748B] mt-1">{audienceValues || (b.targetAudience === "ALL" ? "All" : "No values")}</div>
-                  </TableCell>
-                  <TableCell className="align-top text-xs text-[#334155]">
-                    <div>{formatDateTime(b.startDate)}</div>
-                    <div>{formatDateTime(b.endDate)}</div>
-                    <div className="text-[#64748B]">Created: {formatDateTime(b.createdAt)}</div>
-                  </TableCell>
-                  <TableCell className="align-top"><Badge className={getPriorityColorClass(b.displayPriority)}>{humanizeEnum(b.displayPriority)}</Badge></TableCell>
-                  <TableCell className="align-top"><Badge className={getStatusColorClass(b.status)}>{humanizeEnum(b.status)}</Badge></TableCell>
-                  <TableCell className="align-top text-xs text-[#334155]">
-                    <div>Views: {Number(b.views || 0)}</div>
-                    <div>Clicks: {Number(b.clicks || 0)}</div>
-                    <div>CTR: {Number.isFinite(ctr) ? ctr.toFixed(2) : "0.00"}%</div>
-                  </TableCell>
-                  <TableCell className="align-top">
-                    <div className="flex justify-end gap-2 flex-wrap">
-                      <Button size="sm" variant="outline" onClick={() => openEdit(b)}><Pencil className="w-4 h-4" />Edit</Button>
-                      {b.status === "ACTIVE" ? (
-                        <Button size="sm" variant="outline" onClick={() => void updateStatus(b, "INACTIVE")}>Deactivate</Button>
-                      ) : (
-                        <Button size="sm" variant="outline" onClick={() => void updateStatus(b, "ACTIVE")}>Activate</Button>
-                      )}
-                      {b.status !== "EXPIRED" ? <Button size="sm" variant="outline" onClick={() => void updateStatus(b, "EXPIRED")}>Expire</Button> : null}
-                      <Button size="sm" variant="destructive" onClick={() => void removeBanner(b)}><Trash2 className="w-4 h-4" />Delete</Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
+                <div className="text-xs text-[#334155]">
+                  <div>Views: {Number(b.views || 0)}</div>
+                  <div>Clicks: {Number(b.clicks || 0)}</div>
+                  <div>CTR: {Number.isFinite(ctr) ? ctr.toFixed(2) : "0.00"}%</div>
+                </div>
               );
-            })}
-            {!loading && rows.length === 0 ? <TableRow><TableCell colSpan={7} className="text-center py-10 text-[#64748B]">No banners found.</TableCell></TableRow> : null}
-          </TableBody>
-        </Table>
+            }},
+            { key: "actions", header: "Actions", render: (b) => (
+              <div className="flex justify-end gap-2 flex-wrap">
+                <Button size="sm" variant="outline" onClick={() => openEdit(b)}><Pencil className="w-4 h-4" />Edit</Button>
+                {b.status === "ACTIVE" ? (
+                  <Button size="sm" variant="outline" onClick={() => void updateStatus(b, "INACTIVE")}>Deactivate</Button>
+                ) : (
+                  <Button size="sm" variant="outline" onClick={() => void updateStatus(b, "ACTIVE")}>Activate</Button>
+                )}
+                {b.status !== "EXPIRED" ? <Button size="sm" variant="outline" onClick={() => void updateStatus(b, "EXPIRED")}>Expire</Button> : null}
+                <Button size="sm" variant="destructive" onClick={() => void removeBanner(b)}><Trash2 className="w-4 h-4" />Delete</Button>
+              </div>
+            )},
+          ];
+          return <DataTable columns={cols} rows={rows} rowKey={(b) => b.id} loading={loading} emptyTitle="No banners found" />;
+        })()}
       </Card>
 
       <Dialog open={dialogOpen} onOpenChange={closeDialog}>

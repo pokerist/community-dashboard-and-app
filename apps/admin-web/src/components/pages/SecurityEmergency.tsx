@@ -16,14 +16,7 @@ import { Label } from "../ui/label";
 import { Input } from "../ui/input";
 import { Textarea } from "../ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../ui/table";
+import { DataTable, type DataTableColumn } from "../DataTable";
 import { AlertTriangle, CheckCircle, Clock, Flame, Video } from "lucide-react";
 import apiClient from "../../lib/api-client";
 import {
@@ -429,59 +422,20 @@ export function SecurityEmergency() {
         <div className="p-4 border-b border-[#E5E7EB]">
           <h3 className="text-[#1E293B]">Security Incidents</h3>
         </div>
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-[#F9FAFB]">
-              <TableHead>Incident ID</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Location</TableHead>
-              <TableHead>Resident</TableHead>
-              <TableHead>Description</TableHead>
-              <TableHead>Priority</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Response Time</TableHead>
-              <TableHead>Reported At</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {incidentsData.map((incident) => (
-              <TableRow key={incident.id} className="hover:bg-[#F9FAFB]">
-                <TableCell className="font-medium text-[#1E293B]">
-                  {incident.incidentNumber ?? incident.id}
-                </TableCell>
-                <TableCell>
-                  <Badge variant="secondary" className="bg-[#F3F4F6] text-[#1E293B]">
-                    {incident.type}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-[#64748B]">
-                  {incident.location ?? incident.unit?.unitNumber ?? "—"}
-                </TableCell>
-                <TableCell className="text-[#1E293B]">{incident.residentName || "—"}</TableCell>
-                <TableCell className="text-[#64748B] max-w-xs truncate">{incident.description}</TableCell>
-                <TableCell>
-                  <Badge className={getPriorityColorClass(incident.priority)}>
-                    {humanizeEnum(incident.priority)}
-                  </Badge>
-                </TableCell>
-                <TableCell>
-                  <Badge className={getStatusColorClass(incident.status)}>
-                    {humanizeEnum(incident.status)}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-[#1E293B]">{incident.responseTime ?? "—"}</TableCell>
-                <TableCell className="text-[#64748B]">{formatDateTime(incident.reportedAt ?? incident.createdAt)}</TableCell>
-              </TableRow>
-            ))}
-            {!isLoading && incidentsData.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={9} className="text-center py-10 text-[#64748B]">
-                  No incidents found.
-                </TableCell>
-              </TableRow>
-            ) : null}
-          </TableBody>
-        </Table>
+        {(() => {
+          const cols: DataTableColumn<any>[] = [
+            { key: "id", header: "Incident ID", render: (i) => <span className="font-medium text-[#1E293B]">{i.incidentNumber ?? i.id}</span> },
+            { key: "type", header: "Type", render: (i) => <Badge variant="secondary" className="bg-[#F3F4F6] text-[#1E293B]">{i.type}</Badge> },
+            { key: "location", header: "Location", render: (i) => <span className="text-[#64748B]">{i.location ?? i.unit?.unitNumber ?? "—"}</span> },
+            { key: "resident", header: "Resident", render: (i) => <span className="text-[#1E293B]">{i.residentName || "—"}</span> },
+            { key: "description", header: "Description", render: (i) => <span className="text-[#64748B] max-w-xs truncate block">{i.description}</span> },
+            { key: "priority", header: "Priority", render: (i) => <Badge className={getPriorityColorClass(i.priority)}>{humanizeEnum(i.priority)}</Badge> },
+            { key: "status", header: "Status", render: (i) => <Badge className={getStatusColorClass(i.status)}>{humanizeEnum(i.status)}</Badge> },
+            { key: "responseTime", header: "Response Time", render: (i) => <span className="text-[#1E293B]">{i.responseTime ?? "—"}</span> },
+            { key: "reportedAt", header: "Reported At", render: (i) => <span className="text-[#64748B]">{formatDateTime(i.reportedAt ?? i.createdAt)}</span> },
+          ];
+          return <DataTable columns={cols} rows={incidentsData} rowKey={(i) => i.id} loading={isLoading} emptyTitle="No incidents found" />;
+        })()}
       </Card>
 
     </div>

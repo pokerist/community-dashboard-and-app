@@ -27,7 +27,7 @@ import { Card } from "../ui/card";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
+import { DataTable, type DataTableColumn } from "../DataTable";
 import { PageHeader } from "../PageHeader";
 
 type ReportKey =
@@ -402,49 +402,25 @@ export function ReportsAnalytics() {
           {/* Recent Reports Table */}
           <div>
             <h2 className="text-base font-semibold text-[#0F172A] mb-3">Generated Reports</h2>
-            <Card className="border border-[#E2E8F0] rounded-xl overflow-hidden">
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="border-[#E2E8F0] bg-[#F8FAFC]">
-                      <TableHead className="text-[#64748B]">Report Name</TableHead>
-                      <TableHead className="text-[#64748B]">Type</TableHead>
-                      <TableHead className="text-[#64748B]">Format</TableHead>
-                      <TableHead className="text-[#64748B] text-right">Rows</TableHead>
-                      <TableHead className="text-[#64748B]">Generated</TableHead>
-                      <TableHead className="text-[#64748B] text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {history.length === 0 ? (
-                      <TableRow className="border-[#E2E8F0]">
-                        <TableCell colSpan={6} className="text-center py-12">
-                          <FileText className="w-12 h-12 text-[#CBD5E1] mx-auto mb-3" />
-                          <p className="text-[#64748B]">No reports generated yet</p>
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      history.map((report) => (
-                        <TableRow key={report.id} className="border-[#E2E8F0] hover:bg-[#F8FAFC] transition">
-                          <TableCell className="text-[#0F172A] font-medium">{report.label}</TableCell>
-                          <TableCell className="text-[#64748B] text-sm">{humanizeEnum(report.reportType)}</TableCell>
-                          <TableCell>
-                            <Badge className={getFormatBadgeColor(report.format)}>{report.format.toUpperCase()}</Badge>
-                          </TableCell>
-                          <TableCell className="text-[#334155] text-right font-medium">{report.rowCount}</TableCell>
-                          <TableCell className="text-[#64748B] text-sm">{formatDateTime(report.generatedAt)}</TableCell>
-                          <TableCell className="text-right">
-                            <Button variant="ghost" size="sm" onClick={() => void downloadReport(report.id, report.filename)} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50">
-                              <Download className="w-4 h-4" />
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </Card>
+            {(() => {
+              const cols: DataTableColumn<HistoryRow>[] = [
+                { key: "name", header: "Report Name", render: (r) => <span className="text-[#0F172A] font-medium">{r.label}</span> },
+                { key: "type", header: "Type", render: (r) => <span className="text-[#64748B] text-sm">{humanizeEnum(r.reportType)}</span> },
+                { key: "format", header: "Format", render: (r) => <Badge className={getFormatBadgeColor(r.format)}>{r.format.toUpperCase()}</Badge> },
+                { key: "rows", header: "Rows", render: (r) => <span className="text-[#334155] font-medium">{r.rowCount}</span> },
+                { key: "generated", header: "Generated", render: (r) => <span className="text-[#64748B] text-sm">{formatDateTime(r.generatedAt)}</span> },
+                { key: "actions", header: "Actions", render: (r) => (
+                  <Button variant="ghost" size="sm" onClick={() => void downloadReport(r.id, r.filename)} className="text-blue-600 hover:text-blue-700 hover:bg-blue-50">
+                    <Download className="w-4 h-4" />
+                  </Button>
+                )},
+              ];
+              return (
+                <Card className="border border-[#E2E8F0] rounded-xl overflow-hidden">
+                  <DataTable columns={cols} rows={history} rowKey={(r) => r.id} emptyTitle="No reports generated yet" emptyDescription="Generated reports will appear here" />
+                </Card>
+              );
+            })()}
           </div>
         </div>
       ) : (

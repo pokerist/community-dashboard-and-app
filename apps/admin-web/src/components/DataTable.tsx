@@ -1,15 +1,5 @@
 import { ReactNode } from "react";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "./ui/table";
-import { Skeleton } from "./ui/skeleton";
 import { EmptyState } from "./EmptyState";
-import { cn } from "./ui/utils";
 
 export interface DataTableColumn<TRow> {
   key: string;
@@ -31,6 +21,29 @@ interface DataTableProps<TRow> {
   headerRowClassName?: string;
   rowClassName?: string | ((row: TRow) => string);
   cellClassName?: string;
+  onRowClick?: (row: TRow) => void;
+}
+
+// Teal → Blue → Dark pink, cycling per column
+const ACCENTS = ["#0D9488", "#2563EB", "#BE185D"];
+const accentFor = (i: number) => ACCENTS[i % ACCENTS.length];
+
+// Varied skeleton widths so the loading state looks natural
+const SK_WIDTHS = ["62%", "78%", "48%", "68%", "55%", "72%"];
+
+function SkeletonBar({ colIdx, dark }: { colIdx: number; dark: boolean }) {
+  return (
+    <div style={{
+      height: "12px",
+      width: SK_WIDTHS[colIdx % SK_WIDTHS.length],
+      borderRadius: "4px",
+      backgroundImage: dark
+        ? "linear-gradient(90deg,rgba(255,255,255,0.06) 25%,rgba(255,255,255,0.12) 50%,rgba(255,255,255,0.06) 75%)"
+        : "linear-gradient(90deg,#F3F4F6 25%,#E9EAEC 50%,#F3F4F6 75%)",
+      backgroundSize: "200% 100%",
+      animation: "dt-shimmer 1.4s ease infinite",
+    }} />
+  );
 }
 
 export function DataTable<TRow>({
@@ -43,10 +56,10 @@ export function DataTable<TRow>({
   emptyDescription,
   variant = "light",
   wrapperClassName,
-  headerRowClassName,
   rowClassName,
-  cellClassName,
+  onRowClick,
 }: DataTableProps<TRow>) {
+
   if (!loading && rows.length === 0) {
     return (
       <EmptyState
@@ -57,85 +70,133 @@ export function DataTable<TRow>({
     );
   }
 
-  const wrapperBaseClassName =
-    variant === "dark"
-      ? "rounded-xl border border-white/5 overflow-hidden bg-[#181c27]"
-      : "overflow-hidden rounded-xl border border-[#E2E8F0] bg-white";
-
-  const headRowBaseClassName =
-    variant === "dark"
-      ? "bg-[#0f1117] border-b border-white/5"
-      : "bg-[#F8FAFC]";
-
-  const tableHeadBaseClassName =
-    variant === "dark"
-      ? "py-3 px-4 text-left text-xs font-medium text-slate-500 uppercase tracking-wider"
-      : undefined;
-
-  const tableCellBaseClassName =
-    variant === "dark"
-      ? "py-4 px-4 text-sm text-slate-300"
-      : undefined;
-
-  const rowBaseClassName =
-    variant === "dark"
-      ? "border-b border-white/5 hover:bg-white/[0.02] transition-colors last:border-0"
-      : undefined;
+  const isDark = variant === "dark";
 
   return (
-    <div className={cn(wrapperBaseClassName, wrapperClassName)}>
-      <Table>
-        <TableHeader>
-          <TableRow className={cn(headRowBaseClassName, headerRowClassName)}>
-            {columns.map((column) => (
-              <TableHead
-                key={column.key}
-                className={cn(tableHeadBaseClassName, column.className)}
-              >
-                {column.header}
-              </TableHead>
-            ))}
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {loading
-            ? Array.from({ length: skeletonRows }).map((_, index) => (
-                <TableRow key={`skeleton-${index}`} className={rowBaseClassName}>
-                  {columns.map((column) => (
-                    <TableCell
-                      key={`${column.key}-${index}`}
-                      className={cn(tableCellBaseClassName, cellClassName, column.className)}
+    <>
+      <style>{`
+        @keyframes dt-shimmer {
+          0%   { background-position:  200% 0 }
+          100% { background-position: -200% 0 }
+        }
+        .dt-row:hover .dt-cell {
+          background: ${isDark ? "rgba(255,255,255,0.025)" : "#FAFAFA"} !important;
+        }
+      `}</style>
+
+      <div
+        className={wrapperClassName}
+        style={{
+          borderRadius: "10px",
+          border: isDark ? "1px solid rgba(255,255,255,0.06)" : "1px solid #EBEBEB",
+          overflow: "hidden",
+          background: isDark ? "#181C27" : "#FFFFFF",
+          boxShadow: isDark ? "none" : "0 1px 4px rgba(0,0,0,0.05)",
+          fontFamily: "'Work Sans', sans-serif",
+        }}
+      >
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+
+          {/* ── Header ───────────────────────────────────────── */}
+          <thead>
+            <tr style={{ background: isDark ? "#0F1117" : "#FAFAFA" }}>
+              {columns.map((col, ci) => {
+                const accent = accentFor(ci);
+                return (
+                  <th
+                    key={col.key}
+                    className={col.className}
+                    style={{
+                      padding: "10px 16px",
+                      textAlign: "left",
+                      fontSize: "10.5px",
+                      fontWeight: 700,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.07em",
+                      color: isDark ? "#6B7280" : "#9CA3AF",
+                      borderBottom: isDark
+                        ? "1px solid rgba(255,255,255,0.06)"
+                        : "1px solid #EBEBEB",
+                      // Subtle colored underline glow per column
+                      boxShadow: `inset 0 -2px 0 ${accent}35`,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                      {/* Accent dot */}
+                      <span style={{
+                        width: "5px", height: "5px", borderRadius: "50%",
+                        background: accent, opacity: 0.8, flexShrink: 0,
+                      }} />
+                      {col.header}
+                    </span>
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+
+          {/* ── Body ─────────────────────────────────────────── */}
+          <tbody>
+            {loading
+              ? Array.from({ length: skeletonRows }).map((_, ri) => (
+                  <tr key={`sk-${ri}`}>
+                    {columns.map((col, ci) => (
+                      <td
+                        key={`${col.key}-sk-${ri}`}
+                        className={col.className}
+                        style={{
+                          padding: "12px 16px",
+                          borderBottom: ri < skeletonRows - 1
+                            ? isDark ? "1px solid rgba(255,255,255,0.04)" : "1px solid #F3F4F6"
+                            : "none",
+                        }}
+                      >
+                        <SkeletonBar colIdx={ci} dark={isDark} />
+                      </td>
+                    ))}
+                  </tr>
+                ))
+
+              : rows.map((row, ri) => {
+                  const extra = typeof rowClassName === "function" ? rowClassName(row) : (rowClassName ?? "");
+                  const isLast = ri === rows.length - 1;
+                  return (
+                    <tr
+                      key={rowKey(row)}
+                      className={`dt-row ${extra}`}
+                      style={{ transition: "background 100ms ease", cursor: onRowClick ? "pointer" : undefined }}
+                      onClick={onRowClick ? () => onRowClick(row) : undefined}
                     >
-                      <Skeleton
-                        className={cn(
-                          "h-4 w-full max-w-[140px]",
-                          variant === "dark" ? "bg-white/10" : "",
-                        )}
-                      />
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            : rows.map((row) => (
-                <TableRow
-                  key={rowKey(row)}
-                  className={cn(
-                    rowBaseClassName,
-                    typeof rowClassName === "function" ? rowClassName(row) : rowClassName,
-                  )}
-                >
-                  {columns.map((column) => (
-                    <TableCell
-                      key={`${column.key}-${rowKey(row)}`}
-                      className={cn(tableCellBaseClassName, cellClassName, column.className)}
-                    >
-                      {column.render(row)}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))}
-        </TableBody>
-      </Table>
-    </div>
+                      {columns.map((col, ci) => {
+                        const accent = accentFor(ci);
+                        return (
+                          <td
+                            key={`${col.key}-${rowKey(row)}`}
+                            className={`dt-cell ${col.className ?? ""}`}
+                            style={{
+                              padding: "11px 16px",
+                              fontSize: "13px",
+                              color: isDark ? "#CBD5E1" : "#374151",
+                              borderBottom: isLast
+                                ? "none"
+                                : isDark ? "1px solid rgba(255,255,255,0.04)" : "1px solid #F5F5F5",
+                              // First column gets a faint accent left border
+                              borderLeft: ci === 0 ? `2px solid ${accent}30` : "none",
+                              transition: "background 100ms ease",
+                              fontFamily: "'Work Sans', sans-serif",
+                            }}
+                          >
+                            {col.render(row)}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }

@@ -853,6 +853,14 @@ export class AccessControlService {
     return this.prisma.accessQRCode.findMany({
       where,
       orderBy: { createdAt: 'desc' },
+      include: {
+        forUnit: {
+          select: { id: true, unitNumber: true, block: true, projectName: true },
+        },
+        generatedBy: {
+          select: { id: true, nameEN: true, nameAR: true, email: true, phone: true },
+        },
+      },
     });
   }
 

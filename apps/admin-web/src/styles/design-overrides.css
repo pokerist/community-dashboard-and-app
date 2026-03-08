@@ -9,9 +9,9 @@
 /* ── Design Tokens ────────────────────────────────────────────── */
 :root {
   /* Backgrounds */
-  --bg-base:    #F5F4F1;
+  --bg-base:    #F1F3F5;
   --bg-card:    #FFFFFF;
-  --bg-sidebar: #1A1D23;
+  --bg-sidebar: #FFFFFF;
 
   /* Text */
   --text-primary:        #111827;
@@ -49,7 +49,7 @@
   --primary-foreground: #ffffff;
   --ring:               #2563EB;
 
-  --background:           #F5F4F1;
+  --background:           #F1F3F5;
   --background-secondary: #EBEBEB;
   --surface:              #FFFFFF;
 

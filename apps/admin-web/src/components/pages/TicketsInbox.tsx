@@ -15,7 +15,7 @@ import {
 } from "../ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Tabs, TabsList, TabsTrigger } from "../ui/tabs";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
+import { DataTable, type DataTableColumn } from "../DataTable";
 import { toast } from "sonner";
 import { AlertTriangle, ArrowLeft, Clock, Eye, MessageSquare, RefreshCw, Search, Send, UserX, X } from "lucide-react";
 import apiClient from "../../lib/api-client";
@@ -610,54 +610,32 @@ export function TicketsInbox() {
           </div>
         </div>
 
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-[#F9FAFB]">
-              <TableHead>Type</TableHead>
-              <TableHead>Ticket</TableHead>
-              <TableHead>Resident</TableHead>
-              <TableHead>Unit</TableHead>
-              <TableHead>Priority</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Updated</TableHead>
-              <TableHead>Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredRows.map((r) => (
-              <TableRow key={r.key} className="hover:bg-[#F9FAFB]">
-                <TableCell>
-                  <div className="flex items-center gap-2">
-                    <Badge className={kindBadgeClass(r.kind)}>{humanizeEnum(r.kind)}</Badge>
-                    {r.isUrgent ? (
-                      <Badge className="bg-[#FEE2E2] text-[#B91C1C]">Urgent</Badge>
-                    ) : null}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-[#1E293B]">{r.title}</p>
-                    <p className="text-xs text-[#64748B]">
-                      {r.kind === "COMPLAINT"
-                        ? (r.raw?.complaintNumber || r.id.slice(0, 8))
-                        : r.id.slice(0, 8)}
-                      {r.kind === "COMPLAINT" && r.team ? ` • ${r.team}` : ""}
-                    </p>
-                  </div>
-                </TableCell>
-                <TableCell><div className="space-y-1"><p className="text-sm text-[#1E293B]">{r.residentName}</p><p className="text-xs text-[#64748B]">{r.residentSub}</p></div></TableCell>
-                <TableCell className="text-[#64748B]">{r.unitLabel}</TableCell>
-                <TableCell><Badge className={getPriorityColorClass(r.priority || "MEDIUM")}>{adminPriorityLabel(r.priority || "MEDIUM")}</Badge></TableCell>
-                <TableCell><Badge className={getStatusColorClass(r.status)}>{adminTicketStatusLabel(r.kind, r.status)}</Badge></TableCell>
-                <TableCell className="text-[#64748B]">{formatDateTime(r.updatedAt || r.createdAt)}</TableCell>
-                <TableCell><Button variant="ghost" size="sm" onClick={() => void loadTicketDetail(r)}><Eye className="w-4 h-4 mr-1" />Open</Button></TableCell>
-              </TableRow>
-            ))}
-            {!loading && filteredRows.length === 0 ? (
-              <TableRow><TableCell colSpan={8} className="text-center py-10 text-[#64748B]">No tickets match the current filters.</TableCell></TableRow>
-            ) : null}
-          </TableBody>
-        </Table>
+        {(() => {
+          const cols: DataTableColumn<any>[] = [
+            { key: "type", header: "Type", render: (r) => (
+              <div className="flex items-center gap-2">
+                <Badge className={kindBadgeClass(r.kind)}>{humanizeEnum(r.kind)}</Badge>
+                {r.isUrgent ? <Badge className="bg-[#FEE2E2] text-[#B91C1C]">Urgent</Badge> : null}
+              </div>
+            )},
+            { key: "ticket", header: "Ticket", render: (r) => (
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-[#1E293B]">{r.title}</p>
+                <p className="text-xs text-[#64748B]">
+                  {r.kind === "COMPLAINT" ? (r.raw?.complaintNumber || r.id.slice(0, 8)) : r.id.slice(0, 8)}
+                  {r.kind === "COMPLAINT" && r.team ? ` • ${r.team}` : ""}
+                </p>
+              </div>
+            )},
+            { key: "resident", header: "Resident", render: (r) => <div className="space-y-1"><p className="text-sm text-[#1E293B]">{r.residentName}</p><p className="text-xs text-[#64748B]">{r.residentSub}</p></div> },
+            { key: "unit", header: "Unit", render: (r) => <span className="text-[#64748B]">{r.unitLabel}</span> },
+            { key: "priority", header: "Priority", render: (r) => <Badge className={getPriorityColorClass(r.priority || "MEDIUM")}>{adminPriorityLabel(r.priority || "MEDIUM")}</Badge> },
+            { key: "status", header: "Status", render: (r) => <Badge className={getStatusColorClass(r.status)}>{adminTicketStatusLabel(r.kind, r.status)}</Badge> },
+            { key: "updated", header: "Updated", render: (r) => <span className="text-[#64748B]">{formatDateTime(r.updatedAt || r.createdAt)}</span> },
+            { key: "actions", header: "Actions", render: (r) => <Button variant="ghost" size="sm" onClick={() => void loadTicketDetail(r)}><Eye className="w-4 h-4 mr-1" />Open</Button> },
+          ];
+          return <DataTable columns={cols} rows={filteredRows} rowKey={(r) => r.key} loading={loading} emptyTitle="No tickets match the current filters" />;
+        })()}
       </Card>
 
       <Dialog open={dialogOpen} onOpenChange={(open) => { if (!open) { setDialogOpen(false); setActive(null); setReturnToResidentOpen(false); setReturnToResidentMsg(""); } }}>

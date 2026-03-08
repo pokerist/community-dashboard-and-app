@@ -10,7 +10,10 @@ import {
   Wrench,
 } from "lucide-react";
 import type { ComponentType } from "react";
-import { cn } from "./ui/utils";
+import { formatCurrencyEGP } from "../lib/live-data";
+import type { DashboardKPIs } from "../lib/dashboard-service";
+
+// ─── Types ────────────────────────────────────────────────────
 
 type StatIcon =
   | "devices"
@@ -32,137 +35,284 @@ interface StatCardProps {
   icon: StatIcon;
   onClick?: () => void;
   variant?: "light" | "dark";
-  className?: string;
 }
 
-const iconMap: Record<StatIcon, ComponentType<{ className?: string }>> = {
-  devices: QrCode,
-  "active-users": UserCheck,
-  "complaints-total": ClipboardList,
-  "complaints-open": ClipboardList,
+// ─── Maps ─────────────────────────────────────────────────────
+
+const iconMap: Record<StatIcon, ComponentType<{ style?: React.CSSProperties }>> = {
+  devices:             QrCode,
+  "active-users":      UserCheck,
+  "complaints-total":  ClipboardList,
+  "complaints-open":   ClipboardList,
   "complaints-closed": ClipboardList,
-  tickets: Ticket,
-  revenue: Wallet,
-  occupancy: Building2,
-  visitors: UserRound,
-  workers: Wrench,
-  cars: Car,
+  tickets:             Ticket,
+  revenue:             Wallet,
+  occupancy:           Building2,
+  visitors:            UserRound,
+  workers:             Wrench,
+  cars:                Car,
 };
 
-/* Semantic color per stat type */
-const toneMap: Record<
-  StatIcon,
-  { accentColor: string; iconBg: string; iconColor: string; borderClass: string }
-> = {
-  devices:              { accentColor: "#2563EB", iconBg: "bg-blue-50",    iconColor: "text-blue-600",    borderClass: "border-l-[#2563EB]" },
-  "active-users":       { accentColor: "#059669", iconBg: "bg-emerald-50", iconColor: "text-emerald-600", borderClass: "border-l-[#059669]" },
-  "complaints-total":   { accentColor: "#6366F1", iconBg: "bg-indigo-50",  iconColor: "text-indigo-600",  borderClass: "border-l-[#D97706]" },
-  "complaints-open":    { accentColor: "#D97706", iconBg: "bg-amber-50",   iconColor: "text-amber-600",   borderClass: "border-l-[#DC2626]" },
-  "complaints-closed":  { accentColor: "#059669", iconBg: "bg-emerald-50", iconColor: "text-emerald-600", borderClass: "border-l-[#059669]" },
-  tickets:              { accentColor: "#2563EB", iconBg: "bg-blue-50",    iconColor: "text-blue-600",    borderClass: "border-l-[#2563EB]" },
-  revenue:              { accentColor: "#059669", iconBg: "bg-emerald-50", iconColor: "text-emerald-600", borderClass: "border-l-[#059669]" },
-  occupancy:            { accentColor: "#8B5CF6", iconBg: "bg-violet-50",  iconColor: "text-violet-600",  borderClass: "border-l-[#7C3AED]" },
-  visitors:             { accentColor: "#0891B2", iconBg: "bg-cyan-50",    iconColor: "text-cyan-600",    borderClass: "border-l-[#0891B2]" },
-  workers:              { accentColor: "#EA580C", iconBg: "bg-orange-50",  iconColor: "text-orange-600",  borderClass: "border-l-[#D97706]" },
-  cars:                 { accentColor: "#64748B", iconBg: "bg-slate-50",   iconColor: "text-slate-500",   borderClass: "border-l-[#64748B]" },
+const toneMap: Record<StatIcon, { accentColor: string; iconBg: string; iconColor: string }> = {
+  "devices":            { accentColor: "#2563EB", iconBg: "#EFF6FF", iconColor: "#2563EB" },
+  "active-users":       { accentColor: "#059669", iconBg: "#ECFDF5", iconColor: "#059669" },
+  "complaints-total":   { accentColor: "#D97706", iconBg: "#FFFBEB", iconColor: "#D97706" },
+  "complaints-open":    { accentColor: "#DC2626", iconBg: "#FEF2F2", iconColor: "#DC2626" },
+  "complaints-closed":  { accentColor: "#059669", iconBg: "#ECFDF5", iconColor: "#059669" },
+  "tickets":            { accentColor: "#2563EB", iconBg: "#EFF6FF", iconColor: "#2563EB" },
+  "revenue":            { accentColor: "#059669", iconBg: "#ECFDF5", iconColor: "#059669" },
+  "occupancy":          { accentColor: "#7C3AED", iconBg: "#F5F3FF", iconColor: "#7C3AED" },
+  "visitors":           { accentColor: "#0891B2", iconBg: "#ECFEFF", iconColor: "#0891B2" },
+  "workers":            { accentColor: "#D97706", iconBg: "#FFFBEB", iconColor: "#D97706" },
+  "cars":               { accentColor: "#64748B", iconBg: "#F8FAFC", iconColor: "#64748B" },
 };
 
-export function StatCard({
-  title,
-  value,
-  subtitle,
-  icon,
-  onClick,
-  variant = "light",
-  className,
-}: StatCardProps) {
+// ─── StatCard ─────────────────────────────────────────────────
+
+export function StatCard({ title, value, subtitle, icon, onClick, variant = "light" }: StatCardProps) {
   const IconComponent = iconMap[icon];
   const tone = toneMap[icon];
 
+  /* Dark variant */
   if (variant === "dark") {
     return (
       <div
-        className={cn(
-          "group relative bg-[#1C1B27] rounded-[6px] border border-white/[0.07] p-5 transition-colors",
-          onClick ? "cursor-pointer hover:border-white/[0.12]" : "",
-          className,
-        )}
         onClick={onClick}
         role={onClick ? "button" : undefined}
         tabIndex={onClick ? 0 : undefined}
+        style={{
+          background: "#1C1B27",
+          borderRadius: "12px",
+          border: "1px solid rgba(255,255,255,0.07)",
+          padding: "20px",
+          cursor: onClick ? "pointer" : "default",
+          fontFamily: "'Work Sans', sans-serif",
+        }}
       >
-        <div className="flex items-start justify-between mb-3">
-          <p className="text-[10px] font-bold text-white/38 uppercase tracking-[0.14em]">{title}</p>
-          <div className={cn("w-8 h-8 rounded-[4px] flex items-center justify-center", tone.iconBg, "bg-opacity-10")}>
-            <IconComponent className="w-4 h-4 text-white/50" />
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: "12px" }}>
+          <p style={{ fontSize: "10px", fontWeight: 700, color: "rgba(255,255,255,0.38)", textTransform: "uppercase", letterSpacing: "0.14em" }}>
+            {title}
+          </p>
+          <div style={{ width: "28px", height: "28px", borderRadius: "4px", background: "rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <IconComponent style={{ width: "14px", height: "14px", color: "rgba(255,255,255,0.4)" }} />
           </div>
         </div>
-        <p
-          className="text-[28px] font-bold text-white/92 leading-none tracking-[-0.025em]"
-          style={{ fontFamily: "'DM Mono', monospace" }}
-        >
+        <p style={{ fontSize: "26px", fontWeight: 700, color: "rgba(255,255,255,0.92)", lineHeight: 1, letterSpacing: "-0.025em", fontFamily: "'DM Mono', monospace" }}>
           {value}
         </p>
-        {subtitle && <p className="text-[10.5px] text-white/32 mt-2 leading-relaxed">{subtitle}</p>}
+        {subtitle && <p style={{ fontSize: "10.5px", color: "rgba(255,255,255,0.32)", marginTop: "8px", lineHeight: 1.5 }}>{subtitle}</p>}
       </div>
     );
   }
 
+  /* Light variant */
   return (
     <div
-      className={cn(
-        "group relative bg-white rounded-[6px] border border-[#EBEBEB] border-l-4 shadow-[0_1px_3px_rgba(0,0,0,0.06)]",
-        "transition-all duration-200",
-        tone.borderClass,
-        onClick
-          ? "cursor-pointer hover:shadow-[0_4px_12px_rgba(0,0,0,0.10)] hover:-translate-y-px"
-          : "hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)]",
-        className,
-      )}
       onClick={onClick}
       role={onClick ? "button" : undefined}
       tabIndex={onClick ? 0 : undefined}
+      style={{
+        background: "#FFFFFF",
+        borderRadius: "8px",
+        border: "1px solid #EBEBEB",
+        padding: "16px 18px 18px",
+        cursor: onClick ? "pointer" : "default",
+        transition: "box-shadow 180ms ease, transform 180ms ease, border-color 180ms ease",
+        fontFamily: "'Work Sans', sans-serif",
+        display: "flex",
+        flexDirection: "column",
+        position: "relative",
+        overflow: "hidden",
+      }}
+      onMouseEnter={(e) => {
+        const el = e.currentTarget as HTMLDivElement;
+        el.style.boxShadow = "0 4px 16px rgba(0,0,0,0.08)";
+        el.style.transform = "translateY(-1px)";
+        el.style.borderColor = "#D1D5DB";
+        const hint = el.querySelector(".view-hint") as HTMLElement | null;
+        if (hint) hint.style.opacity = "1";
+      }}
+      onMouseLeave={(e) => {
+        const el = e.currentTarget as HTMLDivElement;
+        el.style.boxShadow = "none";
+        el.style.transform = "translateY(0)";
+        el.style.borderColor = "#EBEBEB";
+        const hint = el.querySelector(".view-hint") as HTMLElement | null;
+        if (hint) hint.style.opacity = "0";
+      }}
     >
-      <div className="p-4">
-        {/* Header row */}
-        <div className="flex items-start justify-between gap-2 mb-3">
-          <p className="text-[11px] font-semibold text-[#6B7280] uppercase tracking-[0.06em]">
-            {title}
-          </p>
-          <div
-            className={cn(
-              "flex h-7 w-7 shrink-0 items-center justify-center rounded-[4px] transition-transform duration-150 group-hover:scale-110",
-              tone.iconBg,
-            )}
-          >
-            <IconComponent className={cn("h-3.5 w-3.5", tone.iconColor)} />
-          </div>
+      {/* Accent bar */}
+      <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: "2px", background: tone.accentColor, borderRadius: "8px 8px 0 0", opacity: 0.7 }} />
+
+      {/* Icon + title */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px" }}>
+        <div style={{ width: "30px", height: "30px", borderRadius: "7px", background: tone.iconBg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <IconComponent style={{ width: "14px", height: "14px", color: tone.iconColor }} />
         </div>
-
-        {/* Value — DM Mono, 28px bold */}
-        <p className="text-[28px] font-bold text-[#111827] font-mono leading-tight mt-2">
-          {value}
+        <p style={{ fontSize: "11px", fontWeight: 500, color: "#9CA3AF", textAlign: "right", lineHeight: 1.3, maxWidth: "120px" }}>
+          {title}
         </p>
-
-        {/* Subtitle */}
-        {subtitle && (
-          <p className="text-[12px] text-[#6B7280] mt-1.5 line-clamp-2">
-            {subtitle}
-          </p>
-        )}
-
-        {/* Click hint — uniform blue accent */}
-        {onClick && (
-          <div className="mt-2.5 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-            <span className="text-[12px] font-medium text-[#2563EB] mt-3 inline-flex items-center gap-1 hover:gap-2 transition-all">
-              View details
-            </span>
-            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" className="text-[#2563EB]">
-              <path d="M2 5h6M5 2l3 3-3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </div>
-        )}
       </div>
+
+      {/* Value */}
+      <p style={{ fontSize: "30px", fontWeight: 700, color: "#111827", lineHeight: 1, letterSpacing: "-0.03em", fontFamily: "'DM Mono', monospace", marginBottom: "6px" }}>
+        {value}
+      </p>
+
+      {/* Subtitle */}
+      {subtitle && (
+        <p style={{ fontSize: "11.5px", color: "#9CA3AF", lineHeight: 1.4, marginTop: "2px", overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+          {subtitle}
+        </p>
+      )}
+
+      {/* Hover hint */}
+      {onClick && (
+        <div className="view-hint" style={{ marginTop: "10px", display: "flex", alignItems: "center", gap: "4px", opacity: 0, transition: "opacity 150ms ease" }}>
+          <span style={{ fontSize: "11.5px", fontWeight: 600, color: tone.accentColor, fontFamily: "'Work Sans', sans-serif" }}>View details</span>
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+            <path d="M2 5h6M5 2l3 3-3 3" stroke={tone.accentColor} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// KpiGrid — replaces the inline grid in DashboardOverview.tsx
+//
+// Usage in DashboardOverview:
+//   import { KpiGrid, KpiGridSkeleton } from "../StatCard";
+//   ...
+//   {statsQuery.isLoading
+//     ? <KpiGridSkeleton />
+//     : <KpiGrid kpis={kpis} periodLabel={stats.periodLabel} onCardClick={setSelectedCard} />
+//   }
+// ─────────────────────────────────────────────────────────────
+
+interface KpiGridProps {
+  kpis: DashboardKPIs;
+  periodLabel: string;
+  onCardClick: (key: string) => void;
+}
+
+export function KpiGrid({ kpis, periodLabel, onCardClick }: KpiGridProps) {
+  const cards: Array<{ key: string; title: string; value: string; subtitle: string; icon: StatIcon }> = [
+    {
+      key: "totalRegisteredDevices",
+      title: "Registered Devices",
+      value: String(kpis.totalRegisteredDevices),
+      subtitle: `Android ${kpis.totalRegisteredDevicesByPlatform.android}  ·  iOS ${kpis.totalRegisteredDevicesByPlatform.ios}`,
+      icon: "devices",
+    },
+    {
+      key: "activeMobileUsers",
+      title: "Active Mobile Users",
+      value: String(kpis.activeMobileUsers),
+      subtitle: `Android ${kpis.activeMobileUsersByPlatform.android}  ·  iOS ${kpis.activeMobileUsersByPlatform.ios}`,
+      icon: "active-users",
+    },
+    {
+      key: "totalComplaints",
+      title: "Total Complaints",
+      value: String(kpis.totalComplaints),
+      subtitle: `Period: ${periodLabel}`,
+      icon: "complaints-total",
+    },
+    {
+      key: "openComplaints",
+      title: "Open Complaints",
+      value: String(kpis.openComplaints),
+      subtitle: "Click to view open list",
+      icon: "complaints-open",
+    },
+    {
+      key: "closedComplaints",
+      title: "Closed Complaints",
+      value: String(kpis.closedComplaints),
+      subtitle: `Period: ${periodLabel}`,
+      icon: "complaints-closed",
+    },
+    {
+      key: "ticketsByStatus",
+      title: "Tickets by Status",
+      value: String(kpis.ticketsByStatus.NEW + kpis.ticketsByStatus.IN_PROGRESS + kpis.ticketsByStatus.RESOLVED),
+      subtitle: `New ${kpis.ticketsByStatus.NEW}  ·  In Progress ${kpis.ticketsByStatus.IN_PROGRESS}  ·  Resolved ${kpis.ticketsByStatus.RESOLVED}`,
+      icon: "tickets",
+    },
+    {
+      key: "revenueCurrentMonth",
+      title: "Revenue",
+      value: formatCurrencyEGP(kpis.revenueCurrentMonth),
+      subtitle: `Paid invoices · ${periodLabel}`,
+      icon: "revenue",
+    },
+    {
+      key: "occupancyRate",
+      title: "Occupancy Rate",
+      value: `${kpis.occupancyRate.toFixed(1)}%`,
+      subtitle: "Occupied / total active units",
+      icon: "occupancy",
+    },
+    {
+      key: "currentVisitors",
+      title: "Current Visitors",
+      value: String(kpis.currentVisitors),
+      subtitle: "Click to view checked-in visitors",
+      icon: "visitors",
+    },
+    {
+      key: "blueCollarWorkers",
+      title: "Blue Collar Workers",
+      value: String(kpis.blueCollarWorkers),
+      subtitle: "Active workers on compound",
+      icon: "workers",
+    },
+    {
+      key: "totalCars",
+      title: "Registered Vehicles",
+      value: String(kpis.totalCars),
+      subtitle: "Resident-registered vehicles",
+      icon: "cars",
+    },
+  ];
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px" }}>
+      {cards.map((card) => (
+        <StatCard
+          key={card.key}
+          title={card.title}
+          value={card.value}
+          subtitle={card.subtitle}
+          icon={card.icon}
+          onClick={() => onCardClick(card.key)}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ─── Skeleton ─────────────────────────────────────────────────
+
+export function KpiGridSkeleton() {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px" }}>
+      {Array.from({ length: 11 }).map((_, i) => (
+        <div
+          key={i}
+          style={{
+            height: "110px",
+            borderRadius: "8px",
+            background: "linear-gradient(90deg, #F3F4F6 25%, #E9EAEC 50%, #F3F4F6 75%)",
+            backgroundSize: "200% 100%",
+            border: "1px solid #EBEBEB",
+            animation: "shimmer 1.5s infinite",
+          }}
+        />
+      ))}
+      <style>{`@keyframes shimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }`}</style>
     </div>
   );
 }

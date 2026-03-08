@@ -1,548 +1,423 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Card } from "../ui/card";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
-import { Badge } from "../ui/badge";
-import { toast } from "sonner";
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogFooter,
-} from "../ui/dialog";
-import { Label } from "../ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { Search, Plus, FileText, Calendar, AlertCircle } from "lucide-react";
-import apiClient from "../../lib/api-client";
-import { errorMessage, formatCurrencyEGP, formatDate, getStatusColorClass, humanizeEnum } from "../../lib/live-data";
+  RefreshCw, Plus, Check, X, Search, FileText,
+  Calendar, AlertCircle, DollarSign, Upload, ChevronDown,
+} from 'lucide-react';
+import { toast } from 'sonner';
+import { StatCard } from '../StatCard';
+import { DataTable, type DataTableColumn } from '../DataTable';
+import { StatusBadge } from '../StatusBadge';
+import apiClient from '../../lib/api-client';
+import { errorMessage, formatCurrencyEGP, formatDate, humanizeEnum } from '../../lib/live-data';
 
-type OwnerOption = { id: string; label: string };
-type UnitOption = { id: string; label: string };
+// ─── Types ────────────────────────────────────────────────────
+
+type OwnerOption   = { id: string; label: string };
+type UnitOption    = { id: string; label: string };
 
 type CreateLeaseForm = {
-  unitId: string;
-  ownerId: string;
-  startDate: string;
-  endDate: string;
-  monthlyRent: string;
-  securityDeposit: string;
-  tenantEmail: string;
-  tenantName: string;
-  tenantPhone: string;
-  tenantNationalId: string;
-  contractFileId: string;
-  nationalIdFileId: string;
-  contractFile: File | null;
-  nationalIdPhoto: File | null;
+  unitId: string; ownerId: string;
+  startDate: string; endDate: string;
+  monthlyRent: string; securityDeposit: string;
+  tenantEmail: string; tenantName: string;
+  tenantPhone: string; tenantNationalId: string;
+  contractFileId: string; nationalIdFileId: string;
+  contractFile: File | null; nationalIdPhoto: File | null;
 };
 
-const defaultCreateLeaseForm: CreateLeaseForm = {
-  unitId: "",
-  ownerId: "",
-  startDate: "",
-  endDate: "",
-  monthlyRent: "",
-  securityDeposit: "",
-  tenantEmail: "",
-  tenantName: "",
-  tenantPhone: "",
-  tenantNationalId: "",
-  contractFileId: "",
-  nationalIdFileId: "",
-  contractFile: null,
-  nationalIdPhoto: null,
+const INIT_FORM: CreateLeaseForm = {
+  unitId: '', ownerId: '', startDate: '', endDate: '',
+  monthlyRent: '', securityDeposit: '',
+  tenantEmail: '', tenantName: '', tenantPhone: '', tenantNationalId: '',
+  contractFileId: '', nationalIdFileId: '',
+  contractFile: null, nationalIdPhoto: null,
 };
+
+// ─── Shared styles ────────────────────────────────────────────
+
+const inputStyle: React.CSSProperties = {
+  width: '100%', padding: '8px 10px', borderRadius: '7px',
+  border: '1px solid #E5E7EB', fontSize: '13px', color: '#111827',
+  background: '#FFF', outline: 'none', fontFamily: "'Work Sans', sans-serif",
+  boxSizing: 'border-box', height: '36px',
+};
+const selectStyle: React.CSSProperties = { ...inputStyle, cursor: 'pointer' };
+
+// ─── Primitives ───────────────────────────────────────────────
+
+function Field({ label, hint, required, span2, children }: {
+  label: string; hint?: string; required?: boolean; span2?: boolean; children: React.ReactNode;
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', gridColumn: span2 ? 'span 2' : undefined }}>
+      <label style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'Work Sans', sans-serif" }}>
+        {label}{required && <span style={{ color: '#EF4444', marginLeft: '3px' }}>*</span>}
+      </label>
+      {hint && <p style={{ fontSize: '10.5px', color: '#B0B7C3', margin: 0 }}>{hint}</p>}
+      {children}
+    </div>
+  );
+}
+
+function SectionLabel({ label, sub }: { label: string; sub?: string }) {
+  return (
+    <div style={{ gridColumn: 'span 2', display: 'flex', alignItems: 'center', gap: '8px', paddingTop: '4px' }}>
+      <span style={{ fontSize: '10px', fontWeight: 800, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.09em', whiteSpace: 'nowrap', fontFamily: "'Work Sans', sans-serif" }}>{label}</span>
+      <div style={{ flex: 1, height: '1px', background: '#F0F0F0' }} />
+      {sub && <span style={{ fontSize: '10px', color: '#C4C9D4', whiteSpace: 'nowrap', fontFamily: "'Work Sans', sans-serif" }}>{sub}</span>}
+    </div>
+  );
+}
+
+function FileField({ label, fileName, onChange, accept, hint }: {
+  label: string; fileName?: string; onChange: (f: File | null) => void;
+  accept?: string; hint?: string;
+}) {
+  return (
+    <Field label={label} hint={hint}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', borderRadius: '7px', border: `1.5px dashed ${fileName ? '#A7F3D0' : '#E5E7EB'}`, background: fileName ? '#F0FDF4' : '#FAFAFA', cursor: 'pointer', fontSize: '12px', color: fileName ? '#059669' : '#9CA3AF', fontFamily: "'Work Sans', sans-serif", transition: 'all 120ms' }}>
+        {fileName
+          ? <><Check style={{ width: '12px', height: '12px', flexShrink: 0 }} /><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fileName}</span></>
+          : <><Upload style={{ width: '12px', height: '12px', flexShrink: 0 }} /><span>Choose file…</span></>
+        }
+        <input type="file" accept={accept} style={{ display: 'none' }} onChange={(e) => onChange(e.target.files?.[0] ?? null)} />
+      </label>
+    </Field>
+  );
+}
+
+// ─── Create Lease Modal ───────────────────────────────────────
+
+function CreateLeaseModal({ open, onClose, unitOptions, ownerOptions, onCreated }: {
+  open: boolean; onClose: () => void;
+  unitOptions: UnitOption[]; ownerOptions: OwnerOption[];
+  onCreated: () => void;
+}) {
+  const [form, setForm]       = useState<CreateLeaseForm>(INIT_FORM);
+  const [saving, setSaving]   = useState(false);
+
+  const set = <K extends keyof CreateLeaseForm>(key: K, val: CreateLeaseForm[K]) =>
+    setForm((p) => ({ ...p, [key]: val }));
+
+  const handleCreate = async () => {
+    const required = [form.unitId, form.ownerId, form.startDate, form.endDate, form.monthlyRent, form.tenantEmail];
+    if (required.some((v) => !String(v).trim())) { toast.error('Fill all required fields'); return; }
+    const usingFiles = !!form.contractFile || !!form.nationalIdPhoto;
+    const usingIds   = !!form.contractFileId.trim() && !!form.nationalIdFileId.trim();
+    if (!usingFiles && !usingIds) { toast.error('Upload contract + national ID files, or provide existing file IDs'); return; }
+    if (!usingIds && (!form.tenantName || !form.tenantPhone || !form.tenantNationalId)) {
+      toast.error('For new tenant onboarding, provide name, phone, and national ID'); return;
+    }
+    setSaving(true);
+    try {
+      const fd = new FormData();
+      fd.append('unitId',      form.unitId);
+      fd.append('ownerId',     form.ownerId);
+      fd.append('startDate',   new Date(form.startDate).toISOString());
+      fd.append('endDate',     new Date(form.endDate).toISOString());
+      fd.append('monthlyRent', String(Number(form.monthlyRent)));
+      if (form.securityDeposit)       fd.append('securityDeposit',  String(Number(form.securityDeposit)));
+      fd.append('tenantEmail', form.tenantEmail.trim());
+      if (form.tenantName.trim())        fd.append('tenantName',      form.tenantName.trim());
+      if (form.tenantPhone.trim())       fd.append('tenantPhone',     form.tenantPhone.trim());
+      if (form.tenantNationalId.trim())  fd.append('tenantNationalId', form.tenantNationalId.trim());
+      if (form.contractFileId.trim())   fd.append('contractFileId',  form.contractFileId.trim());
+      if (form.nationalIdFileId.trim()) fd.append('nationalIdFileId', form.nationalIdFileId.trim());
+      if (form.contractFile)            fd.append('contractFile',    form.contractFile);
+      if (form.nationalIdPhoto)         fd.append('nationalIdPhoto', form.nationalIdPhoto);
+      await apiClient.post('/leases', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      toast.success('Lease created');
+      setForm(INIT_FORM);
+      onCreated();
+      onClose();
+    } catch (e) { toast.error('Failed to create lease', { description: errorMessage(e) }); }
+    finally { setSaving(false); }
+  };
+
+  if (!open) return null;
+
+  return (
+    <div
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(17,24,39,0.4)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: '24px' }}
+    >
+      <div style={{ width: '100%', maxWidth: '580px', background: '#FFF', borderRadius: '14px', overflow: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,0.18)', fontFamily: "'Work Sans', sans-serif", display: 'flex', flexDirection: 'column', maxHeight: '90vh' }}>
+        {/* Gradient strip */}
+        <div style={{ height: '4px', background: 'linear-gradient(90deg, #2563EB 0%, #0D9488 100%)', flexShrink: 0 }} />
+
+        {/* Header */}
+        <div style={{ padding: '20px 24px 16px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', borderBottom: '1px solid #F3F4F6', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ width: '36px', height: '36px', borderRadius: '9px', background: '#EFF6FF', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <FileText style={{ width: '15px', height: '15px', color: '#2563EB' }} />
+            </div>
+            <div>
+              <p style={{ fontSize: '14.5px', fontWeight: 800, color: '#111827', margin: 0, letterSpacing: '-0.01em' }}>Create Lease</p>
+              <p style={{ fontSize: '11.5px', color: '#9CA3AF', margin: '2px 0 0' }}>New lease contract with tenant onboarding</p>
+            </div>
+          </div>
+          <button type="button" onClick={onClose}
+            style={{ width: '28px', height: '28px', borderRadius: '6px', border: '1px solid #EBEBEB', background: '#FAFAFA', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#9CA3AF', flexShrink: 0 }}>
+            <X style={{ width: '12px', height: '12px' }} />
+          </button>
+        </div>
+
+        {/* Scrollable body */}
+        <div style={{ padding: '20px 24px', overflowY: 'auto', flex: 1 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+
+            <SectionLabel label="Contract" />
+
+            <Field label="Unit" required>
+              <select value={form.unitId || ''} onChange={(e) => set('unitId', e.target.value)} style={selectStyle}>
+                <option value=''>Select unit…</option>
+                {unitOptions.map((u) => <option key={u.id} value={u.id}>{u.label}</option>)}
+              </select>
+            </Field>
+            <Field label="Owner" required>
+              <select value={form.ownerId || ''} onChange={(e) => set('ownerId', e.target.value)} style={selectStyle}>
+                <option value=''>Select owner…</option>
+                {ownerOptions.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+              </select>
+            </Field>
+            <Field label="Start Date" required>
+              <input type="date" value={form.startDate} onChange={(e) => set('startDate', e.target.value)} style={inputStyle} />
+            </Field>
+            <Field label="End Date" required>
+              <input type="date" value={form.endDate} onChange={(e) => set('endDate', e.target.value)} style={inputStyle} />
+            </Field>
+            <Field label="Monthly Rent" required>
+              <div style={{ position: 'relative' }}>
+                <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '11px', color: '#9CA3AF', fontFamily: "'DM Mono', monospace", pointerEvents: 'none' }}>EGP</span>
+                <input type="number" min="0" value={form.monthlyRent} onChange={(e) => set('monthlyRent', e.target.value)} placeholder="0.00"
+                  style={{ ...inputStyle, paddingLeft: '42px', fontFamily: "'DM Mono', monospace" }} />
+              </div>
+            </Field>
+            <Field label="Security Deposit" hint="Optional">
+              <div style={{ position: 'relative' }}>
+                <span style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', fontSize: '11px', color: '#9CA3AF', fontFamily: "'DM Mono', monospace", pointerEvents: 'none' }}>EGP</span>
+                <input type="number" min="0" value={form.securityDeposit} onChange={(e) => set('securityDeposit', e.target.value)} placeholder="0.00"
+                  style={{ ...inputStyle, paddingLeft: '42px', fontFamily: "'DM Mono', monospace" }} />
+              </div>
+            </Field>
+
+            <SectionLabel label="Tenant" sub="New or existing" />
+
+            <Field label="Email" required span2>
+              <input type="email" value={form.tenantEmail} onChange={(e) => set('tenantEmail', e.target.value)} placeholder="tenant@example.com" style={inputStyle} />
+            </Field>
+            <Field label="Full Name" hint="Required for new tenants">
+              <input value={form.tenantName} onChange={(e) => set('tenantName', e.target.value)} placeholder="John Doe" style={inputStyle} />
+            </Field>
+            <Field label="Phone" hint="Required for new tenants">
+              <input value={form.tenantPhone} onChange={(e) => set('tenantPhone', e.target.value)} placeholder="+201234567890" style={inputStyle} />
+            </Field>
+            <Field label="National ID" hint="Required for new tenants" span2>
+              <input value={form.tenantNationalId} onChange={(e) => set('tenantNationalId', e.target.value)} placeholder="2980***********" style={{ ...inputStyle, fontFamily: "'DM Mono', monospace" }} />
+            </Field>
+
+            <SectionLabel label="Documents" sub="Upload files or use existing IDs" />
+
+            <FileField label="Contract File" fileName={form.contractFile?.name} accept=".pdf,image/*" onChange={(f) => set('contractFile', f)} hint="PDF or image" />
+            <FileField label="National ID Photo" fileName={form.nationalIdPhoto?.name} accept=".pdf,image/*" onChange={(f) => set('nationalIdPhoto', f)} hint="PDF or image" />
+            <Field label="Contract File ID" hint="Existing UUID — replaces upload">
+              <input value={form.contractFileId} onChange={(e) => set('contractFileId', e.target.value)} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" style={{ ...inputStyle, fontFamily: "'DM Mono', monospace", fontSize: '11.5px' }} />
+            </Field>
+            <Field label="National ID File ID" hint="Existing UUID — replaces upload">
+              <input value={form.nationalIdFileId} onChange={(e) => set('nationalIdFileId', e.target.value)} placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" style={{ ...inputStyle, fontFamily: "'DM Mono', monospace', fontSize: '11.5px'", fontSize: '11.5px' }} />
+            </Field>
+
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: '14px 24px 20px', display: 'flex', justifyContent: 'flex-end', gap: '8px', borderTop: '1px solid #F3F4F6', flexShrink: 0 }}>
+          <button type="button" disabled={saving} onClick={onClose}
+            style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '8px 16px', borderRadius: '8px', border: '1px solid #E5E7EB', background: '#FFF', color: '#6B7280', cursor: saving ? 'not-allowed' : 'pointer', fontSize: '13px', fontFamily: "'Work Sans', sans-serif", fontWeight: 600 }}>
+            <X style={{ width: '12px', height: '12px' }} /> Cancel
+          </button>
+          <button type="button" disabled={saving} onClick={() => void handleCreate()}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 20px', borderRadius: '8px', background: saving ? '#9CA3AF' : '#111827', color: '#FFF', border: 'none', cursor: saving ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif", boxShadow: saving ? 'none' : '0 2px 6px rgba(0,0,0,0.18)' }}>
+            <Check style={{ width: '13px', height: '13px' }} />
+            {saving ? 'Creating…' : 'Create Lease'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main ─────────────────────────────────────────────────────
 
 export function LeaseManagement() {
-  const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-  const [leasesData, setLeasesData] = useState<any[]>([]);
-  const [ownerOptions, setOwnerOptions] = useState<OwnerOption[]>([]);
-  const [unitOptions, setUnitOptions] = useState<UnitOption[]>([]);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [isCreatingLease, setIsCreatingLease] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [createLeaseForm, setCreateLeaseForm] = useState<CreateLeaseForm>(defaultCreateLeaseForm);
+  const [leasesData,    setLeasesData]    = useState<any[]>([]);
+  const [ownerOptions,  setOwnerOptions]  = useState<OwnerOption[]>([]);
+  const [unitOptions,   setUnitOptions]   = useState<UnitOption[]>([]);
+  const [searchTerm,    setSearchTerm]    = useState('');
+  const [isLoading,     setIsLoading]     = useState(false);
+  const [loadError,     setLoadError]     = useState<string | null>(null);
+  const [modalOpen,     setModalOpen]     = useState(false);
 
   const loadLeases = useCallback(async () => {
-    setIsLoading(true);
-    setLoadError(null);
+    setIsLoading(true); setLoadError(null);
     try {
-      const [response, ownersResponse, unitsResponse] = await Promise.all([
-        apiClient.get("/leases"),
-        apiClient.get("/admin/users", { params: { userType: "owner", take: 500, skip: 0 } }),
-        apiClient.get("/units", { params: { page: 1, limit: 100 } }),
+      const [leasesRes, ownersRes, unitsRes] = await Promise.all([
+        apiClient.get('/leases'),
+        apiClient.get('/admin/users', { params: { userType: 'owner', take: 500, skip: 0 } }),
+        apiClient.get('/units', { params: { page: 1, limit: 100 } }),
       ]);
-      setLeasesData(Array.isArray(response.data) ? response.data : []);
-
-      const owners = (Array.isArray(ownersResponse.data) ? ownersResponse.data : []).map((ownerUser: any) => ({
-        id: String(ownerUser.id),
-        label: ownerUser.nameEN ?? ownerUser.email ?? ownerUser.phone ?? String(ownerUser.id),
-      }));
-      setOwnerOptions(owners);
-
-      const units = Array.isArray(unitsResponse.data?.data)
-        ? unitsResponse.data.data
-        : Array.isArray(unitsResponse.data)
-          ? unitsResponse.data
-          : [];
-      setUnitOptions(
-        units.map((unit: any) => ({
-          id: String(unit.id),
-          label:
-            [unit.projectName, unit.block ? `Block ${unit.block}` : null, unit.unitNumber ? `Unit ${unit.unitNumber}` : null]
-              .filter(Boolean)
-              .join(" - ") || String(unit.id),
+      setLeasesData(Array.isArray(leasesRes.data) ? leasesRes.data : []);
+      setOwnerOptions(
+        (Array.isArray(ownersRes.data) ? ownersRes.data : []).map((u: any) => ({
+          id: String(u.id),
+          label: u.nameEN ?? u.email ?? u.phone ?? String(u.id),
         })),
       );
-    } catch (error) {
-      const msg = errorMessage(error);
+      const rawUnits = Array.isArray(unitsRes.data?.data) ? unitsRes.data.data
+        : Array.isArray(unitsRes.data)                     ? unitsRes.data : [];
+      setUnitOptions(
+        rawUnits.map((u: any) => ({
+          id: String(u.id),
+          label: [u.projectName, u.block ? `Block ${u.block}` : null, u.unitNumber ? `Unit ${u.unitNumber}` : null].filter(Boolean).join(' – ') || String(u.id),
+        })),
+      );
+    } catch (e) {
+      const msg = errorMessage(e);
       setLoadError(msg);
-      toast.error("Failed to load leases", { description: msg });
-    } finally {
-      setIsLoading(false);
-    }
+      toast.error('Failed to load leases', { description: msg });
+    } finally { setIsLoading(false); }
   }, []);
 
-  useEffect(() => {
-    void loadLeases();
-  }, [loadLeases]);
+  useEffect(() => { void loadLeases(); }, [loadLeases]);
 
-  const handleCreateLease = async () => {
-    const required = [
-      createLeaseForm.unitId,
-      createLeaseForm.ownerId,
-      createLeaseForm.startDate,
-      createLeaseForm.endDate,
-      createLeaseForm.monthlyRent,
-      createLeaseForm.tenantEmail,
-    ];
-    if (required.some((v) => !String(v).trim())) {
-      toast.error("Please fill all required lease fields");
-      return;
-    }
-
-    const usingFiles = !!createLeaseForm.contractFile || !!createLeaseForm.nationalIdPhoto;
-    const usingIds =
-      !!createLeaseForm.contractFileId.trim() && !!createLeaseForm.nationalIdFileId.trim();
-
-    if (!usingFiles && !usingIds) {
-      toast.error("Provide contract/national ID files or existing file IDs");
-      return;
-    }
-
-    if (!usingFiles && (!createLeaseForm.tenantName || !createLeaseForm.tenantPhone || !createLeaseForm.tenantNationalId)) {
-      toast.error("For new tenant onboarding, provide tenant name, phone, and national ID");
-      return;
-    }
-
-    setIsCreatingLease(true);
-    try {
-      const formData = new FormData();
-      formData.append("unitId", createLeaseForm.unitId);
-      formData.append("ownerId", createLeaseForm.ownerId);
-      formData.append("startDate", new Date(createLeaseForm.startDate).toISOString());
-      formData.append("endDate", new Date(createLeaseForm.endDate).toISOString());
-      formData.append("monthlyRent", String(Number(createLeaseForm.monthlyRent)));
-      if (createLeaseForm.securityDeposit) {
-        formData.append("securityDeposit", String(Number(createLeaseForm.securityDeposit)));
-      }
-      formData.append("tenantEmail", createLeaseForm.tenantEmail.trim());
-      if (createLeaseForm.tenantName.trim()) formData.append("tenantName", createLeaseForm.tenantName.trim());
-      if (createLeaseForm.tenantPhone.trim()) formData.append("tenantPhone", createLeaseForm.tenantPhone.trim());
-      if (createLeaseForm.tenantNationalId.trim()) formData.append("tenantNationalId", createLeaseForm.tenantNationalId.trim());
-
-      if (createLeaseForm.contractFileId.trim()) formData.append("contractFileId", createLeaseForm.contractFileId.trim());
-      if (createLeaseForm.nationalIdFileId.trim()) formData.append("nationalIdFileId", createLeaseForm.nationalIdFileId.trim());
-      if (createLeaseForm.contractFile) formData.append("contractFile", createLeaseForm.contractFile);
-      if (createLeaseForm.nationalIdPhoto) formData.append("nationalIdPhoto", createLeaseForm.nationalIdPhoto);
-
-      await apiClient.post("/leases", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-
-      toast.success("Lease created");
-      setIsCreateDialogOpen(false);
-      setCreateLeaseForm(defaultCreateLeaseForm);
-      await loadLeases();
-    } catch (error) {
-      toast.error("Failed to create lease", { description: errorMessage(error) });
-    } finally {
-      setIsCreatingLease(false);
-    }
-  };
+  // ── Derived ───────────────────────────────────────────────────
 
   const filteredLeases = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
-    return leasesData.filter((lease) => {
-      if (!q) return true;
-      return [
-        lease.leaseNumber,
-        lease.id,
-        lease.unit?.unitNumber,
-        lease.owner?.nameEN,
-        lease.tenant?.nameEN,
-        lease.tenantEmail,
-        lease.status,
-      ]
-        .filter(Boolean)
-        .some((v) => String(v).toLowerCase().includes(q));
-    });
+    if (!q) return leasesData;
+    return leasesData.filter((l) =>
+      [l.leaseNumber, l.id, l.unit?.unitNumber, l.owner?.nameEN, l.tenant?.nameEN, l.tenantEmail, l.status]
+        .filter(Boolean).some((v) => String(v).toLowerCase().includes(q)),
+    );
   }, [leasesData, searchTerm]);
 
-  const activeLeases = leasesData.filter((l) => String(l.status || "").toUpperCase() === "ACTIVE");
-  const expiringSoon = leasesData.filter((l) => {
-    const endDate = new Date(l.endDate ?? 0);
-    if (Number.isNaN(endDate.getTime())) return false;
-    const diffDays = (endDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
-    return diffDays >= 0 && diffDays <= 30;
+  const activeLeases     = leasesData.filter((l) => String(l.status ?? '').toUpperCase() === 'ACTIVE');
+  const expiringSoon     = leasesData.filter((l) => {
+    const d = new Date(l.endDate ?? 0);
+    if (Number.isNaN(d.getTime())) return false;
+    const diff = (d.getTime() - Date.now()) / 86_400_000;
+    return diff >= 0 && diff <= 30;
   });
-  const overduePayments = leasesData.filter((l) =>
-    ["OVERDUE", "LATE"].includes(String(l.paymentStatus || "").toUpperCase()),
-  );
-  const totalRent = leasesData.reduce((sum, l) => sum + Number(l.monthlyRent ?? 0), 0);
+  const overduePayments  = leasesData.filter((l) => ['OVERDUE', 'LATE'].includes(String(l.paymentStatus ?? '').toUpperCase()));
+  const totalMonthlyRent = leasesData.reduce((s, l) => s + Number(l.monthlyRent ?? 0), 0);
+
+  // ── Columns ───────────────────────────────────────────────────
+
+  const columns: DataTableColumn<any>[] = [
+    { key: 'id',       header: 'Lease',           render: (l) => (
+      <div>
+        <p style={{ fontSize: '12.5px', fontWeight: 700, color: '#111827', margin: 0, fontFamily: "'DM Mono', monospace" }}>{l.leaseNumber ?? l.id?.slice(0, 10)}</p>
+      </div>
+    )},
+    { key: 'unit',     header: 'Unit',            render: (l) => (
+      <span style={{ display: 'inline-flex', alignItems: 'center', padding: '2px 8px', borderRadius: '5px', fontSize: '11px', fontWeight: 700, background: '#EFF6FF', color: '#2563EB', fontFamily: "'Work Sans', sans-serif" }}>
+        {l.unit?.unitNumber ?? l.unitId ?? '—'}
+      </span>
+    )},
+    { key: 'owner',    header: 'Owner',           render: (l) => <span style={{ fontSize: '12px', color: '#6B7280' }}>{l.owner?.nameEN ?? l.owner?.email ?? '—'}</span> },
+    { key: 'tenant',   header: 'Tenant',          render: (l) => <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#111827' }}>{l.tenant?.nameEN ?? l.tenantEmail ?? '—'}</span> },
+    { key: 'period',   header: 'Period',          render: (l) => (
+      <div>
+        <p style={{ fontSize: '11.5px', color: '#374151', margin: 0, fontFamily: "'DM Mono', monospace" }}>{formatDate(l.startDate)}</p>
+        <p style={{ fontSize: '10.5px', color: '#9CA3AF', margin: '1px 0 0', fontFamily: "'DM Mono', monospace" }}>→ {formatDate(l.endDate)}</p>
+      </div>
+    )},
+    { key: 'rent',     header: 'Monthly Rent',    render: (l) => (
+      <span style={{ fontSize: '13px', fontWeight: 700, color: '#111827', fontFamily: "'DM Mono', monospace" }}>
+        {formatCurrencyEGP(l.monthlyRent)}
+      </span>
+    )},
+    { key: 'status',   header: 'Status',          render: (l) => <StatusBadge value={l.status} /> },
+    { key: 'payStatus',header: 'Payment',         render: (l) => <StatusBadge value={l.paymentStatus ?? 'UNKNOWN'} /> },
+  ];
+
+  // ─────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div style={{ fontFamily: "'Work Sans', sans-serif" }}>
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+
+      {/* ── Header ─────────────────────────────────────────── */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', marginBottom: '20px', flexWrap: 'wrap' }}>
         <div>
-          <h1 className="text-[#1E293B]">Lease & Rental Management</h1>
-          <p className="text-[#64748B] mt-1">Live lease contracts and tenant data from backend</p>
+          <h1 style={{ fontSize: '18px', fontWeight: 900, color: '#111827', letterSpacing: '-0.02em', margin: 0 }}>Lease & Rental Management</h1>
+          <p style={{ fontSize: '13px', color: '#6B7280', margin: '4px 0 0' }}>Live lease contracts and tenant data.</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => void loadLeases()} disabled={isLoading}>
-            {isLoading ? "Refreshing..." : "Refresh"}
-          </Button>
-          <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white rounded-lg gap-2">
-                <Plus className="w-4 h-4" />
-                Create Lease
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-lg">
-              <DialogHeader>
-                <DialogTitle>Create Lease</DialogTitle>
-                <DialogDescription>
-                  Create a lease with tenant onboarding. You can upload files (local dev storage fallback supported) or provide existing file IDs.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-2 max-h-[60vh] overflow-y-auto pr-1">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Unit</Label>
-                    <Select
-                      value={createLeaseForm.unitId || "none"}
-                      onValueChange={(value) =>
-                        setCreateLeaseForm((p) => ({ ...p, unitId: value === "none" ? "" : value }))
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select unit" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Select unit</SelectItem>
-                        {unitOptions.map((unit) => (
-                          <SelectItem key={unit.id} value={unit.id}>
-                            {unit.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Owner</Label>
-                    <Select
-                      value={createLeaseForm.ownerId || "none"}
-                      onValueChange={(value) =>
-                        setCreateLeaseForm((p) => ({ ...p, ownerId: value === "none" ? "" : value }))
-                      }
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select owner" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Select owner</SelectItem>
-                        {ownerOptions.map((owner) => (
-                          <SelectItem key={owner.id} value={owner.id}>
-                            {owner.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Start Date</Label>
-                    <Input
-                      type="date"
-                      value={createLeaseForm.startDate}
-                      onChange={(e) => setCreateLeaseForm((p) => ({ ...p, startDate: e.target.value }))}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>End Date</Label>
-                    <Input
-                      type="date"
-                      value={createLeaseForm.endDate}
-                      onChange={(e) => setCreateLeaseForm((p) => ({ ...p, endDate: e.target.value }))}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Monthly Rent</Label>
-                    <Input
-                      type="number"
-                      value={createLeaseForm.monthlyRent}
-                      onChange={(e) => setCreateLeaseForm((p) => ({ ...p, monthlyRent: e.target.value }))}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Security Deposit (optional)</Label>
-                    <Input
-                      type="number"
-                      value={createLeaseForm.securityDeposit}
-                      onChange={(e) => setCreateLeaseForm((p) => ({ ...p, securityDeposit: e.target.value }))}
-                    />
-                  </div>
-                </div>
-
-                <div className="border rounded-lg p-4 space-y-4">
-                  <h4 className="text-sm font-medium text-[#1E293B]">Tenant Onboarding</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>Tenant Email</Label>
-                      <Input
-                        type="email"
-                        value={createLeaseForm.tenantEmail}
-                        onChange={(e) => setCreateLeaseForm((p) => ({ ...p, tenantEmail: e.target.value }))}
-                        placeholder="tenant@example.com"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Tenant Name (new tenant)</Label>
-                      <Input
-                        value={createLeaseForm.tenantName}
-                        onChange={(e) => setCreateLeaseForm((p) => ({ ...p, tenantName: e.target.value }))}
-                        placeholder="John Doe"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Tenant Phone (new tenant)</Label>
-                      <Input
-                        value={createLeaseForm.tenantPhone}
-                        onChange={(e) => setCreateLeaseForm((p) => ({ ...p, tenantPhone: e.target.value }))}
-                        placeholder="+201234567890"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Tenant National ID (new tenant)</Label>
-                      <Input
-                        value={createLeaseForm.tenantNationalId}
-                        onChange={(e) => setCreateLeaseForm((p) => ({ ...p, tenantNationalId: e.target.value }))}
-                        placeholder="2980***********"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="border rounded-lg p-4 space-y-4">
-                  <h4 className="text-sm font-medium text-[#1E293B]">Lease Files</h4>
-                  <p className="text-xs text-[#64748B]">
-                    Option A: upload files here. Option B: provide existing file IDs if already uploaded.
-                  </p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>Contract File Upload (PDF/Image)</Label>
-                      <Input
-                        type="file"
-                        accept=".pdf,image/*"
-                        onChange={(e) =>
-                          setCreateLeaseForm((p) => ({
-                            ...p,
-                            contractFile: e.target.files?.[0] ?? null,
-                          }))
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>National ID Upload (PDF/Image)</Label>
-                      <Input
-                        type="file"
-                        accept=".pdf,image/*"
-                        onChange={(e) =>
-                          setCreateLeaseForm((p) => ({
-                            ...p,
-                            nationalIdPhoto: e.target.files?.[0] ?? null,
-                          }))
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Contract File ID (optional)</Label>
-                      <Input
-                        value={createLeaseForm.contractFileId}
-                        onChange={(e) => setCreateLeaseForm((p) => ({ ...p, contractFileId: e.target.value }))}
-                        placeholder="Existing contract file UUID"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>National ID File ID (optional)</Label>
-                      <Input
-                        value={createLeaseForm.nationalIdFileId}
-                        onChange={(e) => setCreateLeaseForm((p) => ({ ...p, nationalIdFileId: e.target.value }))}
-                        placeholder="Existing national ID file UUID"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)} disabled={isCreatingLease}>
-                  Cancel
-                </Button>
-                <Button
-                  className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white"
-                  onClick={() => void handleCreateLease()}
-                  disabled={isCreatingLease}
-                >
-                  {isCreatingLease ? "Creating..." : "Create Lease"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button type="button" onClick={() => void loadLeases()} disabled={isLoading}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', borderRadius: '7px', border: '1px solid #E5E7EB', background: '#FFF', color: '#6B7280', cursor: isLoading ? 'not-allowed' : 'pointer' }}>
+            <RefreshCw style={{ width: '13px', height: '13px', animation: isLoading ? 'spin 1s linear infinite' : 'none' }} />
+          </button>
+          <button type="button" onClick={() => setModalOpen(true)}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 16px', height: '36px', borderRadius: '8px', background: '#111827', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif", boxShadow: '0 2px 6px rgba(0,0,0,0.15)' }}>
+            <Plus style={{ width: '13px', height: '13px' }} /> Create Lease
+          </button>
         </div>
       </div>
 
-      {loadError ? (
-        <Card className="p-4 border border-[#FECACA] bg-[#FEF2F2] text-[#991B1B] rounded-xl">{loadError}</Card>
-      ) : null}
+      {/* ── Error banner ───────────────────────────────────── */}
+      {loadError && (
+        <div style={{ marginBottom: '16px', padding: '12px 14px', borderRadius: '9px', border: '1px solid #FECACA', background: '#FEF2F2', color: '#991B1B', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <AlertCircle style={{ width: '14px', height: '14px', flexShrink: 0 }} />
+          {loadError}
+        </div>
+      )}
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="p-6 shadow-card rounded-xl">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[#64748B] mb-2">Active Leases</p>
-              <h3 className="text-[#1E293B]">{activeLeases.length}</h3>
-            </div>
-            <div className="w-12 h-12 rounded-xl bg-[#10B981]/10 flex items-center justify-center">
-              <FileText className="w-6 h-6 text-[#10B981]" />
-            </div>
-          </div>
-        </Card>
-        <Card className="p-6 shadow-card rounded-xl">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[#64748B] mb-2">Expiring Soon</p>
-              <h3 className="text-[#1E293B]">{expiringSoon.length}</h3>
-            </div>
-            <div className="w-12 h-12 rounded-xl bg-[#F59E0B]/10 flex items-center justify-center">
-              <Calendar className="w-6 h-6 text-[#F59E0B]" />
-            </div>
-          </div>
-        </Card>
-        <Card className="p-6 shadow-card rounded-xl">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[#64748B] mb-2">Overdue Payments</p>
-              <h3 className="text-[#1E293B]">{overduePayments.length}</h3>
-            </div>
-            <div className="w-12 h-12 rounded-xl bg-[#EF4444]/10 flex items-center justify-center">
-              <AlertCircle className="w-6 h-6 text-[#EF4444]" />
-            </div>
-          </div>
-        </Card>
-        <Card className="p-6 shadow-card rounded-xl">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[#64748B] mb-2">Total Monthly Rent</p>
-              <h3 className="text-[#1E293B]">{formatCurrencyEGP(totalRent)}</h3>
-            </div>
-            <div className="w-12 h-12 rounded-xl bg-[#0B5FFF]/10 flex items-center justify-center">
-              <FileText className="w-6 h-6 text-[#0B5FFF]" />
-            </div>
-          </div>
-        </Card>
+      {/* ── Stats ──────────────────────────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '20px' }}>
+        <StatCard icon="active-users"     title="Active Leases"       value={String(activeLeases.length)}        subtitle="Currently active contracts" />
+        <StatCard icon="complaints-total" title="Expiring Soon"       value={String(expiringSoon.length)}        subtitle="Within the next 30 days" />
+        <StatCard icon="complaints-open"  title="Overdue Payments"    value={String(overduePayments.length)}     subtitle="Late or overdue" />
+        <StatCard icon="revenue"          title="Total Monthly Rent"  value={formatCurrencyEGP(totalMonthlyRent)} subtitle="Across all active leases" />
       </div>
 
-      <Card className="shadow-card rounded-xl overflow-hidden">
-        <div className="p-4 border-b border-[#E5E7EB]">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#64748B]" />
-            <Input
-              placeholder="Search by unit, owner, or tenant..."
-              className="pl-10 rounded-lg"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
+      {/* ── Table card ─────────────────────────────────────── */}
+      <div style={{ borderRadius: '12px', border: '1px solid #EBEBEB', background: '#FFF', overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
+        {/* Search bar */}
+        <div style={{ padding: '12px 14px', borderBottom: '1px solid #F3F4F6', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Search style={{ width: '13px', height: '13px', color: '#C4C9D4', flexShrink: 0 }} />
+          <input
+            placeholder="Search by unit, owner, tenant, or status…"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            style={{ flex: 1, border: 'none', background: 'transparent', outline: 'none', fontSize: '13px', color: '#111827', fontFamily: "'Work Sans', sans-serif" }}
+          />
+          {searchTerm && (
+            <button type="button" onClick={() => setSearchTerm('')}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', borderRadius: '50%', background: '#F3F4F6', border: 'none', cursor: 'pointer', color: '#9CA3AF' }}>
+              <X style={{ width: '10px', height: '10px' }} />
+            </button>
+          )}
         </div>
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-[#F9FAFB]">
-              <TableHead>Lease ID</TableHead>
-              <TableHead>Unit</TableHead>
-              <TableHead>Owner</TableHead>
-              <TableHead>Tenant</TableHead>
-              <TableHead>Lease Period</TableHead>
-              <TableHead>Monthly Rent</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Payment Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredLeases.map((lease) => (
-              <TableRow key={lease.id} className="hover:bg-[#F9FAFB]">
-                <TableCell className="font-medium text-[#1E293B]">
-                  {lease.leaseNumber ?? lease.id}
-                </TableCell>
-                <TableCell>
-                  <Badge variant="secondary" className="bg-[#F3F4F6] text-[#1E293B]">
-                    {lease.unit?.unitNumber ?? lease.unitId ?? "—"}
-                  </Badge>
-                </TableCell>
-                <TableCell className="text-[#64748B]">
-                  {lease.owner?.nameEN ?? lease.owner?.email ?? lease.ownerId ?? "—"}
-                </TableCell>
-                <TableCell className="text-[#1E293B]">
-                  {lease.tenant?.nameEN ?? lease.tenantEmail ?? lease.tenantId ?? "—"}
-                </TableCell>
-                <TableCell className="text-[#64748B]">
-                  <div className="text-sm">
-                    <div>{formatDate(lease.startDate)}</div>
-                    <div className="text-xs">to {formatDate(lease.endDate)}</div>
-                  </div>
-                </TableCell>
-                <TableCell className="text-[#1E293B]">{formatCurrencyEGP(lease.monthlyRent)}</TableCell>
-                <TableCell>
-                  <Badge className={getStatusColorClass(lease.status)}>{humanizeEnum(lease.status)}</Badge>
-                </TableCell>
-                <TableCell>
-                  <Badge className={getStatusColorClass(lease.paymentStatus ?? "UNKNOWN")}>
-                    {humanizeEnum(lease.paymentStatus ?? "Unknown")}
-                  </Badge>
-                </TableCell>
-              </TableRow>
-            ))}
-            {!isLoading && filteredLeases.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={8} className="text-center py-10 text-[#64748B]">
-                  No leases found.
-                </TableCell>
-              </TableRow>
-            ) : null}
-          </TableBody>
-        </Table>
-      </Card>
+
+        <DataTable
+          columns={columns}
+          rows={filteredLeases}
+          rowKey={(l) => l.id}
+          loading={isLoading}
+          emptyTitle="No leases found"
+          emptyDescription="Create a lease or adjust your search."
+        />
+      </div>
+
+      {/* ── Create modal ───────────────────────────────────── */}
+      <CreateLeaseModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        unitOptions={unitOptions}
+        ownerOptions={ownerOptions}
+        onCreated={() => void loadLeases()}
+      />
     </div>
   );
 }

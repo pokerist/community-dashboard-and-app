@@ -1,12 +1,11 @@
 import {
-  Activity,
   AlertTriangle,
   ClipboardList,
   FilePlus2,
   Receipt,
   UserPlus,
 } from "lucide-react";
-import type { ComponentType } from "react";
+import type { ComponentType, CSSProperties } from "react";
 import { DashboardActivityItem, DashboardActivityType } from "../lib/dashboard-service";
 import { relativeTime } from "../lib/live-data";
 
@@ -18,179 +17,228 @@ interface ActivityFeedProps {
 const iconByType: Record<
   DashboardActivityType,
   {
-    icon: ComponentType<{ className?: string }>;
-    circleBg: string;
-    circleIcon: string;
-    badgeBg: string;
-    badgeText: string;
+    icon: ComponentType<{ style?: CSSProperties }>;
+    circleStyle: { background: string; color: string };
+    badgeStyle: { background: string; color: string };
     label: string;
   }
 > = {
   COMPLAINT: {
     icon: ClipboardList,
-    circleBg: "bg-[#FFFBEB]",
-    circleIcon: "text-[#D97706]",
-    badgeBg: "bg-[#FFFBEB]",
-    badgeText: "text-[#92400E]",
+    circleStyle: { background: "#FFFBEB", color: "#D97706" },
+    badgeStyle: { background: "#FFFBEB", color: "#92400E" },
     label: "Complaint",
   },
   SERVICE_REQUEST: {
     icon: FilePlus2,
-    circleBg: "bg-[#EFF6FF]",
-    circleIcon: "text-[#2563EB]",
-    badgeBg: "bg-[#EFF6FF]",
-    badgeText: "text-[#1E40AF]",
+    circleStyle: { background: "#EFF6FF", color: "#2563EB" },
+    badgeStyle: { background: "#EFF6FF", color: "#1E40AF" },
     label: "Service",
   },
   VIOLATION: {
     icon: AlertTriangle,
-    circleBg: "bg-[#FEF2F2]",
-    circleIcon: "text-[#DC2626]",
-    badgeBg: "bg-[#FEF2F2]",
-    badgeText: "text-[#991B1B]",
+    circleStyle: { background: "#FEF2F2", color: "#DC2626" },
+    badgeStyle: { background: "#FEF2F2", color: "#991B1B" },
     label: "Violation",
   },
   INVOICE: {
     icon: Receipt,
-    circleBg: "bg-[#ECFDF5]",
-    circleIcon: "text-[#059669]",
-    badgeBg: "bg-[#ECFDF5]",
-    badgeText: "text-[#065F46]",
+    circleStyle: { background: "#ECFDF5", color: "#059669" },
+    badgeStyle: { background: "#ECFDF5", color: "#065F46" },
     label: "Invoice",
   },
   REGISTRATION: {
     icon: UserPlus,
-    circleBg: "bg-[#F5F3FF]",
-    circleIcon: "text-[#7C3AED]",
-    badgeBg: "bg-[#F5F3FF]",
-    badgeText: "text-[#5B21B6]",
+    circleStyle: { background: "#F5F3FF", color: "#7C3AED" },
+    badgeStyle: { background: "#F5F3FF", color: "#5B21B6" },
     label: "Registration",
   },
 };
 
+// ─── Skeleton row ─────────────────────────────────────────────
 function SkeletonRow() {
   return (
-    <div className="flex items-start gap-4 px-5 py-4 border-b border-[#F3F4F6] last:border-0">
-      <div className="mt-0.5 h-8 w-8 shrink-0 animate-pulse rounded-full bg-[#F3F4F6]" />
-      <div className="flex-1 space-y-2 py-0.5">
-        <div className="h-3.5 w-3/4 animate-pulse rounded-[3px] bg-[#F3F4F6]" />
-        <div className="flex gap-2 mt-2">
-          <div className="h-2.5 w-16 animate-pulse rounded-[3px] bg-[#F9FAFB]" />
-          <div className="h-2.5 w-24 animate-pulse rounded-[3px] bg-[#F9FAFB]" />
+    <div style={{ display: "flex", alignItems: "flex-start", gap: "12px", padding: "14px 16px", borderBottom: "1px solid #F3F4F6" }}>
+      <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: "#F3F4F6", flexShrink: 0, animation: "shimmer 1.5s infinite", backgroundSize: "200% 100%", backgroundImage: "linear-gradient(90deg,#F3F4F6 25%,#EBEBEB 50%,#F3F4F6 75%)" }} />
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "8px", paddingTop: "2px" }}>
+        <div style={{ height: "13px", width: "70%", borderRadius: "4px", backgroundImage: "linear-gradient(90deg,#F3F4F6 25%,#EBEBEB 50%,#F3F4F6 75%)", backgroundSize: "200% 100%", animation: "shimmer 1.5s infinite" }} />
+        <div style={{ display: "flex", gap: "8px" }}>
+          <div style={{ height: "10px", width: "52px", borderRadius: "4px", backgroundImage: "linear-gradient(90deg,#F9FAFB 25%,#F3F4F6 50%,#F9FAFB 75%)", backgroundSize: "200% 100%", animation: "shimmer 1.5s infinite" }} />
+          <div style={{ height: "10px", width: "80px", borderRadius: "4px", backgroundImage: "linear-gradient(90deg,#F9FAFB 25%,#F3F4F6 50%,#F9FAFB 75%)", backgroundSize: "200% 100%", animation: "shimmer 1.5s infinite" }} />
         </div>
       </div>
-      <div className="h-2.5 w-10 animate-pulse rounded-[3px] bg-[#F3F4F6] mt-1" />
+      <div style={{ height: "10px", width: "36px", borderRadius: "4px", backgroundImage: "linear-gradient(90deg,#F3F4F6 25%,#EBEBEB 50%,#F3F4F6 75%)", backgroundSize: "200% 100%", animation: "shimmer 1.5s infinite", marginTop: "4px", flexShrink: 0 }} />
+      <style>{`@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}`}</style>
     </div>
   );
 }
 
+// ─── Main component ───────────────────────────────────────────
 export function ActivityFeed({ activities, loading = false }: ActivityFeedProps) {
   return (
     <div
-      className="flex flex-col bg-white rounded-[6px] overflow-hidden"
-      style={{ border: "1px solid #EBEBEB", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}
+      style={{
+        background: "#FFFFFF",
+        borderRadius: "10px",
+        border: "1px solid #EBEBEB",
+        boxShadow: "0 1px 4px rgba(0,0,0,0.05)",
+        display: "flex",
+        flexDirection: "column",
+        overflow: "hidden",
+        fontFamily: "'Work Sans', sans-serif",
+      }}
     >
-      {/* Panel header */}
-      <div className="flex items-center justify-between px-5 py-3.5 border-b border-[#F3F4F6]">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-7 w-7 items-center justify-center rounded-[5px] bg-[#F5F4F1] border border-[#EBEBEB]">
-            <Activity className="h-3.5 w-3.5 text-[#6B7280]" />
+      {/* ── Panel header ─────────────────────────────────────── */}
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "14px 16px",
+        borderBottom: "1px solid #F3F4F6",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          {/* Icon */}
+          <div style={{
+            width: "28px", height: "28px",
+            borderRadius: "7px",
+            background: "#F5F5F5",
+            border: "1px solid #EBEBEB",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            flexShrink: 0,
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+            </svg>
           </div>
+
           <div>
-            <h3
-              className="text-[13px] font-bold text-[#111827] leading-none"
-              style={{ fontFamily: "'Work Sans', sans-serif" }}
-            >
+            <h3 style={{ fontSize: "13px", fontWeight: 700, color: "#111827", lineHeight: 1, letterSpacing: "-0.01em" }}>
               Recent Activity
             </h3>
-            <p className="mt-0.5 text-[10.5px] text-[#9CA3AF]">Live feed of compound events</p>
+            <p style={{ marginTop: "3px", fontSize: "10.5px", color: "#9CA3AF", lineHeight: 1 }}>
+              Live feed of compound events
+            </p>
           </div>
         </div>
 
-        {/* Blue accent event count pill */}
+        {/* Event count badge */}
         {!loading && activities.length > 0 && (
-          <span
-            className="rounded-[4px] bg-[#2563EB] px-2.5 py-[3px] text-[10.5px] font-bold text-white tabular-nums"
-            style={{ fontFamily: "'DM Mono', monospace" }}
-          >
+          <span style={{
+            background: "#111827",
+            color: "#FFFFFF",
+            fontSize: "10.5px",
+            fontWeight: 700,
+            padding: "3px 9px",
+            borderRadius: "6px",
+            fontFamily: "'DM Mono', monospace",
+            letterSpacing: "0.02em",
+          }}>
             {activities.length} events
           </span>
         )}
       </div>
 
-      {/* Feed rows */}
-      <div className="flex-1 divide-y divide-[#F5F4F1]">
+      {/* ── Feed body ────────────────────────────────────────── */}
+      <div style={{ flex: 1 }}>
         {loading ? (
           Array.from({ length: 6 }).map((_, i) => <SkeletonRow key={i} />)
+
         ) : activities.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
-            <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-[#F9FAFB] border border-[#E5E7EB]">
-              <Activity className="h-5 w-5 text-[#D1D5DB]" />
+          // Empty state
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "48px 24px", textAlign: "center" }}>
+            <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "#F9FAFB", border: "1px solid #E5E7EB", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: "12px" }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#D1D5DB" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+              </svg>
             </div>
-            <p
-              className="text-[13.5px] font-semibold text-[#6B7280]"
-              style={{ fontFamily: "'Work Sans', sans-serif" }}
-            >
-              All quiet for now
-            </p>
-            <p className="mt-1 text-[12px] text-[#9CA3AF] max-w-[220px]">
+            <p style={{ fontSize: "13.5px", fontWeight: 600, color: "#6B7280" }}>All quiet for now</p>
+            <p style={{ marginTop: "4px", fontSize: "12px", color: "#9CA3AF", maxWidth: "200px", lineHeight: 1.5 }}>
               Nothing here yet — check back shortly.
             </p>
           </div>
+
         ) : (
-          activities.map((activity) => {
+          activities.map((activity, idx) => {
             const config = iconByType[activity.type];
             const Icon = config.icon;
+            const isLast = idx === activities.length - 1;
+
             return (
               <div
                 key={activity.id}
-                className="flex items-start gap-3 px-4 py-3 border-b border-[#F3F4F6] hover:bg-[#F9FAFB] transition-colors"
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: "12px",
+                  padding: "12px 16px",
+                  borderBottom: isLast ? "none" : "1px solid #F9FAFB",
+                  transition: "background 100ms ease",
+                  cursor: "default",
+                }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.background = "#FAFAFA"; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
               >
                 {/* Circle icon */}
-                <div
-                  className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${config.circleBg}`}
-                >
-                  <Icon className={`h-3.5 w-3.5 ${config.circleIcon}`} />
+                <div style={{
+                  marginTop: "1px",
+                  width: "32px", height: "32px",
+                  borderRadius: "50%",
+                  background: config.circleStyle.background,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  flexShrink: 0,
+                }}>
+                  <Icon style={{ width: "13px", height: "13px", color: config.circleStyle.color }} />
                 </div>
 
-                {/* Content — two-tier hierarchy */}
-                <div className="min-w-0 flex-1">
-                  {/* PRIMARY: description — bold, prominent */}
-                  <p className="text-[13px] font-semibold text-[#111827]">
+                {/* Content */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  {/* Description */}
+                  <p style={{ fontSize: "13px", fontWeight: 600, color: "#111827", lineHeight: 1.35, letterSpacing: "-0.005em" }}>
                     {activity.description}
                   </p>
 
-                  {/* SECONDARY: category + actor + unit — softer, smaller */}
-                  <div className="mt-1.5 flex items-center gap-2 flex-wrap">
-                    {/* Colored category badge */}
-                    <span
-                      className={`inline px-2 py-0.5 rounded text-[11px] font-semibold uppercase tracking-wide ${config.badgeBg} ${config.badgeText}`}
-                    >
+                  {/* Meta row: badge + actor + unit */}
+                  <div style={{ marginTop: "6px", display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                    {/* Category badge */}
+                    <span style={{
+                      fontSize: "10px",
+                      fontWeight: 700,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.06em",
+                      padding: "2px 7px",
+                      borderRadius: "4px",
+                      background: config.badgeStyle.background,
+                      color: config.badgeStyle.color,
+                    }}>
                       {config.label}
                     </span>
 
                     {activity.actorName && (
-                      <span className="text-[11px] text-[#9CA3AF]">
+                      <span style={{ fontSize: "11px", color: "#9CA3AF" }}>
                         by{" "}
-                        <span className="font-medium text-[#6B7280]">
+                        <span style={{ fontWeight: 600, color: "#6B7280" }}>
                           {activity.actorName}
                         </span>
                       </span>
                     )}
 
                     {activity.unitNumber && (
-                      <span
-                        className="text-[11px] font-medium text-[#9CA3AF]"
-                        style={{ fontFamily: "'DM Mono', monospace" }}
-                      >
+                      <span style={{ fontSize: "11px", fontWeight: 500, color: "#9CA3AF", fontFamily: "'DM Mono', monospace" }}>
                         Unit {activity.unitNumber}
                       </span>
                     )}
                   </div>
                 </div>
 
-                {/* Timestamp — DM Mono, right-aligned, muted */}
-                <span className="ml-auto text-[11px] text-[#9CA3AF] font-mono whitespace-nowrap pt-0.5 flex-shrink-0">
+                {/* Timestamp */}
+                <span style={{
+                  flexShrink: 0,
+                  fontSize: "11px",
+                  color: "#9CA3AF",
+                  fontFamily: "'DM Mono', monospace",
+                  whiteSpace: "nowrap",
+                  paddingTop: "2px",
+                }}>
                   {relativeTime(activity.timestamp)}
                 </span>
               </div>

@@ -9,7 +9,7 @@ import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Switch } from '../ui/switch';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
+import { DataTable, type DataTableColumn } from '../DataTable';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
 import { Textarea } from '../ui/textarea';
 import { DrawerForm } from '../DrawerForm';
@@ -307,53 +307,25 @@ export function PermitsManagement() {
             </div>
           </Card>
 
-          <Card className="overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Request #</TableHead>
-                  <TableHead>Permit Type</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Unit</TableHead>
-                  <TableHead>Requester</TableHead>
-                  <TableHead>Submitted</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {requests.map((request) => (
-                  <TableRow key={request.id}>
-                    <TableCell>{request.requestNumber}</TableCell>
-                    <TableCell>{request.permitTypeName}</TableCell>
-                    <TableCell>
-                      <Badge className={categoryBadgeClass(request.category)}>
-                        {humanizeEnum(request.category)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{request.unitNumber}</TableCell>
-                    <TableCell>{request.requesterName}</TableCell>
-                    <TableCell>{formatDateTime(request.submittedAt)}</TableCell>
-                    <TableCell>
-                      <StatusBadge value={request.status} />
-                    </TableCell>
-                    <TableCell>
-                      <Button variant="ghost" size="icon" onClick={() => void openRequestDrawer(request.id)}>
-                        <Eye className="h-4 w-4" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {!loading && requests.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={8} className="py-10 text-center text-sm text-slate-500">
-                      No permit requests found.
-                    </TableCell>
-                  </TableRow>
-                ) : null}
-              </TableBody>
-            </Table>
-          </Card>
+          {(() => {
+            const cols: DataTableColumn<PermitRequestListItem>[] = [
+              { key: "num", header: "Request #", render: (r) => <span>{r.requestNumber}</span> },
+              { key: "type", header: "Permit Type", render: (r) => <span>{r.permitTypeName}</span> },
+              { key: "category", header: "Category", render: (r) => <Badge className={categoryBadgeClass(r.category)}>{humanizeEnum(r.category)}</Badge> },
+              { key: "unit", header: "Unit", render: (r) => <span>{r.unitNumber}</span> },
+              { key: "requester", header: "Requester", render: (r) => <span>{r.requesterName}</span> },
+              { key: "submitted", header: "Submitted", render: (r) => <span>{formatDateTime(r.submittedAt)}</span> },
+              { key: "status", header: "Status", render: (r) => <StatusBadge value={r.status} /> },
+              { key: "actions", header: "Actions", render: (r) => (
+                <Button variant="ghost" size="icon" onClick={() => void openRequestDrawer(r.id)}><Eye className="h-4 w-4" /></Button>
+              )},
+            ];
+            return (
+              <Card className="overflow-hidden">
+                <DataTable columns={cols} rows={requests} rowKey={(r) => r.id} loading={loading} emptyTitle="No permit requests found" />
+              </Card>
+            );
+          })()}
         </TabsContent>
 
         <TabsContent value="types" className="space-y-4">

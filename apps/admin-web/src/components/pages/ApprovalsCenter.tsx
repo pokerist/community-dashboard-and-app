@@ -1,23 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "../ui/dialog";
-import { Input } from "../ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
-import { Textarea } from "../ui/textarea";
+  CheckCircle2, XCircle, Clock, Search, CalendarRange,
+  ChevronDown, Users, Home, Briefcase, UserCheck, Building2,
+  SlidersHorizontal, Eye,
+} from "lucide-react";
 import { DataTable, DataTableColumn } from "../DataTable";
 import { DrawerForm } from "../DrawerForm";
 import { EmptyState } from "../EmptyState";
-import { PageHeader } from "../PageHeader";
-import { SkeletonTable } from "../SkeletonTable";
-import { StatCard } from "../StatCard";
 import { StatusBadge } from "../StatusBadge";
 import approvalsService, {
   ApprovalBaseItem,
@@ -30,7 +20,6 @@ import approvalsService, {
   HomeStaffType,
   OwnerApprovalItem,
   OwnerOption,
-  TenantApprovalItem,
   UnitOption,
 } from "../../lib/approvals-service";
 import {
@@ -42,375 +31,363 @@ import {
   toInitials,
 } from "../../lib/live-data";
 
-type TabKey = "owners" | "family" | "delegates" | "home-staff" | "tenants";
+// ─── Types ────────────────────────────────────────────────────
+
+type TabKey = "owners" | "family" | "delegates" | "home-staff";
 type StatusFilter = "PENDING" | "PROCESSING" | "ALL";
-type PreRegistrationMode = "OWNER" | "FAMILY";
-type PreRegistrationStep = 1 | 2;
 
 type SelectedItem =
   | { tab: "owners"; item: OwnerApprovalItem }
   | { tab: "family"; item: FamilyApprovalItem }
   | { tab: "delegates"; item: DelegateApprovalItem }
   | { tab: "home-staff"; item: HomeStaffApprovalItem }
-  | { tab: "tenants"; item: TenantApprovalItem };
 
 type PreviewState = {
-  loading: boolean;
-  objectUrl: string | null;
-  mimeType: string | null;
-  error: string | null;
+  loading: boolean; objectUrl: string | null; mimeType: string | null; error: string | null;
 };
 
-function buildUnitLabel(projectName: string, unitNumber: string | null): string {
-  return unitNumber ? `${projectName} - ${unitNumber}` : projectName;
-}
+// ─── Constants ────────────────────────────────────────────────
 
-function collectDocumentUrls(item: ApprovalBaseItem | null): string[] {
-  if (!item) return [];
-  const urls: string[] = [];
-  if (item.documents.photo) urls.push(item.documents.photo);
-  if (item.documents.nationalId) urls.push(item.documents.nationalId);
-  if (item.documents.passport) urls.push(item.documents.passport);
-  item.documents.other.forEach((row) => urls.push(row.url));
-  return urls;
-}
+const ACCENTS = ["#0D9488", "#2563EB", "#BE185D"];
 
 const RELATIONSHIP_OPTIONS: FamilyRelationship[] = ["SON_DAUGHTER", "MOTHER_FATHER", "SPOUSE"];
 const HOME_STAFF_TYPES: HomeStaffType[] = ["DRIVER", "NANNY", "SERVANT", "GARDENER", "OTHER"];
 const DELEGATE_FEE_MODES: DelegateFeeMode[] = ["NO_FEE", "FEE_REQUIRED"];
 
+const TAB_META: Record<TabKey, { label: string; icon: React.ReactNode; statsKey: keyof ApprovalStats; accent: string }> = {
+  owners:      { label: "Owners",       icon: <Building2 style={{ width: "13px", height: "13px" }} />, statsKey: "pendingOwners",        accent: "#2563EB" },
+  family:      { label: "Family",       icon: <Users     style={{ width: "13px", height: "13px" }} />, statsKey: "pendingFamilyMembers", accent: "#0D9488" },
+  delegates:   { label: "Delegates",    icon: <UserCheck style={{ width: "13px", height: "13px" }} />, statsKey: "pendingDelegates",     accent: "#BE185D" },
+  "home-staff":{ label: "Home Staff",   icon: <Home      style={{ width: "13px", height: "13px" }} />, statsKey: "pendingHomeStaff",     accent: "#7C3AED" },
+};
+
+function buildUnitLabel(projectName: string, unitNumber: string | null): string {
+  return unitNumber ? `${projectName} – ${unitNumber}` : projectName;
+}
+
+function collectDocumentUrls(item: ApprovalBaseItem | null): string[] {
+  if (!item) return [];
+  const urls: string[] = [];
+  if (item.documents.photo)      urls.push(item.documents.photo);
+  if (item.documents.nationalId) urls.push(item.documents.nationalId);
+  if (item.documents.passport)   urls.push(item.documents.passport);
+  item.documents.other.forEach((r) => urls.push(r.url));
+  return urls;
+}
+
+// ─── Primitive UI ─────────────────────────────────────────────
+
+const inputStyle: React.CSSProperties = { width: "100%", padding: "7px 10px", borderRadius: "7px", border: "1px solid #E5E7EB", fontSize: "12.5px", color: "#111827", background: "#FFF", outline: "none", fontFamily: "'Work Sans', sans-serif", boxSizing: "border-box", height: "34px" };
+const selectStyle: React.CSSProperties = { ...inputStyle, cursor: "pointer" };
+
+function ReviewBtn({ onClick, label = "Review" }: { onClick: () => void; label?: string }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button type="button" onClick={onClick} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{ display: "flex", alignItems: "center", gap: "4px", padding: "4px 10px", borderRadius: "6px", border: "1px solid #E5E7EB", background: hov ? "#111827" : "#FFF", color: hov ? "#FFF" : "#374151", cursor: "pointer", fontSize: "11.5px", fontWeight: 700, transition: "all 120ms ease", fontFamily: "'Work Sans', sans-serif", flexShrink: 0 }}>
+      <Eye style={{ width: "10px", height: "10px" }} />{label}
+    </button>
+  );
+}
+
+function ApproveBtn({ onClick, busy }: { onClick: () => void; busy: boolean }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button type="button" onClick={onClick} disabled={busy} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{ display: "flex", alignItems: "center", gap: "5px", padding: "8px 18px", borderRadius: "7px", background: hov ? "#047857" : "#059669", color: "#FFF", border: "none", cursor: busy ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 700, transition: "background 120ms ease", fontFamily: "'Work Sans', sans-serif", opacity: busy ? 0.7 : 1 }}>
+      <CheckCircle2 style={{ width: "14px", height: "14px" }} />{busy ? "Approving…" : "Approve"}
+    </button>
+  );
+}
+
+function RejectBtn({ onClick, busy, confirm = false }: { onClick: () => void; busy: boolean; confirm?: boolean }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button type="button" onClick={onClick} disabled={busy} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{ display: "flex", alignItems: "center", gap: "5px", padding: "8px 18px", borderRadius: "7px", background: hov ? "#B91C1C" : (confirm ? "#DC2626" : "#FEF2F2"), color: confirm ? "#FFF" : "#DC2626", border: confirm ? "none" : "1px solid #FCA5A5", cursor: busy ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 700, transition: "all 120ms ease", fontFamily: "'Work Sans', sans-serif", opacity: busy ? 0.7 : 1 }}>
+      <XCircle style={{ width: "14px", height: "14px" }} />{confirm ? (busy ? "Rejecting…" : "Confirm Reject") : "Reject"}
+    </button>
+  );
+}
+
+function GhostBtn({ label, onClick }: { label: string; onClick: () => void }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button type="button" onClick={onClick} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{ padding: "8px 14px", borderRadius: "7px", background: hov ? "#F5F5F5" : "#FFF", color: "#6B7280", border: "1px solid #E5E7EB", cursor: "pointer", fontSize: "12.5px", fontWeight: 500, transition: "background 120ms ease", fontFamily: "'Work Sans', sans-serif" }}>
+      {label}
+    </button>
+  );
+}
+
+// ─── Filter bar ───────────────────────────────────────────────
+
+function FilterBar({ children, open, onToggle, activeCount }: { children: React.ReactNode; open: boolean; onToggle: () => void; activeCount: number }) {
+  return (
+    <div style={{ borderRadius: "10px", border: "1px solid #EBEBEB", background: "#FFF", overflow: "hidden", marginBottom: "12px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 14px", borderBottom: open ? "1px solid #F3F4F6" : "none" }}>
+        <Search style={{ width: "13px", height: "13px", color: "#9CA3AF", flexShrink: 0 }} />
+        {/* first child as search */}
+        <div style={{ flex: 1 }}>{Array.isArray(children) ? (children as React.ReactNode[])[0] : children}</div>
+        <button type="button" onClick={onToggle}
+          style={{ display: "flex", alignItems: "center", gap: "5px", padding: "5px 10px", borderRadius: "6px", border: `1px solid ${activeCount > 0 ? "#2563EB40" : "#E5E7EB"}`, background: activeCount > 0 ? "#EFF6FF" : "#FAFAFA", color: activeCount > 0 ? "#2563EB" : "#6B7280", fontSize: "11.5px", fontWeight: 600, cursor: "pointer", flexShrink: 0, fontFamily: "'Work Sans', sans-serif" }}>
+          <SlidersHorizontal style={{ width: "11px", height: "11px" }} />
+          Filters
+          {activeCount > 0 && <span style={{ width: "15px", height: "15px", borderRadius: "50%", background: "#2563EB", color: "#FFF", fontSize: "9px", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Mono', monospace" }}>{activeCount}</span>}
+          <ChevronDown style={{ width: "10px", height: "10px", transform: open ? "rotate(180deg)" : "none", transition: "transform 150ms ease" }} />
+        </button>
+      </div>
+      {open && (
+        <div style={{ padding: "10px 14px", display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+          {/* date range pair */}
+          <div style={{ display: "flex", alignItems: "center", gap: "4px", padding: "5px 10px", borderRadius: "7px", border: "1px solid #E5E7EB", background: "#FAFAFA", flexShrink: 0 }}>
+            <CalendarRange style={{ width: "11px", height: "11px", color: "#9CA3AF" }} />
+            <span style={{ fontSize: "10.5px", color: "#9CA3AF", fontWeight: 600 }}>FROM</span>
+            {(Array.isArray(children) ? (children as React.ReactNode[])[1] : null)}
+            <span style={{ fontSize: "10.5px", color: "#9CA3AF", fontWeight: 600, marginLeft: "4px" }}>TO</span>
+            {(Array.isArray(children) ? (children as React.ReactNode[])[2] : null)}
+          </div>
+          {/* rest of filters */}
+          {Array.isArray(children) && (children as React.ReactNode[]).slice(3)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Stat cards ───────────────────────────────────────────────
+
+function ApprovalStatCard({ tab, stats, statsLoading, active, onClick }: { tab: TabKey; stats: ApprovalStats | null; statsLoading: boolean; active: boolean; onClick: () => void }) {
+  const meta  = TAB_META[tab];
+  const count = stats ? (stats[meta.statsKey] ?? 0) : 0;
+  const [hov, setHov] = useState(false);
+
+  return (
+    <button type="button" onClick={onClick} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{ flex: 1, minWidth: 0, padding: "14px 16px", borderRadius: "10px", border: `1px solid ${active ? meta.accent + "50" : "#EBEBEB"}`, background: active ? `${meta.accent}08` : hov ? "#FAFAFA" : "#FFF", boxShadow: active ? `0 0 0 2px ${meta.accent}30` : "0 1px 3px rgba(0,0,0,0.04)", cursor: "pointer", transition: "all 120ms ease", textAlign: "left", borderTop: `3px solid ${active ? meta.accent : "#EBEBEB"}`, fontFamily: "'Work Sans', sans-serif" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+        <span style={{ color: active ? meta.accent : "#9CA3AF", transition: "color 120ms" }}>{meta.icon}</span>
+        <span style={{ fontSize: "11px", fontWeight: 600, color: active ? meta.accent : "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.05em" }}>{meta.label}</span>
+      </div>
+      <p style={{ fontSize: "26px", fontWeight: 900, color: active ? meta.accent : "#111827", letterSpacing: "-0.04em", lineHeight: 1, margin: 0, fontFamily: "'DM Mono', monospace" }}>
+        {statsLoading ? "—" : String(count)}
+      </p>
+      {count > 0 && !statsLoading && (
+        <div style={{ display: "flex", alignItems: "center", gap: "4px", marginTop: "5px" }}>
+          <Clock style={{ width: "9px", height: "9px", color: "#F59E0B" }} />
+          <span style={{ fontSize: "10px", color: "#F59E0B", fontWeight: 700 }}>pending review</span>
+        </div>
+      )}
+    </button>
+  );
+}
+
+// ─── Detail row ───────────────────────────────────────────────
+
+function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", gap: "12px", padding: "6px 0", borderBottom: "1px solid #F9FAFB" }}>
+      <span style={{ fontSize: "11px", fontWeight: 600, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.05em", width: "110px", flexShrink: 0, paddingTop: "1px" }}>{label}</span>
+      <span style={{ fontSize: "13px", color: "#111827", flex: 1 }}>{value || "—"}</span>
+    </div>
+  );
+}
+
+// ─── Document preview card ────────────────────────────────────
+
+function DocCard({ label, url, preview, onOpen }: { label: string; url: string | null; preview?: PreviewState; onOpen: () => void }) {
+  const isImage = Boolean(preview?.mimeType?.startsWith("image/"));
+  return (
+    <div style={{ borderRadius: "8px", border: "1px solid #EBEBEB", overflow: "hidden", background: "#FAFAFA" }}>
+      <div style={{ padding: "7px 10px", borderBottom: "1px solid #F3F4F6", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span style={{ fontSize: "11px", fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</span>
+        {url && (
+          <button type="button" onClick={onOpen}
+            style={{ fontSize: "10.5px", fontWeight: 600, color: "#2563EB", background: "none", border: "none", cursor: "pointer", fontFamily: "'Work Sans', sans-serif" }}>
+            Open ↗
+          </button>
+        )}
+      </div>
+      <div style={{ padding: "8px", minHeight: "64px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        {!url ? (
+          <p style={{ fontSize: "12px", color: "#D1D5DB" }}>Not provided</p>
+        ) : preview?.loading ? (
+          <p style={{ fontSize: "12px", color: "#9CA3AF" }}>Loading…</p>
+        ) : preview?.objectUrl && isImage ? (
+          <button type="button" onClick={onOpen} style={{ width: "100%", padding: 0, border: "none", background: "none", cursor: "pointer" }}>
+            <img src={preview.objectUrl} alt={label} style={{ width: "100%", height: "90px", objectFit: "cover", borderRadius: "5px" }} />
+          </button>
+        ) : (
+          <button type="button" onClick={onOpen}
+            style={{ padding: "5px 12px", borderRadius: "6px", border: "1px solid #E5E7EB", background: "#FFF", color: "#374151", cursor: "pointer", fontSize: "12px", fontFamily: "'Work Sans', sans-serif" }}>
+            View document
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Main component ───────────────────────────────────────────
+
 export function ApprovalsCenter() {
   const [activeTab, setActiveTab] = useState<TabKey>("owners");
-  const [stats, setStats] = useState<ApprovalStats | null>(null);
+  const [stats, setStats]         = useState<ApprovalStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(true);
 
-  const [owners, setOwners] = useState<OwnerApprovalItem[]>([]);
-  const [family, setFamily] = useState<FamilyApprovalItem[]>([]);
-  const [delegates, setDelegates] = useState<DelegateApprovalItem[]>([]);
-  const [homeStaff, setHomeStaff] = useState<HomeStaffApprovalItem[]>([]);
-  const [tenants, setTenants] = useState<TenantApprovalItem[]>([]);
-  const [tenantsTotal, setTenantsTotal] = useState(0);
+  const [owners,     setOwners]     = useState<OwnerApprovalItem[]>([]);
+  const [family,     setFamily]     = useState<FamilyApprovalItem[]>([]);
+  const [delegates,  setDelegates]  = useState<DelegateApprovalItem[]>([]);
+  const [homeStaff,  setHomeStaff]  = useState<HomeStaffApprovalItem[]>([]);
 
-  const [ownersLoading, setOwnersLoading] = useState(false);
-  const [familyLoading, setFamilyLoading] = useState(false);
-  const [delegatesLoading, setDelegatesLoading] = useState(false);
-  const [homeStaffLoading, setHomeStaffLoading] = useState(false);
-  const [tenantsLoading, setTenantsLoading] = useState(false);
+  const [ownersLoading,    setOL] = useState(false);
+  const [familyLoading,    setFL] = useState(false);
+  const [delegatesLoading, setDL] = useState(false);
+  const [homeStaffLoading, setHL] = useState(false);
 
-  const [ownerStatus, setOwnerStatus] = useState<StatusFilter>("ALL");
-  const [ownerSearch, setOwnerSearch] = useState("");
-  const [ownerDateFrom, setOwnerDateFrom] = useState("");
-  const [ownerDateTo, setOwnerDateTo] = useState("");
-  const [ownerRegistrationType, setOwnerRegistrationType] = useState<"ALL" | "SELF" | "PRE_REG">("ALL");
+  // Filters
+  const [ownerSearch,           setOwnerSearch]           = useState("");
+  const [ownerStatus,           setOwnerStatus]           = useState<StatusFilter>("ALL");
+  const [ownerDateFrom,         setOwnerDateFrom]         = useState("");
+  const [ownerDateTo,           setOwnerDateTo]           = useState("");
+  const [ownerRegistrationType, setOwnerRegType]          = useState<"ALL" | "SELF" | "PRE_REG">("ALL");
+  const [ownerFiltersOpen,      setOwnerFiltersOpen]      = useState(false);
 
-  const [familyStatus, setFamilyStatus] = useState<StatusFilter>("PENDING");
-  const [familySearch, setFamilySearch] = useState("");
-  const [familyDateFrom, setFamilyDateFrom] = useState("");
-  const [familyDateTo, setFamilyDateTo] = useState("");
-  const [familyRelationship, setFamilyRelationship] = useState<"ALL" | FamilyRelationship>("ALL");
+  const [familySearch,      setFamilySearch]      = useState("");
+  const [familyStatus,      setFamilyStatus]      = useState<StatusFilter>("PENDING");
+  const [familyDateFrom,    setFamilyDateFrom]    = useState("");
+  const [familyDateTo,      setFamilyDateTo]      = useState("");
+  const [familyRelationship,setFamilyRel]         = useState<"ALL" | FamilyRelationship>("ALL");
+  const [familyFiltersOpen, setFamilyFiltersOpen] = useState(false);
 
-  const [delegateStatus, setDelegateStatus] = useState<StatusFilter>("PENDING");
-  const [delegateSearch, setDelegateSearch] = useState("");
-  const [delegateDateFrom, setDelegateDateFrom] = useState("");
-  const [delegateDateTo, setDelegateDateTo] = useState("");
-  const [delegateFeeMode, setDelegateFeeMode] = useState<"ALL" | DelegateFeeMode>("ALL");
+  const [delegateSearch,     setDelegateSearch]     = useState("");
+  const [delegateStatus,     setDelegateStatus]     = useState<StatusFilter>("PENDING");
+  const [delegateDateFrom,   setDelegateDateFrom]   = useState("");
+  const [delegateDateTo,     setDelegateDateTo]     = useState("");
+  const [delegateFeeMode,    setDelegateFeeMode]    = useState<"ALL" | DelegateFeeMode>("ALL");
+  const [delegateFiltersOpen,setDelegateFiltersOpen]= useState(false);
 
-  const [homeStaffStatus, setHomeStaffStatus] = useState<StatusFilter>("PENDING");
-  const [homeStaffSearch, setHomeStaffSearch] = useState("");
-  const [homeStaffDateFrom, setHomeStaffDateFrom] = useState("");
-  const [homeStaffDateTo, setHomeStaffDateTo] = useState("");
-  const [homeStaffType, setHomeStaffType] = useState<"ALL" | HomeStaffType>("ALL");
+  const [homeStaffSearch,     setHSSearch]          = useState("");
+  const [homeStaffStatus,     setHSStatus]          = useState<StatusFilter>("PENDING");
+  const [homeStaffDateFrom,   setHSDateFrom]        = useState("");
+  const [homeStaffDateTo,     setHSDateTo]          = useState("");
+  const [homeStaffType,       setHSType]            = useState<"ALL" | HomeStaffType>("ALL");
+  const [homeStaffFiltersOpen,setHSFiltersOpen]     = useState(false);
 
-  const [tenantStatus, setTenantStatus] = useState<"PENDING" | "APPROVED" | "REJECTED" | "ALL">("PENDING");
-  const [tenantSearch, setTenantSearch] = useState("");
-
+  // Review drawer
   const [selectedItem, setSelectedItem] = useState<SelectedItem | null>(null);
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [actionBusy, setActionBusy] = useState(false);
-  const [rejectMode, setRejectMode] = useState(false);
+  const [drawerOpen,   setDrawerOpen]   = useState(false);
+  const [actionBusy,   setActionBusy]   = useState(false);
+  const [rejectMode,   setRejectMode]   = useState(false);
   const [rejectReason, setRejectReason] = useState("");
 
-  const [preRegisterOpen, setPreRegisterOpen] = useState(false);
-  const [preRegisterMode, setPreRegisterMode] = useState<PreRegistrationMode>("OWNER");
-  const [preRegisterStep, setPreRegisterStep] = useState<PreRegistrationStep>(1);
-  const [preRegisterBusy, setPreRegisterBusy] = useState(false);
-
-  const [ownerForm, setOwnerForm] = useState({
-    nameEN: "",
-    email: "",
-    phone: "",
-    nationalId: "",
-    unitId: "",
-    notes: "",
-  });
-
-  const [familyForm, setFamilyForm] = useState({
-    ownerUserId: "",
-    unitId: "",
-    fullName: "",
-    phone: "",
-    relationship: "SON_DAUGHTER" as FamilyRelationship,
-    email: "",
-    nationalIdOrPassport: "",
-    notes: "",
-  });
-
-  const [ownerOptions, setOwnerOptions] = useState<OwnerOption[]>([]);
-  const [unitOptions, setUnitOptions] = useState<UnitOption[]>([]);
-  const [optionsLoading, setOptionsLoading] = useState(false);
-
+  // Document previews
   const [previewByUrl, setPreviewByUrl] = useState<Record<string, PreviewState>>({});
   const previewByUrlRef = useRef<Record<string, PreviewState>>({});
   const createdObjectUrls = useRef<string[]>([]);
 
-  useEffect(() => {
-    previewByUrlRef.current = previewByUrl;
-  }, [previewByUrl]);
+  useEffect(() => { previewByUrlRef.current = previewByUrl; }, [previewByUrl]);
+  useEffect(() => () => { createdObjectUrls.current.forEach((u) => URL.revokeObjectURL(u)); }, []);
 
-  useEffect(() => {
-    return () => {
-      createdObjectUrls.current.forEach((url) => URL.revokeObjectURL(url));
-    };
-  }, []);
+  // ── Loaders ──────────────────────────────────────────────────
 
   const loadStats = useCallback(async () => {
     setStatsLoading(true);
-    try {
-      const response = await approvalsService.getStats();
-      setStats(response);
-    } catch (error) {
-      toast.error("Failed to load approval stats", { description: errorMessage(error) });
-    } finally {
-      setStatsLoading(false);
-    }
+    try { setStats(await approvalsService.getStats()); }
+    catch (e) { toast.error("Failed to load stats", { description: errorMessage(e) }); }
+    finally { setStatsLoading(false); }
   }, []);
 
   const loadOwners = useCallback(async () => {
-    setOwnersLoading(true);
-    try {
-      const rows = await approvalsService.listOwners({
-        search: ownerSearch || undefined,
-        status: ownerStatus,
-        dateFrom: ownerDateFrom || undefined,
-        dateTo: ownerDateTo || undefined,
-        registrationType: ownerRegistrationType === "ALL" ? undefined : ownerRegistrationType,
-      });
-      setOwners(rows);
-    } catch (error) {
-      toast.error("Failed to load owners approvals", { description: errorMessage(error) });
-    } finally {
-      setOwnersLoading(false);
-    }
+    setOL(true);
+    try { setOwners(await approvalsService.listOwners({ search: ownerSearch || undefined, status: ownerStatus, dateFrom: ownerDateFrom || undefined, dateTo: ownerDateTo || undefined, registrationType: ownerRegistrationType === "ALL" ? undefined : ownerRegistrationType })); }
+    catch (e) { toast.error("Failed to load owner approvals", { description: errorMessage(e) }); }
+    finally { setOL(false); }
   }, [ownerDateFrom, ownerDateTo, ownerRegistrationType, ownerSearch, ownerStatus]);
 
   const loadFamily = useCallback(async () => {
-    setFamilyLoading(true);
-    try {
-      const rows = await approvalsService.listFamilyMembers({
-        search: familySearch || undefined,
-        status: familyStatus === "ALL" || familyStatus === "PROCESSING" ? undefined : familyStatus,
-        dateFrom: familyDateFrom || undefined,
-        dateTo: familyDateTo || undefined,
-        relationship: familyRelationship === "ALL" ? undefined : familyRelationship,
-      });
-      setFamily(rows);
-    } catch (error) {
-      toast.error("Failed to load family approvals", { description: errorMessage(error) });
-    } finally {
-      setFamilyLoading(false);
-    }
+    setFL(true);
+    try { setFamily(await approvalsService.listFamilyMembers({ search: familySearch || undefined, status: familyStatus === "ALL" || familyStatus === "PROCESSING" ? undefined : familyStatus, dateFrom: familyDateFrom || undefined, dateTo: familyDateTo || undefined, relationship: familyRelationship === "ALL" ? undefined : familyRelationship })); }
+    catch (e) { toast.error("Failed to load family approvals", { description: errorMessage(e) }); }
+    finally { setFL(false); }
   }, [familyDateFrom, familyDateTo, familyRelationship, familySearch, familyStatus]);
 
   const loadDelegates = useCallback(async () => {
-    setDelegatesLoading(true);
-    try {
-      const rows = await approvalsService.listDelegates({
-        search: delegateSearch || undefined,
-        status: delegateStatus === "ALL" || delegateStatus === "PROCESSING" ? undefined : delegateStatus,
-        dateFrom: delegateDateFrom || undefined,
-        dateTo: delegateDateTo || undefined,
-        feeMode: delegateFeeMode === "ALL" ? undefined : delegateFeeMode,
-      });
-      setDelegates(rows);
-    } catch (error) {
-      toast.error("Failed to load delegates approvals", { description: errorMessage(error) });
-    } finally {
-      setDelegatesLoading(false);
-    }
+    setDL(true);
+    try { setDelegates(await approvalsService.listDelegates({ search: delegateSearch || undefined, status: delegateStatus === "ALL" || delegateStatus === "PROCESSING" ? undefined : delegateStatus, dateFrom: delegateDateFrom || undefined, dateTo: delegateDateTo || undefined, feeMode: delegateFeeMode === "ALL" ? undefined : delegateFeeMode })); }
+    catch (e) { toast.error("Failed to load delegate approvals", { description: errorMessage(e) }); }
+    finally { setDL(false); }
   }, [delegateDateFrom, delegateDateTo, delegateFeeMode, delegateSearch, delegateStatus]);
 
   const loadHomeStaff = useCallback(async () => {
-    setHomeStaffLoading(true);
-    try {
-      const rows = await approvalsService.listHomeStaff({
-        search: homeStaffSearch || undefined,
-        status: homeStaffStatus === "ALL" || homeStaffStatus === "PROCESSING" ? undefined : homeStaffStatus,
-        dateFrom: homeStaffDateFrom || undefined,
-        dateTo: homeStaffDateTo || undefined,
-        staffType: homeStaffType === "ALL" ? undefined : homeStaffType,
-      });
-      setHomeStaff(rows);
-    } catch (error) {
-      toast.error("Failed to load home staff approvals", { description: errorMessage(error) });
-    } finally {
-      setHomeStaffLoading(false);
-    }
+    setHL(true);
+    try { setHomeStaff(await approvalsService.listHomeStaff({ search: homeStaffSearch || undefined, status: homeStaffStatus === "ALL" || homeStaffStatus === "PROCESSING" ? undefined : homeStaffStatus, dateFrom: homeStaffDateFrom || undefined, dateTo: homeStaffDateTo || undefined, staffType: homeStaffType === "ALL" ? undefined : homeStaffType })); }
+    catch (e) { toast.error("Failed to load home staff approvals", { description: errorMessage(e) }); }
+    finally { setHL(false); }
   }, [homeStaffDateFrom, homeStaffDateTo, homeStaffSearch, homeStaffStatus, homeStaffType]);
 
-  const loadTenants = useCallback(async () => {
-    setTenantsLoading(true);
-    try {
-      const result = await approvalsService.listTenants({
-        search: tenantSearch || undefined,
-        status: tenantStatus === "ALL" ? undefined : tenantStatus,
-        limit: 100,
-      });
-      setTenants(result.data);
-      setTenantsTotal(result.total);
-    } catch (error) {
-      toast.error("Failed to load tenant approvals", { description: errorMessage(error) });
-    } finally {
-      setTenantsLoading(false);
-    }
-  }, [tenantSearch, tenantStatus]);
 
+  useEffect(() => { void loadStats(); }, [loadStats]);
   useEffect(() => {
-    void loadStats();
-  }, [loadStats]);
+    if (activeTab === "owners")      void loadOwners();
+    if (activeTab === "family")      void loadFamily();
+    if (activeTab === "delegates")   void loadDelegates();
+    if (activeTab === "home-staff")  void loadHomeStaff();
+  }, [activeTab, loadOwners, loadFamily, loadDelegates, loadHomeStaff]);
 
-  useEffect(() => {
-    if (activeTab === "owners") void loadOwners();
-    if (activeTab === "family") void loadFamily();
-    if (activeTab === "delegates") void loadDelegates();
-    if (activeTab === "home-staff") void loadHomeStaff();
-    if (activeTab === "tenants") void loadTenants();
-  }, [activeTab, loadDelegates, loadFamily, loadHomeStaff, loadOwners, loadTenants]);
-
-  useEffect(() => {
-    if (!preRegisterOpen) return;
-    setOptionsLoading(true);
-    Promise.all([approvalsService.listOwnerOptions(), approvalsService.listUnitOptions()])
-      .then(([ownerRows, unitRows]) => {
-        setOwnerOptions(ownerRows);
-        setUnitOptions(unitRows);
-      })
-      .catch((error) => {
-        toast.error("Failed to load pre-registration options", { description: errorMessage(error) });
-      })
-      .finally(() => setOptionsLoading(false));
-  }, [preRegisterOpen]);
-
-  const selectedBaseItem = selectedItem?.item ?? null;
+  // ── Document preview ──────────────────────────────────────────
 
   const ensurePreview = useCallback(async (url: string) => {
     if (!url) return;
-    const current = previewByUrlRef.current[url];
-    if (current?.loading || current?.objectUrl || current?.error) return;
-
-    setPreviewByUrl((prev) => {
-      const existing = prev[url];
-      if (existing?.loading || existing?.objectUrl || existing?.error) return prev;
-      const next = {
-        ...prev,
-        [url]: { loading: true, objectUrl: null, mimeType: null, error: null },
-      };
-      previewByUrlRef.current = next;
-      return next;
-    });
-
+    const cur = previewByUrlRef.current[url];
+    if (cur?.loading || cur?.objectUrl || cur?.error) return;
+    setPreviewByUrl((p) => { const e = p[url]; if (e?.loading || e?.objectUrl || e?.error) return p; const n = { ...p, [url]: { loading: true, objectUrl: null, mimeType: null, error: null } }; previewByUrlRef.current = n; return n; });
     try {
       const blob = await approvalsService.fetchDocumentBlob(url);
       const objectUrl = URL.createObjectURL(blob);
       createdObjectUrls.current.push(objectUrl);
-      setPreviewByUrl((prev) => {
-        const next = {
-          ...prev,
-          [url]: {
-            loading: false,
-            objectUrl,
-            mimeType: blob.type || null,
-            error: null,
-          },
-        };
-        previewByUrlRef.current = next;
-        return next;
-      });
-    } catch (error) {
-      setPreviewByUrl((prev) => {
-        const next = {
-          ...prev,
-          [url]: {
-            loading: false,
-            objectUrl: null,
-            mimeType: null,
-            error: errorMessage(error),
-          },
-        };
-        previewByUrlRef.current = next;
-        return next;
-      });
+      setPreviewByUrl((p) => { const n = { ...p, [url]: { loading: false, objectUrl, mimeType: blob.type || null, error: null } }; previewByUrlRef.current = n; return n; });
+    } catch (e) {
+      setPreviewByUrl((p) => { const n = { ...p, [url]: { loading: false, objectUrl: null, mimeType: null, error: errorMessage(e) } }; previewByUrlRef.current = n; return n; });
     }
   }, []);
 
-  useEffect(() => {
-    collectDocumentUrls(selectedBaseItem).forEach((url) => {
-      void ensurePreview(url);
-    });
-  }, [ensurePreview, selectedBaseItem]);
+  const selectedBaseItem = selectedItem?.item ?? null;
+  useEffect(() => { collectDocumentUrls(selectedBaseItem).forEach((u) => void ensurePreview(u)); }, [ensurePreview, selectedBaseItem]);
 
   const openDocument = useCallback(async (url: string) => {
     const preview = previewByUrl[url];
-    if (preview?.objectUrl) {
-      window.open(preview.objectUrl, "_blank", "noopener,noreferrer");
-      return;
-    }
-
-    try {
-      const blob = await approvalsService.fetchDocumentBlob(url);
-      const objectUrl = URL.createObjectURL(blob);
-      createdObjectUrls.current.push(objectUrl);
-      window.open(objectUrl, "_blank", "noopener,noreferrer");
-    } catch (error) {
-      toast.error("Failed to open document", { description: errorMessage(error) });
-    }
+    if (preview?.objectUrl) { window.open(preview.objectUrl, "_blank", "noopener,noreferrer"); return; }
+    try { const blob = await approvalsService.fetchDocumentBlob(url); const u = URL.createObjectURL(blob); createdObjectUrls.current.push(u); window.open(u, "_blank", "noopener,noreferrer"); }
+    catch (e) { toast.error("Failed to open document", { description: errorMessage(e) }); }
   }, [previewByUrl]);
 
+  // ── Optimistic updates ────────────────────────────────────────
+
   const removeOptimistically = useCallback((tab: TabKey, id: string) => {
-    let ownerRow: OwnerApprovalItem | null = null;
-    let familyRow: FamilyApprovalItem | null = null;
-    let delegateRow: DelegateApprovalItem | null = null;
-    let staffRow: HomeStaffApprovalItem | null = null;
-    let tenantRow: TenantApprovalItem | null = null;
-
-    if (tab === "owners") setOwners((prev) => { ownerRow = prev.find((row) => row.id === id) ?? null; return prev.filter((row) => row.id !== id); });
-    if (tab === "family") setFamily((prev) => { familyRow = prev.find((row) => row.id === id) ?? null; return prev.filter((row) => row.id !== id); });
-    if (tab === "delegates") setDelegates((prev) => { delegateRow = prev.find((row) => row.id === id) ?? null; return prev.filter((row) => row.id !== id); });
-    if (tab === "home-staff") setHomeStaff((prev) => { staffRow = prev.find((row) => row.id === id) ?? null; return prev.filter((row) => row.id !== id); });
-    if (tab === "tenants") setTenants((prev) => { tenantRow = prev.find((row) => row.id === id) ?? null; return prev.filter((row) => row.id !== id); });
-
-    setStats((prev) => {
-      if (!prev) return prev;
-      if (tab === "owners") return { ...prev, pendingOwners: Math.max(0, prev.pendingOwners - 1), totalPending: Math.max(0, prev.totalPending - 1) };
-      if (tab === "family") return { ...prev, pendingFamilyMembers: Math.max(0, prev.pendingFamilyMembers - 1), totalPending: Math.max(0, prev.totalPending - 1) };
-      if (tab === "delegates") return { ...prev, pendingDelegates: Math.max(0, prev.pendingDelegates - 1), totalPending: Math.max(0, prev.totalPending - 1) };
-      if (tab === "tenants") return { ...prev, pendingTenants: Math.max(0, (prev.pendingTenants ?? 0) - 1), totalPending: Math.max(0, prev.totalPending - 1) };
-      return { ...prev, pendingHomeStaff: Math.max(0, prev.pendingHomeStaff - 1), totalPending: Math.max(0, prev.totalPending - 1) };
+    let ownerRow: OwnerApprovalItem | null = null, familyRow: FamilyApprovalItem | null = null, delegateRow: DelegateApprovalItem | null = null, staffRow: HomeStaffApprovalItem | null = null;
+    if (tab === "owners")      setOwners((p)     => { ownerRow    = p.find((r) => r.id === id) ?? null; return p.filter((r) => r.id !== id); });
+    if (tab === "family")      setFamily((p)     => { familyRow   = p.find((r) => r.id === id) ?? null; return p.filter((r) => r.id !== id); });
+    if (tab === "delegates")   setDelegates((p)  => { delegateRow = p.find((r) => r.id === id) ?? null; return p.filter((r) => r.id !== id); });
+    if (tab === "home-staff")  setHomeStaff((p)  => { staffRow    = p.find((r) => r.id === id) ?? null; return p.filter((r) => r.id !== id); });
+    setStats((p) => {
+      if (!p) return p;
+      if (tab === "owners")     return { ...p, pendingOwners: Math.max(0, p.pendingOwners - 1), totalPending: Math.max(0, p.totalPending - 1) };
+      if (tab === "family")     return { ...p, pendingFamilyMembers: Math.max(0, p.pendingFamilyMembers - 1), totalPending: Math.max(0, p.totalPending - 1) };
+      if (tab === "delegates")  return { ...p, pendingDelegates: Math.max(0, p.pendingDelegates - 1), totalPending: Math.max(0, p.totalPending - 1) };
+      return { ...p, pendingHomeStaff: Math.max(0, p.pendingHomeStaff - 1), totalPending: Math.max(0, p.totalPending - 1) };
     });
-
     return () => {
-      if (tab === "owners" && ownerRow) setOwners((prev) => [ownerRow as OwnerApprovalItem, ...prev]);
-      if (tab === "family" && familyRow) setFamily((prev) => [familyRow as FamilyApprovalItem, ...prev]);
-      if (tab === "delegates" && delegateRow) setDelegates((prev) => [delegateRow as DelegateApprovalItem, ...prev]);
-      if (tab === "home-staff" && staffRow) setHomeStaff((prev) => [staffRow as HomeStaffApprovalItem, ...prev]);
-      if (tab === "tenants" && tenantRow) setTenants((prev) => [tenantRow as TenantApprovalItem, ...prev]);
-
-      setStats((prev) => {
-        if (!prev) return prev;
-        if (tab === "owners") return { ...prev, pendingOwners: prev.pendingOwners + 1, totalPending: prev.totalPending + 1 };
-        if (tab === "family") return { ...prev, pendingFamilyMembers: prev.pendingFamilyMembers + 1, totalPending: prev.totalPending + 1 };
-        if (tab === "delegates") return { ...prev, pendingDelegates: prev.pendingDelegates + 1, totalPending: prev.totalPending + 1 };
-        if (tab === "tenants") return { ...prev, pendingTenants: (prev.pendingTenants ?? 0) + 1, totalPending: prev.totalPending + 1 };
-        return { ...prev, pendingHomeStaff: prev.pendingHomeStaff + 1, totalPending: prev.totalPending + 1 };
+      if (tab === "owners"     && ownerRow)    setOwners((p)    => [ownerRow!,    ...p]);
+      if (tab === "family"     && familyRow)   setFamily((p)    => [familyRow!,   ...p]);
+      if (tab === "delegates"  && delegateRow) setDelegates((p) => [delegateRow!, ...p]);
+      if (tab === "home-staff" && staffRow)    setHomeStaff((p) => [staffRow!,    ...p]);
+      setStats((p) => {
+        if (!p) return p;
+        if (tab === "owners")     return { ...p, pendingOwners: p.pendingOwners + 1, totalPending: p.totalPending + 1 };
+        if (tab === "family")     return { ...p, pendingFamilyMembers: p.pendingFamilyMembers + 1, totalPending: p.totalPending + 1 };
+        if (tab === "delegates")  return { ...p, pendingDelegates: p.pendingDelegates + 1, totalPending: p.totalPending + 1 };
+        return { ...p, pendingHomeStaff: p.pendingHomeStaff + 1, totalPending: p.totalPending + 1 };
       });
     };
   }, []);
@@ -418,580 +395,313 @@ export function ApprovalsCenter() {
   const handleApprove = useCallback(async () => {
     if (!selectedItem) return;
     if (!window.confirm("Approve and send credentials?")) return;
-
     setActionBusy(true);
     const rollback = removeOptimistically(selectedItem.tab, selectedItem.item.id);
     try {
-      if (selectedItem.tab === "owners") await approvalsService.approveOwner(selectedItem.item.id);
-      if (selectedItem.tab === "family") await approvalsService.approveFamilyMember(selectedItem.item.id);
-      if (selectedItem.tab === "delegates") await approvalsService.approveDelegate(selectedItem.item.id);
+      if (selectedItem.tab === "owners")     await approvalsService.approveOwner(selectedItem.item.id);
+      if (selectedItem.tab === "family")     await approvalsService.approveFamilyMember(selectedItem.item.id);
+      if (selectedItem.tab === "delegates")  await approvalsService.approveDelegate(selectedItem.item.id);
       if (selectedItem.tab === "home-staff") await approvalsService.approveHomeStaff(selectedItem.item.id);
-      if (selectedItem.tab === "tenants") await approvalsService.approveTenant(selectedItem.item.id);
-      toast.success("Approval completed");
-      setDrawerOpen(false);
-      setSelectedItem(null);
-      setRejectMode(false);
-      setRejectReason("");
-    } catch (error) {
-      rollback();
-      toast.error("Approval failed", { description: errorMessage(error) });
-    } finally {
-      setActionBusy(false);
-    }
+      toast.success("Approval completed"); setDrawerOpen(false); setSelectedItem(null); setRejectMode(false); setRejectReason("");
+    } catch (e) { rollback(); toast.error("Approval failed", { description: errorMessage(e) }); }
+    finally { setActionBusy(false); }
   }, [removeOptimistically, selectedItem]);
 
   const handleReject = useCallback(async () => {
     if (!selectedItem) return;
-    if (!rejectReason.trim()) {
-      toast.error("Rejection reason is required");
-      return;
-    }
-
+    if (!rejectReason.trim()) { toast.error("Rejection reason is required"); return; }
     setActionBusy(true);
     const rollback = removeOptimistically(selectedItem.tab, selectedItem.item.id);
     try {
-      if (selectedItem.tab === "owners") await approvalsService.rejectOwner(selectedItem.item.id, rejectReason.trim());
-      if (selectedItem.tab === "family") await approvalsService.rejectFamilyMember(selectedItem.item.id, rejectReason.trim());
-      if (selectedItem.tab === "delegates") await approvalsService.rejectDelegate(selectedItem.item.id, rejectReason.trim());
+      if (selectedItem.tab === "owners")     await approvalsService.rejectOwner(selectedItem.item.id, rejectReason.trim());
+      if (selectedItem.tab === "family")     await approvalsService.rejectFamilyMember(selectedItem.item.id, rejectReason.trim());
+      if (selectedItem.tab === "delegates")  await approvalsService.rejectDelegate(selectedItem.item.id, rejectReason.trim());
       if (selectedItem.tab === "home-staff") await approvalsService.rejectHomeStaff(selectedItem.item.id, rejectReason.trim());
-      if (selectedItem.tab === "tenants") await approvalsService.rejectTenant(selectedItem.item.id, rejectReason.trim());
-      toast.success("Request rejected");
-      setDrawerOpen(false);
-      setSelectedItem(null);
-      setRejectMode(false);
-      setRejectReason("");
-    } catch (error) {
-      rollback();
-      toast.error("Rejection failed", { description: errorMessage(error) });
-    } finally {
-      setActionBusy(false);
-    }
+      toast.success("Request rejected"); setDrawerOpen(false); setSelectedItem(null); setRejectMode(false); setRejectReason("");
+    } catch (e) { rollback(); toast.error("Rejection failed", { description: errorMessage(e) }); }
+    finally { setActionBusy(false); }
   }, [rejectReason, removeOptimistically, selectedItem]);
 
-  const openReview = useCallback((item: SelectedItem) => {
-    setSelectedItem(item);
-    setDrawerOpen(true);
-    setRejectMode(false);
-    setRejectReason("");
-  }, []);
+  const openReview = useCallback((item: SelectedItem) => { setSelectedItem(item); setDrawerOpen(true); setRejectMode(false); setRejectReason(""); }, []);
+
+  // ── Columns ───────────────────────────────────────────────────
 
   const ownerColumns = useMemo<DataTableColumn<OwnerApprovalItem>[]>(() => [
-    { key: "name", header: "Name", render: (row) => row.name || "Unknown" },
-    { key: "phone", header: "Phone", render: (row) => row.phone },
-    { key: "nationalId", header: "National ID", render: (row) => row.nationalId },
-    { key: "submitted", header: "Submitted", render: (row) => formatDateTime(row.submittedAt) },
-    { key: "type", header: "Type", render: (row) => <Badge>{row.isPreRegistration ? "Pre-reg" : "Self"}</Badge> },
-    { key: "status", header: "Status", render: (row) => <StatusBadge value={row.status} /> },
-    { key: "actions", header: "Actions", render: (row) => <Button size="sm" onClick={() => openReview({ tab: "owners", item: row })}>Review</Button> },
+    { key: "name",      header: "Name",      render: (r) => <span style={{ fontWeight: 600, color: "#111827" }}>{r.name || "Unknown"}</span> },
+    { key: "phone",     header: "Phone",     render: (r) => <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "12px" }}>{r.phone}</span> },
+    { key: "nationalId",header: "Nat. ID",   render: (r) => <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "12px", color: "#6B7280" }}>{r.nationalId}</span> },
+    { key: "submitted", header: "Submitted", render: (r) => <span style={{ fontSize: "12px", color: "#9CA3AF" }}>{formatDateTime(r.submittedAt)}</span> },
+    { key: "type",      header: "Type",      render: (r) => <span style={{ padding: "2px 8px", borderRadius: "5px", fontSize: "10.5px", fontWeight: 700, background: r.isPreRegistration ? "#EFF6FF" : "#F3F4F6", color: r.isPreRegistration ? "#1D4ED8" : "#6B7280" }}>{r.isPreRegistration ? "Pre-reg" : "Self"}</span> },
+    { key: "status",    header: "Status",    render: (r) => <StatusBadge value={r.status} /> },
+    { key: "actions",   header: "",          render: (r) => <ReviewBtn onClick={() => openReview({ tab: "owners", item: r })} /> },
   ], [openReview]);
 
   const familyColumns = useMemo<DataTableColumn<FamilyApprovalItem>[]>(() => [
-    { key: "name", header: "Name", render: (row) => row.fullName },
-    { key: "phone", header: "Phone", render: (row) => row.phone },
-    { key: "relationship", header: "Relationship", render: (row) => <Badge>{humanizeEnum(row.relationship)}</Badge> },
-    { key: "owner", header: "Owner", render: (row) => row.ownerName },
-    { key: "unit", header: "Unit", render: (row) => buildUnitLabel(row.projectName, row.unitNumber) },
-    { key: "submitted", header: "Submitted", render: (row) => formatDateTime(row.submittedAt) },
-    { key: "status", header: "Status", render: (row) => <StatusBadge value={row.status} /> },
-    { key: "actions", header: "Actions", render: (row) => <Button size="sm" onClick={() => openReview({ tab: "family", item: row })}>Review</Button> },
+    { key: "name",         header: "Name",         render: (r) => <span style={{ fontWeight: 600, color: "#111827" }}>{r.fullName}</span> },
+    { key: "phone",        header: "Phone",        render: (r) => <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "12px" }}>{r.phone}</span> },
+    { key: "relationship", header: "Relationship", render: (r) => <span style={{ padding: "2px 8px", borderRadius: "5px", fontSize: "10.5px", fontWeight: 700, background: "#F0FDFA", color: "#0D9488" }}>{humanizeEnum(r.relationship)}</span> },
+    { key: "owner",        header: "Owner",        render: (r) => r.ownerName },
+    { key: "unit",         header: "Unit",         render: (r) => <span style={{ fontSize: "12px", color: "#6B7280" }}>{buildUnitLabel(r.projectName, r.unitNumber)}</span> },
+    { key: "submitted",    header: "Submitted",    render: (r) => <span style={{ fontSize: "12px", color: "#9CA3AF" }}>{formatDateTime(r.submittedAt)}</span> },
+    { key: "status",       header: "Status",       render: (r) => <StatusBadge value={r.status} /> },
+    { key: "actions",      header: "",             render: (r) => <ReviewBtn onClick={() => openReview({ tab: "family", item: r })} /> },
   ], [openReview]);
 
   const delegateColumns = useMemo<DataTableColumn<DelegateApprovalItem>[]>(() => [
-    { key: "name", header: "Name", render: (row) => row.fullName },
-    { key: "phone", header: "Phone", render: (row) => row.phone },
-    { key: "owner", header: "Owner", render: (row) => row.ownerName },
-    { key: "unit", header: "Unit", render: (row) => buildUnitLabel(row.projectName, row.unitNumber) },
-    { key: "period", header: "Valid Period", render: (row) => `${formatDate(row.validFrom)} - ${formatDate(row.validTo)}` },
-    { key: "fee", header: "Fee Mode", render: (row) => <Badge>{humanizeEnum(row.feeMode)}</Badge> },
-    { key: "status", header: "Status", render: (row) => <StatusBadge value={row.status} /> },
-    { key: "actions", header: "Actions", render: (row) => <Button size="sm" onClick={() => openReview({ tab: "delegates", item: row })}>Review</Button> },
+    { key: "name",    header: "Name",       render: (r) => <span style={{ fontWeight: 600, color: "#111827" }}>{r.fullName}</span> },
+    { key: "phone",   header: "Phone",      render: (r) => <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "12px" }}>{r.phone}</span> },
+    { key: "owner",   header: "Owner",      render: (r) => r.ownerName },
+    { key: "unit",    header: "Unit",       render: (r) => <span style={{ fontSize: "12px", color: "#6B7280" }}>{buildUnitLabel(r.projectName, r.unitNumber)}</span> },
+    { key: "period",  header: "Valid Period",render: (r) => <span style={{ fontSize: "11.5px", color: "#6B7280", fontFamily: "'DM Mono', monospace" }}>{formatDate(r.validFrom)} → {formatDate(r.validTo)}</span> },
+    { key: "fee",     header: "Fee",        render: (r) => <span style={{ padding: "2px 8px", borderRadius: "5px", fontSize: "10.5px", fontWeight: 700, background: "#FFF1F2", color: "#BE185D" }}>{humanizeEnum(r.feeMode)}</span> },
+    { key: "status",  header: "Status",     render: (r) => <StatusBadge value={r.status} /> },
+    { key: "actions", header: "",           render: (r) => <ReviewBtn onClick={() => openReview({ tab: "delegates", item: r })} /> },
   ], [openReview]);
 
   const homeStaffColumns = useMemo<DataTableColumn<HomeStaffApprovalItem>[]>(() => [
-    { key: "name", header: "Name", render: (row) => row.fullName },
-    { key: "type", header: "Staff Type", render: (row) => <Badge>{humanizeEnum(row.staffType)}</Badge> },
-    { key: "phone", header: "Phone", render: (row) => row.phone },
-    { key: "owner", header: "Owner", render: (row) => row.ownerName },
-    { key: "unit", header: "Unit", render: (row) => buildUnitLabel(row.projectName, row.unitNumber) },
-    { key: "period", header: "Access Period", render: (row) => `${formatDate(row.accessValidFrom)} - ${formatDate(row.accessValidTo)}` },
-    { key: "liveIn", header: "Live-In", render: (row) => <Badge>{row.isLiveIn ? "Live-In" : "Non Live-In"}</Badge> },
-    { key: "status", header: "Status", render: (row) => <StatusBadge value={row.status} /> },
-    { key: "actions", header: "Actions", render: (row) => <Button size="sm" onClick={() => openReview({ tab: "home-staff", item: row })}>Review</Button> },
+    { key: "name",   header: "Name",        render: (r) => <span style={{ fontWeight: 600, color: "#111827" }}>{r.fullName}</span> },
+    { key: "type",   header: "Staff Type",  render: (r) => <span style={{ padding: "2px 8px", borderRadius: "5px", fontSize: "10.5px", fontWeight: 700, background: "#F5F3FF", color: "#7C3AED" }}>{humanizeEnum(r.staffType)}</span> },
+    { key: "phone",  header: "Phone",       render: (r) => <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "12px" }}>{r.phone}</span> },
+    { key: "owner",  header: "Owner",       render: (r) => r.ownerName },
+    { key: "unit",   header: "Unit",        render: (r) => <span style={{ fontSize: "12px", color: "#6B7280" }}>{buildUnitLabel(r.projectName, r.unitNumber)}</span> },
+    { key: "period", header: "Access",      render: (r) => <span style={{ fontSize: "11.5px", color: "#6B7280", fontFamily: "'DM Mono', monospace" }}>{formatDate(r.accessValidFrom)} → {formatDate(r.accessValidTo)}</span> },
+    { key: "liveIn", header: "Live-In",     render: (r) => <span style={{ padding: "2px 8px", borderRadius: "5px", fontSize: "10.5px", fontWeight: 700, background: r.isLiveIn ? "#ECFDF5" : "#F3F4F6", color: r.isLiveIn ? "#065F46" : "#6B7280" }}>{r.isLiveIn ? "Live-In" : "Day"}</span> },
+    { key: "status", header: "Status",      render: (r) => <StatusBadge value={r.status} /> },
+    { key: "actions",header: "",            render: (r) => <ReviewBtn onClick={() => openReview({ tab: "home-staff", item: r })} /> },
   ], [openReview]);
 
-  const tenantColumns = useMemo<DataTableColumn<TenantApprovalItem>[]>(() => [
-    { key: "tenant", header: "Tenant", render: (row) => (
-      <div>
-        <p className="font-medium text-[#1E293B]">{row.tenantName}</p>
-        <p className="text-xs text-[#64748B]">{row.tenantEmail}</p>
-      </div>
-    )},
-    { key: "phone", header: "Phone", render: (row) => row.tenantPhone },
-    { key: "nationality", header: "Nationality", render: (row) => row.tenantNationality || "—" },
-    { key: "unit", header: "Unit", render: (row) => row.unitNumber || row.unitId.slice(0, 8) },
-    { key: "owner", header: "Owner", render: (row) => row.ownerName || "—" },
-    { key: "requested", header: "Requested", render: (row) => formatDateTime(row.requestedAt) },
-    { key: "status", header: "Status", render: (row) => <StatusBadge value={row.status} /> },
-    { key: "actions", header: "Actions", render: (row) => (
-      row.status === "PENDING"
-        ? <Button size="sm" onClick={() => openReview({ tab: "tenants", item: row })}>Review</Button>
-        : <Button size="sm" variant="outline" onClick={() => openReview({ tab: "tenants", item: row })}>View</Button>
-    )},
-  ], [openReview]);
+  // ── Tab content factory ───────────────────────────────────────
 
-  const preRegisterNext = () => {
-    if (preRegisterMode === "OWNER") {
-      if (!ownerForm.nameEN || !ownerForm.email || !ownerForm.phone || !ownerForm.nationalId) {
-        toast.error("Owner pre-registration form is incomplete");
-        return;
-      }
-    }
-    if (preRegisterMode === "FAMILY") {
-      if (!familyForm.ownerUserId || !familyForm.unitId || !familyForm.fullName || !familyForm.phone) {
-        toast.error("Family pre-registration form is incomplete");
-        return;
-      }
-    }
-    setPreRegisterStep(2);
+  const getItemName = (item: SelectedItem): string => {
+    if (item.tab === "owners")  return item.item.name || "Owner";
+    return (item.item as FamilyApprovalItem | DelegateApprovalItem | HomeStaffApprovalItem).fullName;
   };
 
-  const confirmPreRegistration = async () => {
-    setPreRegisterBusy(true);
-    try {
-      if (preRegisterMode === "OWNER") {
-        await approvalsService.preRegisterOwner({
-          nameEN: ownerForm.nameEN,
-          email: ownerForm.email,
-          phone: ownerForm.phone,
-          nationalId: ownerForm.nationalId,
-          unitId: ownerForm.unitId || undefined,
-          notes: ownerForm.notes || undefined,
-        });
-      } else {
-        await approvalsService.preRegisterFamilyMember({
-          ownerUserId: familyForm.ownerUserId,
-          unitId: familyForm.unitId,
-          fullName: familyForm.fullName,
-          phone: familyForm.phone,
-          relationship: familyForm.relationship,
-          email: familyForm.email || undefined,
-          nationalIdOrPassport: familyForm.nationalIdOrPassport || undefined,
-          notes: familyForm.notes || undefined,
-        });
-      }
-      toast.success("Pre-registration completed");
-      setPreRegisterOpen(false);
-      setPreRegisterStep(1);
-      await loadStats();
-      if (activeTab === "owners") await loadOwners();
-      if (activeTab === "family") await loadFamily();
-    } catch (error) {
-      toast.error("Pre-registration failed", { description: errorMessage(error) });
-    } finally {
-      setPreRegisterBusy(false);
-    }
+  const getItemPhone = (item: SelectedItem): string => {
+    return (item.item as OwnerApprovalItem | FamilyApprovalItem | DelegateApprovalItem | HomeStaffApprovalItem).phone;
   };
 
-  const renderDocumentCard = (label: string, url: string | null) => {
-    const preview = url ? previewByUrl[url] : null;
-    const isImage = Boolean(preview?.mimeType?.startsWith("image/"));
-
-    return (
-      <div key={`${label}-${url ?? "none"}`} className="rounded-lg border border-[#E2E8F0] p-3">
-        <p className="mb-2 text-xs text-[#64748B]">{label}</p>
-        {!url ? (
-          <p className="text-sm text-[#94A3B8]">Not provided</p>
-        ) : preview?.loading ? (
-          <p className="text-sm text-[#64748B]">Loading preview...</p>
-        ) : preview?.objectUrl && isImage ? (
-          <button type="button" className="w-full" onClick={() => void openDocument(url)}>
-            <img src={preview.objectUrl} alt={label} className="h-28 w-full rounded-md object-cover" />
-          </button>
-        ) : (
-          <Button size="sm" variant="outline" onClick={() => void openDocument(url)}>
-            Open Document
-          </Button>
-        )}
-      </div>
-    );
-  };
-
+  // ─────────────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────────────
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Approvals"
-        description="Unified queue for owner registrations, family members, delegates, home staff, and tenants."
-        actions={<Button onClick={() => setPreRegisterOpen(true)}>Pre-Register</Button>}
-      />
+    <div style={{ fontFamily: "'Work Sans', sans-serif" }}>
+      <style>{`@keyframes sk-shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}`}</style>
 
-      <div className="grid gap-3 md:grid-cols-5">
-        <StatCard title="Pending Owners" value={statsLoading ? "..." : String(stats?.pendingOwners ?? 0)} icon="active-users" onClick={() => setActiveTab("owners")} />
-        <StatCard title="Family Members" value={statsLoading ? "..." : String(stats?.pendingFamilyMembers ?? 0)} icon="visitors" onClick={() => setActiveTab("family")} />
-        <StatCard title="Delegates" value={statsLoading ? "..." : String(stats?.pendingDelegates ?? 0)} icon="tickets" onClick={() => setActiveTab("delegates")} />
-        <StatCard title="Home Staff" value={statsLoading ? "..." : String(stats?.pendingHomeStaff ?? 0)} icon="workers" onClick={() => setActiveTab("home-staff")} />
-        <StatCard title="Tenants" value={statsLoading ? "..." : String(stats?.pendingTenants ?? 0)} icon="tickets" onClick={() => setActiveTab("tenants")} />
+      {/* ── Page header ────────────────────────────────────── */}
+      <div style={{ marginBottom: "20px" }}>
+        <h1 style={{ fontSize: "18px", fontWeight: 800, color: "#111827", letterSpacing: "-0.02em", margin: 0 }}>Approvals</h1>
+        <p style={{ marginTop: "4px", fontSize: "13px", color: "#6B7280" }}>Unified queue — owners, family, delegates, and home staff.</p>
       </div>
 
-      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabKey)}>
-        <TabsList className="grid w-full grid-cols-5">
-          <TabsTrigger value="owners">Owners</TabsTrigger>
-          <TabsTrigger value="family">Family Members</TabsTrigger>
-          <TabsTrigger value="delegates">Delegates</TabsTrigger>
-          <TabsTrigger value="home-staff">Home Staff</TabsTrigger>
-          <TabsTrigger value="tenants">Tenants</TabsTrigger>
-        </TabsList>
+      {/* ── Stat cards (horizontal) ────────────────────────── */}
+      <div style={{ display: "flex", gap: "10px", marginBottom: "20px", overflowX: "auto", paddingBottom: "2px" }}>
+        {(["owners", "family", "delegates", "home-staff"] as TabKey[]).map((tab) => (
+          <ApprovalStatCard key={tab} tab={tab} stats={stats} statsLoading={statsLoading} active={activeTab === tab} onClick={() => setActiveTab(tab)} />
+        ))}
+      </div>
 
-        <TabsContent value="owners" className="space-y-3">
-          <div className="grid gap-3 rounded-xl border border-[#E2E8F0] bg-white p-3 md:grid-cols-5">
-            <Input placeholder="Search name or phone" value={ownerSearch} onChange={(event) => setOwnerSearch(event.target.value)} />
-            <Input type="date" value={ownerDateFrom} onChange={(event) => setOwnerDateFrom(event.target.value)} />
-            <Input type="date" value={ownerDateTo} onChange={(event) => setOwnerDateTo(event.target.value)} />
-            <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={ownerStatus} onChange={(event) => setOwnerStatus(event.target.value as StatusFilter)}>
-              <option value="PENDING">Pending</option>
-              <option value="PROCESSING">Processing</option>
-              <option value="ALL">All</option>
-            </select>
-            <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={ownerRegistrationType} onChange={(event) => setOwnerRegistrationType(event.target.value as "ALL" | "SELF" | "PRE_REG")}>
-              <option value="ALL">All Types</option>
-              <option value="SELF">Self</option>
-              <option value="PRE_REG">Pre-reg</option>
-            </select>
-          </div>
-          {ownersLoading ? <SkeletonTable columns={7} /> : <DataTable columns={ownerColumns} rows={owners} rowKey={(row) => row.id} emptyTitle="No owner approvals" emptyDescription="No owner registration matches current filters." />}
-        </TabsContent>
+      {/* ── Custom tab bar ────────────────────────────────── */}
+      <div style={{ display: "flex", gap: "2px", padding: "4px", borderRadius: "10px", background: "#F3F4F6", marginBottom: "16px", overflowX: "auto" }}>
+        {(["owners", "family", "delegates", "home-staff"] as TabKey[]).map((tab) => {
+          const meta   = TAB_META[tab];
+          const active = activeTab === tab;
+          const count  = stats ? (stats[meta.statsKey] ?? 0) : null;
+          return (
+            <button key={tab} type="button" onClick={() => setActiveTab(tab)}
+              style={{ display: "flex", alignItems: "center", gap: "6px", padding: "7px 16px", borderRadius: "7px", border: "none", background: active ? "#FFF" : "transparent", color: active ? "#111827" : "#9CA3AF", cursor: "pointer", fontSize: "12.5px", fontWeight: active ? 700 : 500, transition: "all 120ms ease", fontFamily: "'Work Sans', sans-serif", flexShrink: 0, boxShadow: active ? "0 1px 3px rgba(0,0,0,0.08)" : "none" }}>
+              <span style={{ color: active ? meta.accent : "#D1D5DB" }}>{meta.icon}</span>
+              {meta.label}
+              {count !== null && count > 0 && (
+                <span style={{ fontSize: "9.5px", fontWeight: 700, padding: "1px 5px", borderRadius: "10px", background: active ? meta.accent : "#E5E7EB", color: active ? "#FFF" : "#6B7280", fontFamily: "'DM Mono', monospace" }}>{count}</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
 
-        <TabsContent value="family" className="space-y-3">
-          <div className="grid gap-3 rounded-xl border border-[#E2E8F0] bg-white p-3 md:grid-cols-5">
-            <Input placeholder="Search name or phone" value={familySearch} onChange={(event) => setFamilySearch(event.target.value)} />
-            <Input type="date" value={familyDateFrom} onChange={(event) => setFamilyDateFrom(event.target.value)} />
-            <Input type="date" value={familyDateTo} onChange={(event) => setFamilyDateTo(event.target.value)} />
-            <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={familyStatus} onChange={(event) => setFamilyStatus(event.target.value as StatusFilter)}>
-              <option value="PENDING">Pending</option>
-              <option value="PROCESSING">Processing</option>
-              <option value="ALL">All</option>
-            </select>
-            <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={familyRelationship} onChange={(event) => setFamilyRelationship(event.target.value as "ALL" | FamilyRelationship)}>
-              <option value="ALL">All Relationships</option>
-              {RELATIONSHIP_OPTIONS.map((value) => (
-                <option key={value} value={value}>{humanizeEnum(value)}</option>
-              ))}
-            </select>
-          </div>
-          {familyLoading ? <SkeletonTable columns={8} /> : <DataTable columns={familyColumns} rows={family} rowKey={(row) => row.id} emptyTitle="No family approvals" emptyDescription="No family request matches current filters." />}
-        </TabsContent>
+      {/* ══ Tab panels ══════════════════════════════════════ */}
 
-        <TabsContent value="delegates" className="space-y-3">
-          <div className="grid gap-3 rounded-xl border border-[#E2E8F0] bg-white p-3 md:grid-cols-5">
-            <Input placeholder="Search name or phone" value={delegateSearch} onChange={(event) => setDelegateSearch(event.target.value)} />
-            <Input type="date" value={delegateDateFrom} onChange={(event) => setDelegateDateFrom(event.target.value)} />
-            <Input type="date" value={delegateDateTo} onChange={(event) => setDelegateDateTo(event.target.value)} />
-            <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={delegateStatus} onChange={(event) => setDelegateStatus(event.target.value as StatusFilter)}>
-              <option value="PENDING">Pending</option>
-              <option value="PROCESSING">Processing</option>
-              <option value="ALL">All</option>
-            </select>
-            <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={delegateFeeMode} onChange={(event) => setDelegateFeeMode(event.target.value as "ALL" | DelegateFeeMode)}>
-              <option value="ALL">All Fee Modes</option>
-              {DELEGATE_FEE_MODES.map((value) => (
-                <option key={value} value={value}>{humanizeEnum(value)}</option>
-              ))}
-            </select>
-          </div>
-          {delegatesLoading ? <SkeletonTable columns={8} /> : <DataTable columns={delegateColumns} rows={delegates} rowKey={(row) => row.id} emptyTitle="No delegate approvals" emptyDescription="No delegate request matches current filters." />}
-        </TabsContent>
+      {/* ── Owners ─────────────────────────────────────────── */}
+      {activeTab === "owners" && (
+        <FilterBar open={ownerFiltersOpen} onToggle={() => setOwnerFiltersOpen((p) => !p)}
+          activeCount={[ownerStatus !== "ALL", ownerDateFrom, ownerDateTo, ownerRegistrationType !== "ALL"].filter(Boolean).length}>
+          <input placeholder="Search name or phone…" value={ownerSearch} onChange={(e) => setOwnerSearch(e.target.value)} style={{ ...inputStyle, border: "none", background: "transparent", padding: "0" }} />
+          <input type="date" value={ownerDateFrom} onChange={(e) => setOwnerDateFrom(e.target.value)} style={{ ...inputStyle, width: "130px", border: "none", background: "transparent" }} />
+          <input type="date" value={ownerDateTo}   onChange={(e) => setOwnerDateTo(e.target.value)}   style={{ ...inputStyle, width: "130px", border: "none", background: "transparent" }} />
+          <select value={ownerStatus} onChange={(e) => setOwnerStatus(e.target.value as StatusFilter)} style={{ ...selectStyle, width: "130px" }}>
+            <option value="ALL">All Statuses</option>
+            <option value="PENDING">Pending</option>
+            <option value="PROCESSING">Processing</option>
+          </select>
+          <select value={ownerRegistrationType} onChange={(e) => setOwnerRegType(e.target.value as "ALL"|"SELF"|"PRE_REG")} style={{ ...selectStyle, width: "130px" }}>
+            <option value="ALL">All Types</option>
+            <option value="SELF">Self</option>
+            <option value="PRE_REG">Pre-reg</option>
+          </select>
+        </FilterBar>
+      )}
+      {activeTab === "owners" && <DataTable columns={ownerColumns} rows={owners} rowKey={(r) => r.id} loading={ownersLoading} emptyTitle="No owner approvals" emptyDescription="No owner registration matches current filters." />}
 
-        <TabsContent value="home-staff" className="space-y-3">
-          <div className="grid gap-3 rounded-xl border border-[#E2E8F0] bg-white p-3 md:grid-cols-5">
-            <Input placeholder="Search name or phone" value={homeStaffSearch} onChange={(event) => setHomeStaffSearch(event.target.value)} />
-            <Input type="date" value={homeStaffDateFrom} onChange={(event) => setHomeStaffDateFrom(event.target.value)} />
-            <Input type="date" value={homeStaffDateTo} onChange={(event) => setHomeStaffDateTo(event.target.value)} />
-            <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={homeStaffStatus} onChange={(event) => setHomeStaffStatus(event.target.value as StatusFilter)}>
-              <option value="PENDING">Pending</option>
-              <option value="PROCESSING">Processing</option>
-              <option value="ALL">All</option>
-            </select>
-            <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={homeStaffType} onChange={(event) => setHomeStaffType(event.target.value as "ALL" | HomeStaffType)}>
-              <option value="ALL">All Staff Types</option>
-              {HOME_STAFF_TYPES.map((value) => (
-                <option key={value} value={value}>{humanizeEnum(value)}</option>
-              ))}
-            </select>
-          </div>
-          {homeStaffLoading ? <SkeletonTable columns={9} /> : <DataTable columns={homeStaffColumns} rows={homeStaff} rowKey={(row) => row.id} emptyTitle="No home staff approvals" emptyDescription="No home staff request matches current filters." />}
-        </TabsContent>
+      {/* ── Family ─────────────────────────────────────────── */}
+      {activeTab === "family" && (
+        <FilterBar open={familyFiltersOpen} onToggle={() => setFamilyFiltersOpen((p) => !p)}
+          activeCount={[familyStatus !== "PENDING", familyDateFrom, familyDateTo, familyRelationship !== "ALL"].filter(Boolean).length}>
+          <input placeholder="Search name or phone…" value={familySearch} onChange={(e) => setFamilySearch(e.target.value)} style={{ ...inputStyle, border: "none", background: "transparent", padding: "0" }} />
+          <input type="date" value={familyDateFrom} onChange={(e) => setFamilyDateFrom(e.target.value)} style={{ ...inputStyle, width: "130px", border: "none", background: "transparent" }} />
+          <input type="date" value={familyDateTo}   onChange={(e) => setFamilyDateTo(e.target.value)}   style={{ ...inputStyle, width: "130px", border: "none", background: "transparent" }} />
+          <select value={familyStatus} onChange={(e) => setFamilyStatus(e.target.value as StatusFilter)} style={{ ...selectStyle, width: "130px" }}>
+            <option value="PENDING">Pending</option>
+            <option value="ALL">All</option>
+          </select>
+          <select value={familyRelationship} onChange={(e) => setFamilyRel(e.target.value as "ALL"|FamilyRelationship)} style={{ ...selectStyle, width: "150px" }}>
+            <option value="ALL">All Relationships</option>
+            {RELATIONSHIP_OPTIONS.map((v) => <option key={v} value={v}>{humanizeEnum(v)}</option>)}
+          </select>
+        </FilterBar>
+      )}
+      {activeTab === "family" && <DataTable columns={familyColumns} rows={family} rowKey={(r) => r.id} loading={familyLoading} emptyTitle="No family approvals" />}
 
-        <TabsContent value="tenants" className="space-y-3">
-          <div className="grid gap-3 rounded-xl border border-[#E2E8F0] bg-white p-3 md:grid-cols-3">
-            <Input placeholder="Search tenant name or email" value={tenantSearch} onChange={(event) => setTenantSearch(event.target.value)} />
-            <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={tenantStatus} onChange={(event) => setTenantStatus(event.target.value as "PENDING" | "APPROVED" | "REJECTED" | "ALL")}>
-              <option value="PENDING">Pending</option>
-              <option value="APPROVED">Approved</option>
-              <option value="REJECTED">Rejected</option>
-              <option value="ALL">All</option>
-            </select>
-            <p className="flex items-center text-sm text-[#64748B]">
-              {tenantsLoading ? "Loading..." : `${tenantsTotal} total`}
-            </p>
-          </div>
-          {tenantsLoading
-            ? <SkeletonTable columns={8} />
-            : <DataTable
-                columns={tenantColumns}
-                rows={tenants}
-                rowKey={(row) => row.id}
-                emptyTitle="No tenant approvals"
-                emptyDescription="No rent requests match current filters."
-              />
-          }
-        </TabsContent>
-      </Tabs>
+      {/* ── Delegates ──────────────────────────────────────── */}
+      {activeTab === "delegates" && (
+        <FilterBar open={delegateFiltersOpen} onToggle={() => setDelegateFiltersOpen((p) => !p)}
+          activeCount={[delegateStatus !== "PENDING", delegateDateFrom, delegateDateTo, delegateFeeMode !== "ALL"].filter(Boolean).length}>
+          <input placeholder="Search name or phone…" value={delegateSearch} onChange={(e) => setDelegateSearch(e.target.value)} style={{ ...inputStyle, border: "none", background: "transparent", padding: "0" }} />
+          <input type="date" value={delegateDateFrom} onChange={(e) => setDelegateDateFrom(e.target.value)} style={{ ...inputStyle, width: "130px", border: "none", background: "transparent" }} />
+          <input type="date" value={delegateDateTo}   onChange={(e) => setDelegateDateTo(e.target.value)}   style={{ ...inputStyle, width: "130px", border: "none", background: "transparent" }} />
+          <select value={delegateStatus} onChange={(e) => setDelegateStatus(e.target.value as StatusFilter)} style={{ ...selectStyle, width: "130px" }}>
+            <option value="PENDING">Pending</option>
+            <option value="ALL">All</option>
+          </select>
+          <select value={delegateFeeMode} onChange={(e) => setDelegateFeeMode(e.target.value as "ALL"|DelegateFeeMode)} style={{ ...selectStyle, width: "150px" }}>
+            <option value="ALL">All Fee Modes</option>
+            {DELEGATE_FEE_MODES.map((v) => <option key={v} value={v}>{humanizeEnum(v)}</option>)}
+          </select>
+        </FilterBar>
+      )}
+      {activeTab === "delegates" && <DataTable columns={delegateColumns} rows={delegates} rowKey={(r) => r.id} loading={delegatesLoading} emptyTitle="No delegate approvals" />}
 
+      {/* ── Home Staff ──────────────────────────────────────── */}
+      {activeTab === "home-staff" && (
+        <FilterBar open={homeStaffFiltersOpen} onToggle={() => setHSFiltersOpen((p) => !p)}
+          activeCount={[homeStaffStatus !== "PENDING", homeStaffDateFrom, homeStaffDateTo, homeStaffType !== "ALL"].filter(Boolean).length}>
+          <input placeholder="Search name or phone…" value={homeStaffSearch} onChange={(e) => setHSSearch(e.target.value)} style={{ ...inputStyle, border: "none", background: "transparent", padding: "0" }} />
+          <input type="date" value={homeStaffDateFrom} onChange={(e) => setHSDateFrom(e.target.value)} style={{ ...inputStyle, width: "130px", border: "none", background: "transparent" }} />
+          <input type="date" value={homeStaffDateTo}   onChange={(e) => setHSDateTo(e.target.value)}   style={{ ...inputStyle, width: "130px", border: "none", background: "transparent" }} />
+          <select value={homeStaffStatus} onChange={(e) => setHSStatus(e.target.value as StatusFilter)} style={{ ...selectStyle, width: "130px" }}>
+            <option value="PENDING">Pending</option>
+            <option value="ALL">All</option>
+          </select>
+          <select value={homeStaffType} onChange={(e) => setHSType(e.target.value as "ALL"|HomeStaffType)} style={{ ...selectStyle, width: "150px" }}>
+            <option value="ALL">All Staff Types</option>
+            {HOME_STAFF_TYPES.map((v) => <option key={v} value={v}>{humanizeEnum(v)}</option>)}
+          </select>
+        </FilterBar>
+      )}
+      {activeTab === "home-staff" && <DataTable columns={homeStaffColumns} rows={homeStaff} rowKey={(r) => r.id} loading={homeStaffLoading} emptyTitle="No home staff approvals" />}
+
+      {/* ══ Review drawer ════════════════════════════════════ */}
       <DrawerForm
         open={drawerOpen}
-        onOpenChange={(open) => {
-          setDrawerOpen(open);
-          if (!open) {
-            setRejectMode(false);
-            setRejectReason("");
-          }
-        }}
+        onOpenChange={(o) => { setDrawerOpen(o); if (!o) { setRejectMode(false); setRejectReason(""); } }}
         title="Review Request"
-        description="Review applicant details, documents, and action request."
-        widthClassName="w-full sm:max-w-[560px]"
+        description="Review applicant details, documents, and take action."
+        widthClassName="w-full sm:max-w-[540px]"
         footer={
-          <div className="w-full space-y-3">
-            {rejectMode ? (
-              <Textarea value={rejectReason} onChange={(event) => setRejectReason(event.target.value)} placeholder="Enter rejection reason" />
-            ) : null}
-            {selectedItem && selectedItem.tab === "tenants" && selectedItem.item.status !== "PENDING" ? (
-              <p className="text-center text-sm text-[#64748B]">This request has already been {selectedItem.item.status.toLowerCase()}.</p>
-            ) : (
-              <div className="flex justify-end gap-2">
-                {rejectMode ? (
-                  <>
-                    <Button variant="outline" onClick={() => setRejectMode(false)} disabled={actionBusy}>Cancel</Button>
-                    <Button variant="destructive" onClick={() => void handleReject()} disabled={actionBusy}>Confirm Reject</Button>
-                  </>
-                ) : (
-                  <>
-                    <Button variant="destructive" onClick={() => setRejectMode(true)} disabled={actionBusy}>Reject</Button>
-                    <Button onClick={() => void handleApprove()} disabled={actionBusy}>Approve</Button>
-                  </>
-                )}
-              </div>
+          <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: "10px" }}>
+            {rejectMode && (
+              <textarea value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} placeholder="Enter rejection reason…"
+                style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #FECACA", fontSize: "13px", minHeight: "80px", resize: "vertical", fontFamily: "'Work Sans', sans-serif", outline: "none", background: "#FFF", boxSizing: "border-box" }} />
             )}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+              {rejectMode ? (
+                <>
+                  <GhostBtn label="Cancel" onClick={() => setRejectMode(false)} />
+                  <RejectBtn onClick={() => void handleReject()} busy={actionBusy} confirm />
+                </>
+              ) : (
+                <>
+                  <RejectBtn onClick={() => setRejectMode(true)} busy={false} />
+                  <ApproveBtn onClick={() => void handleApprove()} busy={actionBusy} />
+                </>
+              )}
+            </div>
           </div>
         }
       >
         {selectedItem ? (
-          <div className="space-y-4">
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px", fontFamily: "'Work Sans', sans-serif" }}>
             {/* Profile header */}
-            <div className="rounded-xl border border-[#E2E8F0] p-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#E2E8F0] text-sm font-semibold text-[#334155]">
-                  {selectedItem.tab === "owners"
-                    ? toInitials(selectedItem.item.name || "Owner")
-                    : selectedItem.tab === "tenants"
-                    ? toInitials(selectedItem.item.tenantName)
-                    : toInitials((selectedItem.item as FamilyApprovalItem | DelegateApprovalItem | HomeStaffApprovalItem).fullName)}
+            <div style={{ borderRadius: "10px", border: "1px solid #EBEBEB", overflow: "hidden" }}>
+              <div style={{ height: "4px", background: `linear-gradient(90deg, ${TAB_META[selectedItem.tab].accent}, ${TAB_META[selectedItem.tab].accent}88)` }} />
+              <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", gap: "12px" }}>
+                <div style={{ width: "40px", height: "40px", borderRadius: "50%", background: `${TAB_META[selectedItem.tab].accent}18`, border: `1.5px solid ${TAB_META[selectedItem.tab].accent}35`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <span style={{ fontSize: "12px", fontWeight: 800, color: TAB_META[selectedItem.tab].accent }}>{toInitials(getItemName(selectedItem))}</span>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-[#0F172A]">
-                    {selectedItem.tab === "owners"
-                      ? selectedItem.item.name || "Owner"
-                      : selectedItem.tab === "tenants"
-                      ? selectedItem.item.tenantName
-                      : (selectedItem.item as FamilyApprovalItem | DelegateApprovalItem | HomeStaffApprovalItem).fullName}
-                  </p>
-                  <p className="text-xs text-[#64748B]">
-                    {selectedItem.tab === "tenants"
-                      ? selectedItem.item.tenantPhone
-                      : (selectedItem.item as OwnerApprovalItem | FamilyApprovalItem | DelegateApprovalItem | HomeStaffApprovalItem).phone}
-                  </p>
+                <div style={{ flex: 1 }}>
+                  <p style={{ fontSize: "15px", fontWeight: 800, color: "#111827", margin: 0, letterSpacing: "-0.01em" }}>{getItemName(selectedItem)}</p>
+                  <p style={{ fontSize: "12px", color: "#9CA3AF", margin: "3px 0 0", fontFamily: "'DM Mono', monospace" }}>{getItemPhone(selectedItem)}</p>
                 </div>
+                <StatusBadge value={selectedItem.item.status ?? "PENDING"} />
               </div>
-              <div className="mt-3 flex flex-wrap gap-2 text-xs text-[#64748B]">
-                {selectedItem.tab === "tenants" ? (
-                  <span>Requested: {formatDateTime(selectedItem.item.requestedAt)}</span>
-                ) : (
-                  <>
-                    <span>Submitted: {formatDateTime(selectedItem.item.submittedAt)}</span>
-                    <Badge>{selectedItem.item.isPreRegistration ? "Pre-Registered" : "Self-Registered"}</Badge>
-                  </>
-                )}
+              <div style={{ padding: "8px 16px", borderTop: "1px solid #F3F4F6", display: "flex", gap: "12px", flexWrap: "wrap" }}>
+                <span style={{ fontSize: "11px", color: "#9CA3AF" }}>Submitted {formatDateTime(selectedItem.item.submittedAt)}</span>
+                <span style={{ fontSize: "10.5px", fontWeight: 700, padding: "1px 7px", borderRadius: "4px", background: selectedItem.item.isPreRegistration ? "#EFF6FF" : "#F3F4F6", color: selectedItem.item.isPreRegistration ? "#1D4ED8" : "#6B7280" }}>
+                  {selectedItem.item.isPreRegistration ? "Pre-Registered" : "Self-Registered"}
+                </span>
               </div>
             </div>
 
-            {/* Documents — only for non-tenant tabs */}
-            {selectedItem.tab !== "tenants" ? (
-              <div className="rounded-xl border border-[#E2E8F0] p-4">
-                <h3 className="mb-3 text-sm font-medium text-[#0F172A]">Documents</h3>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  {renderDocumentCard("Profile Photo", selectedItem.item.documents.photo)}
-                  {renderDocumentCard("National ID", selectedItem.item.documents.nationalId)}
-                  {renderDocumentCard("Passport", selectedItem.item.documents.passport)}
-                  {selectedItem.item.documents.other.map((doc) => renderDocumentCard(doc.label, doc.url))}
+            {/* Documents */}
+            <div>
+              <p style={{ fontSize: "11.5px", fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Documents</p>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                  <DocCard label="Photo"      url={selectedItem.item.documents.photo}      preview={selectedItem.item.documents.photo      ? previewByUrl[selectedItem.item.documents.photo]      : undefined} onOpen={() => selectedItem.item.documents.photo      && void openDocument(selectedItem.item.documents.photo)} />
+                  <DocCard label="National ID" url={selectedItem.item.documents.nationalId} preview={selectedItem.item.documents.nationalId ? previewByUrl[selectedItem.item.documents.nationalId] : undefined} onOpen={() => selectedItem.item.documents.nationalId && void openDocument(selectedItem.item.documents.nationalId)} />
+                  <DocCard label="Passport"   url={selectedItem.item.documents.passport}   preview={selectedItem.item.documents.passport   ? previewByUrl[selectedItem.item.documents.passport]   : undefined} onOpen={() => selectedItem.item.documents.passport   && void openDocument(selectedItem.item.documents.passport)} />
+                  {selectedItem.item.documents.other.map((doc) => (
+                    <DocCard key={doc.url} label={doc.label} url={doc.url} preview={previewByUrl[doc.url]} onOpen={() => void openDocument(doc.url)} />
+                  ))}
                 </div>
               </div>
-            ) : null}
 
-            <div className="rounded-xl border border-[#E2E8F0] p-4">
-              <h3 className="mb-3 text-sm font-medium text-[#0F172A]">Details</h3>
-              {selectedItem.tab === "owners" ? (
-                <div className="space-y-1 text-sm text-[#334155]">
-                  <p>Registration Source: {selectedItem.item.origin}</p>
-                  <p>National ID: {selectedItem.item.nationalId}</p>
-                  <p>Expires At: {formatDateTime(selectedItem.item.expiresAt)}</p>
-                </div>
-              ) : null}
-
-              {selectedItem.tab === "family" ? (
-                <div className="space-y-1 text-sm text-[#334155]">
-                  <p>Relationship: {humanizeEnum(selectedItem.item.relationship)}</p>
-                  <p>Owner: {selectedItem.item.ownerName}</p>
-                  <p>Unit: {buildUnitLabel(selectedItem.item.projectName, selectedItem.item.unitNumber)}</p>
-                  <p>Permissions: {selectedItem.item.featurePermissions ? Object.keys(selectedItem.item.featurePermissions).join(", ") || "None" : "None"}</p>
-                </div>
-              ) : null}
-
-              {selectedItem.tab === "delegates" ? (
-                <div className="space-y-1 text-sm text-[#334155]">
-                  <p>Owner: {selectedItem.item.ownerName}</p>
-                  <p>Unit: {buildUnitLabel(selectedItem.item.projectName, selectedItem.item.unitNumber)}</p>
-                  <p>Valid: {formatDate(selectedItem.item.validFrom)} - {formatDate(selectedItem.item.validTo)}</p>
-                  <p>QR Scopes: {selectedItem.item.qrScopes.length ? selectedItem.item.qrScopes.join(", ") : "None"}</p>
-                  <p>Fee: {humanizeEnum(selectedItem.item.feeMode)} {selectedItem.item.feeAmount !== null ? `(${formatCurrencyEGP(selectedItem.item.feeAmount)})` : ""}</p>
-                </div>
-              ) : null}
-
-              {selectedItem.tab === "home-staff" ? (
-                <div className="space-y-1 text-sm text-[#334155]">
-                  <p>Staff Type: {humanizeEnum(selectedItem.item.staffType)}</p>
-                  <p>Owner: {selectedItem.item.ownerName}</p>
-                  <p>Unit: {buildUnitLabel(selectedItem.item.projectName, selectedItem.item.unitNumber)}</p>
-                  <p>Live-In: {selectedItem.item.isLiveIn ? "Yes" : "No"}</p>
-                  <p>Employment: {selectedItem.item.employmentFrom ? formatDate(selectedItem.item.employmentFrom) : "N/A"} - {selectedItem.item.employmentTo ? formatDate(selectedItem.item.employmentTo) : "N/A"}</p>
-                  <p>Access: {formatDate(selectedItem.item.accessValidFrom)} - {formatDate(selectedItem.item.accessValidTo)}</p>
-                </div>
-              ) : null}
-
-              {selectedItem.tab === "tenants" ? (
-                <div className="space-y-2 text-sm text-[#334155]">
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-                    <div><p className="text-xs text-[#64748B]">Tenant Email</p><p>{selectedItem.item.tenantEmail}</p></div>
-                    <div><p className="text-xs text-[#64748B]">Phone</p><p>{selectedItem.item.tenantPhone}</p></div>
-                    <div><p className="text-xs text-[#64748B]">Nationality</p><p>{selectedItem.item.tenantNationality || "—"}</p></div>
-                    <div><p className="text-xs text-[#64748B]">Unit</p><p>{selectedItem.item.unitNumber || "—"}</p></div>
-                    <div><p className="text-xs text-[#64748B]">Owner</p><p>{selectedItem.item.ownerName || "—"}</p></div>
-                    <div><p className="text-xs text-[#64748B]">Owner Email</p><p>{selectedItem.item.ownerEmail || "—"}</p></div>
-                    {selectedItem.item.rejectionReason ? (
-                      <div className="col-span-2"><p className="text-xs text-[#64748B]">Rejection Reason</p><p className="text-[#DC2626]">{selectedItem.item.rejectionReason}</p></div>
-                    ) : null}
-                    {selectedItem.item.reviewedAt ? (
-                      <div><p className="text-xs text-[#64748B]">Reviewed At</p><p>{formatDateTime(selectedItem.item.reviewedAt)}</p></div>
-                    ) : null}
-                    {selectedItem.item.reviewedByName ? (
-                      <div><p className="text-xs text-[#64748B]">Reviewed By</p><p>{selectedItem.item.reviewedByName}</p></div>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
+            {/* Details */}
+            <div>
+              <p style={{ fontSize: "11.5px", fontWeight: 700, color: "#374151", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: "8px" }}>Details</p>
+              <div style={{ borderRadius: "9px", border: "1px solid #EBEBEB", overflow: "hidden" }}>
+                {selectedItem.tab === "owners" && <>
+                  <DetailRow label="Nat. ID"  value={<span style={{ fontFamily: "'DM Mono', monospace" }}>{selectedItem.item.nationalId}</span>} />
+                  <DetailRow label="Origin"   value={selectedItem.item.origin} />
+                  <DetailRow label="Expires"  value={formatDateTime(selectedItem.item.expiresAt)} />
+                </>}
+                {selectedItem.tab === "family" && <>
+                  <DetailRow label="Relationship" value={humanizeEnum(selectedItem.item.relationship)} />
+                  <DetailRow label="Owner"        value={selectedItem.item.ownerName} />
+                  <DetailRow label="Unit"         value={buildUnitLabel(selectedItem.item.projectName, selectedItem.item.unitNumber)} />
+                  <DetailRow label="Permissions"  value={selectedItem.item.featurePermissions ? Object.keys(selectedItem.item.featurePermissions).join(", ") || "None" : "None"} />
+                </>}
+                {selectedItem.tab === "delegates" && <>
+                  <DetailRow label="Owner"     value={selectedItem.item.ownerName} />
+                  <DetailRow label="Unit"      value={buildUnitLabel(selectedItem.item.projectName, selectedItem.item.unitNumber)} />
+                  <DetailRow label="Valid"     value={`${formatDate(selectedItem.item.validFrom)} → ${formatDate(selectedItem.item.validTo)}`} />
+                  <DetailRow label="QR Scopes" value={selectedItem.item.qrScopes.length ? selectedItem.item.qrScopes.join(", ") : "None"} />
+                  <DetailRow label="Fee"       value={`${humanizeEnum(selectedItem.item.feeMode)}${selectedItem.item.feeAmount !== null ? ` (${formatCurrencyEGP(selectedItem.item.feeAmount)})` : ""}`} />
+                </>}
+                {selectedItem.tab === "home-staff" && <>
+                  <DetailRow label="Staff Type"  value={humanizeEnum(selectedItem.item.staffType)} />
+                  <DetailRow label="Owner"       value={selectedItem.item.ownerName} />
+                  <DetailRow label="Unit"        value={buildUnitLabel(selectedItem.item.projectName, selectedItem.item.unitNumber)} />
+                  <DetailRow label="Live-In"     value={selectedItem.item.isLiveIn ? "Yes" : "No"} />
+                  <DetailRow label="Employment"  value={`${selectedItem.item.employmentFrom ? formatDate(selectedItem.item.employmentFrom) : "N/A"} → ${selectedItem.item.employmentTo ? formatDate(selectedItem.item.employmentTo) : "N/A"}`} />
+                  <DetailRow label="Access"      value={`${formatDate(selectedItem.item.accessValidFrom)} → ${formatDate(selectedItem.item.accessValidTo)}`} />
+                </>}
+              </div>
             </div>
           </div>
         ) : (
           <EmptyState title="No request selected" description="Select a row from the approvals table to review details." />
         )}
       </DrawerForm>
-
-      <Dialog open={preRegisterOpen} onOpenChange={setPreRegisterOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Pre-Registration</DialogTitle>
-            <DialogDescription>Step {preRegisterStep} of 2</DialogDescription>
-          </DialogHeader>
-
-          <div className="mb-3 flex gap-2">
-            <Button variant={preRegisterMode === "OWNER" ? "default" : "outline"} onClick={() => setPreRegisterMode("OWNER")}>Pre-Register Owner</Button>
-            <Button variant={preRegisterMode === "FAMILY" ? "default" : "outline"} onClick={() => setPreRegisterMode("FAMILY")}>Pre-Register Family Member</Button>
-          </div>
-
-          {preRegisterStep === 1 ? (
-            <div className="space-y-3">
-              {preRegisterMode === "OWNER" ? (
-                <>
-                  <Input placeholder="Name" value={ownerForm.nameEN} onChange={(event) => setOwnerForm((prev) => ({ ...prev, nameEN: event.target.value }))} />
-                  <Input placeholder="Email" value={ownerForm.email} onChange={(event) => setOwnerForm((prev) => ({ ...prev, email: event.target.value }))} />
-                  <Input placeholder="Phone" value={ownerForm.phone} onChange={(event) => setOwnerForm((prev) => ({ ...prev, phone: event.target.value }))} />
-                  <Input placeholder="National ID" value={ownerForm.nationalId} onChange={(event) => setOwnerForm((prev) => ({ ...prev, nationalId: event.target.value }))} />
-                  <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={ownerForm.unitId} onChange={(event) => setOwnerForm((prev) => ({ ...prev, unitId: event.target.value }))}>
-                    <option value="">Select unit (optional)</option>
-                    {unitOptions.map((row) => <option key={row.id} value={row.id}>{row.label}</option>)}
-                  </select>
-                  <Textarea placeholder="Notes (optional)" value={ownerForm.notes} onChange={(event) => setOwnerForm((prev) => ({ ...prev, notes: event.target.value }))} />
-                </>
-              ) : (
-                <>
-                  {optionsLoading ? (
-                    <SkeletonTable columns={2} rows={3} />
-                  ) : (
-                    <>
-                      <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={familyForm.ownerUserId} onChange={(event) => setFamilyForm((prev) => ({ ...prev, ownerUserId: event.target.value }))}>
-                        <option value="">Select owner</option>
-                        {ownerOptions.map((row) => <option key={row.id} value={row.id}>{row.label}</option>)}
-                      </select>
-                      <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={familyForm.unitId} onChange={(event) => setFamilyForm((prev) => ({ ...prev, unitId: event.target.value }))}>
-                        <option value="">Select unit</option>
-                        {unitOptions.map((row) => <option key={row.id} value={row.id}>{row.label}</option>)}
-                      </select>
-                    </>
-                  )}
-                  <Input placeholder="Name" value={familyForm.fullName} onChange={(event) => setFamilyForm((prev) => ({ ...prev, fullName: event.target.value }))} />
-                  <Input placeholder="Phone" value={familyForm.phone} onChange={(event) => setFamilyForm((prev) => ({ ...prev, phone: event.target.value }))} />
-                  <select className="h-10 rounded-md border border-[#CBD5E1] px-3" value={familyForm.relationship} onChange={(event) => setFamilyForm((prev) => ({ ...prev, relationship: event.target.value as FamilyRelationship }))}>
-                    {RELATIONSHIP_OPTIONS.map((value) => (
-                      <option key={value} value={value}>{humanizeEnum(value)}</option>
-                    ))}
-                  </select>
-                  <Input placeholder="Email (optional)" value={familyForm.email} onChange={(event) => setFamilyForm((prev) => ({ ...prev, email: event.target.value }))} />
-                  <Input placeholder="National ID / Passport (optional)" value={familyForm.nationalIdOrPassport} onChange={(event) => setFamilyForm((prev) => ({ ...prev, nationalIdOrPassport: event.target.value }))} />
-                  <Textarea placeholder="Notes (optional)" value={familyForm.notes} onChange={(event) => setFamilyForm((prev) => ({ ...prev, notes: event.target.value }))} />
-                </>
-              )}
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setPreRegisterOpen(false)}>Cancel</Button>
-                <Button onClick={preRegisterNext}>Next</Button>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              <div className="rounded-xl border border-[#E2E8F0] p-4 text-sm text-[#334155]">
-                {preRegisterMode === "OWNER" ? (
-                  <div className="space-y-1">
-                    <p>Name: {ownerForm.nameEN}</p>
-                    <p>Email: {ownerForm.email}</p>
-                    <p>Phone: {ownerForm.phone}</p>
-                    <p>National ID: {ownerForm.nationalId}</p>
-                    <p>Unit: {ownerForm.unitId || "Not assigned"}</p>
-                  </div>
-                ) : (
-                  <div className="space-y-1">
-                    <p>Owner User: {familyForm.ownerUserId}</p>
-                    <p>Unit: {familyForm.unitId}</p>
-                    <p>Name: {familyForm.fullName}</p>
-                    <p>Phone: {familyForm.phone}</p>
-                    <p>Relationship: {humanizeEnum(familyForm.relationship)}</p>
-                    <p>Email: {familyForm.email || "Not provided"}</p>
-                  </div>
-                )}
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setPreRegisterStep(1)}>Back</Button>
-                <Button onClick={() => void confirmPreRegistration()} disabled={preRegisterBusy}>Confirm and Send Invite</Button>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
