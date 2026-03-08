@@ -23,6 +23,8 @@ AUTO_PROVISION_LOCAL_DB="${AUTO_PROVISION_LOCAL_DB:-true}"
 AUTO_LOCAL_DB_TRUST_AUTH="${AUTO_LOCAL_DB_TRUST_AUTH:-true}"
 HEALTH_CHECK_AFTER_DEPLOY="${HEALTH_CHECK_AFTER_DEPLOY:-true}"
 API_HEALTH_PATH="${API_HEALTH_PATH:-/api}"
+HEALTH_CHECK_RETRIES="${HEALTH_CHECK_RETRIES:-8}"
+HEALTH_CHECK_DELAY_SECONDS="${HEALTH_CHECK_DELAY_SECONDS:-2}"
 NODE_MAJOR="${NODE_MAJOR:-20}"
 PRISMA_DB_FORCE_RESET="${PRISMA_DB_FORCE_RESET:-false}"
 RUN_PROFESSIONAL_DEMO_SEED="${RUN_PROFESSIONAL_DEMO_SEED:-true}"
@@ -187,6 +189,32 @@ psql_socket_test() {
 http_head_code() {
   local url="$1"
   curl -sS -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || true
+}
+
+http_check_with_retries() {
+  local url="$1"
+  local retries="$2"
+  local delay_seconds="$3"
+  local label="$4"
+
+  local attempt=1
+  local code="000"
+  while [[ "$attempt" -le "$retries" ]]; do
+    code="$(http_head_code "$url")"
+    if [[ "$code" =~ ^[23] ]]; then
+      info "${label} check passed (attempt ${attempt}/${retries}, code=${code})"
+      echo "$code"
+      return 0
+    fi
+    warn "${label} check failed (attempt ${attempt}/${retries}, code=${code:-n/a})"
+    if [[ "$attempt" -lt "$retries" ]]; then
+      sleep "$delay_seconds"
+    fi
+    attempt=$((attempt + 1))
+  done
+
+  echo "${code:-000}"
+  return 1
 }
 
 restart_postgres_service() {
@@ -643,18 +671,30 @@ fi
 
 if [[ "$HEALTH_CHECK_AFTER_DEPLOY" == "true" ]]; then
   note "Running post-deploy health checks"
-  sleep 2
-  BACKEND_LOCAL_CODE="$(http_head_code "http://127.0.0.1:${BACKEND_PORT}${API_HEALTH_PATH}")"
-  ADMIN_LOCAL_CODE="$(http_head_code "http://127.0.0.1:${FRONTEND_PORT}/")"
-  if [[ "$BACKEND_LOCAL_CODE" =~ ^[23] ]] && [[ "$ADMIN_LOCAL_CODE" =~ ^[23] ]]; then
-    info "Local health checks passed (backend=${BACKEND_LOCAL_CODE}, admin=${ADMIN_LOCAL_CODE})"
-  else
-    warn "Local health checks not fully passing (backend=${BACKEND_LOCAL_CODE:-n/a}, admin=${ADMIN_LOCAL_CODE:-n/a})"
-    if have_cmd ss; then
-      info "Listening ports snapshot:"
-      ss -ltnp 2>/dev/null | grep -E ":${BACKEND_PORT}|:${FRONTEND_PORT}" || true
-    fi
-    warn "Inspect PM2 logs if needed: pm2 logs community-backend / pm2 logs community-admin-web"
+  sleep "$HEALTH_CHECK_DELAY_SECONDS"
+  BACKEND_HEALTH_URL="http://127.0.0.1:${BACKEND_PORT}${API_HEALTH_PATH}"
+  ADMIN_HEALTH_URL="http://127.0.0.1:${FRONTEND_PORT}/"
+
+  BACKEND_LOCAL_CODE="$(http_check_with_retries "$BACKEND_HEALTH_URL" "$HEALTH_CHECK_RETRIES" "$HEALTH_CHECK_DELAY_SECONDS" "Backend" || true)"
+  ADMIN_LOCAL_CODE="$(http_check_with_retries "$ADMIN_HEALTH_URL" "$HEALTH_CHECK_RETRIES" "$HEALTH_CHECK_DELAY_SECONDS" "Admin" || true)"
+
+  if [[ ! "$BACKEND_LOCAL_CODE" =~ ^[23] ]]; then
+    echo "ERROR: Backend health check failed after ${HEALTH_CHECK_RETRIES} attempts (code=${BACKEND_LOCAL_CODE:-n/a})." >&2
+    warn "Recent backend logs:"
+    pm2 logs community-backend --lines 120 --nostream || true
+    exit 1
+  fi
+
+  if [[ ! "$ADMIN_LOCAL_CODE" =~ ^[23] ]]; then
+    warn "Admin local health check failed after retries (code=${ADMIN_LOCAL_CODE:-n/a})"
+    warn "Inspect admin logs if needed: pm2 logs community-admin-web --lines 120"
+  fi
+
+  info "Local health checks summary (backend=${BACKEND_LOCAL_CODE}, admin=${ADMIN_LOCAL_CODE})"
+
+  if have_cmd ss; then
+    info "Listening ports snapshot:"
+    ss -ltnp 2>/dev/null | grep -E ":${BACKEND_PORT}|:${FRONTEND_PORT}" || true
   fi
 fi
 
