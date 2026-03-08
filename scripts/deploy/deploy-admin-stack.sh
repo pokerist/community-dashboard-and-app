@@ -4,11 +4,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-SERVER_IP="${SERVER_IP:-108.61.174.92}"
+SERVER_IP="${SERVER_IP:-}"
 FRONTEND_PORT="${FRONTEND_PORT:-4002}"
 BACKEND_PORT="${BACKEND_PORT:-4003}"
-API_URL="${API_URL:-http://${SERVER_IP}:${BACKEND_PORT}}"
-ADMIN_URL="${ADMIN_URL:-http://${SERVER_IP}:${FRONTEND_PORT}}"
+API_URL="${API_URL:-}"
+ADMIN_URL="${ADMIN_URL:-}"
 
 ROOT_ENV_PROD="${ROOT_DIR}/.env.production"
 ROOT_ENV_PROD_EXAMPLE="${ROOT_DIR}/.env.production.example"
@@ -45,6 +45,55 @@ require_cmd() {
 
 have_cmd() {
   command -v "$1" >/dev/null 2>&1
+}
+
+is_ipv4() {
+  local ip="$1"
+  [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
+}
+
+resolve_server_ip() {
+  if [[ -n "$SERVER_IP" ]]; then
+    return
+  fi
+
+  local candidate=""
+  if have_cmd hostname; then
+    # Prefer first non-loopback IPv4 discovered locally.
+    for ip in $(hostname -I 2>/dev/null || true); do
+      if is_ipv4 "$ip" && [[ "$ip" != 127.* ]]; then
+        candidate="$ip"
+        break
+      fi
+    done
+  fi
+
+  if [[ -z "$candidate" ]] && have_cmd curl; then
+    for endpoint in "https://api.ipify.org" "https://ifconfig.me"; do
+      candidate="$(curl -4 -fsS --max-time 3 "$endpoint" 2>/dev/null || true)"
+      if is_ipv4 "$candidate"; then
+        break
+      fi
+      candidate=""
+    done
+  fi
+
+  if [[ -z "$candidate" ]]; then
+    candidate="127.0.0.1"
+    warn "Could not auto-detect SERVER_IP. Falling back to 127.0.0.1. Override with SERVER_IP=<public-ip>."
+  fi
+
+  SERVER_IP="$candidate"
+}
+
+resolve_public_endpoints() {
+  resolve_server_ip
+  if [[ -z "$API_URL" ]]; then
+    API_URL="http://${SERVER_IP}:${BACKEND_PORT}"
+  fi
+  if [[ -z "$ADMIN_URL" ]]; then
+    ADMIN_URL="http://${SERVER_IP}:${FRONTEND_PORT}"
+  fi
 }
 
 note() {
@@ -417,6 +466,8 @@ note "Validating tooling"
 require_cmd node
 require_cmd npm
 require_cmd pm2
+
+resolve_public_endpoints
 
 note "Preparing production env files"
 if [[ ! -f "$ROOT_ENV_PROD" ]]; then
