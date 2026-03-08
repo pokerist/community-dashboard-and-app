@@ -30,9 +30,7 @@ This repo contains the operational platform used to manage:
 ### 1) Backend
 ```bash
 npm install
-npx prisma generate
-npx prisma migrate deploy
-npx prisma db seed
+npm run db:init:fresh
 npm run start:dev
 ```
 
@@ -59,7 +57,8 @@ Set API base URL in:
 ## Demo Data / Personas
 
 Baseline seed:
-- `npx prisma db seed`
+- `npm run db:init:fresh` for a brand-new empty database
+- `npx prisma db seed` if the schema already exists
 
 Demo personas:
 - `npm run seed:mobile-personas`

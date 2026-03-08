@@ -24,7 +24,6 @@ AUTO_LOCAL_DB_TRUST_AUTH="${AUTO_LOCAL_DB_TRUST_AUTH:-true}"
 HEALTH_CHECK_AFTER_DEPLOY="${HEALTH_CHECK_AFTER_DEPLOY:-true}"
 API_HEALTH_PATH="${API_HEALTH_PATH:-/api}"
 NODE_MAJOR="${NODE_MAJOR:-20}"
-PRISMA_SCHEMA_SYNC_MODE="${PRISMA_SCHEMA_SYNC_MODE:-dbpush}"
 PRISMA_DB_FORCE_RESET="${PRISMA_DB_FORCE_RESET:-false}"
 RUN_PROFESSIONAL_DEMO_SEED="${RUN_PROFESSIONAL_DEMO_SEED:-true}"
 DEFAULT_DB_HOST="${DEFAULT_DB_HOST:-127.0.0.1}"
@@ -486,16 +485,14 @@ if ! psql_socket_test; then
   exit 1
 fi
 npm run prisma:generate
-if [[ "$PRISMA_SCHEMA_SYNC_MODE" == "migrate" ]]; then
-  note "Applying Prisma migrations (migrate deploy)"
-  npx prisma migrate deploy
+if [[ -n "${PRISMA_SCHEMA_SYNC_MODE:-}" && "${PRISMA_SCHEMA_SYNC_MODE}" != "dbpush" ]]; then
+  warn "PRISMA_SCHEMA_SYNC_MODE=${PRISMA_SCHEMA_SYNC_MODE} is deprecated here. Fresh deploy bootstrap now always uses prisma db push."
+fi
+note "Bootstrapping Prisma schema directly from schema.prisma"
+if [[ "$PRISMA_DB_FORCE_RESET" == "true" ]]; then
+  npm run prisma:push:reset
 else
-  note "Syncing Prisma schema directly (db push)"
-  if [[ "$PRISMA_DB_FORCE_RESET" == "true" ]]; then
-    npx prisma db push --force-reset --accept-data-loss
-  else
-    npx prisma db push
-  fi
+  npm run prisma:push
 fi
 
 note "Syncing permission keys from @Permissions decorators"
