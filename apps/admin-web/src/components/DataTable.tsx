@@ -22,6 +22,7 @@ interface DataTableProps<TRow> {
   rowClassName?: string | ((row: TRow) => string);
   cellClassName?: string;
   onRowClick?: (row: TRow) => void;
+  minTableWidth?: number | string;
 }
 
 // Teal → Blue → Dark pink, cycling per column
@@ -58,6 +59,7 @@ export function DataTable<TRow>({
   wrapperClassName,
   rowClassName,
   onRowClick,
+  minTableWidth,
 }: DataTableProps<TRow>) {
 
   if (!loading && rows.length === 0) {
@@ -89,13 +91,14 @@ export function DataTable<TRow>({
         style={{
           borderRadius: "10px",
           border: isDark ? "1px solid rgba(255,255,255,0.06)" : "1px solid #EBEBEB",
-          overflow: "hidden",
+          overflowX: "auto",
+          overflowY: "hidden",
           background: isDark ? "#181C27" : "#FFFFFF",
           boxShadow: isDark ? "none" : "0 1px 4px rgba(0,0,0,0.05)",
           fontFamily: "'Work Sans', sans-serif",
         }}
       >
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <table style={{ width: "max-content", minWidth: minTableWidth ?? "100%", borderCollapse: "collapse" }}>
 
           {/* ── Header ───────────────────────────────────────── */}
           <thead>

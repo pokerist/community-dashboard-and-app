@@ -701,21 +701,31 @@ export function DashboardUsersPage() {
         {/* ========== PERMISSION MATRIX TAB ========== */}
         <TabsContent value="matrix" className="space-y-4">
           <Card className="p-4 space-y-3">
-            <h3 className="text-sm font-semibold text-[#1E293B]">Permission Matrix Preview</h3>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold text-[#1E293B]">Permission Matrix Preview</h3>
+              <p className="text-xs text-[#64748B]">Scroll horizontally to view all modules</p>
+            </div>
             {(() => {
               type MatrixRow = { roleId: string; roleName: string; total: number; byModule: Map<string, number> };
+              const matrixMinWidth = Math.max(980, 280 + permissionModules.length * 120);
               const matrixCols: DataTableColumn<MatrixRow>[] = [
-                { key: "role", header: "Role", render: (r) => <span className="font-medium text-[#1E293B]">{r.roleName}</span> },
-                { key: "total", header: "Total", render: (r) => <span>{r.total}</span> },
+                { key: "role", header: "Role", className: "min-w-[240px]", render: (r) => <span className="font-medium text-[#1E293B]">{r.roleName}</span> },
+                { key: "total", header: "Total", className: "min-w-[90px]", render: (r) => <span>{r.total}</span> },
                 ...permissionModules.map((mod) => ({
                   key: mod,
                   header: mod,
+                  className: "min-w-[110px]",
                   render: (r: MatrixRow) => <span>{r.byModule.get(mod) ?? 0}</span>,
                 })),
               ];
               return (
-                <div className="overflow-auto rounded-md border border-[#E2E8F0]">
-                  <DataTable columns={matrixCols} rows={rolePermissionMatrix} rowKey={(r) => r.roleId} />
+                <div className="rounded-md border border-[#E2E8F0]">
+                  <DataTable
+                    columns={matrixCols}
+                    rows={rolePermissionMatrix}
+                    rowKey={(r) => r.roleId}
+                    minTableWidth={matrixMinWidth}
+                  />
                 </div>
               );
             })()}
