@@ -11,7 +11,7 @@ import {
   ReportType,
   UnitStatus,
 } from '@prisma/client';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { PrismaService } from '../../../prisma/prisma.service';
 import {
@@ -94,12 +94,36 @@ export class ReportsService {
     return lines.join('\n');
   }
 
-  private toXlsx(rows: ReportRow[]) {
+  private async toXlsx(rows: ReportRow[]) {
     const normalized = rows.length > 0 ? rows : [{ message: 'No rows' }];
-    const worksheet = XLSX.utils.json_to_sheet(normalized);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, 'Report');
-    return XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+    const headers = Array.from(
+      new Set(normalized.flatMap((row) => Object.keys(row))),
+    );
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet('Report');
+    worksheet.columns = headers.map((header) => ({
+      header,
+      key: header,
+      width: Math.max(12, Math.min(40, header.length + 4)),
+    }));
+
+    for (const row of normalized) {
+      const normalizedRow: Record<string, string> = {};
+      for (const header of headers) {
+        const value = (row as any)[header];
+        normalizedRow[header] =
+          value === null || value === undefined
+            ? ''
+            : typeof value === 'object'
+              ? JSON.stringify(value)
+              : String(value);
+      }
+      worksheet.addRow(normalizedRow);
+    }
+
+    const bytes = await workbook.xlsx.writeBuffer();
+    return Buffer.from(bytes);
   }
 
   private sanitizePdfText(value: string) {
@@ -700,7 +724,7 @@ export class ReportsService {
         filename: report.filename,
         mimeType:
           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        content: this.toXlsx(rows),
+        content: await this.toXlsx(rows),
       };
     }
     if (report.format === ReportFormat.PDF) {
