@@ -98,6 +98,12 @@ export function DashboardUsersPage() {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState<"users" | "roles" | "matrix">("users");
+  const activeTabLabel =
+    activeTab === "users"
+      ? "Dashboard Users"
+      : activeTab === "roles"
+        ? "Roles & Permissions"
+        : "Permission Matrix";
 
   // Create user dialog
   const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
@@ -549,23 +555,42 @@ export function DashboardUsersPage() {
         <TabsList className="inline-flex h-auto w-full max-w-[720px] flex-wrap items-center gap-2 rounded-xl border border-[#E2E8F0] bg-white p-2">
           <TabsTrigger
             value="users"
-            className="rounded-lg px-4 py-2 text-sm data-[state=active]:bg-[#0B5FFF] data-[state=active]:text-white"
+            className={`rounded-lg px-4 py-2 text-sm transition-all ${
+              activeTab === "users"
+                ? "bg-[#0B5FFF] text-white shadow-sm ring-2 ring-[#0B5FFF]/20"
+                : "text-[#475569] hover:bg-[#F8FAFC]"
+            }`}
           >
+            <span className={`mr-2 inline-block h-2 w-2 rounded-full ${activeTab === "users" ? "bg-white" : "bg-transparent"}`} />
             Dashboard Users
           </TabsTrigger>
           <TabsTrigger
             value="roles"
-            className="rounded-lg px-4 py-2 text-sm data-[state=active]:bg-[#0B5FFF] data-[state=active]:text-white"
+            className={`rounded-lg px-4 py-2 text-sm transition-all ${
+              activeTab === "roles"
+                ? "bg-[#0B5FFF] text-white shadow-sm ring-2 ring-[#0B5FFF]/20"
+                : "text-[#475569] hover:bg-[#F8FAFC]"
+            }`}
           >
+            <span className={`mr-2 inline-block h-2 w-2 rounded-full ${activeTab === "roles" ? "bg-white" : "bg-transparent"}`} />
             Roles & Permissions
           </TabsTrigger>
           <TabsTrigger
             value="matrix"
-            className="rounded-lg px-4 py-2 text-sm data-[state=active]:bg-[#0B5FFF] data-[state=active]:text-white"
+            className={`rounded-lg px-4 py-2 text-sm transition-all ${
+              activeTab === "matrix"
+                ? "bg-[#0B5FFF] text-white shadow-sm ring-2 ring-[#0B5FFF]/20"
+                : "text-[#475569] hover:bg-[#F8FAFC]"
+            }`}
           >
+            <span className={`mr-2 inline-block h-2 w-2 rounded-full ${activeTab === "matrix" ? "bg-white" : "bg-transparent"}`} />
             Permission Matrix
           </TabsTrigger>
         </TabsList>
+        <div className="mt-1 inline-flex items-center gap-2 rounded-md bg-[#EFF6FF] px-3 py-1 text-xs font-medium text-[#1D4ED8]">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#1D4ED8]" />
+          Active tab: {activeTabLabel}
+        </div>
 
         {/* ========== USERS TAB ========== */}
         <TabsContent value="users" className="space-y-4">
