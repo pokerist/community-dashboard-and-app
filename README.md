@@ -35,6 +35,19 @@ npm run start:prod
 - `npm run audit:prod:gate` enforces: `critical/high/moderate = 0` and only allowlisted low advisories
 - Exception details are documented in `SECURITY_EXCEPTIONS.md`
 
+## RBAC + Governance Docs
+
+- `documentation/LOGICAL_DIAGRAMS.md`
+- `documentation/FLOWS.md`
+- `documentation/domain.md`
+- `documentation/ENV_MATRIX.md`
+
+## Seed Profiles
+
+- `npm run seed:fast` baseline seed
+- `npm run seed:fast:reset-rbac` reset + reseed RBAC policies/assignments
+- `npm run seed:full` full legacy dataset profile
+
 ## Deploy
 
 ```bash

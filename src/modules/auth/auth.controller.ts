@@ -37,11 +37,16 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { PermissionsGuard } from './guards/permissions.guard';
 import { Permissions } from './decorators/permissions.decorator';
 import { ProfileChangeRequestStatus } from '@prisma/client';
+import { ScreenSurface } from '@prisma/client';
+import { AccessResolverService } from './access-resolver.service';
 
 @ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(
+    private authService: AuthService,
+    private accessResolverService: AccessResolverService,
+  ) {}
 
   @Post('login')
   @ApiOperation({ summary: 'User login with email or phone and password' })
@@ -143,6 +148,28 @@ export class AuthController {
   @ApiBearerAuth()
   me(@Request() req: any) {
     return this.authService.getCurrentUserBootstrap(req.user.id);
+  }
+
+  @Get('me/access')
+  @ApiOperation({
+    summary:
+      'Resolve effective permissions/modules/personas and visible screens for current user',
+  })
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  meAccess(
+    @Request() req: any,
+    @Query('surface') surface?: ScreenSurface,
+    @Query('unitId') unitId?: string,
+  ) {
+    const resolvedSurface =
+      surface === ScreenSurface.MOBILE_APP
+        ? ScreenSurface.MOBILE_APP
+        : ScreenSurface.ADMIN_WEB;
+    return this.accessResolverService.resolveUserAccess(req.user.id, {
+      surface: resolvedSurface,
+      unitId,
+    });
   }
 
   @Patch('me/profile')

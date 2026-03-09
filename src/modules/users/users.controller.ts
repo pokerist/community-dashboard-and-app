@@ -38,6 +38,17 @@ import { TransferOwnershipDto } from './dto/transfer-ownership.dto';
 import { UpdateUserRolesDto } from './dto/update-user-roles.dto';
 import { SetRoleStatusPermissionsDto } from './dto/set-role-status-permissions.dto';
 import { SetUserOverridesDto } from './dto/set-user-overrides.dto';
+import {
+  UpsertPersonaDto,
+  UpdatePersonaDto,
+} from './dto/upsert-persona.dto';
+import {
+  UpsertScreenDefinitionDto,
+  UpdateScreenDefinitionDto,
+} from './dto/upsert-screen-definition.dto';
+import { ReplaceScreenVisibilityRulesDto } from './dto/replace-screen-visibility-rules.dto';
+import { SetUserPersonaOverrideDto } from './dto/set-user-persona-override.dto';
+import { ScreenSurface } from '@prisma/client';
 
 import { ApiTags, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -130,6 +141,94 @@ export class AdminUsersController {
     return this.usersService.deleteRole(roleId);
   }
 
+  @Get('personas')
+  @Permissions('admin.view')
+  listPersonas() {
+    return this.usersService.listPersonas();
+  }
+
+  @Post('personas')
+  @Permissions('admin.update')
+  createPersona(@Body() dto: UpsertPersonaDto) {
+    return this.usersService.createPersona(dto);
+  }
+
+  @Patch('personas/:personaId')
+  @Permissions('admin.update')
+  updatePersona(@Param('personaId', new ParseUUIDPipe()) personaId: string, @Body() dto: UpdatePersonaDto) {
+    return this.usersService.updatePersona(personaId, dto);
+  }
+
+  @Delete('personas/:personaId')
+  @Permissions('admin.delete')
+  deletePersona(@Param('personaId', new ParseUUIDPipe()) personaId: string) {
+    return this.usersService.deletePersona(personaId);
+  }
+
+  @Get('screens')
+  @Permissions('admin.view')
+  listScreens(@Query('surface') surface?: ScreenSurface) {
+    const resolvedSurface =
+      surface === ScreenSurface.MOBILE_APP
+        ? ScreenSurface.MOBILE_APP
+        : surface === ScreenSurface.ADMIN_WEB
+          ? ScreenSurface.ADMIN_WEB
+          : undefined;
+    return this.usersService.listScreens(resolvedSurface);
+  }
+
+  @Post('screens')
+  @Permissions('admin.update')
+  createScreen(@Body() dto: UpsertScreenDefinitionDto) {
+    return this.usersService.createScreen(dto);
+  }
+
+  @Patch('screens/:screenId')
+  @Permissions('admin.update')
+  updateScreen(
+    @Param('screenId', new ParseUUIDPipe()) screenId: string,
+    @Body() dto: UpdateScreenDefinitionDto,
+  ) {
+    return this.usersService.updateScreen(screenId, dto);
+  }
+
+  @Delete('screens/:screenId')
+  @Permissions('admin.delete')
+  deleteScreen(@Param('screenId', new ParseUUIDPipe()) screenId: string) {
+    return this.usersService.deleteScreen(screenId);
+  }
+
+  @Get('screen-visibility-rules')
+  @Permissions('admin.view')
+  listScreenVisibilityRules(@Query('surface') surface?: ScreenSurface) {
+    const resolvedSurface =
+      surface === ScreenSurface.MOBILE_APP
+        ? ScreenSurface.MOBILE_APP
+        : surface === ScreenSurface.ADMIN_WEB
+          ? ScreenSurface.ADMIN_WEB
+          : undefined;
+    return this.usersService.listScreenVisibilityRules(resolvedSurface);
+  }
+
+  @Put('screen-visibility-rules')
+  @Permissions('admin.update')
+  replaceScreenVisibilityRules(@Body() dto: ReplaceScreenVisibilityRulesDto) {
+    const rules = dto.rules ?? [];
+    return this.usersService.replaceScreenVisibilityRules(
+      rules.map((rule) => ({
+        personaKey: rule.personaKey,
+        screenKey: rule.screenKey,
+        surface:
+          dto.surface ??
+          (rule.surface === ScreenSurface.MOBILE_APP
+            ? ScreenSurface.MOBILE_APP
+            : ScreenSurface.ADMIN_WEB),
+        unitStatus: rule.unitStatus,
+        visible: rule.visible,
+      })),
+    );
+  }
+
   @Get('module-keys')
   @Permissions('admin.view')
   getModuleKeys() {
@@ -188,6 +287,21 @@ export class AdminUsersController {
     @Body() dto: SetUserOverridesDto,
   ) {
     return this.usersService.setUserPermissionOverrides(userId, dto.overrides);
+  }
+
+  @Get(':userId/persona-override')
+  @Permissions('admin.view')
+  getUserPersonaOverride(@Param('userId', new ParseUUIDPipe()) userId: string) {
+    return this.usersService.getUserPersonaOverride(userId);
+  }
+
+  @Patch(':userId/persona-override')
+  @Permissions('admin.update')
+  setUserPersonaOverride(
+    @Param('userId', new ParseUUIDPipe()) userId: string,
+    @Body() dto: SetUserPersonaOverrideDto,
+  ) {
+    return this.usersService.setUserPersonaOverride(userId, dto.personaKeys ?? []);
   }
 
   @Get(':userId/resolve-permissions')

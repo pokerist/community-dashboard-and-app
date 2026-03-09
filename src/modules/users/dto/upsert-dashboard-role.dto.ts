@@ -19,5 +19,10 @@ export class UpsertDashboardRoleDto {
   moduleKeys?: string[];
 
   @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  personaKeys?: string[];
+
+  @IsOptional()
   statusPermissions?: Record<string, string[]>;
 }

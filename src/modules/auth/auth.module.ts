@@ -12,6 +12,7 @@ import { PrismaModule } from '../../../prisma/prisma.module';
 import { ReferralsModule } from '../referrals/referrals.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { SystemSettingsModule } from '../system-settings/system-settings.module';
+import { AccessResolverService } from './access-resolver.service';
 
 @Module({
   imports: [
@@ -34,8 +35,9 @@ import { SystemSettingsModule } from '../system-settings/system-settings.module'
     PermissionsGuard,
     ModuleAccessGuard,
     PermissionCacheService,
+    AccessResolverService,
   ],
   controllers: [AuthController],
-  exports: [AuthService, JwtModule, PermissionCacheService],
+  exports: [AuthService, JwtModule, PermissionCacheService, AccessResolverService],
 })
 export class AuthModule {}

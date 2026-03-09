@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import {
   ChevronDown, RefreshCw, Search, SlidersHorizontal,
   User, UserCheck, Plus, Building2, Users, Home,
-  Shield, Briefcase, Store, HardHat, Settings,
+  Shield, Briefcase, Store, HardHat,
   ArrowUpRight, MoreHorizontal, Mail, Phone, Clock,
   Link, AlertCircle, CheckCircle2, XCircle,
 } from "lucide-react";
@@ -13,7 +13,7 @@ import { DrawerForm } from "../DrawerForm";
 import { EmptyState } from "../EmptyState";
 import usersService, {
   Broker, DelegateListItem, FamilyMemberListItem, HomeStaffListItem,
-  HouseholdRequestStatus, OwnerListItem, SystemUserListItem, TenantListItem,
+  HouseholdRequestStatus, OwnerListItem, TenantListItem,
   UserDetailResponse, UserStatus, UserStats,
 } from "../../lib/users-service";
 import commercialService, { CommercialDirectoryUser } from "../../lib/commercial-service";
@@ -24,7 +24,7 @@ import { errorMessage } from "../../lib/live-data";
 
 type UsersTabKey =
   | "owners" | "family-members" | "tenants" | "home-staff"
-  | "delegates" | "brokers" | "commercial" | "compound-staff" | "system-users";
+  | "delegates" | "brokers" | "commercial" | "compound-staff";
 
 const ALL_TABS: Array<{ key: UsersTabKey; label: string; icon: React.ReactNode; color: string }> = [
   { key: "owners",         label: "Owners",        icon: <Building2 size={12} />,  color: "#1D4ED8" },
@@ -35,7 +35,6 @@ const ALL_TABS: Array<{ key: UsersTabKey; label: string; icon: React.ReactNode; 
   { key: "brokers",        label: "Brokers",        icon: <Briefcase size={12} />,  color: "#0891B2" },
   { key: "commercial",     label: "Commercial",     icon: <Store size={12} />,      color: "#EA580C" },
   { key: "compound-staff", label: "Compound Staff", icon: <HardHat size={12} />,    color: "#4F46E5" },
-  { key: "system-users",   label: "System Users",   icon: <Settings size={12} />,   color: "#374151" },
 ];
 
 const USER_STATUS_OPTIONS       = [{ value:"all",label:"All statuses" },{ value:"ACTIVE",label:"Active" },{ value:"SUSPENDED",label:"Suspended" },{ value:"PENDING",label:"Pending" },{ value:"INVITED",label:"Invited" },{ value:"DISABLED",label:"Disabled" }];
@@ -218,7 +217,6 @@ export function UsersHubPage() {
   const [homeStaff,       setHomeStaff]       = useState<HomeStaffListItem[]>([]);
   const [delegates,       setDelegates]       = useState<DelegateListItem[]>([]);
   const [brokers,         setBrokers]         = useState<Broker[]>([]);
-  const [systemUsers,     setSystemUsers]     = useState<SystemUserListItem[]>([]);
   const [commercialUsers, setCommercialUsers] = useState<CommercialDirectoryUser[]>([]);
   const [compoundStaff,   setCompoundStaff]   = useState<CompoundStaff[]>([]);
 
@@ -269,7 +267,6 @@ export function UsersHubPage() {
       else if (activeTab==="home-staff")  setHomeStaff((await usersService.listHomeStaff({ page:1,limit:20,search:q,status:st as HouseholdRequestStatus,staffType:secondaryFilter==="all"?undefined:secondaryFilter as any })).items);
       else if (activeTab==="delegates")   setDelegates((await usersService.listDelegates({ page:1,limit:20,search:q,status:st as HouseholdRequestStatus })).items);
       else if (activeTab==="brokers")     setBrokers((await usersService.listBrokers({ page:1,limit:20,search:q,status:st as UserStatus })).items);
-      else if (activeTab==="system-users") setSystemUsers((await usersService.listSystemUsers({ page:1,limit:20,search:q,status:st as UserStatus })).items);
       else if (activeTab==="commercial") {
         const rows = await commercialService.listDirectoryUsers({ includeInactive:statusFilter==="all"||statusFilter==="INACTIVE" });
         const filtered = (statusFilter==="ACTIVE"||statusFilter==="INACTIVE"?rows.filter((r)=>r.status===statusFilter):rows).filter((r)=>!q||[r.userLabel,r.role,r.entityName,r.communityName,r.unitLabel].join(" ").toLowerCase().includes(q.toLowerCase()));
@@ -296,7 +293,6 @@ export function UsersHubPage() {
     setFamilyMembers((p) => p.map((r) => r.userId===userId?{...r,status:next}:r));
     setTenants((p) => p.map((r) => r.userId===userId?{...r,status:next}:r));
     setBrokers((p) => p.map((r) => r.userId===userId?{...r,status:next}:r));
-    setSystemUsers((p) => p.map((r) => r.userId===userId?{...r,status:next}:r));
     setUserDetail((p) => p?.id===userId?{...p,status:next}:p);
   }, []);
 
@@ -400,15 +396,6 @@ export function UsersHubPage() {
     { key:"actions", header:"",        render:(r)=><div style={{ display:"flex",gap:"4px" }}><ActionBtn label="Edit" onClick={()=>openBrokerEdit(r)}/><ActionBtn label="View" onClick={()=>void openUserDetail(r.userId)} icon={<ArrowUpRight size={10}/>}/></div>, width:"130px" },
   ], [openUserDetail]);
 
-  const systemUserCols = useMemo<Col<SystemUserListItem>[]>(() => [
-    { key:"name",   header:"Name",       render:(r)=>r.name },
-    { key:"email",  header:"Email",      render:(r)=>r.email||"—", mono:true },
-    { key:"roles",  header:"Roles",      render:(r)=>r.roles.length?r.roles.join(", "):"—" },
-    { key:"status", header:"Status",     render:(r)=><StatusBadge value={r.status}/>, width:"90px" },
-    { key:"login",  header:"Last Login", render:(r)=>formatDateTime(r.lastLoginAt), mono:true },
-    { key:"actions",header:"",           render:(r)=><div style={{ display:"flex",gap:"4px" }}><ActionBtn label="View" onClick={()=>void openUserDetail(r.userId)} icon={<ArrowUpRight size={10}/>}/><ActionBtn label={r.status==="SUSPENDED"?"Activate":"Suspend"} onClick={()=>void suspendOrActivate(r.userId,r.status)} variant={r.status==="SUSPENDED"?"success":"danger"}/></div>, width:"170px" },
-  ], [openUserDetail, suspendOrActivate]);
-
   const commercialCols = useMemo<Col<CommercialDirectoryUser>[]>(() => [
     { key:"name",      header:"User",      render:(r)=>r.userLabel },
     { key:"role",      header:"Role",      render:(r)=><StatusBadge value={r.role}/> },
@@ -458,7 +445,6 @@ export function UsersHubPage() {
     if (activeTab==="home-staff")     return <DataGrid cols={homeStaffCols}    rows={homeStaff}       rowKey={(r)=>r.id}       loading={tableLoading} />;
     if (activeTab==="delegates")      return <DataGrid cols={delegateCols}     rows={delegates}       rowKey={(r)=>r.id}       loading={tableLoading} />;
     if (activeTab==="brokers")        return <DataGrid cols={brokerCols}       rows={brokers}         rowKey={(r)=>r.id}       loading={tableLoading} />;
-    if (activeTab==="system-users")   return <DataGrid cols={systemUserCols}   rows={systemUsers}     rowKey={(r)=>r.userId}   loading={tableLoading} onRowClick={(r)=>void openUserDetail(r.userId)} />;
     if (activeTab==="commercial")     return <DataGrid cols={commercialCols}   rows={commercialUsers} rowKey={(r)=>r.memberId} loading={tableLoading} onRowClick={(r)=>void openUserDetail(r.userId)} />;
     if (activeTab==="compound-staff") return <DataGrid cols={compoundStaffCols}rows={compoundStaff}   rowKey={(r)=>r.id}       loading={tableLoading} />;
     return null;

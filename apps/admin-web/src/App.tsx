@@ -34,11 +34,13 @@ import { CommunityDirectory } from "./components/pages/CommunityDirectory";
 import { ApprovalsCenter } from "./components/pages/ApprovalsCenter";
 import { HospitalityPage } from "./components/pages/HospitalityPage";
 import { NewsManagement } from "./components/pages/NewsManagement";
+import { MyAccountPage } from "./components/pages/MyAccountPage";
 import { Toaster } from "./components/ui/sonner";
 import { toast } from "sonner";
 import apiClient, { isAuthenticated, removeAuthToken } from "./lib/api-client";
 import notificationsService from "./lib/notificationsService";
 import { AdminLoginPage } from "./components/auth/AdminLoginPage";
+import { useAuthContext } from "./lib/auth-context";
 import {
   Dialog,
   DialogContent,
@@ -52,6 +54,7 @@ type FooterPanel = "documentation" | "support" | "privacy" | null;
 
 const VALID_SECTIONS = new Set([
   "dashboard",
+  "my-account",
   "residents",
   "users",
   "dashboard-users",
@@ -159,6 +162,7 @@ type PendingFocusEntity = {
 /* ── Section label map ──────────────────────────────────────── */
 const SECTION_LABELS: Record<string, string> = {
   dashboard: "Dashboard",
+  "my-account": "My Account",
   residents: "Residents & Users",
   "residents-create": "New Resident",
   units: "Units",
@@ -192,6 +196,7 @@ const SECTION_LABELS: Record<string, string> = {
 };
 
 export default function App() {
+  const { visibleScreens, personas, loading: accessLoading } = useAuthContext();
   const [activeSection, setActiveSection] = useState<string>(() => getSectionFromLocation());
   const [authenticated, setAuthenticated] = useState<boolean>(() => isAuthenticated());
   const [footerPanel, setFooterPanel] = useState<FooterPanel>(null);
@@ -422,9 +427,75 @@ export default function App() {
 
   const sectionLabel = SECTION_LABELS[activeSection] ?? activeSection;
 
+  const allowedSections = useMemo(() => {
+    if (!visibleScreens || visibleScreens.size === 0) {
+      return new Set(Array.from(VALID_SECTIONS));
+    }
+
+    const normalized = new Set<string>();
+    visibleScreens.forEach((screen) => {
+      const section = normalizeSection(screen);
+      if (VALID_SECTIONS.has(section)) {
+        normalized.add(section);
+      }
+    });
+
+    if (normalized.size === 0) {
+      return new Set(Array.from(VALID_SECTIONS));
+    }
+
+    return normalized;
+  }, [visibleScreens]);
+
+  const isLikelyRegularAccount = useMemo(() => {
+    const flags = Array.from(personas ?? []);
+    if (flags.length === 0) return false;
+    return !flags.some((key) => {
+      const upper = key.toUpperCase();
+      return (
+        upper === "SUPER_ADMIN" ||
+        upper.includes("ADMIN") ||
+        upper.includes("STAFF") ||
+        upper.includes("MANAGER")
+      );
+    });
+  }, [personas]);
+
+  useEffect(() => {
+    if (!authenticated || accessLoading) return;
+
+    if (allowedSections.size === 0) return;
+
+    if (!allowedSections.has(activeSection)) {
+      const preferred =
+        isLikelyRegularAccount && allowedSections.has("my-account")
+          ? "my-account"
+          : Array.from(allowedSections)[0] ?? "dashboard";
+      navigateToSection(preferred);
+      return;
+    }
+
+    if (
+      isLikelyRegularAccount &&
+      activeSection === "dashboard" &&
+      allowedSections.has("my-account") &&
+      !allowedSections.has("dashboard")
+    ) {
+      navigateToSection("my-account");
+    }
+  }, [
+    accessLoading,
+    activeSection,
+    allowedSections,
+    authenticated,
+    isLikelyRegularAccount,
+    navigateToSection,
+  ]);
+
   const renderContent = () => {
     switch (activeSection) {
       case "dashboard":       return <DashboardOverview onNavigate={navigateToSection} />;
+      case "my-account":      return <MyAccountPage onNavigate={navigateToSection} />;
       case "residents":       return <ResidentManagement onNavigateToCreate={() => navigateToSection("residents-create")} />;
       case "users":           return <UsersHubPage />;
       case "dashboard-users": return <DashboardUsersPage />;
@@ -483,6 +554,7 @@ export default function App() {
               activeSection={activeSection}
               unseenNotifications={unseenAdminNotifications}
               badgeCounts={sidebarBadges}
+              visibleSections={allowedSections}
             />
 
             {/* Content column */}

@@ -194,53 +194,6 @@ export class AdminSettingsCompatController {
     return this.systemSettingsService.deleteDepartment(id, this.actorId(req));
   }
 
-  @Get('system-users')
-  @Permissions('admin.view')
-  listSystemUsers(@Query() query: any) {
-    return this.systemSettingsService.listSystemUsers(query);
-  }
-
-  @Post('system-users')
-  @Permissions('admin.update')
-  createSystemUser(@Body() dto: any, @Req() req: any) {
-    return this.systemSettingsService.createSystemUser(dto, this.actorId(req));
-  }
-
-  @Patch('system-users/:id')
-  @Permissions('admin.update')
-  async updateSystemUser(@Param('id') id: string, @Body() dto: any, @Req() req: any) {
-    const nextDto = { ...dto };
-    if (typeof dto?.status === 'string') {
-      nextDto.isActive = dto.status.toLowerCase() === 'active';
-      delete nextDto.status;
-    }
-    return this.systemSettingsService.updateSystemUser(id, nextDto, this.actorId(req));
-  }
-
-  @Get('roles')
-  @Permissions('admin.view')
-  listRoles() {
-    return this.systemSettingsService.listRoles();
-  }
-
-  @Post('roles')
-  @Permissions('admin.update')
-  createRole(@Body() dto: any, @Req() req: any) {
-    return this.systemSettingsService.createRole(dto, this.actorId(req));
-  }
-
-  @Patch('roles/:id')
-  @Permissions('admin.update')
-  updateRole(@Param('id') id: string, @Body() dto: any, @Req() req: any) {
-    return this.systemSettingsService.updateRole(id, dto, this.actorId(req));
-  }
-
-  @Delete('roles/:id')
-  @Permissions('admin.update')
-  deleteRole(@Param('id') id: string, @Req() req: any) {
-    return this.systemSettingsService.deleteRole(id, this.actorId(req));
-  }
-
   @Post('backup/trigger')
   @Permissions('admin.update')
   triggerBackup(@Req() req: any) {

@@ -1,7 +1,9 @@
 import { Controller, Get, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
+import { ScreenSurface } from '@prisma/client';
 import { AuthService } from '../auth/auth.service';
+import { AccessResolverService } from '../auth/access-resolver.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { IntegrationConfigService } from './integration-config.service';
 import { SystemSettingsService } from './system-settings.service';
@@ -11,6 +13,7 @@ import { SystemSettingsService } from './system-settings.service';
 export class MobileAppConfigController {
   constructor(
     private readonly authService: AuthService,
+    private readonly accessResolverService: AccessResolverService,
     private readonly systemSettingsService: SystemSettingsService,
     private readonly integrationConfigService: IntegrationConfigService,
   ) {}
@@ -54,9 +57,13 @@ export class MobileAppConfigController {
       };
     }
 
-    const bootstrap = (await this.authService.getCurrentUserBootstrap(
-      userId,
-    )) as any;
+    const [bootstrap, access] = await Promise.all([
+      this.authService.getCurrentUserBootstrap(userId),
+      this.accessResolverService.resolveUserAccess(userId, {
+        surface: ScreenSurface.MOBILE_APP,
+      }),
+    ]);
+    const bootstrapPayload = bootstrap as any;
     const protoHeader = String(req.headers['x-forwarded-proto'] ?? '')
       .split(',')[0]
       .trim();
@@ -67,22 +74,28 @@ export class MobileAppConfigController {
       baseUrl,
     );
 
-    const featureAvailability = bootstrap?.featureAvailability ?? {};
+    const featureAvailability = bootstrapPayload?.featureAvailability ?? {};
     const resolvedPersona =
-      String(bootstrap?.personaHints?.resolvedPersona ?? 'RESIDENT') ||
+      String(bootstrapPayload?.personaHints?.resolvedPersona ?? 'RESIDENT') ||
       'RESIDENT';
 
-    const permissions: string[] = Array.isArray(bootstrap?.permissions)
-      ? bootstrap.permissions.filter(
+    const permissions: string[] = Array.isArray(access?.effectivePermissions)
+      ? access.effectivePermissions.filter(
           (value: unknown): value is string => typeof value === 'string',
         )
       : [];
     const permissionSet = new Set(permissions);
+    const visibleByMatrix = new Set(
+      Array.isArray(access?.visibleScreens) ? access.visibleScreens : [],
+    );
+    const hasMatrixRules = visibleByMatrix.size > 0;
+    const canShow = (screenKey: string, fallbackVisible: boolean) =>
+      hasMatrixRules ? visibleByMatrix.has(screenKey) : fallbackVisible;
 
     const screens = [
       {
         key: 'home',
-        visible: true,
+        visible: canShow('home', true),
         enabledActions: ['view_dashboard', 'view_quick_actions'],
         requiredPermissions: [],
         personaGuards: ['OWNER', 'TENANT', 'FAMILY', 'AUTHORIZED', 'CONTRACTOR', 'PRE_DELIVERY_OWNER', 'RESIDENT'],
@@ -90,7 +103,7 @@ export class MobileAppConfigController {
       },
       {
         key: 'notifications',
-        visible: true,
+        visible: canShow('notifications', true),
         enabledActions: ['list_notifications', 'mark_read'],
         requiredPermissions: ['notification.view_own'],
         personaGuards: ['OWNER', 'TENANT', 'FAMILY', 'AUTHORIZED', 'CONTRACTOR', 'PRE_DELIVERY_OWNER', 'RESIDENT'],
@@ -98,7 +111,7 @@ export class MobileAppConfigController {
       },
       {
         key: 'community_updates',
-        visible: true,
+        visible: canShow('community_updates', true),
         enabledActions: ['list_community_updates'],
         requiredPermissions: ['notification.view_own'],
         personaGuards: ['OWNER', 'TENANT', 'FAMILY', 'AUTHORIZED', 'CONTRACTOR', 'PRE_DELIVERY_OWNER', 'RESIDENT'],
@@ -106,7 +119,7 @@ export class MobileAppConfigController {
       },
       {
         key: 'services',
-        visible: Boolean(featureAvailability.canUseServices),
+        visible: canShow('services', Boolean(featureAvailability.canUseServices)),
         enabledActions: featureAvailability.canUseServices
           ? ['list_services', 'create_service_request', 'list_my_requests']
           : [],
@@ -116,7 +129,7 @@ export class MobileAppConfigController {
       },
       {
         key: 'requests',
-        visible: Boolean(featureAvailability.canUseRequests),
+        visible: canShow('requests', Boolean(featureAvailability.canUseRequests)),
         enabledActions: featureAvailability.canUseRequests
           ? ['list_my_requests', 'view_request_detail', 'submit_request_comment']
           : [],
@@ -126,7 +139,7 @@ export class MobileAppConfigController {
       },
       {
         key: 'bookings',
-        visible: Boolean(featureAvailability.canUseBookings),
+        visible: canShow('bookings', Boolean(featureAvailability.canUseBookings)),
         enabledActions: featureAvailability.canUseBookings
           ? ['list_facilities', 'create_booking', 'cancel_booking']
           : [],
@@ -136,7 +149,10 @@ export class MobileAppConfigController {
       },
       {
         key: 'complaints',
-        visible: Boolean(featureAvailability.canUseComplaints),
+        visible: canShow(
+          'complaints',
+          Boolean(featureAvailability.canUseComplaints),
+        ),
         enabledActions: featureAvailability.canUseComplaints
           ? ['create_complaint', 'list_my_complaints', 'view_complaint_detail']
           : [],
@@ -146,7 +162,10 @@ export class MobileAppConfigController {
       },
       {
         key: 'violations',
-        visible: Boolean(featureAvailability.canUseComplaints),
+        visible: canShow(
+          'violations',
+          Boolean(featureAvailability.canUseComplaints),
+        ),
         enabledActions: featureAvailability.canUseComplaints
           ? ['list_my_violations', 'view_violation_detail', 'submit_violation_action']
           : [],
@@ -156,7 +175,7 @@ export class MobileAppConfigController {
       },
       {
         key: 'finance',
-        visible: Boolean(featureAvailability.canViewFinance),
+        visible: canShow('finance', Boolean(featureAvailability.canViewFinance)),
         enabledActions: featureAvailability.canViewFinance
           ? ['list_my_invoices', 'view_invoice_detail', 'simulate_payment']
           : [],
@@ -166,9 +185,11 @@ export class MobileAppConfigController {
       },
       {
         key: 'qr_access',
-        visible:
+        visible: canShow(
+          'qr_access',
           Boolean(featureAvailability.canUseQr) &&
-          permissionSet.has('qr.generate'),
+            permissionSet.has('qr.generate'),
+        ),
         enabledActions:
           Boolean(featureAvailability.canUseQr) &&
           permissionSet.has('qr.generate')
@@ -180,7 +201,10 @@ export class MobileAppConfigController {
       },
       {
         key: 'household',
-        visible: Boolean(featureAvailability.canManageHousehold),
+        visible: canShow(
+          'household',
+          Boolean(featureAvailability.canManageHousehold),
+        ),
         enabledActions: featureAvailability.canManageHousehold
           ? ['view_household', 'create_household_request', 'manage_delegate']
           : [],
@@ -190,7 +214,7 @@ export class MobileAppConfigController {
       },
       {
         key: 'discover',
-        visible: Boolean(featureAvailability.canUseDiscover),
+        visible: canShow('discover', Boolean(featureAvailability.canUseDiscover)),
         enabledActions: featureAvailability.canUseDiscover
           ? ['list_discover_places']
           : [],
@@ -200,7 +224,10 @@ export class MobileAppConfigController {
       },
       {
         key: 'help_center',
-        visible: Boolean(featureAvailability.canUseHelpCenter),
+        visible: canShow(
+          'help_center',
+          Boolean(featureAvailability.canUseHelpCenter),
+        ),
         enabledActions: featureAvailability.canUseHelpCenter
           ? ['list_help_center_entries']
           : [],
@@ -210,7 +237,7 @@ export class MobileAppConfigController {
       },
       {
         key: 'utilities',
-        visible: Boolean(featureAvailability.canUseUtilities),
+        visible: canShow('utilities', Boolean(featureAvailability.canUseUtilities)),
         enabledActions: featureAvailability.canUseUtilities
           ? ['view_utility_tracker']
           : [],
@@ -223,11 +250,14 @@ export class MobileAppConfigController {
     return {
       data: {
         resolvedPersona,
+        effectivePersonas: access.effectivePersonas ?? [],
         screens,
       },
       meta: {
         version: 1,
         generatedAt: new Date().toISOString(),
+        surface: ScreenSurface.MOBILE_APP,
+        hasMatrixRules,
         mobileAccessUpdatedAt: mobileConfig?.meta?.mobileAccessUpdatedAt ?? null,
       },
     };

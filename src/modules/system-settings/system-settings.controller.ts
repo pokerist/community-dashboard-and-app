@@ -34,9 +34,6 @@ import {
   CreateDepartmentDto,
   UpdateDepartmentDto,
   ListDepartmentsDto,
-  CreateSystemUserDto,
-  UpdateSystemUserDto,
-  ListSystemUsersDto,
 } from './dto/system-settings.dto';
 
 @ApiTags('system-settings')
@@ -252,79 +249,4 @@ export class SystemSettingsController {
     return this.systemSettingsService.deleteDepartment(id, this.actorId(req));
   }
 
-  // System Users Management
-  @Get('users')
-  @Permissions('admin.view')
-  @ApiOperation({ summary: 'List all system users' })
-  listSystemUsers(@Query() query: ListSystemUsersDto) {
-    return this.systemSettingsService.listSystemUsers(query);
-  }
-
-  @Post('users')
-  @Permissions('admin.update')
-  @ApiOperation({ summary: 'Create a new system user' })
-  createSystemUser(@Body() dto: CreateSystemUserDto, @Req() req: any) {
-    return this.systemSettingsService.createSystemUser(dto, this.actorId(req));
-  }
-
-  @Patch('users/:id')
-  @Permissions('admin.update')
-  @ApiOperation({ summary: 'Update a system user' })
-  updateSystemUser(
-    @Param('id') id: string,
-    @Body() dto: UpdateSystemUserDto,
-    @Req() req: any,
-  ) {
-    return this.systemSettingsService.updateSystemUser(
-      id,
-      dto,
-      this.actorId(req),
-    );
-  }
-
-  @Delete('users/:id')
-  @Permissions('admin.update')
-  @ApiOperation({ summary: 'Archive/deactivate a system user' })
-  deleteSystemUser(@Param('id') id: string, @Req() req: any) {
-    return this.systemSettingsService.deactivateSystemUser(
-      id,
-      this.actorId(req),
-    );
-  }
-
-  // Roles & Permissions Management
-  @Get('roles')
-  @Permissions('admin.view')
-  @ApiOperation({ summary: 'List all dashboard roles with permissions' })
-  listRoles() {
-    return this.systemSettingsService.listRoles();
-  }
-
-  @Post('roles')
-  @Permissions('admin.update')
-  @ApiOperation({ summary: 'Create a new dashboard role' })
-  createRole(@Body() dto: any, @Req() req: any) {
-    return this.systemSettingsService.createRole(dto, this.actorId(req));
-  }
-
-  @Patch('roles/:id')
-  @Permissions('admin.update')
-  @ApiOperation({ summary: 'Update dashboard role permissions' })
-  updateRole(@Param('id') id: string, @Body() dto: any, @Req() req: any) {
-    return this.systemSettingsService.updateRole(id, dto, this.actorId(req));
-  }
-
-  @Delete('roles/:id')
-  @Permissions('admin.update')
-  @ApiOperation({ summary: 'Delete dashboard role (with guards)' })
-  deleteRole(@Param('id') id: string, @Req() req: any) {
-    return this.systemSettingsService.deleteRole(id, this.actorId(req));
-  }
-
-  @Get('permissions')
-  @Permissions('admin.view')
-  @ApiOperation({ summary: 'List all available permissions' })
-  listPermissions() {
-    return this.systemSettingsService.listPermissions();
-  }
 }

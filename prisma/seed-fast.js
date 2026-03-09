@@ -91,6 +91,125 @@ const ROLES = {
   COMMUNITY_USER: ['unit.view_own', 'project.view'],
 };
 
+const UNIT_STATUSES = ['OFF_PLAN', 'UNDER_CONSTRUCTION', 'DELIVERED'];
+
+const PERSONAS = [
+  { key: 'SUPER_ADMIN', name: 'Super Admin', isSystem: true },
+  { key: 'ADMIN', name: 'Admin', isSystem: true },
+  { key: 'STAFF', name: 'Staff', isSystem: true },
+  { key: 'OWNER', name: 'Owner', isSystem: true },
+  { key: 'TENANT', name: 'Tenant', isSystem: true },
+  { key: 'FAMILY', name: 'Family', isSystem: true },
+  { key: 'AUTHORIZED', name: 'Authorized', isSystem: true },
+  { key: 'CONTRACTOR', name: 'Contractor', isSystem: true },
+  { key: 'PRE_DELIVERY_OWNER', name: 'Pre-Delivery Owner', isSystem: true },
+  { key: 'RESIDENT', name: 'Resident', isSystem: true },
+  { key: 'COMMERCIAL_OWNER', name: 'Commercial Owner', isSystem: true },
+  { key: 'COMMERCIAL_STAFF', name: 'Commercial Staff', isSystem: true },
+];
+
+const ROLE_PERSONA_LINKS = {
+  SUPER_ADMIN: ['SUPER_ADMIN', 'ADMIN'],
+  MANAGER: ['ADMIN', 'STAFF'],
+  COMMUNITY_USER: ['RESIDENT'],
+};
+
+const ADMIN_SCREEN_DEFS = [
+  { key: 'admin-dashboard', title: 'Dashboard', section: 'dashboard', moduleKey: 'dashboard' },
+  { key: 'admin-my-account', title: 'My Account', section: 'my-account', moduleKey: 'profile' },
+  { key: 'admin-residents', title: 'Residents', section: 'residents', moduleKey: 'users' },
+  { key: 'admin-dashboard-users', title: 'Dashboard Users', section: 'dashboard-users', moduleKey: 'users' },
+  { key: 'admin-communities', title: 'Communities', section: 'communities', moduleKey: 'communities' },
+  { key: 'admin-units', title: 'Units', section: 'units', moduleKey: 'units' },
+  { key: 'admin-commercial', title: 'Commercial', section: 'commercial', moduleKey: 'commercial' },
+  { key: 'admin-compound-staff', title: 'Compound Staff', section: 'compound-staff', moduleKey: 'users' },
+  { key: 'admin-attendance', title: 'Attendance', section: 'attendance', moduleKey: 'users' },
+  { key: 'admin-blue-collar', title: 'Blue Collar', section: 'blue-collar', moduleKey: 'users' },
+  { key: 'admin-gates', title: 'Gates', section: 'gates', moduleKey: 'gates' },
+  { key: 'admin-access', title: 'Access Control', section: 'access', moduleKey: 'gates' },
+  { key: 'admin-rental', title: 'Rental', section: 'rental', moduleKey: 'rentals' },
+  { key: 'admin-billing', title: 'Billing', section: 'billing', moduleKey: 'payments' },
+  { key: 'admin-complaints', title: 'Complaints', section: 'complaints', moduleKey: 'complaints' },
+  { key: 'admin-violations', title: 'Violations', section: 'violations', moduleKey: 'violations' },
+  { key: 'admin-tickets', title: 'Tickets', section: 'tickets', moduleKey: 'tickets' },
+  { key: 'admin-services', title: 'Services', section: 'services', moduleKey: 'services' },
+  { key: 'admin-permits', title: 'Permits', section: 'permits', moduleKey: 'permits' },
+  { key: 'admin-amenities', title: 'Amenities', section: 'amenities', moduleKey: 'amenities' },
+  { key: 'admin-ordering', title: 'Ordering', section: 'ordering', moduleKey: 'services' },
+  { key: 'admin-notifications', title: 'Notifications', section: 'notifications', moduleKey: 'news' },
+  { key: 'admin-news', title: 'News', section: 'news', moduleKey: 'news' },
+  { key: 'admin-marketing', title: 'Marketing', section: 'marketing', moduleKey: 'news' },
+  { key: 'admin-surveys', title: 'Surveys', section: 'surveys', moduleKey: 'reports' },
+  { key: 'admin-approvals', title: 'Registrations', section: 'approvals', moduleKey: 'users' },
+  { key: 'admin-reports', title: 'Reports', section: 'reports', moduleKey: 'reports' },
+  { key: 'admin-directory', title: 'Directory', section: 'directory', moduleKey: 'dashboard' },
+  { key: 'admin-security', title: 'Security', section: 'security', moduleKey: 'gates' },
+  { key: 'admin-settings', title: 'System Settings', section: 'settings', moduleKey: 'dashboard' },
+  { key: 'admin-hospitality', title: 'Hospitality', section: 'hospitality', moduleKey: 'services' },
+];
+
+const MOBILE_SCREEN_DEFS = [
+  { key: 'mobile-home', title: 'Home', section: 'home', moduleKey: 'dashboard' },
+  { key: 'mobile-notifications', title: 'Notifications', section: 'notifications', moduleKey: 'news' },
+  { key: 'mobile-community-updates', title: 'Community Updates', section: 'community_updates', moduleKey: 'news' },
+  { key: 'mobile-services', title: 'Services', section: 'services', moduleKey: 'services' },
+  { key: 'mobile-requests', title: 'Requests', section: 'requests', moduleKey: 'services' },
+  { key: 'mobile-bookings', title: 'Bookings', section: 'bookings', moduleKey: 'amenities' },
+  { key: 'mobile-complaints', title: 'Complaints', section: 'complaints', moduleKey: 'complaints' },
+  { key: 'mobile-violations', title: 'Violations', section: 'violations', moduleKey: 'violations' },
+  { key: 'mobile-finance', title: 'Finance', section: 'finance', moduleKey: 'payments' },
+  { key: 'mobile-qr-access', title: 'QR Access', section: 'qr_access', moduleKey: 'gates' },
+  { key: 'mobile-household', title: 'Household', section: 'household', moduleKey: 'users' },
+  { key: 'mobile-discover', title: 'Discover', section: 'discover', moduleKey: 'dashboard' },
+  { key: 'mobile-help-center', title: 'Help Center', section: 'help_center', moduleKey: 'dashboard' },
+  { key: 'mobile-utilities', title: 'Utilities', section: 'utilities', moduleKey: 'payments' },
+];
+
+const ADMIN_VISIBILITY = {
+  SUPER_ADMIN: ADMIN_SCREEN_DEFS.map((row) => row.section),
+  ADMIN: ADMIN_SCREEN_DEFS.map((row) => row.section),
+  STAFF: [
+    'dashboard',
+    'my-account',
+    'tickets',
+    'services',
+    'permits',
+    'complaints',
+    'violations',
+    'gates',
+    'access',
+    'notifications',
+    'reports',
+  ],
+  OWNER: ['my-account'],
+  TENANT: ['my-account'],
+  FAMILY: ['my-account'],
+  AUTHORIZED: ['my-account'],
+  CONTRACTOR: ['my-account'],
+  PRE_DELIVERY_OWNER: ['my-account'],
+  RESIDENT: ['my-account'],
+  COMMERCIAL_OWNER: ['my-account'],
+  COMMERCIAL_STAFF: ['my-account'],
+};
+
+const MOBILE_VISIBILITY = {
+  OWNER: ['home', 'notifications', 'community_updates', 'services', 'requests', 'bookings', 'complaints', 'violations', 'finance', 'qr_access', 'household', 'discover', 'help_center', 'utilities'],
+  TENANT: ['home', 'notifications', 'community_updates', 'services', 'requests', 'bookings', 'complaints', 'violations', 'finance', 'qr_access', 'household', 'discover', 'help_center', 'utilities'],
+  FAMILY: ['home', 'notifications', 'community_updates', 'services', 'requests', 'bookings', 'complaints', 'violations', 'discover', 'help_center'],
+  AUTHORIZED: ['home', 'notifications', 'community_updates', 'services', 'requests', 'bookings', 'complaints', 'violations', 'qr_access', 'household', 'discover', 'help_center'],
+  CONTRACTOR: ['home', 'notifications', 'requests', 'qr_access', 'help_center'],
+  PRE_DELIVERY_OWNER: ['home', 'notifications', 'community_updates', 'complaints', 'discover', 'help_center'],
+  RESIDENT: ['home', 'notifications', 'community_updates', 'services', 'requests', 'bookings', 'complaints', 'violations', 'finance', 'qr_access', 'discover', 'help_center', 'utilities'],
+  COMMERCIAL_OWNER: ['home', 'notifications', 'community_updates', 'services', 'requests', 'bookings', 'discover', 'help_center'],
+  COMMERCIAL_STAFF: ['home', 'notifications', 'services', 'requests', 'help_center'],
+};
+
+const MOBILE_STATUS_BLOCKLIST = {
+  OFF_PLAN: ['bookings', 'household', 'utilities'],
+  UNDER_CONSTRUCTION: ['bookings'],
+  DELIVERED: [],
+};
+
 const DEFAULT_INVOICE_CATEGORY_LABELS = {
   RENT: 'Rent',
   SERVICE_FEE: 'Service Fee',
@@ -167,6 +286,176 @@ async function upsertUnit(communityId, block, unitNumber, payload) {
   });
 }
 
+async function resetRbacPolicyData() {
+  await prisma.$transaction(async (tx) => {
+    await tx.userPersonaOverride.deleteMany({});
+    await tx.userPermissionOverride.deleteMany({});
+    await tx.screenVisibilityRule.deleteMany({});
+    await tx.rolePersona.deleteMany({});
+    await tx.roleStatusPermission.deleteMany({});
+    await tx.roleModuleAccess.deleteMany({});
+    await tx.rolePermission.deleteMany({});
+    await tx.userRole.deleteMany({});
+    await tx.screenDefinition.deleteMany({});
+    await tx.persona.deleteMany({});
+  });
+}
+
+async function seedDynamicGovernance({
+  roleIdByName,
+  resetRbac,
+}) {
+  if (resetRbac) {
+    await prisma.screenVisibilityRule.deleteMany({});
+    await prisma.rolePersona.deleteMany({});
+    await prisma.screenDefinition.deleteMany({});
+    await prisma.persona.deleteMany({});
+  }
+
+  for (const persona of PERSONAS) {
+    await prisma.persona.upsert({
+      where: { key: persona.key },
+      update: {
+        name: persona.name,
+        description: persona.description ?? null,
+        isSystem: persona.isSystem === true,
+        isActive: true,
+      },
+      create: {
+        key: persona.key,
+        name: persona.name,
+        description: persona.description ?? null,
+        isSystem: persona.isSystem === true,
+        isActive: true,
+      },
+    });
+  }
+
+  const screenUpserts = [
+    ...ADMIN_SCREEN_DEFS.map((screen) => ({ ...screen, surface: 'ADMIN_WEB' })),
+    ...MOBILE_SCREEN_DEFS.map((screen) => ({ ...screen, surface: 'MOBILE_APP' })),
+  ];
+
+  for (const screen of screenUpserts) {
+    await prisma.screenDefinition.upsert({
+      where: { key: screen.key },
+      update: {
+        title: screen.title,
+        section: screen.section,
+        moduleKey: screen.moduleKey ?? null,
+        surface: screen.surface,
+        isEnabled: true,
+      },
+      create: {
+        key: screen.key,
+        title: screen.title,
+        section: screen.section,
+        moduleKey: screen.moduleKey ?? null,
+        surface: screen.surface,
+        isEnabled: true,
+      },
+    });
+  }
+
+  const personas = await prisma.persona.findMany({
+    where: { key: { in: PERSONAS.map((row) => row.key) } },
+    select: { id: true, key: true },
+  });
+  const personaIdByKey = new Map(personas.map((row) => [row.key, row.id]));
+
+  const rolePersonaRows = [];
+  for (const [roleName, personaKeys] of Object.entries(ROLE_PERSONA_LINKS)) {
+    const roleId = roleIdByName.get(roleName);
+    if (!roleId) continue;
+    for (const personaKey of personaKeys) {
+      const personaId = personaIdByKey.get(personaKey);
+      if (!personaId) continue;
+      rolePersonaRows.push({ roleId, personaId });
+    }
+  }
+
+  if (rolePersonaRows.length > 0) {
+    await prisma.rolePersona.createMany({
+      data: rolePersonaRows,
+      skipDuplicates: true,
+    });
+  }
+
+  const shouldSeedRules =
+    resetRbac === true ||
+    process.env.SEED_FORCE_SCREEN_RULES === 'true' ||
+    (await prisma.screenVisibilityRule.count()) === 0;
+
+  if (!shouldSeedRules) return;
+
+  await prisma.screenVisibilityRule.deleteMany({});
+
+  const allScreens = await prisma.screenDefinition.findMany({
+    where: {
+      key: { in: screenUpserts.map((row) => row.key) },
+    },
+    select: {
+      id: true,
+      section: true,
+      surface: true,
+    },
+  });
+
+  const adminScreenIdBySection = new Map();
+  const mobileScreenIdBySection = new Map();
+  for (const row of allScreens) {
+    if (row.surface === 'ADMIN_WEB') {
+      adminScreenIdBySection.set(row.section, row.id);
+    } else if (row.surface === 'MOBILE_APP') {
+      mobileScreenIdBySection.set(row.section, row.id);
+    }
+  }
+
+  const visibilityRows = [];
+
+  for (const [personaKey, sections] of Object.entries(ADMIN_VISIBILITY)) {
+    const personaId = personaIdByKey.get(personaKey);
+    if (!personaId) continue;
+    const allowed = new Set(sections);
+    for (const unitStatus of UNIT_STATUSES) {
+      for (const [section, screenId] of adminScreenIdBySection.entries()) {
+        visibilityRows.push({
+          personaId,
+          screenId,
+          surface: 'ADMIN_WEB',
+          unitStatus,
+          visible: allowed.has(section),
+        });
+      }
+    }
+  }
+
+  for (const [personaKey, sections] of Object.entries(MOBILE_VISIBILITY)) {
+    const personaId = personaIdByKey.get(personaKey);
+    if (!personaId) continue;
+    const allowed = new Set(sections);
+    for (const unitStatus of UNIT_STATUSES) {
+      const blocked = new Set(MOBILE_STATUS_BLOCKLIST[unitStatus] ?? []);
+      for (const [section, screenId] of mobileScreenIdBySection.entries()) {
+        visibilityRows.push({
+          personaId,
+          screenId,
+          surface: 'MOBILE_APP',
+          unitStatus,
+          visible: allowed.has(section) && !blocked.has(section),
+        });
+      }
+    }
+  }
+
+  if (visibilityRows.length > 0) {
+    await prisma.screenVisibilityRule.createMany({
+      data: visibilityRows,
+      skipDuplicates: true,
+    });
+  }
+}
+
 async function main() {
   const lockResult = await prisma.$queryRaw`
     SELECT pg_try_advisory_lock(885122009) AS locked
@@ -180,6 +469,11 @@ async function main() {
 
   try {
     console.log('Fast seed started...');
+    const resetRbac = process.env.SEED_RESET_RBAC === 'true';
+    if (resetRbac) {
+      console.log('RBAC reset mode: clearing role assignments and policy tables...');
+      await resetRbacPolicyData();
+    }
 
     await prisma.permission.createMany({
       data: PERMISSIONS.map((key) => ({ key })),
@@ -188,9 +482,17 @@ async function main() {
 
     const roleNames = Object.keys(ROLES);
     await prisma.role.createMany({
-      data: roleNames.map((name) => ({ name })),
+      data: roleNames.map((name) => ({ name, isSystem: true })),
       skipDuplicates: true,
     });
+    await Promise.all(
+      roleNames.map((name) =>
+        prisma.role.updateMany({
+          where: { name },
+          data: { isSystem: true },
+        }),
+      ),
+    );
 
     const [roleRows, permissionRows] = await Promise.all([
       prisma.role.findMany({
@@ -225,6 +527,8 @@ async function main() {
       skipDuplicates: true,
     });
 
+    await seedDynamicGovernance({ roleIdByName, resetRbac });
+
     await prisma.invoiceCategory.createMany({
       data: Object.values(InvoiceType).map((type, index) => ({
         label: DEFAULT_INVOICE_CATEGORY_LABELS[type],
@@ -247,7 +551,7 @@ async function main() {
       throw new Error('Missing core role IDs');
     }
 
-    await prisma.user.upsert({
+    const superAdminUser = await prisma.user.upsert({
       where: { email: 'test@admin.com' },
       update: { passwordHash, nameEN: 'Super Admin' },
       create: {
@@ -279,6 +583,7 @@ async function main() {
 
     await prisma.userRole.createMany({
       data: [
+        { userId: superAdminUser.id, roleId: superAdminRoleId },
         { userId: manager.id, roleId: managerRoleId },
         { userId: residentAUser.id, roleId: communityRoleId },
         { userId: residentBUser.id, roleId: communityRoleId },

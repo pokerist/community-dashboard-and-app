@@ -398,6 +398,9 @@ export class UsersService {
           include: { permission: true },
         },
         moduleAccess: true,
+        personas: {
+          include: { persona: true },
+        },
         users: {
           select: { userId: true },
         },
@@ -484,6 +487,7 @@ export class UsersService {
     description?: string;
     permissionKeys?: string[];
     moduleKeys?: string[];
+    personaKeys?: string[];
     statusPermissions?: Record<string, string[]>;
   }) {
     const roleName = input.name.trim();
@@ -502,6 +506,18 @@ export class UsersService {
         : [];
     if (permissions.length !== permissionKeys.length) {
       throw new BadRequestException('One or more permissions are invalid');
+    }
+
+    const personaKeys = Array.from(new Set(input.personaKeys ?? []));
+    const personas =
+      personaKeys.length > 0
+        ? await this.prisma.persona.findMany({
+            where: { key: { in: personaKeys } },
+            select: { id: true, key: true },
+          })
+        : [];
+    if (personas.length !== personaKeys.length) {
+      throw new BadRequestException('One or more personas are invalid');
     }
 
     // Resolve status permissions
@@ -536,6 +552,15 @@ export class UsersService {
         });
       }
 
+      if (personas.length > 0) {
+        await tx.rolePersona.createMany({
+          data: personas.map((persona) => ({
+            roleId: createdRole.id,
+            personaId: persona.id,
+          })),
+        });
+      }
+
       // Status permissions
       if (statusPermData.length > 0) {
         await tx.roleStatusPermission.createMany({
@@ -557,6 +582,7 @@ export class UsersService {
         permissions: { include: { permission: true } },
         statusPermissions: { include: { permission: true } },
         moduleAccess: true,
+        personas: { include: { persona: true } },
         users: { select: { userId: true } },
       },
     });
@@ -599,6 +625,7 @@ export class UsersService {
       description?: string;
       permissionKeys?: string[];
       moduleKeys?: string[];
+      personaKeys?: string[];
       statusPermissions?: Record<string, string[]>;
     },
   ) {
@@ -624,6 +651,18 @@ export class UsersService {
         : [];
     if (permissions.length !== permissionKeys.length) {
       throw new BadRequestException('One or more permissions are invalid');
+    }
+
+    const personaKeys = Array.from(new Set(input.personaKeys ?? []));
+    const personas =
+      personaKeys.length > 0
+        ? await this.prisma.persona.findMany({
+            where: { key: { in: personaKeys } },
+            select: { id: true, key: true },
+          })
+        : [];
+    if (input.personaKeys !== undefined && personas.length !== personaKeys.length) {
+      throw new BadRequestException('One or more personas are invalid');
     }
 
     const statusPermData = await this.resolveStatusPermissionInput(input.statusPermissions);
@@ -662,6 +701,18 @@ export class UsersService {
         }
       }
 
+      if (input.personaKeys !== undefined) {
+        await tx.rolePersona.deleteMany({ where: { roleId } });
+        if (personas.length > 0) {
+          await tx.rolePersona.createMany({
+            data: personas.map((persona) => ({
+              roleId,
+              personaId: persona.id,
+            })),
+          });
+        }
+      }
+
       // Replace status permissions
       if (input.statusPermissions !== undefined) {
         await tx.roleStatusPermission.deleteMany({ where: { roleId } });
@@ -684,6 +735,7 @@ export class UsersService {
         permissions: { include: { permission: true } },
         statusPermissions: { include: { permission: true } },
         moduleAccess: true,
+        personas: { include: { persona: true } },
         users: { select: { userId: true } },
       },
     });
@@ -700,6 +752,7 @@ export class UsersService {
       await tx.roleModuleAccess.deleteMany({ where: { roleId } });
       await tx.roleStatusPermission.deleteMany({ where: { roleId } });
       await tx.rolePermission.deleteMany({ where: { roleId } });
+      await tx.rolePersona.deleteMany({ where: { roleId } });
       await tx.userRole.deleteMany({ where: { roleId } });
       await tx.role.delete({ where: { id: roleId } });
     });
@@ -867,6 +920,439 @@ export class UsersService {
     });
 
     return this.getUserPermissionOverrides(userId);
+  }
+
+  // ── Personas ───────────────────────────────────────────────
+  async listPersonas() {
+    const rows = await this.prisma.persona.findMany({
+      orderBy: [{ isSystem: 'desc' }, { key: 'asc' }],
+      include: {
+        _count: {
+          select: {
+            roleLinks: true,
+            userOverrides: true,
+            visibilityRules: true,
+          },
+        },
+      },
+    });
+
+    return rows.map((row) => ({
+      id: row.id,
+      key: row.key,
+      name: row.name,
+      description: row.description,
+      isSystem: row.isSystem,
+      isActive: row.isActive,
+      roleCount: row._count.roleLinks,
+      userOverrideCount: row._count.userOverrides,
+      ruleCount: row._count.visibilityRules,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    }));
+  }
+
+  async createPersona(input: {
+    key: string;
+    name: string;
+    description?: string;
+    isSystem?: boolean;
+    isActive?: boolean;
+  }) {
+    const key = input.key.trim().toUpperCase();
+    const name = input.name.trim();
+    if (!key) throw new BadRequestException('Persona key is required');
+    if (!name) throw new BadRequestException('Persona name is required');
+
+    const existing = await this.prisma.persona.findUnique({ where: { key } });
+    if (existing) throw new ConflictException('Persona key already exists');
+
+    return this.prisma.persona.create({
+      data: {
+        key,
+        name,
+        description: input.description?.trim() || null,
+        isSystem: input.isSystem ?? false,
+        isActive: input.isActive ?? true,
+      },
+    });
+  }
+
+  async updatePersona(
+    personaId: string,
+    input: {
+      key?: string;
+      name?: string;
+      description?: string;
+      isSystem?: boolean;
+      isActive?: boolean;
+    },
+  ) {
+    const existing = await this.prisma.persona.findUnique({
+      where: { id: personaId },
+      select: { id: true, key: true },
+    });
+    if (!existing) throw new NotFoundException('Persona not found');
+
+    const nextKey = input.key?.trim().toUpperCase();
+    if (nextKey && nextKey !== existing.key) {
+      const duplicate = await this.prisma.persona.findUnique({
+        where: { key: nextKey },
+        select: { id: true },
+      });
+      if (duplicate) throw new ConflictException('Persona key already exists');
+    }
+
+    return this.prisma.persona.update({
+      where: { id: personaId },
+      data: {
+        ...(nextKey ? { key: nextKey } : {}),
+        ...(input.name ? { name: input.name.trim() } : {}),
+        ...(input.description !== undefined
+          ? { description: input.description?.trim() || null }
+          : {}),
+        ...(input.isSystem !== undefined ? { isSystem: input.isSystem } : {}),
+        ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+      },
+    });
+  }
+
+  async deletePersona(personaId: string) {
+    const persona = await this.prisma.persona.findUnique({
+      where: { id: personaId },
+      include: {
+        _count: {
+          select: {
+            roleLinks: true,
+            userOverrides: true,
+            visibilityRules: true,
+          },
+        },
+      },
+    });
+    if (!persona) throw new NotFoundException('Persona not found');
+    if (persona.isSystem) {
+      throw new ForbiddenException('Cannot delete a system persona');
+    }
+
+    if (
+      persona._count.roleLinks > 0 ||
+      persona._count.userOverrides > 0 ||
+      persona._count.visibilityRules > 0
+    ) {
+      throw new BadRequestException(
+        'Cannot delete persona while it is linked to roles/users/rules',
+      );
+    }
+
+    await this.prisma.persona.delete({ where: { id: personaId } });
+    return { deleted: true };
+  }
+
+  // ── Screens ────────────────────────────────────────────────
+  async listScreens(surface?: 'ADMIN_WEB' | 'MOBILE_APP') {
+    return this.prisma.screenDefinition.findMany({
+      where: surface ? { surface } : undefined,
+      orderBy: [{ surface: 'asc' }, { section: 'asc' }, { key: 'asc' }],
+      include: {
+        _count: {
+          select: {
+            visibilityRules: true,
+          },
+        },
+      },
+    });
+  }
+
+  async createScreen(input: {
+    key: string;
+    title: string;
+    section: string;
+    description?: string;
+    moduleKey?: string;
+    surface?: 'ADMIN_WEB' | 'MOBILE_APP';
+    isEnabled?: boolean;
+  }) {
+    const key = input.key.trim().toLowerCase();
+    const title = input.title.trim();
+    const section = input.section.trim().toLowerCase();
+    if (!key) throw new BadRequestException('Screen key is required');
+    if (!title) throw new BadRequestException('Screen title is required');
+    if (!section) throw new BadRequestException('Screen section is required');
+
+    const existing = await this.prisma.screenDefinition.findUnique({
+      where: { key },
+      select: { id: true },
+    });
+    if (existing) throw new ConflictException('Screen key already exists');
+
+    return this.prisma.screenDefinition.create({
+      data: {
+        key,
+        title,
+        section,
+        description: input.description?.trim() || null,
+        moduleKey: input.moduleKey?.trim() || null,
+        surface: input.surface ?? 'ADMIN_WEB',
+        isEnabled: input.isEnabled ?? true,
+      },
+    });
+  }
+
+  async updateScreen(
+    screenId: string,
+    input: {
+      key?: string;
+      title?: string;
+      section?: string;
+      description?: string;
+      moduleKey?: string;
+      surface?: 'ADMIN_WEB' | 'MOBILE_APP';
+      isEnabled?: boolean;
+    },
+  ) {
+    const existing = await this.prisma.screenDefinition.findUnique({
+      where: { id: screenId },
+      select: { id: true, key: true },
+    });
+    if (!existing) throw new NotFoundException('Screen not found');
+
+    const nextKey = input.key?.trim().toLowerCase();
+    if (nextKey && nextKey !== existing.key) {
+      const duplicate = await this.prisma.screenDefinition.findUnique({
+        where: { key: nextKey },
+        select: { id: true },
+      });
+      if (duplicate) throw new ConflictException('Screen key already exists');
+    }
+
+    return this.prisma.screenDefinition.update({
+      where: { id: screenId },
+      data: {
+        ...(nextKey ? { key: nextKey } : {}),
+        ...(input.title ? { title: input.title.trim() } : {}),
+        ...(input.section ? { section: input.section.trim().toLowerCase() } : {}),
+        ...(input.description !== undefined
+          ? { description: input.description?.trim() || null }
+          : {}),
+        ...(input.moduleKey !== undefined
+          ? { moduleKey: input.moduleKey?.trim() || null }
+          : {}),
+        ...(input.surface ? { surface: input.surface } : {}),
+        ...(input.isEnabled !== undefined ? { isEnabled: input.isEnabled } : {}),
+      },
+    });
+  }
+
+  async deleteScreen(screenId: string) {
+    const existing = await this.prisma.screenDefinition.findUnique({
+      where: { id: screenId },
+      include: {
+        _count: {
+          select: { visibilityRules: true },
+        },
+      },
+    });
+    if (!existing) throw new NotFoundException('Screen not found');
+
+    if (existing._count.visibilityRules > 0) {
+      throw new BadRequestException(
+        'Cannot delete screen while visibility rules still reference it',
+      );
+    }
+
+    await this.prisma.screenDefinition.delete({ where: { id: screenId } });
+    return { deleted: true };
+  }
+
+  async listScreenVisibilityRules(surface?: 'ADMIN_WEB' | 'MOBILE_APP') {
+    return this.prisma.screenVisibilityRule.findMany({
+      where: surface ? { surface } : undefined,
+      orderBy: [
+        { surface: 'asc' },
+        { unitStatus: 'asc' },
+        { persona: { key: 'asc' } },
+        { screen: { key: 'asc' } },
+      ],
+      include: {
+        persona: { select: { id: true, key: true, name: true } },
+        screen: {
+          select: {
+            id: true,
+            key: true,
+            title: true,
+            section: true,
+            surface: true,
+          },
+        },
+      },
+    });
+  }
+
+  async replaceScreenVisibilityRules(
+    rules: Array<{
+      personaKey: string;
+      screenKey: string;
+      surface: 'ADMIN_WEB' | 'MOBILE_APP';
+      unitStatus: UnitStatus;
+      visible: boolean;
+    }>,
+  ) {
+    const normalizedRules = rules.map((rule) => ({
+      personaKey: rule.personaKey.trim().toUpperCase(),
+      screenKey: rule.screenKey.trim().toLowerCase(),
+      surface: rule.surface,
+      unitStatus: rule.unitStatus,
+      visible: rule.visible,
+    }));
+
+    const uniquePersonaKeys = Array.from(
+      new Set(normalizedRules.map((rule) => rule.personaKey)),
+    );
+    const uniqueScreenKeys = Array.from(
+      new Set(normalizedRules.map((rule) => rule.screenKey)),
+    );
+
+    const [personas, screens] = await Promise.all([
+      this.prisma.persona.findMany({
+        where: { key: { in: uniquePersonaKeys } },
+        select: { id: true, key: true },
+      }),
+      this.prisma.screenDefinition.findMany({
+        where: { key: { in: uniqueScreenKeys } },
+        select: { id: true, key: true, surface: true },
+      }),
+    ]);
+
+    if (personas.length !== uniquePersonaKeys.length) {
+      throw new BadRequestException('One or more persona keys are invalid');
+    }
+    if (screens.length !== uniqueScreenKeys.length) {
+      throw new BadRequestException('One or more screen keys are invalid');
+    }
+
+    const personaIdByKey = new Map(personas.map((row) => [row.key, row.id]));
+    const screenByKey = new Map(screens.map((row) => [row.key, row]));
+    const touchedSurfaces = Array.from(
+      new Set(normalizedRules.map((rule) => rule.surface)),
+    );
+
+    await this.prisma.$transaction(async (tx) => {
+      for (const surface of touchedSurfaces) {
+        await tx.screenVisibilityRule.deleteMany({
+          where: { surface },
+        });
+      }
+
+      if (normalizedRules.length > 0) {
+        await tx.screenVisibilityRule.createMany({
+          data: normalizedRules.map((rule) => {
+            const screen = screenByKey.get(rule.screenKey);
+            if (!screen) {
+              throw new BadRequestException(
+                `Invalid screen key: ${rule.screenKey}`,
+              );
+            }
+            if (screen.surface !== rule.surface) {
+              throw new BadRequestException(
+                `Screen ${rule.screenKey} does not match surface ${rule.surface}`,
+              );
+            }
+
+            const personaId = personaIdByKey.get(rule.personaKey);
+            if (!personaId) {
+              throw new BadRequestException(
+                `Invalid persona key: ${rule.personaKey}`,
+              );
+            }
+
+            return {
+              personaId,
+              screenId: screen.id,
+              surface: rule.surface,
+              unitStatus: rule.unitStatus,
+              visible: rule.visible,
+            };
+          }),
+          skipDuplicates: true,
+        });
+      }
+    });
+
+    return this.listScreenVisibilityRules();
+  }
+
+  async setUserPersonaOverride(userId: string, personaKeys: string[]) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    const uniqueKeys = Array.from(
+      new Set(personaKeys.map((key) => key.trim().toUpperCase()).filter(Boolean)),
+    );
+
+    const personas =
+      uniqueKeys.length > 0
+        ? await this.prisma.persona.findMany({
+            where: { key: { in: uniqueKeys } },
+            select: { id: true, key: true },
+          })
+        : [];
+    if (personas.length !== uniqueKeys.length) {
+      throw new BadRequestException('One or more persona keys are invalid');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.userPersonaOverride.deleteMany({
+        where: { userId },
+      });
+      if (personas.length > 0) {
+        await tx.userPersonaOverride.createMany({
+          data: personas.map((persona) => ({
+            userId,
+            personaId: persona.id,
+            grant: true,
+          })),
+          skipDuplicates: true,
+        });
+      }
+    });
+
+    return this.prisma.userPersonaOverride.findMany({
+      where: { userId },
+      include: {
+        persona: {
+          select: { id: true, key: true, name: true },
+        },
+      },
+      orderBy: { persona: { key: 'asc' } },
+    });
+  }
+
+  async getUserPersonaOverride(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    const rows = await this.prisma.userPersonaOverride.findMany({
+      where: { userId, grant: true },
+      include: {
+        persona: {
+          select: { id: true, key: true, name: true },
+        },
+      },
+      orderBy: { persona: { key: 'asc' } },
+    });
+
+    return {
+      userId,
+      personaKeys: rows.map((row) => row.persona.key),
+      overrides: rows,
+    };
   }
 
   // ── Permission resolution (base + status + override) ───────

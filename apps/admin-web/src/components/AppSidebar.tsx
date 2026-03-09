@@ -24,6 +24,7 @@ import {
   Shield,
   Ticket,
   Newspaper,
+  UserCircle2,
 } from "lucide-react";
 import logo from "../assets/0c7a0cd1f45864e0108618f40b9f2a75ac95e9dc.png";
 import type { ComponentType } from "react";
@@ -46,6 +47,7 @@ const menuSections: NavSection[] = [
     group: "Overview",
     items: [
       { title: "Dashboard", icon: LayoutDashboard, section: "dashboard" },
+      { title: "My Account", icon: UserCircle2, section: "my-account" },
     ],
   },
   {
@@ -133,9 +135,16 @@ interface AppSidebarProps {
   activeSection: string;
   unseenNotifications?: number;
   badgeCounts?: SidebarBadgeCounts;
+  visibleSections?: Set<string>;
 }
 
-export function AppSidebar({ onNavigate, activeSection, unseenNotifications = 0, badgeCounts }: AppSidebarProps) {
+export function AppSidebar({
+  onNavigate,
+  activeSection,
+  unseenNotifications = 0,
+  badgeCounts,
+  visibleSections,
+}: AppSidebarProps) {
   const authEmail =
     (typeof window !== "undefined" ? localStorage.getItem("auth_email") : null) || "admin@mg.com";
   const authName =
@@ -210,7 +219,15 @@ export function AppSidebar({ onNavigate, activeSection, unseenNotifications = 0,
 
       {/* ── Navigation ─────────────────────────────────────────── */}
       <div style={{ flex: 1, overflowY: "auto", padding: "8px", scrollbarWidth: "none" }}>
-        {menuSections.map((section, sIdx) => (
+        {menuSections
+          .map((section) => ({
+            ...section,
+            items: section.items.filter((item) =>
+              visibleSections ? visibleSections.has(item.section) : true,
+            ),
+          }))
+          .filter((section) => section.items.length > 0)
+          .map((section, sIdx) => (
           <div key={section.group} style={{ marginBottom: "2px" }}>
 
             {/* Group label */}

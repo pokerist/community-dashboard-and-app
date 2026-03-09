@@ -12,8 +12,8 @@ import apiClient from "../../lib/api-client";
 
 type SettingsTab =
   | "general" | "notifications" | "security" | "appearance"
-  | "localization" | "data" | "departments" | "users"
-  | "roles" | "integrations" | "authentication" | "mobile";
+  | "localization" | "data" | "departments"
+  | "integrations" | "authentication" | "mobile";
 
 type GeneralSettings = {
   companyName: string; supportEmail: string; supportPhone: string;
@@ -1009,8 +1009,6 @@ const TABS: { id: SettingsTab; label: string; icon: React.ReactNode }[] = [
   { id: "localization", label: "Localization", icon: <Globe style={{ width: "13px", height: "13px" }} /> },
   { id: "data", label: "Data & Backup", icon: <Database style={{ width: "13px", height: "13px" }} /> },
   { id: "departments", label: "Departments", icon: <Layers style={{ width: "13px", height: "13px" }} /> },
-  { id: "users", label: "System Users", icon: <Users2 style={{ width: "13px", height: "13px" }} /> },
-  { id: "roles", label: "Roles & Permissions", icon: <Lock style={{ width: "13px", height: "13px" }} /> },
   { id: "integrations", label: "Integrations", icon: <Link style={{ width: "13px", height: "13px" }} /> },
   { id: "mobile", label: "Mobile Access", icon: <Smartphone style={{ width: "13px", height: "13px" }} /> },
 ];
@@ -1060,9 +1058,6 @@ export function SystemSettings() {
 
   // Entity state (CRUD resources)
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [systemUsers, setSystemUsers] = useState<SystemUser[]>([]);
-  const [roles, setRoles] = useState<Role[]>([]);
-
   // Saved snapshots for discard
   const [saved, setSaved] = useState({
     general: DEFAULT_GENERAL, notif: DEFAULT_NOTIF, security: DEFAULT_SEC,
@@ -1075,24 +1070,6 @@ export function SystemSettings() {
       const res = await apiClient.get("/admin/departments");
       setDepartments(ensureArray<Department>(res.data));
     } catch { /* silently fail, list stays empty */ }
-  }, []);
-
-  const loadSystemUsers = useCallback(async () => {
-    try {
-      const res = await apiClient.get("/admin/system-users");
-      setSystemUsers(ensureArray<SystemUser>(res.data));
-    } catch { /* silently fail */ }
-  }, []);
-
-  const loadRoles = useCallback(async () => {
-    try {
-      const res = await apiClient.get("/admin/roles");
-      const normalized = ensureArray<Role>(res.data).map((role) => ({
-        ...role,
-        permissions: ensureArray<string>((role as unknown as Record<string, unknown>).permissions),
-      }));
-      setRoles(normalized);
-    } catch { /* silently fail */ }
   }, []);
 
   const load = useCallback(async () => {
@@ -1124,9 +1101,7 @@ export function SystemSettings() {
   // Load entity data when their tabs are first activated
   useEffect(() => {
     if (activeTab === "departments") void loadDepartments();
-    if (activeTab === "users") { void loadSystemUsers(); void loadDepartments(); }
-    if (activeTab === "roles") void loadRoles();
-  }, [activeTab, loadDepartments, loadSystemUsers, loadRoles]);
+  }, [activeTab, loadDepartments]);
 
   const patch = <T,>(setter: React.Dispatch<React.SetStateAction<T>>) =>
     (p: Partial<T>) => { setter((prev) => ({ ...prev, ...p })); setDirty(true); };
@@ -1253,8 +1228,6 @@ export function SystemSettings() {
                   {activeTab === "localization" && <LocalizationPanel settings={localization} onChange={patch(setLocalization)} />}
                   {activeTab === "data" && <DataPanel settings={data} onChange={patch(setDataSettings)} onBackupNow={() => void handleBackupNow()} />}
                   {activeTab === "departments" && <DepartmentsPanel departments={departments} onRefresh={() => void loadDepartments()} />}
-                  {activeTab === "users" && <SystemUsersPanel users={systemUsers} departments={departments} onRefresh={() => void loadSystemUsers()} />}
-                  {activeTab === "roles" && <RolesPanel roles={roles} onRefresh={() => void loadRoles()} />}
                   {activeTab === "integrations" && <IntegrationsPanel />}
                   {activeTab === "mobile" && <MobileAccessPanel mobileAccess={mobileAccess} onChange={handleMobileAccessChange} />}
                 </>

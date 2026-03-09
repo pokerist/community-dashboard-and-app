@@ -20,6 +20,8 @@
     "db:init:fresh": "npm run prisma:generate && npm run prisma:push && npx prisma db seed",
     "db:init:fresh:reset": "npm run prisma:generate && npm run prisma:push:reset && npx prisma db seed",
     "seed:fast": "node prisma/seed-fast.js",
+    "seed:fast:reset-rbac": "node -e \"process.env.SEED_RESET_RBAC='true'; require('./prisma/seed-fast.js')\"",
+    "seed:full": "npx tsx prisma/seed.ts",
     "audit:prod": "npm audit --omit=dev",
     "audit:prod:gate": "npm audit --omit=dev --json | node scripts/security/audit-prod-gate.js"
   },

@@ -29,10 +29,40 @@ type RoleRow = {
   permissions?: Array<{ permission?: { key?: string } }>;
   statusPermissions?: Array<{ unitStatus?: string; permission?: { key?: string } }>;
   moduleAccess?: Array<{ moduleKey: string; canAccess: boolean }>;
+  personas?: Array<{ persona?: { id?: string; key?: string; name?: string } }>;
   users?: Array<{ userId: string }>;
 };
 
 type PermissionRow = { id: string; key: string };
+type PersonaRow = {
+  id: string;
+  key: string;
+  name: string;
+  description?: string | null;
+  isSystem?: boolean;
+  isActive?: boolean;
+  roleCount?: number;
+  userOverrideCount?: number;
+  ruleCount?: number;
+};
+
+type ScreenRow = {
+  id: string;
+  key: string;
+  title: string;
+  section: string;
+  moduleKey?: string | null;
+  surface: "ADMIN_WEB" | "MOBILE_APP";
+  isEnabled: boolean;
+};
+
+type RuleDraftItem = {
+  personaKey: string;
+  screenKey: string;
+  surface: "ADMIN_WEB" | "MOBILE_APP";
+  unitStatus: string;
+  visible: boolean;
+};
 
 type PermissionGroup = {
   module: string;
@@ -95,15 +125,21 @@ export function DashboardUsersPage() {
   const [users, setUsers] = useState<DashboardUserRow[]>([]);
   const [roles, setRoles] = useState<RoleRow[]>([]);
   const [permissions, setPermissions] = useState<PermissionRow[]>([]);
+  const [personas, setPersonas] = useState<PersonaRow[]>([]);
+  const [screens, setScreens] = useState<ScreenRow[]>([]);
+  const [ruleDrafts, setRuleDrafts] = useState<RuleDraftItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
-  const [activeTab, setActiveTab] = useState<"users" | "roles" | "matrix">("users");
+  const [activeTab, setActiveTab] = useState<"users" | "roles" | "matrix" | "governance">("users");
+  const [ruleStatusFilter, setRuleStatusFilter] = useState<string>("DELIVERED");
   const activeTabLabel =
     activeTab === "users"
       ? "Dashboard Users"
       : activeTab === "roles"
         ? "Roles & Permissions"
-        : "Permission Matrix";
+        : activeTab === "matrix"
+          ? "Permission Matrix"
+          : "Screen Governance";
 
   // Create user dialog
   const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
@@ -126,9 +162,19 @@ export function DashboardUsersPage() {
   const [roleName, setRoleName] = useState("");
   const [roleDescription, setRoleDescription] = useState("");
   const [selectedModuleKeys, setSelectedModuleKeys] = useState<string[]>([]);
+  const [selectedPersonaKeys, setSelectedPersonaKeys] = useState<string[]>([]);
   const [selectedPermissionKeys, setSelectedPermissionKeys] = useState<string[]>([]);
   const [permissionSearch, setPermissionSearch] = useState("");
   const [expandedModules, setExpandedModules] = useState<string[]>([]);
+
+  // Governance quick create
+  const [newPersonaKey, setNewPersonaKey] = useState("");
+  const [newPersonaName, setNewPersonaName] = useState("");
+  const [newPersonaDescription, setNewPersonaDescription] = useState("");
+  const [newScreenKey, setNewScreenKey] = useState("");
+  const [newScreenTitle, setNewScreenTitle] = useState("");
+  const [newScreenSection, setNewScreenSection] = useState("");
+  const [newScreenModule, setNewScreenModule] = useState("");
 
   // Status permissions within role dialog
   const [roleStatusPerms, setRoleStatusPerms] = useState<Record<string, string[]>>({
@@ -145,18 +191,43 @@ export function DashboardUsersPage() {
   const [overridesUserName, setOverridesUserName] = useState("");
   const [userOverrides, setUserOverrides] = useState<OverrideItem[]>([]);
   const [overrideSearch, setOverrideSearch] = useState("");
+  const [isPersonaOverrideOpen, setIsPersonaOverrideOpen] = useState(false);
+  const [personaOverrideUserId, setPersonaOverrideUserId] = useState<string | null>(null);
+  const [personaOverrideUserName, setPersonaOverrideUserName] = useState("");
+  const [personaOverrideKeys, setPersonaOverrideKeys] = useState<string[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [usersRes, rolesRes, permsRes] = await Promise.all([
+      const [usersRes, rolesRes, permsRes, personasRes, screensRes, rulesRes] = await Promise.all([
         apiClient.get<DashboardUserRow[]>("/admin/users/dashboard"),
         apiClient.get<RoleRow[]>("/admin/users/roles"),
         apiClient.get<PermissionRow[]>("/admin/users/permissions"),
+        apiClient.get<PersonaRow[]>("/admin/users/personas"),
+        apiClient.get<ScreenRow[]>("/admin/users/screens?surface=ADMIN_WEB"),
+        apiClient.get<Array<{
+          persona?: { key?: string };
+          screen?: { key?: string };
+          surface?: "ADMIN_WEB" | "MOBILE_APP";
+          unitStatus?: string;
+          visible?: boolean;
+        }>>("/admin/users/screen-visibility-rules?surface=ADMIN_WEB"),
       ]);
       setUsers(Array.isArray(usersRes.data) ? usersRes.data : []);
       setRoles(Array.isArray(rolesRes.data) ? rolesRes.data : []);
       setPermissions(Array.isArray(permsRes.data) ? permsRes.data : []);
+      setPersonas(Array.isArray(personasRes.data) ? personasRes.data : []);
+      setScreens(Array.isArray(screensRes.data) ? screensRes.data : []);
+      const normalizedRules = (Array.isArray(rulesRes.data) ? rulesRes.data : [])
+        .map((row) => ({
+          personaKey: String(row.persona?.key ?? "").toUpperCase(),
+          screenKey: String(row.screen?.key ?? "").toLowerCase(),
+          surface: row.surface === "MOBILE_APP" ? "MOBILE_APP" : "ADMIN_WEB",
+          unitStatus: String(row.unitStatus ?? "DELIVERED"),
+          visible: row.visible !== false,
+        }))
+        .filter((row) => row.personaKey && row.screenKey);
+      setRuleDrafts(normalizedRules);
     } catch (error) {
       toast.error("Failed to load dashboard users data", { description: errorMessage(error) });
     } finally {
@@ -323,6 +394,21 @@ export function DashboardUsersPage() {
     setIsOverridesOpen(true);
   };
 
+  const openPersonaOverride = async (user: DashboardUserRow) => {
+    setPersonaOverrideUserId(user.id);
+    setPersonaOverrideUserName(user.nameEN || user.email || "User");
+    try {
+      const res = await apiClient.get<{ personaKeys?: string[] }>(`/admin/users/${user.id}/persona-override`);
+      const keys = Array.isArray(res.data?.personaKeys)
+        ? res.data.personaKeys.map((value) => String(value).toUpperCase())
+        : [];
+      setPersonaOverrideKeys(keys);
+    } catch {
+      setPersonaOverrideKeys([]);
+    }
+    setIsPersonaOverrideOpen(true);
+  };
+
   const toggleOverride = (permKey: string) => {
     setUserOverrides((prev) => {
       const existing = prev.find((o) => o.permissionKey === permKey);
@@ -336,6 +422,12 @@ export function DashboardUsersPage() {
     const item = userOverrides.find((o) => o.permissionKey === permKey);
     if (!item) return "none";
     return item.grant ? "grant" : "deny";
+  };
+
+  const togglePersonaOverrideKey = (key: string) => {
+    setPersonaOverrideKeys((prev) =>
+      prev.includes(key) ? prev.filter((item) => item !== key) : [...prev, key],
+    );
   };
 
   const saveOverrides = async () => {
@@ -356,6 +448,7 @@ export function DashboardUsersPage() {
     setRoleName("");
     setRoleDescription("");
     setSelectedModuleKeys([]);
+    setSelectedPersonaKeys([]);
     setSelectedPermissionKeys([]);
     setRoleStatusPerms({ OFF_PLAN: [], UNDER_CONSTRUCTION: [], DELIVERED: [] });
     setPermissionSearch("");
@@ -372,6 +465,9 @@ export function DashboardUsersPage() {
     setRoleDescription(row.description || "");
     setSelectedModuleKeys(
       (row.moduleAccess ?? []).filter((ma) => ma.canAccess).map((ma) => ma.moduleKey),
+    );
+    setSelectedPersonaKeys(
+      (row.personas ?? []).map((rp) => rp.persona?.key || "").filter(Boolean) as string[],
     );
     setSelectedPermissionKeys(
       (row.permissions ?? []).map((rp) => rp.permission?.key || "").filter(Boolean),
@@ -405,6 +501,7 @@ export function DashboardUsersPage() {
       description: roleDescription.trim() || undefined,
       permissionKeys: selectedPermissionKeys,
       moduleKeys: selectedModuleKeys,
+      personaKeys: selectedPersonaKeys,
       statusPermissions: roleStatusPerms,
     };
     try {
@@ -442,6 +539,12 @@ export function DashboardUsersPage() {
   const toggleModuleKey = (key: string) => {
     setSelectedModuleKeys((prev) =>
       prev.includes(key) ? prev.filter((m) => m !== key) : [...prev, key],
+    );
+  };
+
+  const togglePersonaKey = (key: string) => {
+    setSelectedPersonaKeys((prev) =>
+      prev.includes(key) ? prev.filter((p) => p !== key) : [...prev, key],
     );
   };
 
@@ -504,6 +607,125 @@ export function DashboardUsersPage() {
     }
   };
 
+  // Governance actions
+  const createPersona = async () => {
+    if (!newPersonaKey.trim() || !newPersonaName.trim()) {
+      toast.error("Persona key and name are required");
+      return;
+    }
+    try {
+      await apiClient.post("/admin/users/personas", {
+        key: newPersonaKey.trim().toUpperCase(),
+        name: newPersonaName.trim(),
+        description: newPersonaDescription.trim() || undefined,
+      });
+      toast.success("Persona created");
+      setNewPersonaKey("");
+      setNewPersonaName("");
+      setNewPersonaDescription("");
+      await load();
+    } catch (error) {
+      toast.error("Failed to create persona", { description: errorMessage(error) });
+    }
+  };
+
+  const savePersonaOverride = async () => {
+    if (!personaOverrideUserId) return;
+    try {
+      await apiClient.patch(`/admin/users/${personaOverrideUserId}/persona-override`, {
+        personaKeys: personaOverrideKeys,
+      });
+      toast.success("Persona override saved");
+      setIsPersonaOverrideOpen(false);
+    } catch (error) {
+      toast.error("Failed to save persona override", { description: errorMessage(error) });
+    }
+  };
+
+  const createScreen = async () => {
+    if (!newScreenKey.trim() || !newScreenTitle.trim() || !newScreenSection.trim()) {
+      toast.error("Screen key, title and section are required");
+      return;
+    }
+    try {
+      await apiClient.post("/admin/users/screens", {
+        key: newScreenKey.trim().toLowerCase(),
+        title: newScreenTitle.trim(),
+        section: newScreenSection.trim().toLowerCase(),
+        moduleKey: newScreenModule.trim() || undefined,
+        surface: "ADMIN_WEB",
+        isEnabled: true,
+      });
+      toast.success("Screen created");
+      setNewScreenKey("");
+      setNewScreenTitle("");
+      setNewScreenSection("");
+      setNewScreenModule("");
+      await load();
+    } catch (error) {
+      toast.error("Failed to create screen", { description: errorMessage(error) });
+    }
+  };
+
+  const isRuleVisible = (personaKey: string, screenKey: string, unitStatus: string) => {
+    const row = ruleDrafts.find(
+      (rule) =>
+        rule.surface === "ADMIN_WEB" &&
+        rule.personaKey === personaKey &&
+        rule.screenKey === screenKey &&
+        rule.unitStatus === unitStatus,
+    );
+    return row?.visible === true;
+  };
+
+  const toggleRule = (personaKey: string, screenKey: string, unitStatus: string) => {
+    setRuleDrafts((prev) => {
+      const idx = prev.findIndex(
+        (rule) =>
+          rule.surface === "ADMIN_WEB" &&
+          rule.personaKey === personaKey &&
+          rule.screenKey === screenKey &&
+          rule.unitStatus === unitStatus,
+      );
+      if (idx >= 0) {
+        const next = [...prev];
+        next[idx] = { ...next[idx], visible: !next[idx].visible };
+        return next;
+      }
+      return [
+        ...prev,
+        {
+          personaKey,
+          screenKey,
+          surface: "ADMIN_WEB",
+          unitStatus,
+          visible: true,
+        },
+      ];
+    });
+  };
+
+  const saveRules = async () => {
+    try {
+      await apiClient.put("/admin/users/screen-visibility-rules", {
+        surface: "ADMIN_WEB",
+        rules: ruleDrafts
+          .filter((rule) => rule.surface === "ADMIN_WEB")
+          .map((rule) => ({
+            personaKey: rule.personaKey,
+            screenKey: rule.screenKey,
+            surface: "ADMIN_WEB",
+            unitStatus: rule.unitStatus,
+            visible: rule.visible,
+          })),
+      });
+      toast.success("Screen visibility rules saved");
+      await load();
+    } catch (error) {
+      toast.error("Failed to save screen rules", { description: errorMessage(error) });
+    }
+  };
+
   // ─── Step navigation ──────────────────────────
   const currentStepIndex = ROLE_STEPS.indexOf(roleStep);
   const canGoNext = () => {
@@ -528,11 +750,12 @@ export function DashboardUsersPage() {
     return {
       name: roleName.trim(),
       description: roleDescription.trim(),
+      personas: selectedPersonaKeys,
       modules: selectedModuleKeys.map((k) => MODULE_LABELS[k] || k),
       permissionCount: selectedPermissionKeys.length,
       statusPermCount: totalStatusPerms,
     };
-  }, [roleName, roleDescription, selectedModuleKeys, selectedPermissionKeys, roleStatusPerms]);
+  }, [roleName, roleDescription, selectedPersonaKeys, selectedModuleKeys, selectedPermissionKeys, roleStatusPerms]);
 
   return (
     <div className="space-y-6">
@@ -551,7 +774,7 @@ export function DashboardUsersPage() {
         </div>
       </div>
 
-      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "users" | "roles" | "matrix")} className="space-y-4">
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "users" | "roles" | "matrix" | "governance")} className="space-y-4">
         <TabsList className="inline-flex h-auto w-full max-w-[720px] flex-wrap items-center gap-2 rounded-xl border border-[#E2E8F0] bg-white p-2">
           <TabsTrigger
             value="users"
@@ -585,6 +808,17 @@ export function DashboardUsersPage() {
           >
             <span className={`mr-2 inline-block h-2 w-2 rounded-full ${activeTab === "matrix" ? "bg-white" : "bg-transparent"}`} />
             Permission Matrix
+          </TabsTrigger>
+          <TabsTrigger
+            value="governance"
+            className={`rounded-lg px-4 py-2 text-sm transition-all ${
+              activeTab === "governance"
+                ? "bg-[#0B5FFF] text-white shadow-sm ring-2 ring-[#0B5FFF]/20"
+                : "text-[#475569] hover:bg-[#F8FAFC]"
+            }`}
+          >
+            <span className={`mr-2 inline-block h-2 w-2 rounded-full ${activeTab === "governance" ? "bg-white" : "bg-transparent"}`} />
+            Screen Governance
           </TabsTrigger>
         </TabsList>
         <div className="mt-1 inline-flex items-center gap-2 rounded-md bg-[#EFF6FF] px-3 py-1 text-xs font-medium text-[#1D4ED8]">
@@ -629,6 +863,7 @@ export function DashboardUsersPage() {
               { key: "actions", header: "Actions", render: (u) => (
                 <div className="flex gap-1">
                   <Button variant="outline" size="sm" onClick={() => openEditRoles(u)}>Roles</Button>
+                  <Button variant="outline" size="sm" onClick={() => void openPersonaOverride(u)}>Personas</Button>
                   <Button variant="outline" size="sm" onClick={() => void openOverrides(u)}>Overrides</Button>
                 </div>
               )},
@@ -672,6 +907,18 @@ export function DashboardUsersPage() {
                     <Badge className="bg-[#E2E8F0] text-[#475569]">
                       +{(r.moduleAccess ?? []).filter((ma) => ma.canAccess).length - 4}
                     </Badge>
+                  )}
+                </div>
+              )},
+              { key: "personas", header: "Personas", render: (r) => (
+                <div className="flex flex-wrap gap-1">
+                  {(r.personas ?? []).slice(0, 3).map((rp) => (
+                    <Badge key={`${r.id}-${rp.persona?.id || rp.persona?.key}`} className="bg-[#F5F3FF] text-[#6D28D9]">
+                      {rp.persona?.key || rp.persona?.name || "\u2014"}
+                    </Badge>
+                  ))}
+                  {(r.personas?.length ?? 0) > 3 && (
+                    <Badge className="bg-[#E2E8F0] text-[#475569]">+{(r.personas?.length ?? 0) - 3}</Badge>
                   )}
                 </div>
               )},
@@ -757,6 +1004,155 @@ export function DashboardUsersPage() {
             })()}
           </Card>
         </TabsContent>
+
+        {/* ========== GOVERNANCE TAB ========== */}
+        <TabsContent value="governance" className="space-y-4">
+          <Card className="p-4 space-y-3">
+            <h3 className="text-sm font-semibold text-[#1E293B]">Personas</h3>
+            <p className="text-xs text-[#64748B]">
+              Define dynamic account personas used by roles and screen visibility rules.
+            </p>
+            <div className="grid gap-2 md:grid-cols-3">
+              <Input value={newPersonaKey} onChange={(e) => setNewPersonaKey(e.target.value)} placeholder="OWNER_FAMILY" />
+              <Input value={newPersonaName} onChange={(e) => setNewPersonaName(e.target.value)} placeholder="Owner Family" />
+              <Input value={newPersonaDescription} onChange={(e) => setNewPersonaDescription(e.target.value)} placeholder="Optional description" />
+            </div>
+            <div className="flex justify-end">
+              <Button className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white" onClick={() => void createPersona()}>
+                Add Persona
+              </Button>
+            </div>
+            <div className="rounded-md border border-[#E2E8F0]">
+              <div className="max-h-52 overflow-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-[#F8FAFC]">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs text-[#64748B]">Key</th>
+                      <th className="px-3 py-2 text-left text-xs text-[#64748B]">Name</th>
+                      <th className="px-3 py-2 text-left text-xs text-[#64748B]">Rules</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {personas.map((persona) => (
+                      <tr key={persona.id} className="border-t border-[#EEF2F7]">
+                        <td className="px-3 py-2 font-medium text-[#1E293B]">{persona.key}</td>
+                        <td className="px-3 py-2 text-[#334155]">{persona.name}</td>
+                        <td className="px-3 py-2 text-[#64748B]">{persona.ruleCount || 0}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="p-4 space-y-3">
+            <h3 className="text-sm font-semibold text-[#1E293B]">Screen Catalog (Admin Web)</h3>
+            <div className="grid gap-2 md:grid-cols-4">
+              <Input value={newScreenKey} onChange={(e) => setNewScreenKey(e.target.value)} placeholder="services_home" />
+              <Input value={newScreenTitle} onChange={(e) => setNewScreenTitle(e.target.value)} placeholder="Services Home" />
+              <Input value={newScreenSection} onChange={(e) => setNewScreenSection(e.target.value)} placeholder="services" />
+              <Input value={newScreenModule} onChange={(e) => setNewScreenModule(e.target.value)} placeholder="services module key" />
+            </div>
+            <div className="flex justify-end">
+              <Button className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white" onClick={() => void createScreen()}>
+                Add Screen
+              </Button>
+            </div>
+            <div className="rounded-md border border-[#E2E8F0]">
+              <div className="max-h-52 overflow-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-[#F8FAFC]">
+                    <tr>
+                      <th className="px-3 py-2 text-left text-xs text-[#64748B]">Key</th>
+                      <th className="px-3 py-2 text-left text-xs text-[#64748B]">Section</th>
+                      <th className="px-3 py-2 text-left text-xs text-[#64748B]">Module</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {screens.map((screen) => (
+                      <tr key={screen.id} className="border-t border-[#EEF2F7]">
+                        <td className="px-3 py-2 font-medium text-[#1E293B]">{screen.key}</td>
+                        <td className="px-3 py-2 text-[#334155]">{screen.section}</td>
+                        <td className="px-3 py-2 text-[#64748B]">{screen.moduleKey || "\u2014"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </Card>
+
+          <Card className="p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="text-sm font-semibold text-[#1E293B]">Visibility Matrix</h3>
+                <p className="text-xs text-[#64748B]">
+                  Toggle per persona and section for selected unit status.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Label className="text-xs text-[#64748B]">Unit Status</Label>
+                <select
+                  className="rounded-md border border-[#CBD5E1] bg-white px-2 py-1 text-sm text-[#334155]"
+                  value={ruleStatusFilter}
+                  onChange={(e) => setRuleStatusFilter(e.target.value)}
+                >
+                  {UNIT_STATUSES.map((status) => (
+                    <option key={status} value={status}>
+                      {STATUS_LABELS[status] || status}
+                    </option>
+                  ))}
+                </select>
+                <Button variant="outline" onClick={() => void saveRules()}>
+                  Save Rules
+                </Button>
+              </div>
+            </div>
+            <div className="rounded-md border border-[#E2E8F0] bg-white">
+              <div className="overflow-x-auto overflow-y-hidden pb-2">
+                <table className="w-max min-w-full border-collapse text-sm" style={{ minWidth: Math.max(820, 250 + screens.length * 120) }}>
+                  <thead>
+                    <tr className="bg-[#F8FAFC]">
+                      <th className="sticky left-0 z-20 min-w-[220px] border-b border-r border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[#64748B]">
+                        Persona
+                      </th>
+                      {screens.map((screen) => (
+                        <th key={screen.id} className="min-w-[110px] border-b border-r border-[#E2E8F0] px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[#64748B]">
+                          {screen.section}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {personas.map((persona, idx) => (
+                      <tr key={persona.id} className={idx % 2 === 0 ? "bg-white" : "bg-[#FCFDFE]"}>
+                        <td className="sticky left-0 z-10 border-b border-r border-[#EEF2F7] bg-inherit px-3 py-2 font-medium text-[#1E293B]">
+                          {persona.key}
+                        </td>
+                        {screens.map((screen) => {
+                          const checked = isRuleVisible(persona.key, screen.key, ruleStatusFilter);
+                          return (
+                            <td key={`${persona.id}-${screen.id}`} className="border-b border-r border-[#EEF2F7] px-3 py-2">
+                              <label className="inline-flex items-center gap-2 text-xs text-[#334155]">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleRule(persona.key, screen.key, ruleStatusFilter)}
+                                />
+                                {checked ? "Visible" : "Hidden"}
+                              </label>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </Card>
+        </TabsContent>
       </Tabs>
 
       {/* ========== CREATE USER DIALOG ========== */}
@@ -823,6 +1219,41 @@ export function DashboardUsersPage() {
             <Button variant="outline" onClick={() => setIsEditRolesOpen(false)}>Cancel</Button>
             <Button className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white" onClick={() => void saveUserRoles()}>
               Save Roles
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ========== USER PERSONA OVERRIDE DIALOG ========== */}
+      <Dialog open={isPersonaOverrideOpen} onOpenChange={setIsPersonaOverrideOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Persona Override &mdash; {personaOverrideUserName}</DialogTitle>
+            <DialogDescription>
+              Choose explicit personas for this user. These overrides are merged with role-derived personas.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-60 overflow-y-auto rounded-md border border-[#E2E8F0] p-2 space-y-2">
+            {personas.map((persona) => (
+              <label key={persona.id} className="flex items-center gap-2 text-sm text-[#334155]">
+                <input
+                  type="checkbox"
+                  checked={personaOverrideKeys.includes(persona.key)}
+                  onChange={() => togglePersonaOverrideKey(persona.key)}
+                />
+                <span>{persona.key}</span>
+              </label>
+            ))}
+            {personas.length === 0 && (
+              <p className="px-1 py-2 text-xs text-[#64748B]">
+                No personas available. Create personas from Screen Governance tab.
+              </p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsPersonaOverrideOpen(false)}>Cancel</Button>
+            <Button className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white" onClick={() => void savePersonaOverride()}>
+              Save Personas
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -933,6 +1364,36 @@ export function DashboardUsersPage() {
                 <div className="space-y-2">
                   <Label>Description</Label>
                   <Input value={roleDescription} onChange={(e) => setRoleDescription(e.target.value)} placeholder="What this role is for..." />
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label>Personas</Label>
+                    <Badge className="bg-[#E2E8F0] text-[#334155]">
+                      {selectedPersonaKeys.length} selected
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-[#64748B]">
+                    Personas link this role to screen visibility rules (web/mobile).
+                  </p>
+                  <div className="max-h-44 overflow-y-auto rounded-md border border-[#E2E8F0] p-2">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {personas.map((persona) => (
+                        <label key={persona.id} className="flex items-center gap-2 text-sm text-[#334155]">
+                          <input
+                            type="checkbox"
+                            checked={selectedPersonaKeys.includes(persona.key)}
+                            onChange={() => togglePersonaKey(persona.key)}
+                          />
+                          <span>{persona.key}</span>
+                        </label>
+                      ))}
+                    </div>
+                    {personas.length === 0 && (
+                      <p className="px-1 py-2 text-xs text-[#64748B]">
+                        No personas found. Create personas in Screen Governance tab first.
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -1101,6 +1562,14 @@ export function DashboardUsersPage() {
                     {reviewSummary.modules.length > 0 ? reviewSummary.modules.map((m) => (
                       <Badge key={m} className="bg-[#DBEAFE] text-[#1D4ED8]">{m}</Badge>
                     )) : <span className="text-sm text-[#64748B]">No modules selected</span>}
+                  </div>
+                </Card>
+                <Card className="p-4 space-y-2">
+                  <h4 className="text-sm font-semibold text-[#1E293B]">Personas</h4>
+                  <div className="flex flex-wrap gap-1">
+                    {reviewSummary.personas.length > 0 ? reviewSummary.personas.map((key) => (
+                      <Badge key={key} className="bg-[#F5F3FF] text-[#6D28D9]">{key}</Badge>
+                    )) : <span className="text-sm text-[#64748B]">No personas linked</span>}
                   </div>
                 </Card>
                 <Card className="p-4 space-y-2">

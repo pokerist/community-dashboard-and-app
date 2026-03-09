@@ -4,6 +4,8 @@ import apiClient from "./api-client";
 type AuthContextValue = {
   permissions: Set<string>;
   modules: Set<string>;
+  personas: Set<string>;
+  visibleScreens: Set<string>;
   loading: boolean;
   refresh: () => Promise<void>;
 };
@@ -11,6 +13,8 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue>({
   permissions: new Set(),
   modules: new Set(),
+  personas: new Set(),
+  visibleScreens: new Set(),
   loading: false,
   refresh: async () => {},
 });
@@ -18,21 +22,34 @@ const AuthContext = createContext<AuthContextValue>({
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [permissions, setPermissions] = useState<Set<string>>(new Set());
   const [modules, setModules] = useState<Set<string>>(new Set());
+  const [personas, setPersonas] = useState<Set<string>>(new Set());
+  const [visibleScreens, setVisibleScreens] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
 
   const refresh = useCallback(async () => {
-    const userId = localStorage.getItem("auth_user_id");
-    if (!userId) return;
+    const token = localStorage.getItem("auth_token");
+    if (!token) return;
 
     setLoading(true);
     try {
-      const res = await apiClient.get<{ permissions: string[]; modules: string[] }>(
-        `/admin/users/${userId}/resolve-permissions`,
+      const res = await apiClient.get<{
+        effectivePermissions?: string[];
+        effectiveModules?: string[];
+        effectivePersonas?: string[];
+        visibleScreens?: string[];
+      }>(
+        "/auth/me/access?surface=ADMIN_WEB",
       );
-      setPermissions(new Set(res.data.permissions ?? []));
-      setModules(new Set(res.data.modules ?? []));
+      setPermissions(new Set(res.data.effectivePermissions ?? []));
+      setModules(new Set(res.data.effectiveModules ?? []));
+      setPersonas(new Set(res.data.effectivePersonas ?? []));
+      setVisibleScreens(new Set(res.data.visibleScreens ?? []));
     } catch {
       // silently fail — user may not have permission to read their own perms yet
+      setPermissions(new Set());
+      setModules(new Set());
+      setPersonas(new Set());
+      setVisibleScreens(new Set());
     } finally {
       setLoading(false);
     }
@@ -52,11 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("auth:login", handler);
   }, [refresh]);
 
-  return (
-    <AuthContext.Provider value={{ permissions, modules, loading, refresh }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={{ permissions, modules, personas, visibleScreens, loading, refresh }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuthContext() {
@@ -79,4 +92,13 @@ export function usePermission(key: string): boolean {
 export function useModule(moduleKey: string): boolean {
   const { modules } = useContext(AuthContext);
   return modules.has(moduleKey);
+}
+
+/**
+ * Check if a dashboard screen/section should be visible for current user.
+ * Real enforcement still happens on backend permissions.
+ */
+export function useScreenVisible(screenKey: string): boolean {
+  const { visibleScreens } = useContext(AuthContext);
+  return visibleScreens.has(screenKey);
 }
