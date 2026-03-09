@@ -48,6 +48,10 @@ import {
 } from './dto/upsert-screen-definition.dto';
 import { ReplaceScreenVisibilityRulesDto } from './dto/replace-screen-visibility-rules.dto';
 import { SetUserPersonaOverrideDto } from './dto/set-user-persona-override.dto';
+import {
+  ReplaceRoleScreenOverridesDto,
+  ReplaceScreenBundlesDto,
+} from './dto/set-screen-bundles.dto';
 import { ScreenSurface } from '@prisma/client';
 
 import { ApiTags, ApiQuery } from '@nestjs/swagger';
@@ -208,6 +212,36 @@ export class AdminUsersController {
           ? ScreenSurface.ADMIN_WEB
           : undefined;
     return this.usersService.listScreenVisibilityRules(resolvedSurface);
+  }
+
+  @Get('screen-bundles')
+  @Permissions('admin.view')
+  listScreenBundles(@Query('surface') surface?: ScreenSurface) {
+    const resolvedSurface =
+      surface === ScreenSurface.MOBILE_APP
+        ? ScreenSurface.MOBILE_APP
+        : ScreenSurface.ADMIN_WEB;
+    return this.usersService.listScreenBundles(resolvedSurface);
+  }
+
+  @Put('screen-bundles')
+  @Permissions('admin.update')
+  replaceScreenBundles(@Body() dto: ReplaceScreenBundlesDto) {
+    return this.usersService.replaceScreenBundles({
+      surface:
+        dto.surface === ScreenSurface.MOBILE_APP
+          ? ScreenSurface.MOBILE_APP
+          : ScreenSurface.ADMIN_WEB,
+      bundles: dto.bundles ?? [],
+    });
+  }
+
+  @Put('role-screen-overrides')
+  @Permissions('admin.update')
+  replaceRoleScreenOverrides(@Body() dto: ReplaceRoleScreenOverridesDto) {
+    return this.usersService.replaceRoleScreenOverrides({
+      overrides: dto.overrides ?? [],
+    });
   }
 
   @Put('screen-visibility-rules')

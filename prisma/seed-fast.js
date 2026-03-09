@@ -16,45 +16,40 @@ const DEV_PASSWORD_HASH =
   '$2b$08$exYKLbTecbIb6Aci.BC2WuRjsgZtuE.qBQ.2Tn6oaqBwcCjwf7cze'; // pass123
 
 const PERMISSIONS = [
-  'auth.login',
-  'auth.refresh',
-  'auth.logout',
   'admin.view',
+  'admin.create',
   'admin.update',
+  'admin.delete',
+  'user.create',
   'user.read',
-  'unit.view_all',
-  'unit.view_own',
-  'project.view',
-  'complaint.view_all',
-  'complaint.view_own',
-  'complaint.report',
-  'complaint.manage',
-  'violation.view_all',
-  'violation.issue',
-  'violation.update',
-  'violation.cancel',
-  'facility.view_all',
-  'facility.view_own',
-  'facility.create',
-  'facility.update',
-  'booking.view_all',
-  'booking.view_own',
-  'booking.create',
-  'booking.update',
-  'booking.approve',
-  'booking.reject',
-  'booking.cancel',
-  'commercial.view_all',
+  'user.update',
+  'user.delete',
+  'resident.read',
+  'resident.update',
+  'units.view',
+  'units.update',
+  'communities.view',
+  'amenities.view',
+  'bookings.view',
+  'payments.view',
+  'complaints.view',
+  'complaints.update',
+  'violations.view',
+  'violations.update',
+  'services.view',
+  'services.update',
+  'gates.view',
+  'permits.view',
+  'rentals.view',
+  'commercial.view',
   'commercial.create',
   'commercial.update',
-  'compound_staff.view_all',
-  'compound_staff.create',
-  'compound_staff.update',
-  'compound_staff.delete',
-  'gate.view_all',
-  'gate.create',
-  'gate.update',
-  'gate.logs.view',
+  'reports.view',
+  'news.view',
+  'tickets.view',
+  'dashboard.view',
+  'profile.view',
+  'profile.update',
 ];
 
 const ROLES = {
@@ -63,32 +58,27 @@ const ROLES = {
     'admin.view',
     'admin.update',
     'user.read',
-    'unit.view_all',
-    'project.view',
-    'complaint.view_all',
-    'complaint.manage',
-    'violation.view_all',
-    'violation.issue',
-    'violation.update',
-    'facility.view_all',
-    'facility.create',
-    'facility.update',
-    'booking.view_all',
-    'booking.approve',
-    'booking.reject',
-    'booking.cancel',
-    'commercial.view_all',
-    'commercial.create',
+    'resident.read',
+    'units.view',
+    'communities.view',
+    'amenities.view',
+    'bookings.view',
+    'payments.view',
+    'complaints.view',
+    'violations.view',
+    'services.view',
+    'gates.view',
+    'permits.view',
+    'rentals.view',
+    'commercial.view',
     'commercial.update',
-    'compound_staff.view_all',
-    'compound_staff.create',
-    'compound_staff.update',
-    'gate.view_all',
-    'gate.create',
-    'gate.update',
-    'gate.logs.view',
+    'reports.view',
+    'news.view',
+    'tickets.view',
+    'dashboard.view',
+    'profile.view',
   ],
-  COMMUNITY_USER: ['unit.view_own', 'project.view'],
+  COMMUNITY_USER: ['profile.view', 'profile.update', 'dashboard.view'],
 };
 
 const UNIT_STATUSES = ['OFF_PLAN', 'UNDER_CONSTRUCTION', 'DELIVERED'];
@@ -110,7 +100,7 @@ const PERSONAS = [
 
 const ROLE_PERSONA_LINKS = {
   SUPER_ADMIN: ['SUPER_ADMIN', 'ADMIN'],
-  MANAGER: ['ADMIN', 'STAFF'],
+  MANAGER: ['STAFF'],
   COMMUNITY_USER: ['RESIDENT'],
 };
 
@@ -190,6 +180,40 @@ const ADMIN_VISIBILITY = {
   RESIDENT: ['my-account'],
   COMMERCIAL_OWNER: ['my-account'],
   COMMERCIAL_STAFF: ['my-account'],
+};
+
+const ADMIN_SCREEN_BUNDLES = {
+  dashboard: ['dashboard.view'],
+  'my-account': ['profile.view'],
+  residents: ['resident.read'],
+  'dashboard-users': ['admin.view', 'user.read'],
+  communities: ['communities.view'],
+  units: ['units.view'],
+  commercial: ['commercial.view'],
+  'compound-staff': ['user.read'],
+  attendance: ['user.read'],
+  'blue-collar': ['user.read'],
+  gates: ['gates.view'],
+  access: ['gates.view'],
+  rental: ['rentals.view'],
+  billing: ['payments.view'],
+  complaints: ['complaints.view'],
+  violations: ['violations.view'],
+  tickets: ['tickets.view'],
+  services: ['services.view'],
+  permits: ['permits.view'],
+  amenities: ['amenities.view'],
+  ordering: ['services.view'],
+  notifications: ['news.view'],
+  news: ['news.view'],
+  marketing: ['news.view'],
+  surveys: ['reports.view'],
+  approvals: ['admin.view'],
+  reports: ['reports.view'],
+  directory: ['dashboard.view'],
+  security: ['gates.view'],
+  settings: ['admin.update'],
+  hospitality: ['services.view'],
 };
 
 const MOBILE_VISIBILITY = {
@@ -288,6 +312,9 @@ async function upsertUnit(communityId, block, unitNumber, payload) {
 
 async function resetRbacPolicyData() {
   await prisma.$transaction(async (tx) => {
+    await tx.roleScreenBundleOverride.deleteMany({});
+    await tx.screenPermissionBundleItem.deleteMany({});
+    await tx.screenPermissionBundle.deleteMany({});
     await tx.userPersonaOverride.deleteMany({});
     await tx.userPermissionOverride.deleteMany({});
     await tx.screenVisibilityRule.deleteMany({});
@@ -306,6 +333,9 @@ async function seedDynamicGovernance({
   resetRbac,
 }) {
   if (resetRbac) {
+    await prisma.roleScreenBundleOverride.deleteMany({});
+    await prisma.screenPermissionBundleItem.deleteMany({});
+    await prisma.screenPermissionBundle.deleteMany({});
     await prisma.screenVisibilityRule.deleteMany({});
     await prisma.rolePersona.deleteMany({});
     await prisma.screenDefinition.deleteMany({});
@@ -408,6 +438,53 @@ async function seedDynamicGovernance({
       adminScreenIdBySection.set(row.section, row.id);
     } else if (row.surface === 'MOBILE_APP') {
       mobileScreenIdBySection.set(row.section, row.id);
+    }
+  }
+
+  const bundlePermissionKeys = Array.from(
+    new Set(
+      Object.values(ADMIN_SCREEN_BUNDLES).flatMap((permissions) => permissions),
+    ),
+  );
+  const bundlePermissions = await prisma.permission.findMany({
+    where: { key: { in: bundlePermissionKeys } },
+    select: { id: true, key: true },
+  });
+  const permissionIdByKey = new Map(bundlePermissions.map((row) => [row.key, row.id]));
+
+  await prisma.roleScreenBundleOverride.deleteMany({});
+  await prisma.screenPermissionBundleItem.deleteMany({});
+  await prisma.screenPermissionBundle.deleteMany({});
+
+  for (const [section, permissionKeys] of Object.entries(ADMIN_SCREEN_BUNDLES)) {
+    const screenId = adminScreenIdBySection.get(section);
+    if (!screenId) continue;
+
+    const bundle = await prisma.screenPermissionBundle.create({
+      data: {
+        screenId,
+        name: 'default',
+        isSystem: true,
+      },
+      select: { id: true },
+    });
+
+    if (permissionKeys.length > 0) {
+      await prisma.screenPermissionBundleItem.createMany({
+        data: permissionKeys
+          .map((permissionKey) => ({
+            permissionId: permissionIdByKey.get(permissionKey),
+            actionKey: 'view',
+          }))
+          .filter((row) => Boolean(row.permissionId))
+          .map((row) => ({
+            bundleId: bundle.id,
+            permissionId: row.permissionId,
+            actionKey: row.actionKey,
+            required: true,
+          })),
+        skipDuplicates: true,
+      });
     }
   }
 
@@ -553,11 +630,19 @@ async function main() {
 
     const superAdminUser = await prisma.user.upsert({
       where: { email: 'test@admin.com' },
-      update: { passwordHash, nameEN: 'Super Admin' },
+      update: {
+        passwordHash,
+        nameEN: 'Super Admin',
+        userStatus: 'ACTIVE',
+        twoFactorEnabled: false,
+        loginAttempts: 0,
+        lockedUntil: null,
+      },
       create: {
         email: 'test@admin.com',
         passwordHash,
         nameEN: 'Super Admin',
+        userStatus: 'ACTIVE',
         roles: { create: [{ roleId: superAdminRoleId }] },
         admin: { create: {} },
       },
@@ -566,18 +651,58 @@ async function main() {
     const [manager, residentAUser, residentBUser] = await Promise.all([
       prisma.user.upsert({
         where: { email: 'manager@test.com' },
-        update: { passwordHash, nameEN: 'Manager One' },
-        create: { email: 'manager@test.com', passwordHash, nameEN: 'Manager One' },
+        update: {
+          passwordHash,
+          nameEN: 'Manager One',
+          userStatus: 'ACTIVE',
+          twoFactorEnabled: false,
+          loginAttempts: 0,
+          lockedUntil: null,
+        },
+        create: {
+          email: 'manager@test.com',
+          passwordHash,
+          nameEN: 'Manager One',
+          userStatus: 'ACTIVE',
+        },
       }),
       prisma.user.upsert({
         where: { email: 'residentA@test.com' },
-        update: { passwordHash, nameEN: 'Resident A' },
-        create: { email: 'residentA@test.com', passwordHash, nameEN: 'Resident A' },
+        update: {
+          passwordHash,
+          nameEN: 'Resident A',
+          userStatus: 'ACTIVE',
+          twoFactorEnabled: false,
+          loginAttempts: 0,
+          lockedUntil: null,
+          phone: '01010000001',
+        },
+        create: {
+          email: 'residentA@test.com',
+          passwordHash,
+          nameEN: 'Resident A',
+          userStatus: 'ACTIVE',
+          phone: '01010000001',
+        },
       }),
       prisma.user.upsert({
         where: { email: 'residentB@test.com' },
-        update: { passwordHash, nameEN: 'Resident B' },
-        create: { email: 'residentB@test.com', passwordHash, nameEN: 'Resident B' },
+        update: {
+          passwordHash,
+          nameEN: 'Resident B',
+          userStatus: 'ACTIVE',
+          twoFactorEnabled: false,
+          loginAttempts: 0,
+          lockedUntil: null,
+          phone: '01010000002',
+        },
+        create: {
+          email: 'residentB@test.com',
+          passwordHash,
+          nameEN: 'Resident B',
+          userStatus: 'ACTIVE',
+          phone: '01010000002',
+        },
       }),
     ]);
 
@@ -727,6 +852,8 @@ async function main() {
       upsertUnit(community.id, 'A', '101', {
         phaseId: northPhase.id,
         clusterId: residentialCluster.id,
+        status: 'DELIVERED',
+        isDelivered: true,
         bedrooms: 2,
         bathrooms: 1,
         sizeSqm: 120,
@@ -734,6 +861,8 @@ async function main() {
       upsertUnit(community.id, 'B', '202', {
         phaseId: northPhase.id, // phase-level unit (no cluster)
         clusterId: null,
+        status: 'UNDER_CONSTRUCTION',
+        isDelivered: false,
         bedrooms: 3,
         bathrooms: 2,
         sizeSqm: 160,
@@ -741,6 +870,8 @@ async function main() {
       upsertUnit(community.id, 'R', '015', {
         phaseId: retailPhase.id,
         clusterId: retailCluster.id,
+        status: 'OFF_PLAN',
+        isDelivered: false,
         bedrooms: 0,
         bathrooms: 1,
         sizeSqm: 95,
@@ -748,6 +879,8 @@ async function main() {
       upsertUnit(community.id, 'C', '303', {
         phaseId: null, // community-level unit (no phase/cluster)
         clusterId: null,
+        status: 'DELIVERED',
+        isDelivered: true,
         bedrooms: 2,
         bathrooms: 2,
         sizeSqm: 140,
@@ -778,48 +911,172 @@ async function main() {
       skipDuplicates: true,
     });
 
-    const [commercialOwner, commercialHr, guardUser] = await Promise.all([
+    const [commercialOwner, commercialHr, guardUser, commercialStaff] = await Promise.all([
       prisma.user.upsert({
         where: { email: 'commercial.owner@test.com' },
-        update: { passwordHash, nameEN: 'Commercial Owner', phone: '01020000001' },
+        update: {
+          passwordHash,
+          nameEN: 'Commercial Owner',
+          phone: '01020000001',
+          userStatus: 'ACTIVE',
+          twoFactorEnabled: false,
+          loginAttempts: 0,
+          lockedUntil: null,
+        },
         create: {
           email: 'commercial.owner@test.com',
           passwordHash,
           nameEN: 'Commercial Owner',
           phone: '01020000001',
+          userStatus: 'ACTIVE',
         },
       }),
       prisma.user.upsert({
         where: { email: 'commercial.hr@test.com' },
-        update: { passwordHash, nameEN: 'Commercial HR', phone: '01020000002' },
+        update: {
+          passwordHash,
+          nameEN: 'Commercial HR',
+          phone: '01020000002',
+          userStatus: 'ACTIVE',
+          twoFactorEnabled: false,
+          loginAttempts: 0,
+          lockedUntil: null,
+        },
         create: {
           email: 'commercial.hr@test.com',
           passwordHash,
           nameEN: 'Commercial HR',
           phone: '01020000002',
+          userStatus: 'ACTIVE',
         },
       }),
       prisma.user.upsert({
         where: { email: 'staff.guard@test.com' },
-        update: { passwordHash, nameEN: 'Mahmoud Salah', phone: '01020000003' },
+        update: {
+          passwordHash,
+          nameEN: 'Mahmoud Salah',
+          phone: '01020000003',
+          userStatus: 'ACTIVE',
+          twoFactorEnabled: false,
+          loginAttempts: 0,
+          lockedUntil: null,
+        },
         create: {
           email: 'staff.guard@test.com',
           passwordHash,
           nameEN: 'Mahmoud Salah',
           phone: '01020000003',
+          userStatus: 'ACTIVE',
         },
       }),
       prisma.user.upsert({
         where: { email: 'commercial.staff@test.com' },
-        update: { passwordHash, nameEN: 'Commercial Staff', phone: '01020000006' },
+        update: {
+          passwordHash,
+          nameEN: 'Commercial Staff',
+          phone: '01020000006',
+          userStatus: 'ACTIVE',
+          twoFactorEnabled: false,
+          loginAttempts: 0,
+          lockedUntil: null,
+        },
         create: {
           email: 'commercial.staff@test.com',
           passwordHash,
           nameEN: 'Commercial Staff',
           phone: '01020000006',
+          userStatus: 'ACTIVE',
         },
       }),
     ]);
+
+    const seedAccessAssignments = [
+      {
+        userId: residentAUser.id,
+        unitId: unitA.id,
+        role: 'OWNER',
+        delegateType: null,
+        canViewFinancials: true,
+        canReceiveBilling: true,
+        canGenerateQR: true,
+        canManageWorkers: true,
+      },
+      {
+        userId: residentBUser.id,
+        unitId: unitB.id,
+        role: 'TENANT',
+        delegateType: null,
+        canViewFinancials: true,
+        canReceiveBilling: true,
+        canGenerateQR: true,
+        canManageWorkers: false,
+      },
+      {
+        userId: commercialOwner.id,
+        unitId: unitC.id,
+        role: 'OWNER',
+        delegateType: null,
+        canViewFinancials: true,
+        canReceiveBilling: true,
+        canGenerateQR: true,
+        canManageWorkers: true,
+      },
+      {
+        userId: commercialHr.id,
+        unitId: unitC.id,
+        role: 'FAMILY',
+        delegateType: null,
+        canViewFinancials: false,
+        canReceiveBilling: false,
+        canGenerateQR: true,
+        canManageWorkers: true,
+      },
+      {
+        userId: commercialStaff.id,
+        unitId: unitC.id,
+        role: 'DELEGATE',
+        delegateType: 'FRIEND',
+        canViewFinancials: false,
+        canReceiveBilling: false,
+        canGenerateQR: true,
+        canManageWorkers: false,
+      },
+      {
+        userId: guardUser.id,
+        unitId: unitD.id,
+        role: 'DELEGATE',
+        delegateType: 'INTERIOR_DESIGNER',
+        canViewFinancials: false,
+        canReceiveBilling: false,
+        canGenerateQR: true,
+        canManageWorkers: false,
+      },
+    ];
+
+    await prisma.unitAccess.deleteMany({
+      where: {
+        userId: { in: seedAccessAssignments.map((row) => row.userId) },
+      },
+    });
+
+    await prisma.unitAccess.createMany({
+      data: seedAccessAssignments.map((row) => ({
+        unitId: row.unitId,
+        userId: row.userId,
+        role: row.role,
+        delegateType: row.delegateType,
+        startsAt: new Date(),
+        endsAt: null,
+        grantedBy: manager.id,
+        status: 'ACTIVE',
+        source: 'SEED_BASELINE',
+        canViewFinancials: row.canViewFinancials,
+        canReceiveBilling: row.canReceiveBilling,
+        canBookFacilities: true,
+        canGenerateQR: row.canGenerateQR,
+        canManageWorkers: row.canManageWorkers,
+      })),
+    });
 
     const existingEntity = await prisma.commercialEntity.findFirst({
       where: {
@@ -880,7 +1137,7 @@ async function main() {
         },
         {
           entityId: commercialEntity.id,
-          userId: guardUser.id,
+          userId: commercialStaff.id,
           role: CommercialEntityMemberRole.STAFF,
           permissions: {
             can_work_orders: true,
@@ -1287,6 +1544,12 @@ async function main() {
     console.log('Fast seed complete.');
     console.log('- Super Admin: test@admin.com / pass123');
     console.log('- Manager: manager@test.com / pass123');
+    console.log('- Resident A (Owner, Unit A / DELIVERED): residentA@test.com / pass123');
+    console.log('- Resident B (Tenant, Unit B / UNDER_CONSTRUCTION): residentB@test.com / pass123');
+    console.log('- Commercial Owner (Unit R015 / OFF_PLAN): commercial.owner@test.com / pass123');
+    console.log('- Commercial HR (Family access, Unit R015): commercial.hr@test.com / pass123');
+    console.log('- Commercial Staff (Delegate access, Unit R015): commercial.staff@test.com / pass123');
+    console.log('- Guard Staff (Delegate access, Unit C303): staff.guard@test.com / pass123');
     console.log('- Community: Alkarma Heights Community (2 phases, 2 clusters, 3 gates)');
     console.log('- Compound Staff: active expiring soon + suspended expired + inactive');
   } finally {

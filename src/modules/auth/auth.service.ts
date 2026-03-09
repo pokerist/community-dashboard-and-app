@@ -59,6 +59,11 @@ export class AuthService {
   // Staff/admin roles are restricted to a single active session.
   // On new login, all previous refresh tokens for these roles are revoked.
   private readonly SINGLE_SESSION_ROLES = ['SUPER_ADMIN', 'MANAGER', 'COMPOUND_STAFF'];
+  private readonly sessionTakeoverOtpRequired = this.parseEnvBoolean(
+    process.env.ENABLE_SESSION_TAKEOVER_OTP ??
+      process.env.SESSION_TAKEOVER_REQUIRE_OTP,
+    false,
+  );
 
   constructor(
     private prisma: PrismaService,
@@ -69,6 +74,14 @@ export class AuthService {
     private integrationConfigService: IntegrationConfigService,
     private eventEmitter: EventEmitter2,
   ) {}
+
+  private parseEnvBoolean(raw: string | undefined, fallback: boolean): boolean {
+    if (typeof raw !== 'string') return fallback;
+    const normalized = raw.trim().toLowerCase();
+    if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+    if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+    return fallback;
+  }
 
   private normalizePhoneForComparison(value: string | null | undefined): string {
     return String(value ?? '').replace(/[^\d]/g, '');
@@ -126,6 +139,19 @@ export class AuthService {
       },
     });
     return true;
+  }
+
+  private async revokeSessionsAndBumpVersion(userId: string) {
+    await this.prisma.refreshToken.updateMany({
+      where: { userId, revoked: false },
+      data: { revoked: true },
+    });
+
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { sessionVersion: { increment: 1 } },
+      include: { roles: { include: { role: true } } },
+    });
   }
 
   private buildActivationChecklist(user: {
@@ -403,16 +429,24 @@ export class AuthService {
       },
     });
 
+    let loginTargetUser = authUser;
     if (activeSession) {
-      return this.beginSessionTakeoverChallenge(authUser);
+      if (this.sessionTakeoverOtpRequired) {
+        const challenge = await this.beginSessionTakeoverChallenge(authUser);
+        if (challenge) return challenge;
+      }
+
+      // Fallback for clients that do not support the takeover OTP challenge:
+      // revoke old sessions and complete login immediately after password check.
+      loginTargetUser = await this.revokeSessionsAndBumpVersion(authUser.id);
     }
 
-    const tokens = await this.generateTokens(authUser);
-    await this.markSuccessfulLogin(authUser.id);
+    const tokens = await this.generateTokens(loginTargetUser);
+    await this.markSuccessfulLogin(loginTargetUser.id);
     return {
       ...tokens,
-      userStatus: authUser.userStatus,
-      mustCompleteActivation: authUser.userStatus !== 'ACTIVE',
+      userStatus: loginTargetUser.userStatus,
+      mustCompleteActivation: loginTargetUser.userStatus !== 'ACTIVE',
     };
   }
 
@@ -585,9 +619,10 @@ export class AuthService {
     const emailReady = capabilities.smtpMail && Boolean(user.email);
 
     if (!smsReady && !emailReady) {
-      throw new ServiceUnavailableException(
-        'Session takeover requires OTP verification but no OTP channel is currently available.',
+      this.logger.warn(
+        `Session takeover OTP skipped for user ${user.id}: no OTP channel available.`,
       );
+      return null;
     }
 
     const channel: $Enums.Channel = smsReady ? 'SMS' : 'EMAIL';
@@ -691,18 +726,7 @@ export class AuthService {
       data: { usedAt: new Date() },
     });
 
-    // Revoke ALL existing sessions
-    await this.prisma.refreshToken.updateMany({
-      where: { userId: user.id, revoked: false },
-      data: { revoked: true },
-    });
-
-    // Bump sessionVersion — instantly invalidates all JWTs from old sessions
-    const updatedUser = await this.prisma.user.update({
-      where: { id: user.id },
-      data: { sessionVersion: { increment: 1 } },
-      include: { roles: { include: { role: true } } },
-    });
+    const updatedUser = await this.revokeSessionsAndBumpVersion(user.id);
 
     // Notify the old session(s) that they have been signed out
     await this.notificationsService.sendNotification(
@@ -806,22 +830,13 @@ export class AuthService {
       }
     }
 
-    // Single-session: revoke all existing sessions and bump version
-    await this.prisma.refreshToken.updateMany({
-      where: { userId: user.id, revoked: false },
-      data: { revoked: true },
-    });
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { sessionVersion: { increment: 1 } },
-    });
-
-    const tokens = await this.generateTokens(user);
+    const updatedUser = await this.revokeSessionsAndBumpVersion(user.id);
+    const tokens = await this.generateTokens(updatedUser);
     await this.markSuccessfulLogin(user.id);
     return {
       ...tokens,
-      userStatus: user.userStatus,
-      mustCompleteActivation: user.userStatus !== 'ACTIVE',
+      userStatus: updatedUser.userStatus,
+      mustCompleteActivation: updatedUser.userStatus !== 'ACTIVE',
     };
   }
 

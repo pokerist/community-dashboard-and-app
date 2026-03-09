@@ -196,15 +196,66 @@ const SECTION_LABELS: Record<string, string> = {
 };
 
 export default function App() {
-  const { visibleScreens, personas, loading: accessLoading } = useAuthContext();
+  const {
+    permissions,
+    visibleScreens,
+    personas,
+    screenCapabilities,
+    loading: accessLoading,
+  } = useAuthContext();
   const [activeSection, setActiveSection] = useState<string>(() => getSectionFromLocation());
   const [authenticated, setAuthenticated] = useState<boolean>(() => isAuthenticated());
   const [footerPanel, setFooterPanel] = useState<FooterPanel>(null);
   const [unseenAdminNotifications, setUnseenAdminNotifications] = useState(0);
   const seenNotificationIdsRef = useRef<Set<string>>(new Set());
+  const blockedEndpointsRef = useRef<Set<string>>(new Set());
   const [sidebarBadges, setSidebarBadges] = useState<SidebarBadgeCounts>({
     tickets: 0, violations: 0, permits: 0, rental: 0, amenities: 0, approvals: 0,
   });
+
+  const allowedSections = useMemo(() => {
+    const fromCapabilities = new Set<string>();
+    screenCapabilities.forEach((capability, section) => {
+      const normalized = normalizeSection(section);
+      if (VALID_SECTIONS.has(normalized) && capability.allowed) {
+        fromCapabilities.add(normalized);
+      }
+    });
+
+    if (fromCapabilities.size > 0) {
+      return fromCapabilities;
+    }
+
+    const normalizedVisible = new Set<string>();
+    visibleScreens.forEach((screen) => {
+      const section = normalizeSection(screen);
+      if (VALID_SECTIONS.has(section)) {
+        normalizedVisible.add(section);
+      }
+    });
+
+    if (normalizedVisible.size > 0) {
+      return normalizedVisible;
+    }
+
+    if (accessLoading) {
+      return new Set<string>();
+    }
+
+    return new Set(["my-account"]);
+  }, [accessLoading, screenCapabilities, visibleScreens]);
+
+  const canUseSection = useCallback((section: string): boolean => {
+    const normalized = normalizeSection(section);
+    const capability = screenCapabilities.get(normalized);
+    if (capability) return capability.allowed;
+    return allowedSections.has(normalized);
+  }, [allowedSections, screenCapabilities]);
+
+  const hasPermission = useCallback(
+    (permissionKey: string) => permissions.has(permissionKey),
+    [permissions],
+  );
 
   const navigateToSection = useCallback((section: string) => {
     const next = normalizeSection(section);
@@ -249,12 +300,21 @@ export default function App() {
     if (!authenticated) {
       seenNotificationIdsRef.current = new Set();
       setUnseenAdminNotifications(0);
+      blockedEndpointsRef.current = new Set();
+      return;
+    }
+
+    if (accessLoading || !canUseSection("notifications")) {
+      setUnseenAdminNotifications(0);
       return;
     }
 
     let mounted = true;
 
     const pollNotifications = async (isInitial = false) => {
+      const endpointKey = "/notifications/admin/all";
+      if (blockedEndpointsRef.current.has(endpointKey)) return;
+
       try {
         const response = await notificationsService.listLegacyAdmin({ page: 1, limit: 25 });
         if (!mounted) return;
@@ -305,13 +365,19 @@ export default function App() {
             } : { description });
           });
         }
-      } catch { /* Keep silent; notification poll should not break dashboard UX. */ }
+      } catch (error: unknown) {
+        const status = Number((error as { response?: { status?: number } })?.response?.status ?? 0);
+        if (status === 403) {
+          blockedEndpointsRef.current.add(endpointKey);
+          setUnseenAdminNotifications(0);
+        }
+      }
     };
 
     void pollNotifications(true);
     const timer = window.setInterval(() => void pollNotifications(false), 15000);
     return () => { mounted = false; window.clearInterval(timer); };
-  }, [authenticated, navigateToSection]);
+  }, [accessLoading, authenticated, canUseSection, navigateToSection]);
 
   /* ── Sidebar badge counts polling ─────────────────────────── */
   useEffect(() => {
@@ -320,55 +386,70 @@ export default function App() {
       return;
     }
 
+    if (accessLoading) return;
+
     let mounted = true;
 
-    const fetchBadgeCounts = async () => {
+    const guardedGet = async (
+      endpoint: string,
+      enabled: boolean,
+    ): Promise<{ data: Record<string, unknown> } | null> => {
+      if (!enabled) return null;
+      if (blockedEndpointsRef.current.has(endpoint)) return null;
       try {
-        const [violationsRes, permitsRes, rentalRes, amenitiesRes, approvalsRes, complaintsRes, servicesRes] = await Promise.allSettled([
-          apiClient.get("/violations/stats"),
-          apiClient.get("/permits/stats"),
-          apiClient.get("/rental/stats"),
-          apiClient.get("/facilities/stats"),
-          apiClient.get("/approvals/stats"),
-          apiClient.get("/complaints/stats"),
-          apiClient.get("/services/stats"),
-        ]);
+        return await apiClient.get(endpoint);
+      } catch (error: unknown) {
+        const status = Number((error as { response?: { status?: number } })?.response?.status ?? 0);
+        if (status === 403) blockedEndpointsRef.current.add(endpoint);
+        return null;
+      }
+    };
 
-        if (!mounted) return;
+    const fetchBadgeCounts = async () => {
+      const [violationsRes, permitsRes, rentalRes, amenitiesRes, approvalsRes, complaintsRes, servicesRes] = await Promise.all([
+        guardedGet("/violations/stats", hasPermission("violations.view") || canUseSection("violations")),
+        guardedGet("/permits/stats", hasPermission("permits.view") || canUseSection("permits")),
+        guardedGet("/rental/stats", hasPermission("rentals.view") || canUseSection("rental")),
+        guardedGet("/facilities/stats", hasPermission("amenities.view") || canUseSection("amenities")),
+        guardedGet("/approvals/stats", hasPermission("admin.view") || canUseSection("approvals")),
+        guardedGet("/complaints/stats", hasPermission("complaints.view") || canUseSection("complaints")),
+        guardedGet("/services/stats", hasPermission("services.view") || canUseSection("services")),
+      ]);
 
-        const val = (res: PromiseSettledResult<{ data: Record<string, unknown> }>, key: string): number => {
-          if (res.status !== "fulfilled") return 0;
-          const v = Number(res.value?.data?.[key]);
+      if (!mounted) return;
+
+      const val = (res: { data: Record<string, unknown> } | null, key: string): number => {
+          if (!res) return 0;
+          const v = Number(res.data?.[key]);
           return Number.isFinite(v) ? Math.max(0, Math.round(v)) : 0;
-        };
+      };
 
-        const rentalPending = val(rentalRes, "pendingRentRequests");
-        const rentalExpiring = val(rentalRes, "expiringThisMonth");
-        const tickets =
-          val(servicesRes, "openRequests") +
-          val(complaintsRes, "open") +
+      const rentalPending = val(rentalRes, "pendingRentRequests");
+      const rentalExpiring = val(rentalRes, "expiringThisMonth");
+      const tickets =
+        val(servicesRes, "openRequests") +
+        val(complaintsRes, "open") +
+        val(violationsRes, "open") +
+        val(violationsRes, "underReview") +
+        val(violationsRes, "appealed");
+
+      setSidebarBadges({
+        tickets,
+        violations:
           val(violationsRes, "open") +
           val(violationsRes, "underReview") +
-          val(violationsRes, "appealed");
-
-        setSidebarBadges({
-          tickets,
-          violations:
-            val(violationsRes, "open") +
-            val(violationsRes, "underReview") +
-            val(violationsRes, "appealed"),
-          permits: val(permitsRes, "pendingRequests"),
-          rental: rentalPending + rentalExpiring,
-          amenities: val(amenitiesRes, "pendingApprovals"),
-          approvals: val(approvalsRes, "totalPending"),
-        });
-      } catch { /* Keep silent — badge polling should not break dashboard UX. */ }
+          val(violationsRes, "appealed"),
+        permits: val(permitsRes, "pendingRequests"),
+        rental: rentalPending + rentalExpiring,
+        amenities: val(amenitiesRes, "pendingApprovals"),
+        approvals: val(approvalsRes, "totalPending"),
+      });
     };
 
     void fetchBadgeCounts();
     const timer = window.setInterval(fetchBadgeCounts, 20_000);
     return () => { mounted = false; window.clearInterval(timer); };
-  }, [authenticated]);
+  }, [accessLoading, authenticated, canUseSection, hasPermission]);
 
   useEffect(() => {
     if (activeSection === "notifications") setUnseenAdminNotifications(0);
@@ -427,26 +508,6 @@ export default function App() {
 
   const sectionLabel = SECTION_LABELS[activeSection] ?? activeSection;
 
-  const allowedSections = useMemo(() => {
-    if (!visibleScreens || visibleScreens.size === 0) {
-      return new Set(Array.from(VALID_SECTIONS));
-    }
-
-    const normalized = new Set<string>();
-    visibleScreens.forEach((screen) => {
-      const section = normalizeSection(screen);
-      if (VALID_SECTIONS.has(section)) {
-        normalized.add(section);
-      }
-    });
-
-    if (normalized.size === 0) {
-      return new Set(Array.from(VALID_SECTIONS));
-    }
-
-    return normalized;
-  }, [visibleScreens]);
-
   const isLikelyRegularAccount = useMemo(() => {
     const flags = Array.from(personas ?? []);
     if (flags.length === 0) return false;
@@ -493,6 +554,18 @@ export default function App() {
   ]);
 
   const renderContent = () => {
+    if (accessLoading) {
+      return (
+        <div className="rounded-xl border border-[#E2E8F0] bg-white px-4 py-6 text-sm text-[#475569]">
+          Resolving access capabilities...
+        </div>
+      );
+    }
+
+    if (!canUseSection(activeSection)) {
+      return <MyAccountPage onNavigate={navigateToSection} />;
+    }
+
     switch (activeSection) {
       case "dashboard":       return <DashboardOverview onNavigate={navigateToSection} />;
       case "my-account":      return <MyAccountPage onNavigate={navigateToSection} />;

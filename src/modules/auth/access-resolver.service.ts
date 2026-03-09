@@ -1,15 +1,18 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import {
-  Prisma,
-  ScreenSurface,
-  UnitStatus,
-} from '@prisma/client';
+import { Prisma, ScreenSurface, UnitStatus } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { PermissionCacheService } from './permission-cache.service';
 
 type ResolveAccessOptions = {
   surface?: ScreenSurface;
   unitId?: string;
+};
+
+type ScreenCapability = {
+  section: string;
+  requiredPermissions: string[];
+  missingPermissions: string[];
+  allowed: boolean;
 };
 
 type EffectiveAccessPayload = {
@@ -20,6 +23,7 @@ type EffectiveAccessPayload = {
   effectiveModules: string[];
   effectivePersonas: string[];
   visibleScreens: string[];
+  screenCapabilities: ScreenCapability[];
 };
 
 const ALL_UNIT_STATUSES: UnitStatus[] = [
@@ -87,7 +91,6 @@ export class AccessResolverService {
       }
     }
 
-    if (user.admin) personas.add('ADMIN');
     if (user.owner) personas.add('OWNER');
     if (user.tenant) personas.add('TENANT');
     if (user.resident) personas.add('RESIDENT');
@@ -217,7 +220,9 @@ export class AccessResolverService {
     user: Prisma.UserGetPayload<{
       include: {
         roles: { include: { role: true } };
-        permissionOverrides: { include: { permission: { select: { key: true } } } };
+        permissionOverrides: {
+          include: { permission: { select: { key: true } } };
+        };
       };
     }>,
     unitStatuses: UnitStatus[],
@@ -256,7 +261,10 @@ export class AccessResolverService {
     unitStatuses: UnitStatus[];
     personaIds: string[];
     moduleSet: Set<string>;
-  }): Promise<string[]> {
+  }): Promise<{
+    screens: Array<{ id: string; key: string; section: string; moduleKey: string | null }>;
+    visibleSections: string[];
+  }> {
     const { isSuperAdmin, surface, unitStatuses, personaIds, moduleSet } = params;
 
     const screens = await this.prisma.screenDefinition.findMany({
@@ -271,7 +279,10 @@ export class AccessResolverService {
     });
 
     if (isSuperAdmin) {
-      return screens.map((screen) => screen.section).sort();
+      return {
+        screens,
+        visibleSections: screens.map((screen) => screen.section).sort(),
+      };
     }
 
     const rules =
@@ -316,7 +327,115 @@ export class AccessResolverService {
       }
     }
 
-    return Array.from(visibleSections).sort();
+    return {
+      screens,
+      visibleSections: Array.from(visibleSections).sort(),
+    };
+  }
+
+  private async resolveScreenCapabilities(params: {
+    surface: ScreenSurface;
+    roleIds: string[];
+    isSuperAdmin: boolean;
+    permissions: Set<string>;
+    visibleSections: string[];
+  }): Promise<ScreenCapability[]> {
+    const { surface, roleIds, isSuperAdmin, permissions, visibleSections } = params;
+
+    const screens = await this.prisma.screenDefinition.findMany({
+      where: { surface, isEnabled: true },
+      orderBy: [{ section: 'asc' }, { key: 'asc' }],
+      include: {
+        bundles: {
+          include: {
+            items: {
+              include: {
+                permission: { select: { key: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const visibilitySet = new Set(visibleSections);
+
+    const screenIds = screens.map((screen) => screen.id);
+    const overrides =
+      roleIds.length > 0 && screenIds.length > 0
+        ? await this.prisma.roleScreenBundleOverride.findMany({
+            where: {
+              roleId: { in: roleIds },
+              screenId: { in: screenIds },
+            },
+            include: {
+              permission: { select: { key: true } },
+            },
+          })
+        : [];
+
+    const overrideMap = new Map<string, boolean[]>();
+    for (const row of overrides) {
+      const key = `${row.screenId}::${row.permission.key}`;
+      const current = overrideMap.get(key) ?? [];
+      current.push(row.grant);
+      overrideMap.set(key, current);
+    }
+
+    const bySection = new Map<string, ScreenCapability>();
+
+    for (const screen of screens) {
+      const required = new Set<string>();
+      for (const bundle of screen.bundles) {
+        for (const item of bundle.items) {
+          if (item.required) {
+            required.add(item.permission.key);
+          }
+        }
+      }
+
+      const requiredPermissions = Array.from(required).sort();
+      const missingPermissions: string[] = [];
+
+      if (!isSuperAdmin) {
+        for (const permissionKey of requiredPermissions) {
+          const decisions = overrideMap.get(`${screen.id}::${permissionKey}`) ?? [];
+          const grantedByOverride = decisions.includes(true);
+          const deniedByOverride = decisions.includes(false);
+          const granted = grantedByOverride || (!deniedByOverride && permissions.has(permissionKey));
+          if (!granted) {
+            missingPermissions.push(permissionKey);
+          }
+        }
+      }
+
+      const sectionVisible = isSuperAdmin || visibilitySet.has(screen.section);
+      const capability: ScreenCapability = {
+        section: screen.section,
+        requiredPermissions,
+        missingPermissions,
+        allowed: sectionVisible && (isSuperAdmin || missingPermissions.length === 0),
+      };
+
+      const existing = bySection.get(screen.section);
+      if (!existing) {
+        bySection.set(screen.section, capability);
+        continue;
+      }
+
+      const preferred =
+        capability.allowed && !existing.allowed
+          ? capability
+          : existing.allowed === capability.allowed &&
+              capability.missingPermissions.length < existing.missingPermissions.length
+            ? capability
+            : existing;
+      bySection.set(screen.section, preferred);
+    }
+
+    return Array.from(bySection.values()).sort((a, b) =>
+      a.section.localeCompare(b.section),
+    );
   }
 
   async resolveUserAccess(
@@ -372,18 +491,28 @@ export class AccessResolverService {
     if (!user) throw new NotFoundException('User not found');
 
     const roleNames = user.roles.map((row) => row.role.name);
-    const isSuperAdmin = roleNames.some((name) => name.toUpperCase() === 'SUPER_ADMIN');
+    const roleIds = user.roles.map((row) => row.roleId);
+    const isSuperAdmin = roleNames.some(
+      (name) => name.toUpperCase() === 'SUPER_ADMIN',
+    );
 
     const unitStatuses = await this.resolveUnitStatuses(user, options?.unitId);
     const permissions = await this.resolveEffectivePermissions(user, unitStatuses);
     const modules = this.permissionCache.resolveUserModules(roleNames);
     const personaResolution = await this.resolveEffectivePersonas(user);
-    const visibleScreens = await this.resolveVisibleScreens({
+    const visibleResolution = await this.resolveVisibleScreens({
       isSuperAdmin,
       surface,
       unitStatuses,
       personaIds: personaResolution.ids,
       moduleSet: modules,
+    });
+    const screenCapabilities = await this.resolveScreenCapabilities({
+      surface,
+      roleIds,
+      isSuperAdmin,
+      permissions,
+      visibleSections: visibleResolution.visibleSections,
     });
 
     return {
@@ -393,7 +522,8 @@ export class AccessResolverService {
       effectivePermissions: Array.from(permissions).sort(),
       effectiveModules: Array.from(modules).sort(),
       effectivePersonas: personaResolution.keys,
-      visibleScreens,
+      visibleScreens: visibleResolution.visibleSections,
+      screenCapabilities,
     };
   }
 }

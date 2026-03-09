@@ -11,6 +11,7 @@ import {
   DelegateType,
   HouseholdRequestStatus,
   Prisma,
+  ScreenSurface,
   UnitAccessRole,
   UserStatusEnum,
   UnitStatus,
@@ -1187,6 +1188,251 @@ export class UsersService {
         },
       },
     });
+  }
+
+  async listScreenBundles(surface?: ScreenSurface) {
+    return this.prisma.screenDefinition.findMany({
+      where: surface ? { surface } : undefined,
+      orderBy: [{ surface: 'asc' }, { section: 'asc' }, { key: 'asc' }],
+      select: {
+        id: true,
+        key: true,
+        title: true,
+        section: true,
+        surface: true,
+        bundles: {
+          orderBy: { name: 'asc' },
+          select: {
+            id: true,
+            name: true,
+            isSystem: true,
+            items: {
+              orderBy: { permission: { key: 'asc' } },
+              select: {
+                id: true,
+                actionKey: true,
+                required: true,
+                permission: { select: { id: true, key: true } },
+              },
+            },
+          },
+        },
+        roleOverrides: {
+          orderBy: [{ role: { name: 'asc' } }, { permission: { key: 'asc' } }],
+          select: {
+            role: { select: { id: true, name: true } },
+            permission: { select: { id: true, key: true } },
+            grant: true,
+          },
+        },
+      },
+    });
+  }
+
+  async replaceScreenBundles(input: {
+    surface: ScreenSurface;
+    bundles: Array<{
+      screenKey: string;
+      name?: string;
+      isSystem?: boolean;
+      items: Array<{
+        permissionKey: string;
+        actionKey?: string;
+        required?: boolean;
+      }>;
+    }>;
+  }) {
+    const rows = (input.bundles ?? []).map((bundle) => ({
+      screenKey: bundle.screenKey.trim().toLowerCase(),
+      name: bundle.name?.trim() || 'default',
+      isSystem: bundle.isSystem ?? true,
+      items: (bundle.items ?? []).map((item) => ({
+        permissionKey: item.permissionKey.trim(),
+        actionKey: item.actionKey?.trim() || null,
+        required: item.required ?? true,
+      })),
+    }));
+
+    const uniqueScreenKeys = Array.from(new Set(rows.map((row) => row.screenKey)));
+    const uniquePermissionKeys = Array.from(
+      new Set(rows.flatMap((row) => row.items.map((item) => item.permissionKey))),
+    );
+
+    const [screens, permissions] = await Promise.all([
+      this.prisma.screenDefinition.findMany({
+        where: { key: { in: uniqueScreenKeys }, surface: input.surface },
+        select: { id: true, key: true },
+      }),
+      this.prisma.permission.findMany({
+        where: { key: { in: uniquePermissionKeys } },
+        select: { id: true, key: true },
+      }),
+    ]);
+
+    if (screens.length !== uniqueScreenKeys.length) {
+      throw new BadRequestException('One or more screen keys are invalid for this surface');
+    }
+    if (permissions.length !== uniquePermissionKeys.length) {
+      throw new BadRequestException('One or more permission keys are invalid');
+    }
+
+    const screenIdByKey = new Map(screens.map((row) => [row.key, row.id]));
+    const permissionIdByKey = new Map(permissions.map((row) => [row.key, row.id]));
+
+    await this.prisma.$transaction(async (tx) => {
+      for (const row of rows) {
+        const screenId = screenIdByKey.get(row.screenKey);
+        if (!screenId) {
+          throw new BadRequestException(`Invalid screen key: ${row.screenKey}`);
+        }
+
+        const bundle = await tx.screenPermissionBundle.upsert({
+          where: {
+            screenId_name: {
+              screenId,
+              name: row.name,
+            },
+          },
+          update: {
+            isSystem: row.isSystem,
+          },
+          create: {
+            screenId,
+            name: row.name,
+            isSystem: row.isSystem,
+          },
+          select: { id: true },
+        });
+
+        await tx.screenPermissionBundleItem.deleteMany({
+          where: { bundleId: bundle.id },
+        });
+
+        if (row.items.length > 0) {
+          await tx.screenPermissionBundleItem.createMany({
+            data: row.items.map((item) => {
+              const permissionId = permissionIdByKey.get(item.permissionKey);
+              if (!permissionId) {
+                throw new BadRequestException(
+                  `Invalid permission key: ${item.permissionKey}`,
+                );
+              }
+
+              return {
+                bundleId: bundle.id,
+                permissionId,
+                actionKey: item.actionKey,
+                required: item.required,
+              };
+            }),
+            skipDuplicates: true,
+          });
+        }
+      }
+    });
+
+    return this.listScreenBundles(input.surface);
+  }
+
+  async replaceRoleScreenOverrides(input: {
+    overrides: Array<{
+      roleId: string;
+      screenKey: string;
+      permissionKey: string;
+      grant: boolean;
+    }>;
+  }) {
+    const rows = (input.overrides ?? []).map((item) => ({
+      roleId: item.roleId.trim(),
+      screenKey: item.screenKey.trim().toLowerCase(),
+      permissionKey: item.permissionKey.trim(),
+      grant: item.grant,
+    }));
+
+    if (rows.length === 0) {
+      return { overrides: [] };
+    }
+
+    const uniqueRoleIds = Array.from(new Set(rows.map((row) => row.roleId)));
+    const uniqueScreenKeys = Array.from(new Set(rows.map((row) => row.screenKey)));
+    const uniquePermissionKeys = Array.from(
+      new Set(rows.map((row) => row.permissionKey)),
+    );
+
+    const [roles, screens, permissions] = await Promise.all([
+      this.prisma.role.findMany({
+        where: { id: { in: uniqueRoleIds } },
+        select: { id: true },
+      }),
+      this.prisma.screenDefinition.findMany({
+        where: { key: { in: uniqueScreenKeys } },
+        select: { id: true, key: true },
+      }),
+      this.prisma.permission.findMany({
+        where: { key: { in: uniquePermissionKeys } },
+        select: { id: true, key: true },
+      }),
+    ]);
+
+    if (roles.length !== uniqueRoleIds.length) {
+      throw new BadRequestException('One or more role IDs are invalid');
+    }
+    if (screens.length !== uniqueScreenKeys.length) {
+      throw new BadRequestException('One or more screen keys are invalid');
+    }
+    if (permissions.length !== uniquePermissionKeys.length) {
+      throw new BadRequestException('One or more permission keys are invalid');
+    }
+
+    const screenIdByKey = new Map(screens.map((row) => [row.key, row.id]));
+    const permissionIdByKey = new Map(permissions.map((row) => [row.key, row.id]));
+
+    const touchedPairs = Array.from(
+      new Set(rows.map((row) => `${row.roleId}::${row.screenKey}`)),
+    ).map((key) => {
+      const [roleId, screenKey] = key.split('::');
+      return {
+        roleId,
+        screenId: screenIdByKey.get(screenKey) as string,
+      };
+    });
+
+    await this.prisma.$transaction(async (tx) => {
+      if (touchedPairs.length > 0) {
+        await tx.roleScreenBundleOverride.deleteMany({
+          where: {
+            OR: touchedPairs.map((pair) => ({
+              roleId: pair.roleId,
+              screenId: pair.screenId,
+            })),
+          },
+        });
+      }
+
+      await tx.roleScreenBundleOverride.createMany({
+        data: rows.map((row) => ({
+          roleId: row.roleId,
+          screenId: screenIdByKey.get(row.screenKey) as string,
+          permissionId: permissionIdByKey.get(row.permissionKey) as string,
+          grant: row.grant,
+        })),
+        skipDuplicates: true,
+      });
+    });
+
+    const overrides = await this.prisma.roleScreenBundleOverride.findMany({
+      where: {
+        roleId: { in: uniqueRoleIds },
+      },
+      include: {
+        role: { select: { id: true, name: true } },
+        screen: { select: { id: true, key: true, section: true } },
+        permission: { select: { id: true, key: true } },
+      },
+      orderBy: [{ role: { name: 'asc' } }, { screen: { key: 'asc' } }, { permission: { key: 'asc' } }],
+    });
+
+    return { overrides };
   }
 
   async replaceScreenVisibilityRules(

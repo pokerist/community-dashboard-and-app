@@ -6,6 +6,15 @@ type AuthContextValue = {
   modules: Set<string>;
   personas: Set<string>;
   visibleScreens: Set<string>;
+  screenCapabilities: Map<
+    string,
+    {
+      section: string;
+      requiredPermissions: string[];
+      missingPermissions: string[];
+      allowed: boolean;
+    }
+  >;
   loading: boolean;
   refresh: () => Promise<void>;
 };
@@ -15,6 +24,7 @@ const AuthContext = createContext<AuthContextValue>({
   modules: new Set(),
   personas: new Set(),
   visibleScreens: new Set(),
+  screenCapabilities: new Map(),
   loading: false,
   refresh: async () => {},
 });
@@ -24,6 +34,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [modules, setModules] = useState<Set<string>>(new Set());
   const [personas, setPersonas] = useState<Set<string>>(new Set());
   const [visibleScreens, setVisibleScreens] = useState<Set<string>>(new Set());
+  const [screenCapabilities, setScreenCapabilities] = useState<
+    Map<
+      string,
+      {
+        section: string;
+        requiredPermissions: string[];
+        missingPermissions: string[];
+        allowed: boolean;
+      }
+    >
+  >(new Map());
   const [loading, setLoading] = useState(false);
 
   const refresh = useCallback(async () => {
@@ -37,6 +58,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         effectiveModules?: string[];
         effectivePersonas?: string[];
         visibleScreens?: string[];
+        screenCapabilities?: Array<{
+          section?: string;
+          requiredPermissions?: string[];
+          missingPermissions?: string[];
+          allowed?: boolean;
+        }>;
       }>(
         "/auth/me/access?surface=ADMIN_WEB",
       );
@@ -44,12 +71,37 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setModules(new Set(res.data.effectiveModules ?? []));
       setPersonas(new Set(res.data.effectivePersonas ?? []));
       setVisibleScreens(new Set(res.data.visibleScreens ?? []));
+      const capabilities = new Map<
+        string,
+        {
+          section: string;
+          requiredPermissions: string[];
+          missingPermissions: string[];
+          allowed: boolean;
+        }
+      >();
+      for (const item of res.data.screenCapabilities ?? []) {
+        const section = String(item?.section ?? "").trim().toLowerCase();
+        if (!section) continue;
+        capabilities.set(section, {
+          section,
+          requiredPermissions: Array.isArray(item?.requiredPermissions)
+            ? item.requiredPermissions.map((entry) => String(entry))
+            : [],
+          missingPermissions: Array.isArray(item?.missingPermissions)
+            ? item.missingPermissions.map((entry) => String(entry))
+            : [],
+          allowed: Boolean(item?.allowed),
+        });
+      }
+      setScreenCapabilities(capabilities);
     } catch {
       // silently fail — user may not have permission to read their own perms yet
       setPermissions(new Set());
       setModules(new Set());
       setPersonas(new Set());
       setVisibleScreens(new Set());
+      setScreenCapabilities(new Map());
     } finally {
       setLoading(false);
     }
@@ -69,7 +121,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("auth:login", handler);
   }, [refresh]);
 
-  return <AuthContext.Provider value={{ permissions, modules, personas, visibleScreens, loading, refresh }}>{children}</AuthContext.Provider>;
+  return <AuthContext.Provider value={{ permissions, modules, personas, visibleScreens, screenCapabilities, loading, refresh }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuthContext() {

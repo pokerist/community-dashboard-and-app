@@ -887,6 +887,7 @@ model Role {
   assignedServices      Service[]
   moduleAccess          RoleModuleAccess[]
   personas              RolePersona[]
+  screenOverrides       RoleScreenBundleOverride[]
 }
 
 model RoleModuleAccess {
@@ -1003,6 +1004,8 @@ model Permission {
   rolePermissions       RolePermission[]
   roleStatusPermissions RoleStatusPermission[]
   userOverrides         UserPermissionOverride[]
+  screenBundleItems     ScreenPermissionBundleItem[]
+  roleScreenOverrides   RoleScreenBundleOverride[]
 }
 
 model RolePermission {
@@ -1098,9 +1101,58 @@ model ScreenDefinition {
   updatedAt   DateTime      @updatedAt
 
   visibilityRules ScreenVisibilityRule[]
+  bundles         ScreenPermissionBundle[]
+  roleOverrides   RoleScreenBundleOverride[]
 
   @@index([surface, isEnabled])
   @@index([section])
+}
+
+model ScreenPermissionBundle {
+  id        String   @id @default(uuid())
+  screenId  String
+  name      String
+  isSystem  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  screen ScreenDefinition            @relation(fields: [screenId], references: [id], onDelete: Cascade)
+  items  ScreenPermissionBundleItem[]
+
+  @@unique([screenId, name])
+  @@index([screenId])
+}
+
+model ScreenPermissionBundleItem {
+  id           String  @id @default(uuid())
+  bundleId     String
+  permissionId String
+  actionKey    String?
+  required     Boolean @default(true)
+
+  bundle     ScreenPermissionBundle @relation(fields: [bundleId], references: [id], onDelete: Cascade)
+  permission Permission             @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([bundleId, permissionId])
+  @@index([permissionId])
+}
+
+model RoleScreenBundleOverride {
+  id           String   @id @default(uuid())
+  roleId       String
+  screenId     String
+  permissionId String
+  grant        Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  role       Role             @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  screen     ScreenDefinition @relation(fields: [screenId], references: [id], onDelete: Cascade)
+  permission Permission       @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, screenId, permissionId])
+  @@index([screenId])
+  @@index([permissionId])
 }
 
 model ScreenVisibilityRule {
