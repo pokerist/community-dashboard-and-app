@@ -594,16 +594,23 @@ export function DashboardUsersPage() {
 
         {/* ========== USERS TAB ========== */}
         <TabsContent value="users" className="space-y-4">
-          <Card className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <Input
-              placeholder="Search by name/email/role"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full sm:max-w-md"
-            />
-            <Button className="w-full bg-[#0B5FFF] text-white hover:bg-[#0B5FFF]/90 sm:w-auto" onClick={() => setIsUserDialogOpen(true)}>
-              Add Dashboard User
-            </Button>
+          <Card className="p-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(320px,460px)_auto] sm:items-end sm:justify-between">
+              <div className="space-y-1">
+                <Label className="text-xs font-medium text-[#64748B]">Search Users</Label>
+                <Input
+                  placeholder="Search by name, email, or role"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="w-full bg-white"
+                />
+              </div>
+              <div className="sm:justify-self-end">
+                <Button className="w-full bg-[#0B5FFF] text-white hover:bg-[#0B5FFF]/90 sm:w-auto" onClick={() => setIsUserDialogOpen(true)}>
+                  Add Dashboard User
+                </Button>
+              </div>
+            </div>
           </Card>
 
           {(() => {
