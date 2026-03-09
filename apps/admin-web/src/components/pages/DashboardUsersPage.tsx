@@ -97,6 +97,7 @@ export function DashboardUsersPage() {
   const [permissions, setPermissions] = useState<PermissionRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
+  const [activeTab, setActiveTab] = useState<"users" | "roles" | "matrix">("users");
 
   // Create user dialog
   const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
@@ -529,12 +530,12 @@ export function DashboardUsersPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-[#1E293B]">Dashboard Users & RBAC</h1>
           <p className="text-[#64748B] mt-1">Manage dashboard accounts, dynamic roles, and permission matrix.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" size="sm" onClick={() => void seedAppPages()}>
             Seed App Pages
           </Button>
@@ -544,23 +545,38 @@ export function DashboardUsersPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="users" className="space-y-4">
-        <TabsList className="grid w-full max-w-[600px] grid-cols-3">
-          <TabsTrigger value="users">Dashboard Users</TabsTrigger>
-          <TabsTrigger value="roles">Roles & Permissions</TabsTrigger>
-          <TabsTrigger value="matrix">Permission Matrix</TabsTrigger>
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "users" | "roles" | "matrix")} className="space-y-4">
+        <TabsList className="inline-flex h-auto w-full max-w-[720px] flex-wrap items-center gap-2 rounded-xl border border-[#E2E8F0] bg-white p-2">
+          <TabsTrigger
+            value="users"
+            className="rounded-lg px-4 py-2 text-sm data-[state=active]:bg-[#0B5FFF] data-[state=active]:text-white"
+          >
+            Dashboard Users
+          </TabsTrigger>
+          <TabsTrigger
+            value="roles"
+            className="rounded-lg px-4 py-2 text-sm data-[state=active]:bg-[#0B5FFF] data-[state=active]:text-white"
+          >
+            Roles & Permissions
+          </TabsTrigger>
+          <TabsTrigger
+            value="matrix"
+            className="rounded-lg px-4 py-2 text-sm data-[state=active]:bg-[#0B5FFF] data-[state=active]:text-white"
+          >
+            Permission Matrix
+          </TabsTrigger>
         </TabsList>
 
         {/* ========== USERS TAB ========== */}
         <TabsContent value="users" className="space-y-4">
-          <Card className="p-4 flex items-center justify-between gap-3">
+          <Card className="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <Input
               placeholder="Search by name/email/role"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="max-w-md"
+              className="w-full sm:max-w-md"
             />
-            <Button className="bg-[#0B5FFF] hover:bg-[#0B5FFF]/90 text-white" onClick={() => setIsUserDialogOpen(true)}>
+            <Button className="w-full bg-[#0B5FFF] text-white hover:bg-[#0B5FFF]/90 sm:w-auto" onClick={() => setIsUserDialogOpen(true)}>
               Add Dashboard User
             </Button>
           </Card>
