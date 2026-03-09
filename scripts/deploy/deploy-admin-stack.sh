@@ -601,43 +601,11 @@ else
   run_prisma_push_with_auto_repair "npm run prisma:push"
 fi
 
-note "Syncing permission keys from @Permissions decorators"
-npm run permissions:sync
-
 npm run build
 
-RUN_DEMO_SEEDS_FLAG="${RUN_DEMO_SEEDS:-false}"
-RUN_DASHBOARD_LOAD_SEED_FLAG="${RUN_DASHBOARD_LOAD_SEED:-false}"
-RUN_PROFESSIONAL_DEMO_SEED_FLAG="${RUN_PROFESSIONAL_DEMO_SEED:-true}"
-
-# Baseline seed is required before any downstream demo/load/professional seed scripts.
-if [[ "$RUN_DEMO_SEEDS_FLAG" == "true" || "$RUN_DASHBOARD_LOAD_SEED_FLAG" == "true" || "$RUN_PROFESSIONAL_DEMO_SEED_FLAG" == "true" ]]; then
-  note "Running baseline Prisma seed"
-  source_env_file "$ROOT_ENV_PROD"
-  npx prisma db seed
-fi
-
-if [[ "$RUN_DEMO_SEEDS_FLAG" == "true" ]]; then
-  note "Seeding demo personas"
-  source_env_file "$ROOT_ENV_PROD"
-  npm run seed:mobile-personas
-fi
-if [[ "$RUN_DASHBOARD_LOAD_SEED_FLAG" == "true" ]]; then
-  note "Seeding realistic dashboard load data"
-  source_env_file "$ROOT_ENV_PROD"
-  npm run seed:dashboard-load
-fi
-
-if [[ "$RUN_PROFESSIONAL_DEMO_SEED_FLAG" == "true" ]]; then
-  note "Seeding professional demo dataset (fresh reset + Egyptian personas)"
-  source_env_file "$ROOT_ENV_PROD"
-  if [[ "${NODE_ENV:-}" == "production" && "${ALLOW_DEMO_RESET:-false}" != "true" ]]; then
-    echo "ERROR: Refusing demo reset on NODE_ENV=production without ALLOW_DEMO_RESET=true" >&2
-    exit 1
-  fi
-  npm run seed:mobile-personas
-  npm run seed:professional-demo
-fi
+note "Running baseline Prisma seed"
+source_env_file "$ROOT_ENV_PROD"
+npx prisma db seed
 
 note "Installing admin-web dependencies"
 cd "$ROOT_DIR/apps/admin-web"
