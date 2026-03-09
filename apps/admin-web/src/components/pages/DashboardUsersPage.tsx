@@ -708,24 +708,50 @@ export function DashboardUsersPage() {
             {(() => {
               type MatrixRow = { roleId: string; roleName: string; total: number; byModule: Map<string, number> };
               const matrixMinWidth = Math.max(980, 280 + permissionModules.length * 120);
-              const matrixCols: DataTableColumn<MatrixRow>[] = [
-                { key: "role", header: "Role", className: "min-w-[240px]", render: (r) => <span className="font-medium text-[#1E293B]">{r.roleName}</span> },
-                { key: "total", header: "Total", className: "min-w-[90px]", render: (r) => <span>{r.total}</span> },
-                ...permissionModules.map((mod) => ({
-                  key: mod,
-                  header: mod,
-                  className: "min-w-[110px]",
-                  render: (r: MatrixRow) => <span>{r.byModule.get(mod) ?? 0}</span>,
-                })),
-              ];
               return (
-                <div className="rounded-md border border-[#E2E8F0]">
-                  <DataTable
-                    columns={matrixCols}
-                    rows={rolePermissionMatrix}
-                    rowKey={(r) => r.roleId}
-                    minTableWidth={matrixMinWidth}
-                  />
+                <div className="rounded-md border border-[#E2E8F0] bg-white">
+                  <div className="overflow-x-auto overflow-y-hidden pb-2">
+                    <table
+                      className="w-max min-w-full border-collapse text-sm"
+                      style={{ minWidth: matrixMinWidth }}
+                    >
+                      <thead>
+                        <tr className="bg-[#F8FAFC]">
+                          <th className="sticky left-0 z-20 min-w-[240px] border-b border-r border-[#E2E8F0] bg-[#F8FAFC] px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[#64748B]">
+                            Role
+                          </th>
+                          <th className="sticky left-[240px] z-20 min-w-[90px] border-b border-r border-[#E2E8F0] bg-[#F8FAFC] px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[#64748B]">
+                            Total
+                          </th>
+                          {permissionModules.map((mod) => (
+                            <th
+                              key={mod}
+                              className="min-w-[110px] border-b border-r border-[#E2E8F0] px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-[#64748B]"
+                            >
+                              {mod}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rolePermissionMatrix.map((row, idx) => (
+                          <tr key={row.roleId} className={idx % 2 === 0 ? "bg-white" : "bg-[#FCFDFE]"}>
+                            <td className="sticky left-0 z-10 border-b border-r border-[#EEF2F7] bg-inherit px-4 py-2 font-medium text-[#1E293B]">
+                              {row.roleName}
+                            </td>
+                            <td className="sticky left-[240px] z-10 border-b border-r border-[#EEF2F7] bg-inherit px-3 py-2 text-[#334155]">
+                              {row.total}
+                            </td>
+                            {permissionModules.map((mod) => (
+                              <td key={`${row.roleId}-${mod}`} className="border-b border-r border-[#EEF2F7] px-3 py-2 text-[#334155]">
+                                {row.byModule.get(mod) ?? 0}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               );
             })()}
