@@ -12,9 +12,7 @@
 From repo root:
 ```bash
 npm install
-npx prisma generate
-npx prisma migrate deploy
-npx prisma db seed
+npm run db:init:fresh
 npm run start:dev
 ```
 

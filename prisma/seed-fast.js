@@ -8,6 +8,7 @@ const {
   EntityStatus,
   GateAccessRole,
   GateDirection,
+  InvoiceType,
 } = require('@prisma/client');
 
 const prisma = new PrismaClient();
@@ -88,6 +89,38 @@ const ROLES = {
     'gate.logs.view',
   ],
   COMMUNITY_USER: ['unit.view_own', 'project.view'],
+};
+
+const DEFAULT_INVOICE_CATEGORY_LABELS = {
+  RENT: 'Rent',
+  SERVICE_FEE: 'Service Fee',
+  UTILITY: 'Utility',
+  FINE: 'Fine',
+  MAINTENANCE_FEE: 'Maintenance Fee',
+  BOOKING_FEE: 'Booking Fee',
+  SETUP_FEE: 'Setup Fee',
+  LATE_FEE: 'Late Fee',
+  MISCELLANEOUS: 'Miscellaneous',
+  OWNER_EXPENSE: 'Owner Expense',
+  MANAGEMENT_FEE: 'Management Fee',
+  CREDIT_MEMO: 'Credit Memo',
+  DEBIT_MEMO: 'Debit Memo',
+};
+
+const DEFAULT_INVOICE_CATEGORY_COLORS = {
+  RENT: '#3b82f6',
+  SERVICE_FEE: '#10b981',
+  UTILITY: '#14b8a6',
+  FINE: '#ef4444',
+  MAINTENANCE_FEE: '#f59e0b',
+  BOOKING_FEE: '#f97316',
+  SETUP_FEE: '#8b5cf6',
+  LATE_FEE: '#dc2626',
+  MISCELLANEOUS: '#64748b',
+  OWNER_EXPENSE: '#0ea5e9',
+  MANAGEMENT_FEE: '#2563eb',
+  CREDIT_MEMO: '#22c55e',
+  DEBIT_MEMO: '#f43f5e',
 };
 
 async function upsertGateByName(communityId, name, data) {
@@ -189,6 +222,19 @@ async function main() {
     }
     await prisma.rolePermission.createMany({
       data: rolePermissionRows,
+      skipDuplicates: true,
+    });
+
+    await prisma.invoiceCategory.createMany({
+      data: Object.values(InvoiceType).map((type, index) => ({
+        label: DEFAULT_INVOICE_CATEGORY_LABELS[type],
+        mappedType: type,
+        isSystem: true,
+        description: `Default mapping for ${DEFAULT_INVOICE_CATEGORY_LABELS[type]} invoices.`,
+        color: DEFAULT_INVOICE_CATEGORY_COLORS[type],
+        displayOrder: index,
+        isActive: true,
+      })),
       skipDuplicates: true,
     });
 

@@ -9,8 +9,7 @@ This runbook prepares a presentation-ready environment with:
 
 If using a fresh local DB:
 ```bash
-npx prisma migrate deploy
-npx prisma db seed
+npm run db:init:fresh
 ```
 
 ## 2) Seed Demo Personas
