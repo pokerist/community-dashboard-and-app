@@ -1,7 +1,8 @@
-﻿import {
+import {
   Body,
   Controller,
   Get,
+  ParseUUIDPipe,
   Param,
   Post,
   Query,
@@ -46,10 +47,10 @@ export class PermitsController {
     return this.permitsService.getPermitStats();
   }
 
-  @Get(':id([0-9a-fA-F-]{36})')
+  @Get(':id')
   @ApiOperation({ summary: 'Get permit request detail' })
   @Permissions('service_request.view_all', 'service_request.view_own')
-  getPermitRequestDetail(@Param('id') id: string) {
+  getPermitRequestDetail(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.permitsService.getPermitRequestDetail(id);
   }
 
@@ -63,25 +64,26 @@ export class PermitsController {
     return this.permitsService.createPermitRequest(req.user.id, dto);
   }
 
-  @Post(':id([0-9a-fA-F-]{36})/approve')
+  @Post(':id/approve')
   @ApiOperation({ summary: 'Approve permit request' })
   @Permissions('service_request.resolve')
   approveRequest(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: ApprovePermitDto,
     @Req() req: AuthenticatedRequest,
   ) {
     return this.permitsService.approveRequest(id, req.user.id, dto);
   }
 
-  @Post(':id([0-9a-fA-F-]{36})/reject')
+  @Post(':id/reject')
   @ApiOperation({ summary: 'Reject permit request' })
   @Permissions('service_request.resolve')
   rejectRequest(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe()) id: string,
     @Body() dto: RejectPermitDto,
     @Req() req: AuthenticatedRequest,
   ) {
     return this.permitsService.rejectRequest(id, req.user.id, dto);
   }
 }
+

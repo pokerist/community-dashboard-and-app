@@ -1,8 +1,9 @@
-﻿import {
+import {
   Body,
   Controller,
   Delete,
   Get,
+  ParseUUIDPipe,
   Param,
   Patch,
   Post,
@@ -40,10 +41,10 @@ export class ServiceController {
     return this.serviceService.getServiceStats();
   }
 
-  @Get(':id([0-9a-fA-F-]{36})')
+  @Get(':id')
   @ApiOperation({ summary: 'Get service detail with fields and SLA stats' })
   @Permissions('service.read', 'service_request.create')
-  getServiceDetail(@Param('id') id: string) {
+  getServiceDetail(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.serviceService.getServiceDetail(id);
   }
 
@@ -61,25 +62,26 @@ export class ServiceController {
     return this.serviceService.reorder(dto.ids);
   }
 
-  @Patch(':id([0-9a-fA-F-]{36})')
+  @Patch(':id')
   @ApiOperation({ summary: 'Update service properties and fields' })
   @Permissions('service.update')
-  updateService(@Param('id') id: string, @Body() dto: UpdateServiceDto) {
+  updateService(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: UpdateServiceDto) {
     return this.serviceService.update(id, dto);
   }
 
-  @Patch(':id([0-9a-fA-F-]{36})/toggle')
+  @Patch(':id/toggle')
   @ApiOperation({ summary: 'Toggle service active/inactive status' })
   @Permissions('service.update')
-  toggleService(@Param('id') id: string) {
+  toggleService(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.serviceService.toggleService(id);
   }
 
-  @Delete(':id([0-9a-fA-F-]{36})')
+  @Delete(':id')
   @ApiOperation({ summary: 'Delete a service with no linked requests' })
   @Permissions('service.delete')
-  removeService(@Param('id') id: string) {
+  removeService(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.serviceService.remove(id);
   }
 }
+
 

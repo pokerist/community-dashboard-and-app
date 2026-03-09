@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  ParseUUIDPipe,
   Param,
   Patch,
   Post,
@@ -39,24 +40,25 @@ export class NewsController {
     return this.newsService.findAll(query);
   }
 
-  @Get(':id([0-9a-fA-F-]{36})')
+  @Get(':id')
   @Permissions('news.view', 'news.manage')
   @ApiOperation({ summary: 'Get news item by id' })
-  findOne(@Param('id') id: string) {
+  findOne(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.newsService.findOne(id);
   }
 
-  @Patch(':id([0-9a-fA-F-]{36})')
+  @Patch(':id')
   @Permissions('news.manage')
   @ApiOperation({ summary: 'Update news item' })
-  update(@Param('id') id: string, @Body() dto: UpdateNewsDto) {
+  update(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: UpdateNewsDto) {
     return this.newsService.update(id, dto);
   }
 
-  @Delete(':id([0-9a-fA-F-]{36})')
+  @Delete(':id')
   @Permissions('news.manage')
   @ApiOperation({ summary: 'Delete news item' })
-  remove(@Param('id') id: string) {
+  remove(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.newsService.remove(id);
   }
 }
+

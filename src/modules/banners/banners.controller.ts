@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  ParseUUIDPipe,
   Param,
   Patch,
   Post,
@@ -60,31 +61,32 @@ export class BannersController {
     return this.bannersService.findMobileForUser(req.user.id, { unitId });
   }
 
-  @Get(':id([0-9a-fA-F-]{36})')
+  @Get(':id')
   @Permissions('banner.view', 'banner.manage')
   @ApiOperation({ summary: 'Get banner by id' })
-  findOne(@Param('id') id: string) {
+  findOne(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.bannersService.findOne(id);
   }
 
-  @Patch(':id([0-9a-fA-F-]{36})/status')
+  @Patch(':id/status')
   @Permissions('banner.manage')
   @ApiOperation({ summary: 'Update banner status' })
-  updateStatus(@Param('id') id: string, @Body() dto: UpdateBannerStatusDto) {
+  updateStatus(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: UpdateBannerStatusDto) {
     return this.bannersService.updateStatus(id, dto.status);
   }
 
-  @Patch(':id([0-9a-fA-F-]{36})')
+  @Patch(':id')
   @Permissions('banner.manage')
   @ApiOperation({ summary: 'Update banner' })
-  update(@Param('id') id: string, @Body() dto: UpdateBannerDto) {
+  update(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: UpdateBannerDto) {
     return this.bannersService.update(id, dto);
   }
 
-  @Delete(':id([0-9a-fA-F-]{36})')
+  @Delete(':id')
   @Permissions('banner.manage')
   @ApiOperation({ summary: 'Delete banner' })
-  remove(@Param('id') id: string) {
+  remove(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.bannersService.remove(id);
   }
 }
+

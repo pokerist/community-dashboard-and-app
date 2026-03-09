@@ -6,6 +6,7 @@ import {
   Body,
   Patch,
   Param,
+  ParseUUIDPipe,
   Request,
   Delete,
   HttpCode,
@@ -168,32 +169,32 @@ export class AdminUsersController {
   @Patch('dashboard/:userId/roles')
   @Permissions('admin.update')
   updateUserRoles(
-    @Param('userId') userId: string,
+    @Param('userId', new ParseUUIDPipe()) userId: string,
     @Body() dto: UpdateUserRolesDto,
   ) {
     return this.usersService.updateUserRoles(userId, dto.roleIds);
   }
 
-  @Get(':userId([0-9a-fA-F-]{36})/permission-overrides')
+  @Get(':userId/permission-overrides')
   @Permissions('admin.view')
-  getUserPermissionOverrides(@Param('userId') userId: string) {
+  getUserPermissionOverrides(@Param('userId', new ParseUUIDPipe()) userId: string) {
     return this.usersService.getUserPermissionOverrides(userId);
   }
 
-  @Put(':userId([0-9a-fA-F-]{36})/permission-overrides')
+  @Put(':userId/permission-overrides')
   @Permissions('admin.update')
   setUserPermissionOverrides(
-    @Param('userId') userId: string,
+    @Param('userId', new ParseUUIDPipe()) userId: string,
     @Body() dto: SetUserOverridesDto,
   ) {
     return this.usersService.setUserPermissionOverrides(userId, dto.overrides);
   }
 
-  @Get(':userId([0-9a-fA-F-]{36})/resolve-permissions')
+  @Get(':userId/resolve-permissions')
   @Permissions('admin.view')
   @ApiQuery({ name: 'unitId', type: String, required: false })
   resolvePermissions(
-    @Param('userId') userId: string,
+    @Param('userId', new ParseUUIDPipe()) userId: string,
     @Query('unitId') unitId?: string,
   ) {
     return this.usersService.resolvePermissions(userId, unitId);
@@ -223,29 +224,29 @@ export class AdminUsersController {
     );
   }
 
-  @Get(':id([0-9a-fA-F-]{36})')
+  @Get(':id')
   @Permissions('user.read')
-  getUser(@Param('id') id: string) {
+  getUser(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.usersService.getUserWithRelations(id);
   }
 
-  @Patch(':id([0-9a-fA-F-]{36})')
+  @Patch(':id')
   @Permissions('user.update')
-  updateUser(@Param('id') id: string, @Body() dto: UpdateUserDto) {
+  updateUser(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: UpdateUserDto) {
     return this.usersService.updateUser(id, dto);
   }
 
-  @Delete(':id([0-9a-fA-F-]{36})')
+  @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @Permissions('user.delete')
-  deactivateUser(@Param('id') id: string) {
+  deactivateUser(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.usersService.deactivateUser(id);
   }
 
-  @Delete(':id([0-9a-fA-F-]{36})/hard')
+  @Delete(':id/hard')
   @Permissions('user.delete')
   hardDeleteUser(
-    @Param('id') id: string,
+    @Param('id', new ParseUUIDPipe()) id: string,
     @Query('purge') purge?: string,
   ) {
     const shouldPurge =
@@ -279,33 +280,33 @@ export class AdminUsersController {
 
   @Get('residents/:id')
   @Permissions('resident.view')
-  getResident(@Param('id') id: string) {
+  getResident(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.usersService.getResident(id);
   }
 
   @Patch('residents/:id')
   @Permissions('resident.update')
-  updateResident(@Param('id') id: string, @Body() dto: UpdateResidentDto) {
+  updateResident(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: UpdateResidentDto) {
     return this.usersService.updateResident(id, dto);
   }
 
   @Delete('residents/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @Permissions('resident.delete')
-  deleteResident(@Param('id') id: string) {
+  deleteResident(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.usersService.deleteResident(id);
   }
 
   @Get('residents/:userId/overview')
   @Permissions('resident.view_full_profile')
-  getResidentOverview(@Param('userId') userId: string) {
+  getResidentOverview(@Param('userId', new ParseUUIDPipe()) userId: string) {
     return this.usersService.getResidentOverview(userId);
   }
 
   @Patch('residents/:userId/profile')
   @Permissions('resident.update_full_profile')
   updateResidentProfile(
-    @Param('userId') userId: string,
+    @Param('userId', new ParseUUIDPipe()) userId: string,
     @Body() dto: UpdateResidentProfileAdminDto,
   ) {
     return this.usersService.updateResidentFullProfile(userId, dto);
@@ -314,7 +315,7 @@ export class AdminUsersController {
   @Post('residents/:userId/units/assign')
   @Permissions('unit.assign_resident')
   assignResidentUnit(
-    @Param('userId') userId: string,
+    @Param('userId', new ParseUUIDPipe()) userId: string,
     @Body() dto: AssignResidentUnitDto,
   ) {
     return this.usersService.assignUnitToResidentUser(userId, dto);
@@ -322,7 +323,7 @@ export class AdminUsersController {
 
   @Delete('residents/:userId/units/:unitId')
   @Permissions('unit.remove_resident_from_unit')
-  removeResidentUnit(@Param('userId') userId: string, @Param('unitId') unitId: string) {
+  removeResidentUnit(@Param('userId', new ParseUUIDPipe()) userId: string, @Param('unitId') unitId: string) {
     return this.usersService.removeUnitFromResidentUser(userId, unitId);
   }
 
@@ -339,7 +340,7 @@ export class AdminUsersController {
   @Get('residents/:userId/household-tree')
   @Permissions('resident.view_household_tree')
   getResidentHouseholdTree(
-    @Param('userId') userId: string,
+    @Param('userId', new ParseUUIDPipe()) userId: string,
     @Query('unitId') unitId?: string,
   ) {
     return this.usersService.getResidentHouseholdTree(userId, unitId);
@@ -347,7 +348,7 @@ export class AdminUsersController {
 
   @Get('residents/:userId/documents')
   @Permissions('resident.view_documents')
-  getResidentDocuments(@Param('userId') userId: string) {
+  getResidentDocuments(@Param('userId', new ParseUUIDPipe()) userId: string) {
     return this.usersService.getResidentDocuments(userId);
   }
 
@@ -377,20 +378,20 @@ export class AdminUsersController {
 
   @Get('owners/:id')
   @Permissions('owner.view')
-  getOwner(@Param('id') id: string) {
+  getOwner(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.usersService.getOwner(id);
   }
 
   @Patch('owners/:id')
   @Permissions('owner.update')
-  updateOwner(@Param('id') id: string, @Body() dto: UpdateOwnerDto) {
+  updateOwner(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: UpdateOwnerDto) {
     return this.usersService.updateOwner(id, dto);
   }
 
   @Delete('owners/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @Permissions('owner.delete')
-  deleteOwner(@Param('id') id: string) {
+  deleteOwner(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.usersService.deleteOwner(id);
   }
 
@@ -420,20 +421,20 @@ export class AdminUsersController {
 
   @Get('tenants/:id')
   @Permissions('tenant.view')
-  getTenant(@Param('id') id: string) {
+  getTenant(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.usersService.getTenant(id);
   }
 
   @Patch('tenants/:id')
   @Permissions('tenant.update')
-  updateTenant(@Param('id') id: string, @Body() dto: UpdateTenantDto) {
+  updateTenant(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: UpdateTenantDto) {
     return this.usersService.updateTenant(id, dto);
   }
 
   @Delete('tenants/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @Permissions('tenant.delete')
-  deleteTenant(@Param('id') id: string) {
+  deleteTenant(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.usersService.deleteTenant(id);
   }
 
@@ -463,20 +464,21 @@ export class AdminUsersController {
 
   @Get('admins/:id')
   @Permissions('admin.view')
-  getAdmin(@Param('id') id: string) {
+  getAdmin(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.usersService.getAdmin(id);
   }
 
   @Patch('admins/:id')
   @Permissions('admin.update')
-  updateAdmin(@Param('id') id: string, @Body() dto: UpdateAdminDto) {
+  updateAdmin(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: UpdateAdminDto) {
     return this.usersService.updateAdmin(id, dto);
   }
 
   @Delete('admins/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @Permissions('admin.delete')
-  deleteAdmin(@Param('id') id: string) {
+  deleteAdmin(@Param('id', new ParseUUIDPipe()) id: string) {
     return this.usersService.deleteAdmin(id);
   }
 }
+
