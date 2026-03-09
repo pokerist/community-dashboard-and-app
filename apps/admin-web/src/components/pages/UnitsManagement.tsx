@@ -1,39 +1,65 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Eye, Pencil, Plus, Power, RotateCcw, Home, Search, SlidersHorizontal, DoorOpen, Upload, Download, Users, FileText } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Eye, Pencil, Plus, Power, RotateCcw, Home, Search, SlidersHorizontal, DoorOpen, Upload, Download, Users, FileText, Building2, Building, Castle, Layers, Store, Landmark, LayoutGrid } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../ui/dialog";
 import { DataTable, type DataTableColumn } from "../DataTable";
 import { StatusBadge } from "../StatusBadge";
-import communityService, { type ClusterItem, type CommunityListItem, type GateItem } from "../../lib/community-service";
+import communityService, { type ClusterItem, type CommunityListItem, type GateItem, type PhaseItem } from "../../lib/community-service";
 import apiClient, { handleApiError } from "../../lib/api-client";
 import unitService, {
   type CreateUnitPayload,
   type GateAccessMode,
+  type UnitCategory,
   type UnitDetail,
   type UnitDisplayStatus,
   type UnitListItem,
-  type UnitStatus,
   type UnitType,
 } from "../../lib/unit-service";
 
 // ─── Constants ────────────────────────────────────────────────
-const UNIT_TYPES: UnitType[] = ["APARTMENT", "VILLA", "PENTHOUSE", "DUPLEX", "TOWNHOUSE"];
-const UNIT_STATUSES: UnitStatus[] = ["AVAILABLE","HELD","UNRELEASED","NOT_DELIVERED","DELIVERED","OCCUPIED","LEASED","RENTED"];
-const DISPLAY_STATUSES: UnitDisplayStatus[] = ["OFF_PLAN","UNDER_CONSTRUCTION","DELIVERED","OCCUPIED"];
+const RESIDENTIAL_TYPES: UnitType[] = ["APARTMENT", "VILLA", "PENTHOUSE", "DUPLEX", "TOWNHOUSE"];
+const COMMERCIAL_TYPES: UnitType[] = ["ADMINISTRATIVE", "COMMERCIAL_UNIT"];
+const ALL_UNIT_TYPES: UnitType[] = [...RESIDENTIAL_TYPES, ...COMMERCIAL_TYPES];
+const UNIT_TYPES = ALL_UNIT_TYPES;
+const UNIT_DISPLAY_STATUSES: UnitDisplayStatus[] = ["OFF_PLAN","UNDER_CONSTRUCTION","DELIVERED"];
 
-const TYPE_ICONS: Record<string, string> = {
-  APARTMENT:  "\u{1F3E2}",
-  VILLA:      "\u{1F3E1}",
-  PENTHOUSE:  "\u{1F306}",
-  DUPLEX:     "\u{1F3D8}\uFE0F",
-  TOWNHOUSE:  "\u{1F3E0}",
+/** Status values are now 1:1 with display statuses */
+const DISPLAY_TO_BACKEND_STATUS: Record<UnitDisplayStatus, string> = {
+  OFF_PLAN: "OFF_PLAN",
+  UNDER_CONSTRUCTION: "UNDER_CONSTRUCTION",
+  DELIVERED: "DELIVERED",
+};
+
+function backendToDisplayStatus(status: string): UnitDisplayStatus {
+  if (status === "UNDER_CONSTRUCTION") return "UNDER_CONSTRUCTION";
+  if (status === "DELIVERED") return "DELIVERED";
+  return "OFF_PLAN";
+}
+
+const TYPE_ICON_MAP: Record<string, React.ComponentType<{style?: React.CSSProperties}>> = {
+  APARTMENT:       Building2,
+  VILLA:           Home,
+  PENTHOUSE:       Castle,
+  DUPLEX:          Layers,
+  TOWNHOUSE:       Building,
+  ADMINISTRATIVE:  Landmark,
+  COMMERCIAL_UNIT: Store,
+};
+
+const TYPE_LABELS: Record<UnitType, string> = {
+  APARTMENT:       "Apartment",
+  VILLA:           "Villa",
+  PENTHOUSE:       "Penthouse",
+  DUPLEX:          "Duplex",
+  TOWNHOUSE:       "Townhouse",
+  ADMINISTRATIVE:  "Administrative",
+  COMMERCIAL_UNIT: "Commercial",
 };
 
 const DISPLAY_STATUS_STYLE: Record<UnitDisplayStatus, { bg: string; color: string }> = {
   OFF_PLAN:           { bg: "#F3F4F6", color: "#4B5563" },
   UNDER_CONSTRUCTION: { bg: "#FFFBEB", color: "#92400E" },
   DELIVERED:          { bg: "#EFF6FF", color: "#1D4ED8" },
-  OCCUPIED:           { bg: "#ECFDF5", color: "#065F46" },
 };
 
 // Accent cycling (matches design system)
@@ -41,46 +67,31 @@ const ACCENTS = ["#0D9488", "#2563EB", "#BE185D"];
 
 // ─── Helpers ──────────────────────────────────────────────────
 
-/** Derive a single meaningful status label from displayStatus + ownership */
 function deriveStatusLabel(unit: UnitListItem): string {
   switch (unit.displayStatus) {
-    case "UNDER_CONSTRUCTION":
-      return unit.residentCount > 0 ? "Sold" : "Under Construction";
-    case "DELIVERED":
-      return "Delivered";
-    case "OFF_PLAN":
-      return "Off Plan";
-    case "OCCUPIED":
-      return "Occupied";
-    default:
-      return unit.displayStatus.replace(/_/g, " ");
+    case "UNDER_CONSTRUCTION": return "Under Construction";
+    case "DELIVERED": return "Delivered";
+    case "OFF_PLAN": return "Off Plan";
+    default: return String(unit.displayStatus).replace(/_/g, " ");
   }
 }
 
 function deriveStatusStyle(unit: UnitListItem): { bg: string; color: string } {
-  if (unit.displayStatus === "UNDER_CONSTRUCTION" && unit.residentCount > 0) {
-    // "Sold" styling – purple-ish
-    return { bg: "#F3E8FF", color: "#7C3AED" };
-  }
-  return DISPLAY_STATUS_STYLE[unit.displayStatus];
+  return DISPLAY_STATUS_STYLE[unit.displayStatus] ?? DISPLAY_STATUS_STYLE.OFF_PLAN;
 }
 
-/** Resident type returned from GET /units/:id/residents */
-interface UnitResident {
-  id: string;
-  userId: string;
-  name: string | null;
-  email: string | null;
-  phone: string | null;
-  role: string;
-  isPrimary: boolean;
-  documents?: Array<{
-    id: string;
-    name: string;
-    url: string;
-    type: string;
-  }>;
-}
+const ROLE_STYLE: Record<string, { bg: string; color: string; label: string }> = {
+  OWNER:    { bg: "#DBEAFE", color: "#1D4ED8", label: "Owner" },
+  TENANT:   { bg: "#FEF3C7", color: "#92400E", label: "Tenant" },
+  FAMILY:   { bg: "#E0E7FF", color: "#4338CA", label: "Family" },
+  DELEGATE: { bg: "#FCE7F3", color: "#BE185D", label: "Delegate" },
+};
+
+const RELATIONSHIP_LABELS: Record<string, string> = {
+  SPOUSE: "Spouse",
+  CHILD: "Child",
+  PARENT: "Parent",
+};
 
 // ─── Shared UI primitives ─────────────────────────────────────
 
@@ -130,21 +141,36 @@ const inputStyle: React.CSSProperties = { width: "100%", padding: "8px 10px", bo
 const selectStyle: React.CSSProperties = { ...inputStyle, cursor: "pointer" };
 
 type UnitForm = {
-  communityId: string; clusterId: string; unitNumber: string; block: string;
-  type: UnitType; status: UnitStatus;
-  bedrooms: string; sizeSqm: string; price: string;
+  communityId: string; phaseId: string; clusterId: string; unitNumber: string; block: string;
+  category: UnitCategory; type: UnitType; status: UnitDisplayStatus;
+  bedrooms: string; sizeSqm: string;
   gateAccessMode: GateAccessMode; allowedGateIds: string[];
 };
-const defaultForm: UnitForm = { communityId: "", clusterId: "", unitNumber: "", block: "", type: "APARTMENT", status: "AVAILABLE", bedrooms: "", sizeSqm: "", price: "", gateAccessMode: "ALL_GATES", allowedGateIds: [] };
+const defaultForm: UnitForm = { communityId: "", phaseId: "", clusterId: "", unitNumber: "", block: "", category: "RESIDENTIAL", type: "APARTMENT", status: "OFF_PLAN", bedrooms: "", sizeSqm: "", gateAccessMode: "ALL_GATES", allowedGateIds: [] };
 
-const CSV_TEMPLATE = `unitNumber,block,type,status,communityId,clusterId,bedrooms,sizeSqm,price
-A-101,A,APARTMENT,AVAILABLE,<communityId>,,2,120,500000
-B-202,B,VILLA,AVAILABLE,<communityId>,,4,300,1500000`;
+const CSV_TEMPLATE = `unitNumber,block,type,status,communityId,phaseId,clusterId,bedrooms,sizeSqm
+A-101,A,APARTMENT,OFF_PLAN,<communityId>,,,2,120
+B-202,B,VILLA,OFF_PLAN,<communityId>,<phaseId>,<clusterId>,4,300`;
 
 // ─── Stat card for page header ────────────────────────────────
-function UnitStat({ label, value, accent, icon }: { label: string; value: string | number; accent: string; icon: React.ReactNode }) {
+function UnitStat({ label, value, accent, icon, onClick, active }: { label: string; value: string | number; accent: string; icon: React.ReactNode; onClick?: () => void; active?: boolean }) {
+  const [hovered, setHovered] = useState(false);
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "14px 18px", background: "#FFFFFF", borderRadius: "10px", border: "1px solid #EBEBEB", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", flex: 1, minWidth: 0, borderTop: `3px solid ${accent}` }}>
+    <div
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: "flex", alignItems: "center", gap: "12px", padding: "14px 18px",
+        background: active ? `${accent}08` : hovered ? "#FAFAFA" : "#FFFFFF",
+        borderRadius: "10px",
+        border: active ? `1.5px solid ${accent}` : "1px solid #EBEBEB",
+        boxShadow: active ? `0 0 0 1px ${accent}22` : "0 1px 3px rgba(0,0,0,0.05)",
+        flex: 1, minWidth: 0, borderTop: `3px solid ${accent}`,
+        cursor: onClick ? "pointer" : "default",
+        transition: "background 0.15s, border-color 0.15s, box-shadow 0.15s",
+      }}
+    >
       <div style={{ width: "36px", height: "36px", borderRadius: "9px", background: `${accent}12`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: accent }}>
         {icon}
       </div>
@@ -161,18 +187,21 @@ export function UnitsManagement() {
   const [units, setUnits]               = useState<UnitListItem[]>([]);
   const [loading, setLoading]           = useState(false);
   const [communities, setCommunities]   = useState<CommunityListItem[]>([]);
+  const [phases, setPhases]             = useState<PhaseItem[]>([]);
   const [clusters, setClusters]         = useState<ClusterItem[]>([]);
   const [search, setSearch]             = useState("");
   const [communityFilter, setCF]        = useState("all");
+  const [phaseFilter, setPF]            = useState("all");
   const [clusterFilter, setKF]          = useState("all");
   const [statusFilter, setSF]           = useState("all");
-  const [displayStatusFilter, setDSF]   = useState("all");
+  const [categoryFilter, setCatF]       = useState("all");
   const [showInactive, setShowInactive] = useState(false);
   const [filtersOpen, setFiltersOpen]   = useState(false);
 
   const [formOpen, setFormOpen]           = useState(false);
   const [editingUnit, setEditingUnit]     = useState<UnitListItem | null>(null);
   const [form, setForm]                   = useState<UnitForm>(defaultForm);
+  const [formPhases, setFormPhases]     = useState<PhaseItem[]>([]);
   const [formClusters, setFormClusters]   = useState<ClusterItem[]>([]);
   const [formGates, setFormGates]         = useState<GateItem[]>([]);
 
@@ -183,8 +212,7 @@ export function UnitsManagement() {
   const [detailMode, setDetailMode]               = useState<GateAccessMode>("ALL_GATES");
   const [detailGateIds, setDetailGateIds]         = useState<string[]>([]);
   const [detailGates, setDetailGates]             = useState<GateItem[]>([]);
-  const [detailResidents, setDetailResidents]     = useState<UnitResident[]>([]);
-  const [residentsLoading, setResidentsLoading]   = useState(false);
+  // Residents come from detail.currentResidents (no separate state needed)
 
   // Bulk upload state
   const [bulkOpen, setBulkOpen]           = useState(false);
@@ -198,46 +226,49 @@ export function UnitsManagement() {
     catch (e) { toast.error("Failed to load communities", { description: handleApiError(e) }); }
   }, []);
 
-  const loadClusters = useCallback(async () => {
-    if (communityFilter === "all") { setClusters([]); setKF("all"); return; }
+  const loadPhases = useCallback(async () => {
+    if (communityFilter === "all") { setPhases([]); setPF("all"); return; }
     try {
-      const rows = await communityService.listClusters(communityFilter);
+      const rows = await communityService.listPhases(communityFilter);
+      setPhases(rows);
+      if (phaseFilter !== "all" && !rows.some((r) => r.id === phaseFilter)) setPF("all");
+    } catch { setPhases([]); setPF("all"); }
+  }, [communityFilter, phaseFilter]);
+
+  const loadClusters = useCallback(async () => {
+    if (phaseFilter === "all") { setClusters([]); setKF("all"); return; }
+    try {
+      const rows = await communityService.listClusters(phaseFilter);
       setClusters(rows);
       if (clusterFilter !== "all" && !rows.some((r) => r.id === clusterFilter)) setKF("all");
     } catch { setClusters([]); setKF("all"); }
-  }, [clusterFilter, communityFilter]);
+  }, [clusterFilter, phaseFilter]);
 
   const loadUnits = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await unitService.listUnits({ page: 1, limit: 100, search: search.trim() || undefined, communityId: communityFilter !== "all" ? communityFilter : undefined, clusterId: clusterFilter !== "all" ? clusterFilter : undefined, status: statusFilter !== "all" ? statusFilter as UnitStatus : undefined, displayStatus: displayStatusFilter !== "all" ? displayStatusFilter as UnitDisplayStatus : undefined, includeInactive: showInactive });
+      const res = await unitService.listUnits({ page: 1, limit: 100, search: search.trim() || undefined, communityId: communityFilter !== "all" ? communityFilter : undefined, phaseId: phaseFilter !== "all" ? phaseFilter : undefined, clusterId: clusterFilter !== "all" ? clusterFilter : undefined, displayStatus: statusFilter !== "all" ? statusFilter as UnitDisplayStatus : undefined, category: categoryFilter !== "all" ? categoryFilter as UnitCategory : undefined, includeInactive: showInactive });
       setUnits(res.data);
     } catch (e) { toast.error("Failed to load units", { description: handleApiError(e) }); setUnits([]); }
     finally { setLoading(false); }
-  }, [clusterFilter, communityFilter, displayStatusFilter, search, showInactive, statusFilter]);
+  }, [categoryFilter, clusterFilter, communityFilter, phaseFilter, search, showInactive, statusFilter]);
 
   useEffect(() => { void loadCommunities(); }, [loadCommunities]);
+  useEffect(() => { void loadPhases(); }, [loadPhases]);
   useEffect(() => { void loadClusters(); }, [loadClusters]);
   useEffect(() => { void loadUnits(); }, [loadUnits]);
 
-  const loadFormDeps = useCallback(async (communityId: string) => {
-    if (!communityId) { setFormClusters([]); setFormGates([]); return; }
-    const [cl, ga] = await Promise.all([communityService.listClusters(communityId).catch(() => []), communityService.listGates(communityId).catch(() => [])]);
-    setFormClusters(cl); setFormGates(ga);
+  const loadFormDeps = useCallback(async (communityId: string, phaseId?: string) => {
+    if (!communityId) { setFormPhases([]); setFormClusters([]); setFormGates([]); return; }
+    const [ph, ga] = await Promise.all([communityService.listPhases(communityId).catch(() => []), communityService.listGates(communityId).catch(() => [])]);
+    setFormPhases(ph);
+    const effectivePhaseId = phaseId ?? ph[0]?.id ?? '';
+    if (effectivePhaseId) setFormClusters(await communityService.listClusters(effectivePhaseId).catch(() => []));
+    else setFormClusters([]);
+    setFormGates(ga);
   }, []);
 
-  // ── Load residents for unit detail ─────────────────────────
-  const loadResidents = useCallback(async (unitId: string) => {
-    setResidentsLoading(true);
-    try {
-      const res = await apiClient.get<UnitResident[]>(`/units/${unitId}/residents`);
-      setDetailResidents(Array.isArray(res.data) ? res.data : []);
-    } catch {
-      setDetailResidents([]);
-    } finally {
-      setResidentsLoading(false);
-    }
-  }, []);
+  // Residents are now included directly in the detail response (currentResidents)
 
   // ── CRUD ────────────────────────────────────────────────────
   const openCreate = async () => {
@@ -248,8 +279,8 @@ export function UnitsManagement() {
 
   const openEdit = async (unit: UnitListItem) => {
     setEditingUnit(unit);
-    setForm({ ...defaultForm, communityId: unit.communityId ?? "", clusterId: unit.clusterId ?? "", unitNumber: unit.unitNumber, block: unit.block ?? "", type: unit.type, status: unit.status, bedrooms: unit.bedrooms != null ? String(unit.bedrooms) : "", sizeSqm: unit.sizeSqm != null ? String(unit.sizeSqm) : "", price: unit.price != null ? String(unit.price) : "" });
-    await loadFormDeps(unit.communityId ?? "");
+    setForm({ ...defaultForm, communityId: unit.communityId ?? "", phaseId: unit.phaseId ?? "", clusterId: unit.clusterId ?? "", unitNumber: unit.unitNumber, block: unit.block ?? "", category: unit.category ?? "RESIDENTIAL", type: unit.type, status: backendToDisplayStatus(unit.status), bedrooms: unit.bedrooms != null ? String(unit.bedrooms) : "", sizeSqm: unit.sizeSqm != null ? String(unit.sizeSqm) : "" });
+    await loadFormDeps(unit.communityId ?? "", unit.phaseId ?? undefined);
     try { const ga = await unitService.getUnitGateAccess(unit.id); setForm((p) => ({ ...p, gateAccessMode: ga.mode, allowedGateIds: ga.gates.map((g) => g.id) })); } catch { /* ignore */ }
     setFormOpen(true);
   };
@@ -257,7 +288,7 @@ export function UnitsManagement() {
   const saveForm = async () => {
     if (!form.communityId || !form.unitNumber.trim()) { toast.error("Community and unit number required"); return; }
     if (form.gateAccessMode === "SELECTED_GATES" && !form.allowedGateIds.length) { toast.error("Select at least one gate"); return; }
-    const payload: CreateUnitPayload = { communityId: form.communityId, clusterId: form.clusterId || undefined, unitNumber: form.unitNumber.trim(), block: form.block.trim() || undefined, type: form.type, status: form.status, bedrooms: form.bedrooms ? Number(form.bedrooms) : undefined, sizeSqm: form.sizeSqm ? Number(form.sizeSqm) : undefined, price: form.price ? Number(form.price) : undefined, gateAccessMode: form.gateAccessMode, allowedGateIds: form.gateAccessMode === "SELECTED_GATES" ? form.allowedGateIds : [] };
+    const payload: CreateUnitPayload = { communityId: form.communityId, phaseId: form.phaseId || undefined, clusterId: form.clusterId || undefined, unitNumber: form.unitNumber.trim(), block: form.block.trim() || undefined, category: form.category, type: form.type, status: DISPLAY_TO_BACKEND_STATUS[form.status] as any, bedrooms: form.bedrooms ? Number(form.bedrooms) : undefined, sizeSqm: form.sizeSqm ? Number(form.sizeSqm) : undefined, gateAccessMode: form.gateAccessMode, allowedGateIds: form.gateAccessMode === "SELECTED_GATES" ? form.allowedGateIds : [] };
     try {
       if (editingUnit) { await unitService.updateUnit(editingUnit.id, payload); toast.success("Unit updated"); }
       else { await unitService.createUnit(payload); toast.success("Unit created"); }
@@ -282,7 +313,6 @@ export function UnitsManagement() {
       setDetail(res); setDetailMode(res.gateAccess.mode); setDetailGateIds(res.gateAccess.gates.map((g) => g.id));
       const gates = res.communityId ? await communityService.listGates(res.communityId) : [];
       setDetailGates(gates); setDetailOpen(true);
-      void loadResidents(unit.id);
     } catch (e) { toast.error("Failed to load detail", { description: handleApiError(e) }); }
   };
 
@@ -324,14 +354,14 @@ export function UnitsManagement() {
 
   // ── Derived stats ────────────────────────────────────────────
   const stats = useMemo(() => ({
-    total:    units.length,
-    active:   units.filter((u) => u.isActive).length,
-    occupied: units.filter((u) => u.status === "OCCUPIED").length,
-    inactive: units.filter((u) => !u.isActive).length,
+    total:       units.length,
+    offPlan:     units.filter((u) => u.displayStatus === "OFF_PLAN").length,
+    underConst:  units.filter((u) => u.displayStatus === "UNDER_CONSTRUCTION").length,
+    delivered:   units.filter((u) => u.displayStatus === "DELIVERED").length,
   }), [units]);
 
   // Active filters count for badge
-  const activeFilters = [communityFilter !== "all", clusterFilter !== "all", statusFilter !== "all", displayStatusFilter !== "all", showInactive].filter(Boolean).length;
+  const activeFilters = [communityFilter !== "all", phaseFilter !== "all", clusterFilter !== "all", statusFilter !== "all", categoryFilter !== "all", showInactive].filter(Boolean).length;
 
   // ── Table columns ────────────────────────────────────────────
   const columns: DataTableColumn<UnitListItem>[] = [
@@ -339,7 +369,7 @@ export function UnitsManagement() {
       key: "unit", header: "Unit",
       render: (u) => (
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <span style={{ fontSize: "16px", lineHeight: 1 }}>{TYPE_ICONS[u.type] ?? "\u{1F3E0}"}</span>
+          {(() => { const Icon = TYPE_ICON_MAP[u.type] ?? Home; return <Icon style={{ width: "16px", height: "16px", color: "#6B7280" }} />; })()}
           <div>
             <p style={{ fontSize: "13px", fontWeight: 700, color: "#111827", letterSpacing: "-0.01em", fontFamily: "'DM Mono', monospace" }}>{u.unitNumber}</p>
             {u.block && <p style={{ fontSize: "10.5px", color: "#9CA3AF", marginTop: "1px" }}>Block {u.block}</p>}
@@ -358,11 +388,19 @@ export function UnitsManagement() {
     },
     {
       key: "type", header: "Type",
-      render: (u) => (
-        <span style={{ fontSize: "11.5px", fontWeight: 600, color: "#6B7280", background: "#F3F4F6", padding: "3px 8px", borderRadius: "5px", fontFamily: "'Work Sans', sans-serif" }}>
-          {u.type.charAt(0) + u.type.slice(1).toLowerCase()}
-        </span>
-      ),
+      render: (u) => {
+        const isCommercial = u.category === "COMMERCIAL";
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+            <span style={{ fontSize: "11.5px", fontWeight: 600, color: isCommercial ? "#7C3AED" : "#6B7280", background: isCommercial ? "#F5F3FF" : "#F3F4F6", padding: "3px 8px", borderRadius: "5px", fontFamily: "'Work Sans', sans-serif" }}>
+              {TYPE_LABELS[u.type] ?? u.type}
+            </span>
+            {isCommercial && (
+              <span style={{ fontSize: "9.5px", fontWeight: 700, color: "#7C3AED", textTransform: "uppercase", letterSpacing: "0.05em" }}>Commercial</span>
+            )}
+          </div>
+        );
+      },
     },
     {
       key: "status", header: "Status",
@@ -401,12 +439,6 @@ export function UnitsManagement() {
       ),
     },
     {
-      key: "price", header: "Price",
-      render: (u) => u.price != null
-        ? <span style={{ fontSize: "12.5px", fontWeight: 700, color: "#059669", fontFamily: "'DM Mono', monospace" }}>EGP {u.price.toLocaleString()}</span>
-        : <span style={{ color: "#D1D5DB", fontFamily: "'DM Mono', monospace" }}>\u2014</span>,
-    },
-    {
       key: "actions", header: "Actions",
       render: (u) => (
         <div style={{ display: "flex", gap: "4px" }}>
@@ -442,14 +474,16 @@ export function UnitsManagement() {
 
       {/* ── KPI strip ──────────────────────────────────────── */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "12px", marginBottom: "20px" }}>
-        <UnitStat label="Total Units" value={stats.total} accent={ACCENTS[1]} icon={<Home style={{ width: "16px", height: "16px" }} />} />
-        <UnitStat label="Active" value={stats.active} accent={ACCENTS[0]} icon={
+        <UnitStat label="Total Units" value={stats.total} accent={ACCENTS[1]} icon={<Home style={{ width: "16px", height: "16px" }} />} onClick={() => setSF("all")} active={statusFilter === "all"} />
+        <UnitStat label="Off Plan" value={stats.offPlan} accent="#4B5563" icon={
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-        } />
-        <UnitStat label="Occupied" value={stats.occupied} accent="#059669" icon={
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-        } />
-        <UnitStat label="Inactive" value={stats.inactive} accent={ACCENTS[2]} icon={<Power style={{ width: "16px", height: "16px" }} />} />
+        } onClick={() => setSF("OFF_PLAN")} active={statusFilter === "OFF_PLAN"} />
+        <UnitStat label="Under Construction" value={stats.underConst} accent="#92400E" icon={
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 20h20"/><path d="M5 20V8l7-5 7 5v12"/></svg>
+        } onClick={() => setSF("UNDER_CONSTRUCTION")} active={statusFilter === "UNDER_CONSTRUCTION"} />
+        <UnitStat label="Delivered" value={stats.delivered} accent="#1D4ED8" icon={
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 6L9 17l-5-5"/></svg>
+        } onClick={() => setSF("DELIVERED")} active={statusFilter === "DELIVERED"} />
       </div>
 
       {/* ── Search + filter bar ────────────────────────────── */}
@@ -478,38 +512,46 @@ export function UnitsManagement() {
           <div style={{ padding: "12px 14px", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "10px", alignItems: "end" }}>
             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
               <label style={{ fontSize: "10.5px", fontWeight: 600, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em" }}>Community</label>
-              <select value={communityFilter} onChange={(e) => setCF(e.target.value)} style={selectStyle}>
+              <select value={communityFilter} onChange={(e) => { setCF(e.target.value); setPF("all"); setKF("all"); }} style={selectStyle}>
                 <option value="all">All communities</option>
                 {communities.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <label style={{ fontSize: "10.5px", fontWeight: 600, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em" }}>Phase</label>
+              <select value={phaseFilter} onChange={(e) => { setPF(e.target.value); setKF("all"); }} disabled={communityFilter === "all"} style={{ ...selectStyle, opacity: communityFilter === "all" ? 0.5 : 1 }}>
+                <option value="all">All phases</option>
+                {phases.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
               <label style={{ fontSize: "10.5px", fontWeight: 600, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em" }}>Cluster</label>
-              <select value={clusterFilter} onChange={(e) => setKF(e.target.value)} disabled={communityFilter === "all"} style={{ ...selectStyle, opacity: communityFilter === "all" ? 0.5 : 1 }}>
+              <select value={clusterFilter} onChange={(e) => setKF(e.target.value)} disabled={phaseFilter === "all"} style={{ ...selectStyle, opacity: phaseFilter === "all" ? 0.5 : 1 }}>
                 <option value="all">All clusters</option>
                 {clusters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <label style={{ fontSize: "10.5px", fontWeight: 600, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em" }}>Category</label>
+              <select value={categoryFilter} onChange={(e) => setCatF(e.target.value)} style={selectStyle}>
+                <option value="all">All categories</option>
+                <option value="RESIDENTIAL">Residential</option>
+                <option value="COMMERCIAL">Commercial</option>
               </select>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
               <label style={{ fontSize: "10.5px", fontWeight: 600, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em" }}>Status</label>
               <select value={statusFilter} onChange={(e) => setSF(e.target.value)} style={selectStyle}>
                 <option value="all">All statuses</option>
-                {UNIT_STATUSES.map((s) => <option key={s} value={s}>{s.replace("_", " ")}</option>)}
-              </select>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-              <label style={{ fontSize: "10.5px", fontWeight: 600, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em" }}>Display</label>
-              <select value={displayStatusFilter} onChange={(e) => setDSF(e.target.value)} style={selectStyle}>
-                <option value="all">All display statuses</option>
-                {DISPLAY_STATUSES.map((s) => <option key={s} value={s}>{s.replace("_", " ")}</option>)}
+                {UNIT_DISPLAY_STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, " ")}</option>)}
               </select>
             </div>
             <label style={{ display: "flex", alignItems: "center", gap: "7px", fontSize: "12.5px", color: "#374151", cursor: "pointer", gridColumn: "span 4" }}>
               <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} style={{ accentColor: "#2563EB" }} />
               Show inactive units
-              {showInactive && stats.inactive > 0 && (
+              {showInactive && units.filter((u) => !u.isActive).length > 0 && (
                 <span style={{ fontSize: "10px", fontWeight: 700, background: "#FEF2F2", color: "#BE185D", padding: "1px 6px", borderRadius: "4px" }}>
-                  {stats.inactive} inactive
+                  {units.filter((u) => !u.isActive).length} inactive
                 </span>
               )}
             </label>
@@ -544,13 +586,19 @@ export function UnitsManagement() {
             {/* Location */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
               <Field label="Community">
-                <select value={form.communityId} style={selectStyle} onChange={(e) => { const cid = e.target.value; setForm((p) => ({ ...p, communityId: cid, clusterId: "", allowedGateIds: [] })); void loadFormDeps(cid); }}>
+                <select value={form.communityId} style={selectStyle} onChange={(e) => { const cid = e.target.value; setForm((p) => ({ ...p, communityId: cid, phaseId: "", clusterId: "", allowedGateIds: [] })); void loadFormDeps(cid); }}>
                   <option value="">Select community</option>
                   {communities.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </Field>
+              <Field label="Phase">
+                <select value={form.phaseId} style={selectStyle} onChange={async (e) => { const pid = e.target.value; setForm((p) => ({ ...p, phaseId: pid, clusterId: "" })); setFormClusters(pid ? await communityService.listClusters(pid).catch(() => []) : []); }}>
+                  <option value="">No phase</option>
+                  {formPhases.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </Field>
               <Field label="Cluster">
-                <select value={form.clusterId} style={selectStyle} onChange={(e) => setForm((p) => ({ ...p, clusterId: e.target.value }))}>
+                <select value={form.clusterId} style={selectStyle} onChange={(e) => setForm((p) => ({ ...p, clusterId: e.target.value }))} disabled={!form.phaseId}>
                   <option value="">No cluster</option>
                   {formClusters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
@@ -565,23 +613,34 @@ export function UnitsManagement() {
 
             {/* Classification */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-              <Field label="Type">
-                <select value={form.type} style={selectStyle} onChange={(e) => setForm((p) => ({ ...p, type: e.target.value as UnitType }))}>
-                  {UNIT_TYPES.map((t) => <option key={t} value={t}>{TYPE_ICONS[t]} {t.charAt(0) + t.slice(1).toLowerCase()}</option>)}
+              <Field label="Category">
+                <select value={form.category} style={selectStyle} onChange={(e) => {
+                  const cat = e.target.value as UnitCategory;
+                  const firstType = cat === "COMMERCIAL" ? COMMERCIAL_TYPES[0] : RESIDENTIAL_TYPES[0];
+                  setForm((p) => ({ ...p, category: cat, type: firstType }));
+                }}>
+                  <option value="RESIDENTIAL">Residential</option>
+                  <option value="COMMERCIAL">Commercial</option>
                 </select>
               </Field>
+              <Field label="Type">
+                <select value={form.type} style={selectStyle} onChange={(e) => setForm((p) => ({ ...p, type: e.target.value as UnitType }))}>
+                  {(form.category === "COMMERCIAL" ? COMMERCIAL_TYPES : RESIDENTIAL_TYPES).map((t) => <option key={t} value={t}>{TYPE_LABELS[t]}</option>)}
+                </select>
+              </Field>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
               <Field label="Status">
-                <select value={form.status} style={selectStyle} onChange={(e) => setForm((p) => ({ ...p, status: e.target.value as UnitStatus }))}>
-                  {UNIT_STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, " ")}</option>)}
+                <select value={form.status} style={selectStyle} onChange={(e) => setForm((p) => ({ ...p, status: e.target.value as UnitDisplayStatus }))}>
+                  {UNIT_DISPLAY_STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, " ")}</option>)}
                 </select>
               </Field>
             </div>
 
             {/* Specs */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "12px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
               <Field label="Bedrooms"><input type="number" min={0} value={form.bedrooms} onChange={(e) => setForm((p) => ({ ...p, bedrooms: e.target.value }))} style={inputStyle} /></Field>
               <Field label="Size (m\u00B2)"><input type="number" min={0} value={form.sizeSqm} onChange={(e) => setForm((p) => ({ ...p, sizeSqm: e.target.value }))} style={inputStyle} /></Field>
-              <Field label="Price (EGP)"><input type="number" min={0} value={form.price} onChange={(e) => setForm((p) => ({ ...p, price: e.target.value }))} style={inputStyle} /></Field>
             </div>
 
             {/* Gate access */}
@@ -703,7 +762,7 @@ export function UnitsManagement() {
         <DialogContent style={{ maxWidth: "580px", borderRadius: "10px", border: "1px solid #EBEBEB", padding: 0, overflow: "hidden", fontFamily: "'Work Sans', sans-serif" }}>
           <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid #F3F4F6" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "4px" }}>
-              <span style={{ fontSize: "24px" }}>{TYPE_ICONS[detail?.type ?? ""] ?? "\u{1F3E0}"}</span>
+              {(() => { const Icon = TYPE_ICON_MAP[detail?.type ?? ""] ?? Home; return <div style={{ width: "40px", height: "40px", borderRadius: "10px", background: "#EFF6FF", display: "flex", alignItems: "center", justifyContent: "center" }}><Icon style={{ width: "20px", height: "20px", color: "#2563EB" }} /></div>; })()}
               <div>
                 <DialogTitle style={{ fontFamily: "'DM Mono', monospace", fontWeight: 700, fontSize: "16px", color: "#111827" }}>{detail?.unitNumber ?? "Unit"}</DialogTitle>
                 <p style={{ fontSize: "12px", color: "#9CA3AF", marginTop: "2px" }}>{detail?.communityName} {detail?.clusterName ? `\u00B7 ${detail.clusterName}` : ""}</p>
@@ -714,13 +773,12 @@ export function UnitsManagement() {
           {detail ? (
             <div style={{ maxHeight: "70vh", overflowY: "auto" }}>
               {/* Specs strip */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", borderBottom: "1px solid #F3F4F6" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", borderBottom: "1px solid #F3F4F6" }}>
                 {[
                   { label: "Bedrooms", value: detail.bedrooms != null ? `${detail.bedrooms} BR` : "\u2014" },
                   { label: "Size",     value: detail.sizeSqm != null ? `${detail.sizeSqm} m\u00B2` : "\u2014" },
-                  { label: "Price",    value: detail.price != null ? `EGP ${detail.price.toLocaleString()}` : "\u2014" },
                 ].map((s, i) => (
-                  <div key={s.label} style={{ padding: "12px 16px", borderRight: i < 2 ? "1px solid #F3F4F6" : "none" }}>
+                  <div key={s.label} style={{ padding: "12px 16px", borderRight: i < 1 ? "1px solid #F3F4F6" : "none" }}>
                     <p style={{ fontSize: "10.5px", color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em", fontWeight: 600 }}>{s.label}</p>
                     <p style={{ fontSize: "14px", fontWeight: 700, color: "#111827", marginTop: "3px", fontFamily: "'DM Mono', monospace" }}>{s.value}</p>
                   </div>
@@ -754,57 +812,95 @@ export function UnitsManagement() {
                   <Users style={{ width: "14px", height: "14px", color: "#6B7280" }} />
                   <span style={{ fontSize: "12.5px", fontWeight: 700, color: "#111827" }}>Owners & Residents</span>
                   <span style={{ fontSize: "10px", fontWeight: 700, background: "#F3F4F6", color: "#6B7280", padding: "2px 6px", borderRadius: "4px", fontFamily: "'DM Mono', monospace" }}>
-                    {detailResidents.length}
+                    {detail?.currentResidents?.length ?? 0}
                   </span>
                 </div>
 
-                {residentsLoading ? (
-                  <div style={{ padding: "16px 0", textAlign: "center" }}>
-                    <div style={{ height: "12px", width: "60%", borderRadius: "4px", margin: "0 auto 8px", backgroundImage: "linear-gradient(90deg,#F3F4F6 25%,#E9EAEC 50%,#F3F4F6 75%)", backgroundSize: "200% 100%", animation: "sk-shimmer 1.4s ease infinite" }} />
-                    <div style={{ height: "12px", width: "40%", borderRadius: "4px", margin: "0 auto", backgroundImage: "linear-gradient(90deg,#F3F4F6 25%,#E9EAEC 50%,#F3F4F6 75%)", backgroundSize: "200% 100%", animation: "sk-shimmer 1.4s ease infinite" }} />
-                  </div>
-                ) : detailResidents.length === 0 ? (
+                {!detail?.currentResidents?.length ? (
                   <p style={{ fontSize: "12.5px", color: "#9CA3AF", padding: "8px 0" }}>No owners or residents assigned to this unit.</p>
                 ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                    {detailResidents.map((r) => (
-                      <div key={r.id} style={{ padding: "10px 12px", borderRadius: "8px", border: `1px solid ${r.isPrimary ? "#BFDBFE" : "#E5E7EB"}`, background: r.isPrimary ? "#EFF6FF" : "#FAFAFA" }}>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                            <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: r.isPrimary ? "#2563EB" : "#9CA3AF", color: "#FFF", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", fontWeight: 700, flexShrink: 0 }}>
-                              {(r.name ?? r.email ?? "?").charAt(0).toUpperCase()}
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    {detail.currentResidents.map((r) => {
+                      const roleStyle = ROLE_STYLE[r.role] ?? { bg: "#F3F4F6", color: "#6B7280", label: r.role };
+                      return (
+                        <div key={r.id} style={{ padding: "12px 14px", borderRadius: "8px", border: `1px solid ${roleStyle.color}30`, background: `${roleStyle.bg}40` }}>
+                          {/* Main resident info */}
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                              <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: roleStyle.color, color: "#FFF", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: 700, flexShrink: 0 }}>
+                                {(r.name ?? r.email ?? "?").charAt(0).toUpperCase()}
+                              </div>
+                              <div>
+                                <p style={{ fontSize: "13px", fontWeight: 700, color: "#111827" }}>{r.name ?? "No name on file"}</p>
+                                <div style={{ display: "flex", gap: "12px", marginTop: "2px", flexWrap: "wrap" }}>
+                                  {r.email && <span style={{ fontSize: "11px", color: "#6B7280" }}>{r.email}</span>}
+                                  {r.phone && <span style={{ fontSize: "11px", color: "#9CA3AF" }}>{r.phone}</span>}
+                                </div>
+                              </div>
                             </div>
-                            <div>
-                              <p style={{ fontSize: "12.5px", fontWeight: 600, color: "#111827" }}>{r.name ?? "Unnamed"}</p>
-                              {r.email && <p style={{ fontSize: "11px", color: "#6B7280", marginTop: "1px" }}>{r.email}</p>}
-                              {r.phone && <p style={{ fontSize: "11px", color: "#9CA3AF", marginTop: "1px" }}>{r.phone}</p>}
+                            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px", flexShrink: 0 }}>
+                              <span style={{ fontSize: "10px", fontWeight: 700, padding: "2px 8px", borderRadius: "4px", background: roleStyle.bg, color: roleStyle.color, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                                {roleStyle.label}
+                              </span>
+                              {r.isPrimary && (
+                                <span style={{ fontSize: "9px", fontWeight: 700, padding: "2px 6px", borderRadius: "4px", background: "#DBEAFE", color: "#1D4ED8", textTransform: "uppercase", letterSpacing: "0.05em" }}>Primary</span>
+                              )}
                             </div>
                           </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                            {r.isPrimary && (
-                              <span style={{ fontSize: "9px", fontWeight: 700, padding: "2px 6px", borderRadius: "4px", background: "#DBEAFE", color: "#1D4ED8", textTransform: "uppercase", letterSpacing: "0.05em" }}>Primary</span>
-                            )}
-                            <span style={{ fontSize: "9px", fontWeight: 700, padding: "2px 6px", borderRadius: "4px", background: "#F3F4F6", color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>{r.role}</span>
-                          </div>
-                        </div>
 
-                        {/* Documents for this resident */}
-                        {r.documents && r.documents.length > 0 && (
-                          <div style={{ marginTop: "8px", paddingTop: "8px", borderTop: "1px solid #E5E7EB" }}>
-                            <p style={{ fontSize: "10.5px", fontWeight: 600, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: "4px" }}>Documents</p>
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                              {r.documents.map((doc) => (
-                                <a key={doc.id} href={doc.url} target="_blank" rel="noopener noreferrer"
-                                  style={{ display: "flex", alignItems: "center", gap: "4px", padding: "4px 8px", borderRadius: "5px", border: "1px solid #E5E7EB", background: "#FFF", fontSize: "11px", fontWeight: 500, color: "#2563EB", textDecoration: "none", cursor: "pointer" }}>
-                                  <FileText style={{ width: "10px", height: "10px" }} />
-                                  {doc.name}
-                                </a>
-                              ))}
-                            </div>
+                          {/* Status & assignment date */}
+                          <div style={{ display: "flex", gap: "12px", marginTop: "8px", paddingTop: "6px", borderTop: `1px solid ${roleStyle.color}15` }}>
+                            {r.userStatus && (
+                              <span style={{ fontSize: "10px", fontWeight: 600, color: r.userStatus === "ACTIVE" ? "#059669" : "#9CA3AF" }}>
+                                {r.userStatus}
+                              </span>
+                            )}
+                            {r.assignedAt && (
+                              <span style={{ fontSize: "10px", color: "#9CA3AF" }}>
+                                Assigned {new Date(r.assignedAt).toLocaleDateString()}
+                              </span>
+                            )}
                           </div>
-                        )}
-                      </div>
-                    ))}
+
+                          {/* Family members */}
+                          {r.familyMembers && r.familyMembers.length > 0 && (
+                            <div style={{ marginTop: "10px", paddingTop: "8px", borderTop: `1px solid ${roleStyle.color}20` }}>
+                              <p style={{ fontSize: "10.5px", fontWeight: 700, color: "#6B7280", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: "6px" }}>
+                                Family Members ({r.familyMembers.length})
+                              </p>
+                              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                                {r.familyMembers.map((fm) => (
+                                  <div key={fm.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 10px", borderRadius: "6px", background: "#FFFFFF", border: "1px solid #E5E7EB" }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                      <div style={{ width: "22px", height: "22px", borderRadius: "50%", background: "#E0E7FF", color: "#4338CA", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "9px", fontWeight: 700, flexShrink: 0 }}>
+                                        {(fm.name ?? "?").charAt(0).toUpperCase()}
+                                      </div>
+                                      <div>
+                                        <p style={{ fontSize: "12px", fontWeight: 600, color: "#111827" }}>{fm.name ?? "No name"}</p>
+                                        <div style={{ display: "flex", gap: "8px", marginTop: "1px" }}>
+                                          {fm.email && <span style={{ fontSize: "10px", color: "#9CA3AF" }}>{fm.email}</span>}
+                                          {fm.phone && <span style={{ fontSize: "10px", color: "#9CA3AF" }}>{fm.phone}</span>}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div style={{ display: "flex", gap: "4px", flexShrink: 0 }}>
+                                      <span style={{ fontSize: "9px", fontWeight: 700, padding: "2px 6px", borderRadius: "4px", background: "#E0E7FF", color: "#4338CA", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                                        {RELATIONSHIP_LABELS[fm.relationship] ?? fm.relationship}
+                                      </span>
+                                      {fm.status !== "ACTIVE" && (
+                                        <span style={{ fontSize: "9px", fontWeight: 700, padding: "2px 6px", borderRadius: "4px", background: "#FEF2F2", color: "#DC2626", textTransform: "uppercase" }}>
+                                          {fm.status}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>

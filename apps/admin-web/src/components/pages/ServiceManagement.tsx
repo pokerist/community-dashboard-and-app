@@ -12,8 +12,10 @@ import {
   Sparkles, Trophy, Wrench, Check, X, Search,
   AlertTriangle, Clock,
 } from 'lucide-react';
+import { IconPicker, resolveIcon } from '../IconPicker';
 import servicesService, {
   type AssigneeOption,
+  type CreateMicroServiceInput,
   type DashboardRoleOption,
   type CreateServicePayload,
   type ServiceListItem,
@@ -28,6 +30,7 @@ type ServiceManagementProps = { mode?: 'services' | 'requests' };
 type RequestStatus   = 'ALL' | 'NEW' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED' | 'CANCELLED';
 type RequestPriority = 'ALL' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 type EditableField   = { id: string; label: string; type: ServiceFieldType; required: boolean };
+type EditableMicroService = { id: string; name: string; price: string };
 
 // ─── Constants ────────────────────────────────────────────────
 
@@ -59,6 +62,10 @@ const fmt   = (v?: string | null) => v ? formatDateTime(v) : '—';
 
 function serviceIcon(iconName: string | null, category: ServiceCategory): React.ReactNode {
   const s = { width: '15px', height: '15px' };
+  if (iconName) {
+    const Resolved = resolveIcon(iconName);
+    if (Resolved) return <Resolved style={s} />;
+  }
   const k = (iconName ?? '').toLowerCase();
   if (k.includes('shield') || k.includes('security') || category === ServiceCategory.SECURITY) return <Shield style={s} />;
   if (k.includes('trophy') || k.includes('club'))     return <Trophy style={s} />;
@@ -260,7 +267,14 @@ function ServiceCard({ svc, onEdit, onToggle }: {
         </div>
         {/* Name */}
         <div>
-          <p style={{ fontSize: '13.5px', fontWeight: 800, color: '#111827', margin: '0 0 3px', letterSpacing: '-0.01em' }}>{svc.name}</p>
+          <p style={{ fontSize: '13.5px', fontWeight: 800, color: '#111827', margin: '0 0 3px', letterSpacing: '-0.01em' }}>
+            {svc.name}
+            {svc.microServicesCount > 0 && (
+              <span style={{ fontSize: '10px', fontWeight: 700, padding: '1px 5px', borderRadius: '4px', background: '#EFF6FF', color: '#2563EB', marginLeft: '6px' }}>
+                {svc.microServicesCount} sub
+              </span>
+            )}
+          </p>
           <p style={{ fontSize: '11px', color: '#9CA3AF', margin: 0 }}>
             {humanizeEnum(svc.category)}{svc.slaHours ? <span style={{ color: '#D1D5DB', marginLeft: '6px' }}>· {svc.slaHours}h SLA</span> : null}
           </p>
@@ -308,6 +322,7 @@ function ServiceFormDrawer({ open, onClose, editingId, onSaved, roleOptions }: {
   const [iconName,      setIconName]      = useState('');
   const [iconTone,      setIconTone]      = useState<string>('auto');
   const [fields,        setFields]        = useState<EditableField[]>([{ id: 'f1', label: '', type: ServiceFieldType.TEXT, required: false }]);
+  const [microServices, setMicroServices] = useState<EditableMicroService[]>([]);
   const [saving,        setSaving]        = useState(false);
 
   useEffect(() => {
@@ -318,6 +333,7 @@ function ServiceFormDrawer({ open, onClose, editingId, onSaved, roleOptions }: {
       setEligibility(EligibilityType.ALL); setUrgent(false);
       setIconName(''); setIconTone('auto');
       setFields([{ id: `f-${Date.now()}`, label: '', type: ServiceFieldType.TEXT, required: false }]);
+      setMicroServices([]);
       return;
     }
     void servicesService.getServiceDetail(editingId).then((d) => {
@@ -330,6 +346,7 @@ function ServiceFormDrawer({ open, onClose, editingId, onSaved, roleOptions }: {
       setFields(d.fields.length > 0
         ? d.fields.map((f) => ({ id: f.id, label: f.label, type: f.type as ServiceFieldType, required: f.required }))
         : [{ id: `f-${Date.now()}`, label: '', type: ServiceFieldType.TEXT, required: false }]);
+      setMicroServices(d.microServices?.map((ms) => ({ id: ms.id, name: ms.name, price: ms.price != null ? String(ms.price) : '' })) ?? []);
     }).catch(() => toast.error('Failed to load service'));
   }, [open, editingId]);
 
@@ -346,6 +363,11 @@ function ServiceFormDrawer({ open, onClose, editingId, onSaved, roleOptions }: {
       iconName:  iconName.trim() || undefined,
       iconTone:  iconTone || undefined,
       fields: fields.filter((f) => f.label.trim()).map((f, i) => ({ label: f.label.trim(), type: f.type, required: f.required, order: i + 1 })),
+      microServices: microServices.filter((ms) => ms.name.trim()).map((ms, i) => ({
+        name: ms.name.trim(),
+        price: ms.price ? Number(ms.price) : undefined,
+        displayOrder: i + 1,
+      })),
     };
     try {
       if (editingId) await servicesService.updateService(editingId, payload);
@@ -359,6 +381,11 @@ function ServiceFormDrawer({ open, onClose, editingId, onSaved, roleOptions }: {
   const removeField = (id: string) => setFields((p) => p.filter((f) => f.id !== id));
   const updateField = <K extends keyof EditableField>(id: string, k: K, v: EditableField[K]) =>
     setFields((p) => p.map((f) => f.id === id ? { ...f, [k]: v } : f));
+
+  const addMicroService = () => setMicroServices((p) => [...p, { id: `ms-${Date.now()}-${p.length}`, name: '', price: '' }]);
+  const removeMicroService = (id: string) => setMicroServices((p) => p.filter((ms) => ms.id !== id));
+  const updateMicroService = <K extends keyof EditableMicroService>(id: string, k: K, v: EditableMicroService[K]) =>
+    setMicroServices((p) => p.map((ms) => ms.id === id ? { ...ms, [k]: v } : ms));
 
   return (
     <DrawerForm
@@ -392,17 +419,8 @@ function ServiceFormDrawer({ open, onClose, editingId, onSaved, roleOptions }: {
           </select>
         </Field>
 
-        <Field label="Icon Name" hint="kebab-case">
-          <select value={iconName} onChange={(e) => setIconName(e.target.value)} style={selectStyle}>
-            <option value="">None</option>
-            {[
-              'shield', 'wrench', 'flame', 'trophy', 'sparkles', 'laptop',
-              'zap', 'heart', 'star', 'home', 'key', 'lock', 'bell',
-              'clipboard', 'file-text', 'calendar', 'clock', 'truck',
-              'wifi', 'droplet', 'sun', 'thermometer', 'paint-bucket',
-              'hammer', 'phone', 'mail', 'camera', 'music', 'map-pin',
-            ].map((ic) => <option key={ic} value={ic}>{ic}</option>)}
-          </select>
+        <Field label="Icon" hint="pick an icon">
+          <IconPicker value={iconName} onChange={setIconName} color={iconTone !== 'auto' ? { blue: '#3B82F6', green: '#10B981', orange: '#F59E0B', purple: '#8B5CF6', pink: '#F43F5E', teal: '#14B8A6' }[iconTone] ?? '#6B7280' : '#6B7280'} allowEmpty />
         </Field>
 
         <Field label="Color Tone" hint="for mobile app">
@@ -474,6 +492,29 @@ function ServiceFormDrawer({ open, onClose, editingId, onSaved, roleOptions }: {
             <p style={{ fontSize: '11px', color: '#9CA3AF', margin: '2px 0 0' }}>Flag as high-priority for residents</p>
           </div>
           <ToggleSwitch checked={urgent} onChange={() => setUrgent((p) => !p)} />
+        </div>
+
+        <SectionDivider label="Micro-services" />
+
+        <div style={{ gridColumn: 'span 2', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {microServices.map((ms, idx) => (
+            <div key={ms.id} style={{ display: 'grid', gridTemplateColumns: '28px 1fr 120px auto', gap: '8px', alignItems: 'center' }}>
+              <span style={{ width: '28px', height: '28px', borderRadius: '50%', background: '#EFF6FF', color: '#2563EB', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 700, fontFamily: "'DM Mono', monospace", flexShrink: 0 }}>
+                {String.fromCharCode(65 + idx)}
+              </span>
+              <input value={ms.name} onChange={(e) => updateMicroService(ms.id, 'name', e.target.value)} placeholder="e.g. Pipe Replacement" style={inputStyle} />
+              <input type="number" min={0} value={ms.price} onChange={(e) => updateMicroService(ms.id, 'price', e.target.value)} placeholder="Price (optional)"
+                style={{ ...inputStyle, fontFamily: "'DM Mono', monospace" }} />
+              <button type="button" onClick={() => removeMicroService(ms.id)}
+                style={{ width: '28px', height: '28px', borderRadius: '6px', border: '1px solid #FECACA', background: '#FEF2F2', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#DC2626', flexShrink: 0 }}>
+                <X style={{ width: '11px', height: '11px' }} />
+              </button>
+            </div>
+          ))}
+          <button type="button" onClick={addMicroService}
+            style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '7px 14px', borderRadius: '7px', border: '1px dashed #D1D5DB', background: '#FAFAFA', color: '#6B7280', cursor: 'pointer', fontSize: '12px', fontFamily: "'Work Sans', sans-serif" }}>
+            <Plus style={{ width: '11px', height: '11px' }} /> Add Micro-service
+          </button>
         </div>
 
         <SectionDivider label="Form Fields" />
@@ -800,32 +841,30 @@ export function ServiceManagement({ mode = 'services' }: ServiceManagementProps)
     <div style={{ fontFamily: "'Work Sans', sans-serif" }}>
 
       {/* ── Page header ─────────────────────────────────────── */}
-      <div style={{ marginBottom: '20px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-        <div>
-          <h1 style={{ fontSize: '18px', fontWeight: 900, color: '#111827', letterSpacing: '-0.02em', margin: 0 }}>Services</h1>
-          <p style={{ fontSize: '13px', color: '#9CA3AF', margin: '4px 0 0' }}>Manage your service catalog and incoming requests.</p>
-        </div>
-        {activeTab === 'catalog' && (
-          <button type="button" onClick={() => { setEditingSvcId(null); setSvcDrawerOpen(true); }}
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 16px', height: '36px', borderRadius: '8px', background: '#111827', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif", boxShadow: '0 2px 6px rgba(0,0,0,0.15)' }}>
-            <Plus style={{ width: '13px', height: '13px' }} /> Add Service
-          </button>
-        )}
+      <div style={{ marginBottom: '20px' }}>
+        <h1 style={{ fontSize: '18px', fontWeight: 900, color: '#111827', letterSpacing: '-0.02em', margin: 0 }}>Services</h1>
+        <p style={{ fontSize: '13px', color: '#9CA3AF', margin: '4px 0 0' }}>Manage your service catalog and incoming requests.</p>
       </div>
 
       {/* ── Tabs ────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', gap: '2px', padding: '4px', borderRadius: '10px', background: '#F3F4F6', marginBottom: '20px', width: 'fit-content' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '2px', padding: '4px', borderRadius: '10px', background: '#F3F4F6', marginBottom: '20px' }}>
         <TabBtn label="Service Catalog" active={activeTab === 'catalog'}  onClick={() => setActiveTab('catalog')} />
         <TabBtn label="Requests"        active={activeTab === 'requests'} onClick={() => setActiveTab('requests')} />
+        {activeTab === 'catalog' && (
+          <button type="button" onClick={() => { setEditingSvcId(null); setSvcDrawerOpen(true); }}
+            style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '6px', padding: '0 16px', height: '36px', borderRadius: '8px', background: '#111827', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif", boxShadow: '0 2px 6px rgba(0,0,0,0.15)' }}>
+            <Plus style={{ width: '13px', height: '13px' }} /> Add Service
+          </button>
+        )}
       </div>
 
       {/* ══ CATALOG ═══════════════════════════════════════════ */}
       {activeTab === 'catalog' && (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '20px' }}>
-            <StatCard icon="devices"         title="Total Services"  value={String(stats?.totalServices  ?? 0)} subtitle="All configured" />
-            <StatCard icon="active-users"    title="Active Services" value={String(stats?.activeServices ?? 0)} subtitle="Currently enabled" />
-            <StatCard icon="complaints-open" title="Open Requests"   value={String(stats?.openRequests   ?? 0)} subtitle="Pending action" />
+            <StatCard icon="devices"         title="Total Services"  value={String(stats?.totalServices  ?? 0)} subtitle="All configured"    onClick={() => setCatStatus('all')} />
+            <StatCard icon="active-users"    title="Active Services" value={String(stats?.activeServices ?? 0)} subtitle="Currently enabled" onClick={() => setCatStatus('active')} />
+            <StatCard icon="complaints-open" title="Open Requests"   value={String(stats?.openRequests   ?? 0)} subtitle="Pending action"    onClick={() => { setActiveTab('requests'); setReqStatus('NEW'); setSlaBreached(false); setReqPage(1); }} />
             <StatCard icon="revenue"         title="Total Revenue"   value={money(stats?.totalRevenue    ?? 0)} subtitle="All time" />
           </div>
 
@@ -874,9 +913,9 @@ export function ServiceManagement({ mode = 'services' }: ServiceManagementProps)
       {activeTab === 'requests' && (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '20px' }}>
-            <StatCard icon="complaints-open"   title="Open Requests"       value={String(stats?.openRequests          ?? 0)} subtitle="Pending action" />
-            <StatCard icon="complaints-total"  title="SLA Breached"        value={String(stats?.slaBreachedRequests   ?? 0)} subtitle="Over deadline" />
-            <StatCard icon="complaints-closed" title="Resolved This Month" value={String(stats?.resolvedThisMonth     ?? 0)} subtitle="Current month" />
+            <StatCard icon="complaints-open"   title="Open Requests"       value={String(stats?.openRequests          ?? 0)} subtitle="Pending action"  onClick={() => { setReqStatus('NEW'); setSlaBreached(false); setReqPage(1); }} />
+            <StatCard icon="complaints-total"  title="SLA Breached"        value={String(stats?.slaBreachedRequests   ?? 0)} subtitle="Over deadline"   onClick={() => { setSlaBreached(true); setReqStatus('ALL'); setReqPage(1); }} />
+            <StatCard icon="complaints-closed" title="Resolved This Month" value={String(stats?.resolvedThisMonth     ?? 0)} subtitle="Current month"   onClick={() => { setReqStatus('RESOLVED'); setSlaBreached(false); setReqPage(1); }} />
             <StatCard icon="tickets"           title="Avg Resolution"      value={`${reqAvgResolution}h`}                    subtitle="From resolved" />
           </div>
 

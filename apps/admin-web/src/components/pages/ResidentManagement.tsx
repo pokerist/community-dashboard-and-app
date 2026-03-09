@@ -1,8 +1,8 @@
 import { JSXElementConstructor, ReactElement, ReactNode, ReactPortal, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import {
-  Search, Plus, Trash2, Ban, RefreshCw, User,
-  ChevronRight, Home, Mail, Phone, CreditCard,
+  Search, Plus, Trash2, Ban, RefreshCw, User, Users,
+  ChevronRight, Home, Mail, Phone, CreditCard, Briefcase, Shield, UserPlus,
   Calendar, SlidersHorizontal, UserCheck, UserX, AlertTriangle,
   Fingerprint,
 } from "lucide-react";
@@ -19,19 +19,16 @@ import type { ResidentOverview } from "./resident-360.types";
 
 // ─── Types ────────────────────────────────────────────────────
 
+type ResidentType = "OWNER" | "TENANT" | "FAMILY" | "DELEGATE" | "BROKER" | "UNKNOWN";
+
 type ResidentRow = {
   id: string; name: string; nameAr: string; nationalId: string;
   mobile: string; email: string; units: string[];
   rawStatus: string; status: string; registrationDate: string; avatar: string;
+  residentType: ResidentType;
 };
 
 type UnitOption = { id: string; label: string };
-
-type CreateResidentForm = {
-  nameEN: string; nameAR: string; email: string; phone: string;
-  password: string; nationalId: string; dateOfBirth: string;
-  unitId: string; unitRole: "FAMILY" | "TENANT" | "OWNER";
-};
 
 type OwnerPaymentMode = "CASH" | "INSTALLMENT";
 
@@ -39,8 +36,10 @@ type OwnerInstallmentDraft = {
   dueDate: string; amount: string; referencePageIndex: string; referenceFile: File | null;
 };
 
+type UnitAssignmentRole = "OWNER" | "TENANT" | "FAMILY";
+
 type OwnerUnitDraft = {
-  unitId: string; paymentMode: OwnerPaymentMode; contractSignedAt: string;
+  unitId: string; role: UnitAssignmentRole; paymentMode: OwnerPaymentMode; contractSignedAt: string;
   contractFile: File | null; notes: string; installments: OwnerInstallmentDraft[];
 };
 
@@ -49,11 +48,16 @@ type CreateOwnerForm = {
   nationalId: string; nationalIdPhotoFile: File | null; units: OwnerUnitDraft[];
 };
 
-const INIT_RESIDENT: CreateResidentForm = { nameEN: "", nameAR: "", email: "", phone: "", password: "", nationalId: "", dateOfBirth: "", unitId: "", unitRole: "FAMILY" };
 const INIT_OWNER: CreateOwnerForm = { nameEN: "", nameAR: "", email: "", phone: "", nationalId: "", nationalIdPhotoFile: null, units: [makeUnitDraft()] };
 
 function makeInstallmentDraft(): OwnerInstallmentDraft { return { dueDate: "", amount: "", referencePageIndex: "", referenceFile: null }; }
-function makeUnitDraft(): OwnerUnitDraft { return { unitId: "", paymentMode: "CASH", contractSignedAt: "", contractFile: null, notes: "", installments: [] }; }
+function makeUnitDraft(): OwnerUnitDraft { return { unitId: "", role: "OWNER", paymentMode: "CASH", contractSignedAt: "", contractFile: null, notes: "", installments: [] }; }
+
+const ROLE_OPTIONS: Array<{ value: UnitAssignmentRole; label: string; desc: string; color: string; bg: string }> = [
+  { value: "OWNER", label: "Owner", desc: "Full ownership rights", color: "#1D4ED8", bg: "#EFF6FF" },
+  { value: "TENANT", label: "Tenant", desc: "Active lease holder", color: "#059669", bg: "#ECFDF5" },
+  { value: "FAMILY", label: "Family", desc: "Family member", color: "#D97706", bg: "#FFFBEB" },
+];
 
 // ─── Design tokens ────────────────────────────────────────────
 
@@ -64,6 +68,50 @@ const STATUS_STYLES: Record<string, { dot: string; bg: string; color: string }> 
   SUSPENDED: { dot: "#F59E0B", bg: "#FFFBEB", color: "#92400E" },
   DISABLED:  { dot: "#6B7280", bg: "#F3F4F6", color: "#374151" },
   INVITED:   { dot: "#3B82F6", bg: "#EFF6FF", color: "#1D4ED8" },
+};
+
+// ─── Resident type tabs ──────────────────────────────────────
+
+type TypeTabValue = "all" | ResidentType;
+
+const TYPE_TABS: Array<{ value: TypeTabValue; label: string; icon: React.ReactNode; color: string }> = [
+  { value: "all",      label: "All",       icon: <Users style={{ width: "13px", height: "13px" }} />,     color: "#6B7280" },
+  { value: "OWNER",    label: "Owners",    icon: <Home style={{ width: "13px", height: "13px" }} />,      color: "#1D4ED8" },
+  { value: "TENANT",   label: "Tenants",   icon: <CreditCard style={{ width: "13px", height: "13px" }} />,color: "#059669" },
+  { value: "FAMILY",   label: "Family",    icon: <UserPlus style={{ width: "13px", height: "13px" }} />,  color: "#D97706" },
+  { value: "DELEGATE", label: "Delegates", icon: <Shield style={{ width: "13px", height: "13px" }} />,    color: "#7C3AED" },
+  { value: "BROKER",   label: "Brokers",   icon: <Briefcase style={{ width: "13px", height: "13px" }} />, color: "#DC2626" },
+];
+
+/** Derive a resident's primary type from API response data. Priority: OWNER > TENANT > FAMILY > DELEGATE; separate BROKER check */
+function deriveResidentType(user: any): ResidentType {
+  // Check broker relation first (separate model)
+  if (user.broker) return "BROKER";
+
+  const accesses: Array<{ role: string; delegateType?: string | null }> = user.unitAccesses ?? [];
+  if (accesses.some((a) => a.role === "OWNER")) return "OWNER";
+  if (accesses.some((a) => a.role === "TENANT")) return "TENANT";
+  if (accesses.some((a) => a.role === "FAMILY")) return "FAMILY";
+  if (accesses.some((a) => a.role === "DELEGATE")) return "DELEGATE";
+
+  // Fallback: check familyOf relations
+  const familyOf = user.resident?.familyOf;
+  if (Array.isArray(familyOf) && familyOf.length > 0) return "FAMILY";
+
+  // Legacy fallback from owner/tenant relations
+  if (user.owner) return "OWNER";
+  if (user.tenant) return "TENANT";
+
+  return "UNKNOWN";
+}
+
+const RESIDENT_TYPE_BADGE: Record<ResidentType, { label: string; color: string; bg: string }> = {
+  OWNER:    { label: "Owner",    color: "#1D4ED8", bg: "#EFF6FF" },
+  TENANT:   { label: "Tenant",   color: "#059669", bg: "#ECFDF5" },
+  FAMILY:   { label: "Family",   color: "#D97706", bg: "#FFFBEB" },
+  DELEGATE: { label: "Delegate", color: "#7C3AED", bg: "#F5F3FF" },
+  BROKER:   { label: "Broker",   color: "#DC2626", bg: "#FEF2F2" },
+  UNKNOWN:  { label: "Resident", color: "#6B7280", bg: "#F3F4F6" },
 };
 
 // ─── Primitives ───────────────────────────────────────────────
@@ -148,9 +196,23 @@ function StatusPill({ raw }: { raw: string }) {
 
 // ─── Stat card ────────────────────────────────────────────────
 
-function StatCard({ label, value, accent, icon }: { label: string; value: string | number; accent: string; icon: React.ReactNode }) {
+function StatCard({ label, value, accent, icon, onClick, active }: { label: string; value: string | number; accent: string; icon: React.ReactNode; onClick?: () => void; active?: boolean }) {
   return (
-    <div style={{ flex: 1, minWidth: 0, padding: "14px 16px", background: "#FFF", borderRadius: "10px", border: "1px solid #EBEBEB", boxShadow: "0 1px 3px rgba(0,0,0,0.04)", borderTop: `3px solid ${accent}` }}>
+    <div
+      onClick={onClick}
+      style={{
+        flex: 1, minWidth: 0, padding: "14px 16px",
+        background: active ? `${accent}0A` : "#FFF",
+        borderRadius: "10px",
+        border: active ? `1.5px solid ${accent}` : "1px solid #EBEBEB",
+        boxShadow: active ? `0 0 0 2px ${accent}22` : "0 1px 3px rgba(0,0,0,0.04)",
+        borderTop: `3px solid ${accent}`,
+        cursor: onClick ? "pointer" : undefined,
+        transition: "all 0.15s ease",
+      }}
+      onMouseEnter={(e) => { if (onClick && !active) { e.currentTarget.style.border = `1.5px solid ${accent}66`; e.currentTarget.style.boxShadow = `0 0 0 2px ${accent}18`; } }}
+      onMouseLeave={(e) => { if (onClick && !active) { e.currentTarget.style.border = "1px solid #EBEBEB"; e.currentTarget.style.boxShadow = "0 1px 3px rgba(0,0,0,0.04)"; } }}
+    >
       <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
         <div style={{ width: "32px", height: "32px", borderRadius: "8px", background: `${accent}12`, display: "flex", alignItems: "center", justifyContent: "center", color: accent, flexShrink: 0 }}>{icon}</div>
         <div>
@@ -174,6 +236,7 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
   const [loadError, setLoadError]             = useState<string | null>(null);
   const [searchTerm, setSearch]               = useState("");
   const [statusFilter, setStatusFilter]       = useState("all");
+  const [typeTab, setTypeTab]                 = useState<TypeTabValue>("all");
   const [filtersOpen, setFiltersOpen]         = useState(false);
 
   // 360 sheet
@@ -182,8 +245,7 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
   const [isOverviewLoading, setOvLoading]     = useState(false);
 
   // Create dialogs
-  const [createMode, setCreateMode]           = useState<"owner" | "quick" | null>(null);
-  const [residentForm, setResidentForm]       = useState<CreateResidentForm>(INIT_RESIDENT);
+  const [createMode, setCreateMode]           = useState<"owner" | null>(null);
   const [ownerForm, setOwnerForm]             = useState<CreateOwnerForm>(INIT_OWNER);
   const [saving, setSaving]                   = useState(false);
 
@@ -193,13 +255,13 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
     setIsLoading(true); setLoadError(null);
     try {
       const [res, unitsRes] = await Promise.all([
-        apiClient.get("/admin/users", { params: { userType: "resident", take: 200, skip: 0 } }),
-        apiClient.get("/units", { params: { page: 1, limit: 100, status: "AVAILABLE" } }),
+        apiClient.get("/admin/users", { params: { userType: "resident", take: 100, skip: 0 } }),
+        apiClient.get("/units", { params: { page: 1, limit: 100, displayStatus: "DELIVERED" } }),
       ]);
       const users = Array.isArray(res.data) ? res.data : [];
       setRows(users.map((u: any, i: number) => {
         const unitLabels = u?.resident?.residentUnits?.map((ru: any) => { const unit = ru?.unit; if (!unit) return null; return `${unit.block ? unit.block + "-" : ""}${unit.unitNumber}`; })?.filter(Boolean) ?? [];
-        return { id: u.id, name: u.nameEN ?? "—", nameAr: u.nameAR ?? "—", nationalId: maskNationalId(u?.resident?.nationalId), mobile: u.phone ?? "—", email: u.email ?? "—", units: unitLabels.length > 0 ? unitLabels : ["—"], rawStatus: String(u.userStatus ?? "ACTIVE").toUpperCase(), status: humanizeEnum(u.userStatus ?? "ACTIVE"), registrationDate: formatDate(u.createdAt), avatar: toInitials(u.nameEN) };
+        return { id: u.id, name: u.nameEN ?? "—", nameAr: u.nameAR ?? "—", nationalId: maskNationalId(u?.resident?.nationalId), mobile: u.phone ?? "—", email: u.email ?? "—", units: unitLabels.length > 0 ? unitLabels : ["—"], rawStatus: String(u.userStatus ?? "ACTIVE").toUpperCase(), status: humanizeEnum(u.userStatus ?? "ACTIVE"), registrationDate: formatDate(u.createdAt), avatar: toInitials(u.nameEN), residentType: deriveResidentType(u) };
       }));
       setResidentOptions(users.map((u: any) => ({ id: String(u.id), label: [u.nameEN, u.email, u.phone].filter(Boolean).join(" • ") || String(u.id) })));
       const rawUnits = Array.isArray(unitsRes.data?.data) ? unitsRes.data.data : Array.isArray(unitsRes.data) ? unitsRes.data : [];
@@ -229,20 +291,6 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
 
   // ── Actions ──────────────────────────────────────────────────
 
-  const handleCreateResident = async () => {
-    if (!residentForm.nameEN.trim()) { toast.error("Resident name is required"); return; }
-    if (!residentForm.email.trim() && !residentForm.phone.trim()) { toast.error("Provide at least email or phone"); return; }
-    setSaving(true); let uid: string | null = null;
-    try {
-      const ur = await apiClient.post("/admin/users", { nameEN: residentForm.nameEN.trim(), nameAR: residentForm.nameAR.trim() || undefined, email: residentForm.email.trim() || undefined, phone: residentForm.phone.trim() || undefined, password: residentForm.password.trim() || undefined, signupSource: "dashboard" });
-      uid = ur.data?.id; if (!uid) throw new Error("User creation did not return an id");
-      await apiClient.post("/admin/users/residents", { userId: uid, nationalId: residentForm.nationalId.trim() || undefined, dateOfBirth: residentForm.dateOfBirth ? new Date(residentForm.dateOfBirth).toISOString() : undefined });
-      if (residentForm.unitId) await apiClient.post(`/units/${residentForm.unitId}/assign-user`, { userId: uid, role: residentForm.unitRole });
-      toast.success("Resident created"); setResidentForm(INIT_RESIDENT); setCreateMode(null); await loadResidents();
-    } catch (e) { toast.error("Failed to create resident", { description: uid ? `User created (${uid}) but profile failed. ${errorMessage(e)}` : errorMessage(e) }); }
-    finally { setSaving(false); }
-  };
-
   const handleCreateOwner = async () => {
     if (!ownerForm.nameEN.trim()) { toast.error("Resident English name is required"); return; }
     if (!ownerForm.phone.trim()) { toast.error("Phone is required"); return; }
@@ -251,11 +299,14 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
     setSaving(true);
     try {
       const natIdFileId = await uploadFile("/files/upload/national-id", ownerForm.nationalIdPhotoFile);
-      const mappedUnits = [];
-      for (let i = 0; i < ownerForm.units.length; i++) {
-        const ud = ownerForm.units[i];
-        if (!ud.unitId) throw new Error(`Unit required in assignment #${i + 1}`);
-        if (ud.paymentMode === "INSTALLMENT" && !ud.installments.length) throw new Error(`Installments required for assignment #${i + 1}`);
+      const ownerUnits = ownerForm.units.filter((u) => u.role === "OWNER" && u.unitId);
+      const nonOwnerUnits = ownerForm.units.filter((u) => u.role !== "OWNER" && u.unitId);
+
+      // Build owner unit payloads (with contract/payment info)
+      const mappedOwnerUnits = [];
+      for (let i = 0; i < ownerUnits.length; i++) {
+        const ud = ownerUnits[i];
+        if (ud.paymentMode === "INSTALLMENT" && !ud.installments.length) throw new Error(`Installments required for owner assignment #${i + 1}`);
         const contractFileId = ud.contractFile ? await uploadFile("/files/upload/contract", ud.contractFile) : undefined;
         const installments = [];
         for (let j = 0; j < ud.installments.length; j++) {
@@ -266,9 +317,32 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
           const referenceFileId = inst.referenceFile ? await uploadFile("/files/upload/contract", inst.referenceFile) : undefined;
           installments.push({ dueDate: new Date(inst.dueDate).toISOString(), amount: amt, referenceFileId, referencePageIndex: inst.referencePageIndex ? Number(inst.referencePageIndex) : undefined });
         }
-        mappedUnits.push({ unitId: ud.unitId, paymentMode: ud.paymentMode, contractSignedAt: ud.contractSignedAt ? new Date(ud.contractSignedAt).toISOString() : undefined, contractFileId, notes: ud.notes.trim() || undefined, installments });
+        mappedOwnerUnits.push({ unitId: ud.unitId, paymentMode: ud.paymentMode, contractSignedAt: ud.contractSignedAt ? new Date(ud.contractSignedAt).toISOString() : undefined, contractFileId, notes: ud.notes.trim() || undefined, installments });
       }
-      await apiClient.post("/owners/create-with-unit", { nameEN: ownerForm.nameEN.trim(), nameAR: ownerForm.nameAR.trim() || undefined, email: ownerForm.email.trim() || undefined, phone: ownerForm.phone.trim(), nationalId: ownerForm.nationalId.trim() || undefined, nationalIdPhotoId: natIdFileId, units: mappedUnits });
+
+      let userId: string;
+
+      if (ownerUnits.length > 0) {
+        // Create resident with owner unit assignments
+        const res = await apiClient.post("/owners/create-with-unit", { nameEN: ownerForm.nameEN.trim(), nameAR: ownerForm.nameAR.trim() || undefined, email: ownerForm.email.trim() || undefined, phone: ownerForm.phone.trim(), nationalId: ownerForm.nationalId.trim() || undefined, nationalIdPhotoId: natIdFileId, units: mappedOwnerUnits });
+        userId = res.data?.userId;
+      } else {
+        // No owner units — create resident via owner endpoint with first unit as placeholder, then we'll assign non-owner units
+        // Use the first non-owner unit to create the user via the owner flow
+        const firstUnit = nonOwnerUnits[0];
+        const res = await apiClient.post("/owners/create-with-unit", { nameEN: ownerForm.nameEN.trim(), nameAR: ownerForm.nameAR.trim() || undefined, email: ownerForm.email.trim() || undefined, phone: ownerForm.phone.trim(), nationalId: ownerForm.nationalId.trim() || undefined, nationalIdPhotoId: natIdFileId, units: [{ unitId: firstUnit.unitId, paymentMode: "CASH", installments: [] }] });
+        userId = res.data?.userId;
+      }
+
+      // Assign non-owner units (TENANT/FAMILY) after user is created
+      for (const ud of nonOwnerUnits) {
+        try {
+          await apiClient.post(`/admin/users/residents/${userId}/units/assign`, { unitId: ud.unitId, role: ud.role });
+        } catch (e) {
+          toast.error(`Failed to assign ${ud.role} role for a unit`, { description: errorMessage(e) });
+        }
+      }
+
       toast.success("Resident created successfully"); setOwnerForm(INIT_OWNER); setCreateMode(null); await loadResidents();
     } catch (e) { toast.error("Failed to create resident", { description: errorMessage(e) }); }
     finally { setSaving(false); }
@@ -312,8 +386,9 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
     const q = searchTerm.trim().toLowerCase();
     const matchSearch = !q || [r.name, r.email, r.mobile, ...r.units].some((v) => v.toLowerCase().includes(q));
     const matchStatus = statusFilter === "all" || r.rawStatus === statusFilter.toUpperCase();
-    return matchSearch && matchStatus;
-  }), [rows, searchTerm, statusFilter]);
+    const matchType = typeTab === "all" || r.residentType === typeTab;
+    return matchSearch && matchStatus && matchType;
+  }), [rows, searchTerm, statusFilter, typeTab]);
 
   const stats = useMemo(() => ({
     total:     rows.length,
@@ -321,6 +396,12 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
     suspended: rows.filter((r) => r.rawStatus === "SUSPENDED").length,
     invited:   rows.filter((r) => r.rawStatus === "INVITED").length,
   }), [rows]);
+
+  const typeCounts = useMemo(() => {
+    const counts: Record<ResidentType, number> = { OWNER: 0, TENANT: 0, FAMILY: 0, DELEGATE: 0, BROKER: 0, UNKNOWN: 0 };
+    rows.forEach((r) => { counts[r.residentType] = (counts[r.residentType] ?? 0) + 1; });
+    return counts;
+  }, [rows]);
 
   const activeFilters = [statusFilter !== "all"].filter(Boolean).length;
 
@@ -338,6 +419,17 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
           </div>
         </div>
       ),
+    },
+    {
+      key: "type", header: "Type",
+      render: (r: ResidentRow) => {
+        const badge = RESIDENT_TYPE_BADGE[r.residentType];
+        return (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: "3px 9px", borderRadius: "5px", background: badge.bg, fontSize: "11px", fontWeight: 700, color: badge.color, whiteSpace: "nowrap" }}>
+            {badge.label}
+          </span>
+        );
+      },
     },
     {
       key: "contact", header: "Contact",
@@ -427,11 +519,10 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
       <div style={{ marginBottom: "20px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "16px", flexWrap: "wrap" }}>
         <div>
           <h1 style={{ fontSize: "18px", fontWeight: 800, color: "#111827", letterSpacing: "-0.02em", lineHeight: 1.2, margin: 0 }}>Residents</h1>
-          <p style={{ marginTop: "4px", fontSize: "13px", color: "#6B7280" }}>Live resident records — click <strong style={{ color: "#111827" }}>360</strong> for the full profile.</p>
+          <p style={{ marginTop: "4px", fontSize: "13px", color: "#6B7280" }}>Live resident records — click any row for the full <strong style={{ color: "#111827" }}>360°</strong> profile.</p>
         </div>
         <div style={{ display: "flex", gap: "8px" }}>
           <OutlineBtn label="Refresh" icon={<RefreshCw style={{ width: "12px", height: "12px" }} />} onClick={() => void loadResidents()} />
-          <OutlineBtn label="Quick Add" icon={<Plus style={{ width: "12px", height: "12px" }} />} onClick={() => setCreateMode("quick")} />
           <PrimaryBtn
             label="Add Resident"
             icon={<User style={{ width: "13px", height: "13px" }} />}
@@ -442,10 +533,40 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
 
       {/* ── KPI strip ──────────────────────────────────────── */}
       <div style={{ display: "flex", gap: "12px", marginBottom: "20px", flexWrap: "wrap" }}>
-        <StatCard label="Total Residents" value={stats.total}     accent={ACCENTS[1]} icon={<User style={{ width: "16px", height: "16px" }} />} />
-        <StatCard label="Active"          value={stats.active}    accent={ACCENTS[0]} icon={<UserCheck style={{ width: "16px", height: "16px" }} />} />
-        <StatCard label="Suspended"       value={stats.suspended} accent="#F59E0B"    icon={<Ban style={{ width: "16px", height: "16px" }} />} />
-        <StatCard label="Invited"         value={stats.invited}   accent={ACCENTS[2]} icon={<Mail style={{ width: "16px", height: "16px" }} />} />
+        <StatCard label="Total Residents" value={stats.total}     accent={ACCENTS[1]} icon={<User style={{ width: "16px", height: "16px" }} />}      onClick={() => setStatusFilter("all")}       active={statusFilter === "all"} />
+        <StatCard label="Active"          value={stats.active}    accent={ACCENTS[0]} icon={<UserCheck style={{ width: "16px", height: "16px" }} />} onClick={() => setStatusFilter("active")}    active={statusFilter === "active"} />
+        <StatCard label="Suspended"       value={stats.suspended} accent="#F59E0B"    icon={<Ban style={{ width: "16px", height: "16px" }} />}       onClick={() => setStatusFilter("suspended")} active={statusFilter === "suspended"} />
+        <StatCard label="Invited"         value={stats.invited}   accent={ACCENTS[2]} icon={<Mail style={{ width: "16px", height: "16px" }} />}      onClick={() => setStatusFilter("invited")}   active={statusFilter === "invited"} />
+      </div>
+
+      {/* ── Type tabs ──────────────────────────────────────── */}
+      <div style={{ display: "flex", gap: "4px", marginBottom: "16px", background: "#FAFAFA", borderRadius: "10px", padding: "4px", border: "1px solid #EBEBEB" }}>
+        {TYPE_TABS.map((tab) => {
+          const isActive = typeTab === tab.value;
+          const count = tab.value === "all" ? rows.length : typeCounts[tab.value as ResidentType] ?? 0;
+          return (
+            <button key={tab.value} type="button" onClick={() => setTypeTab(tab.value)}
+              style={{
+                flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
+                padding: "8px 12px", borderRadius: "8px", border: "none",
+                background: isActive ? "#FFF" : "transparent",
+                boxShadow: isActive ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                color: isActive ? tab.color : "#9CA3AF",
+                fontSize: "12.5px", fontWeight: isActive ? 700 : 500,
+                cursor: "pointer", transition: "all 150ms ease",
+                fontFamily: "'Work Sans', sans-serif",
+              }}>
+              {tab.icon}
+              {tab.label}
+              <span style={{
+                fontSize: "10px", fontWeight: 700, fontFamily: "'DM Mono', monospace",
+                padding: "1px 6px", borderRadius: "10px",
+                background: isActive ? `${tab.color}12` : "#F3F4F6",
+                color: isActive ? tab.color : "#9CA3AF",
+              }}>{count}</span>
+            </button>
+          );
+        })}
       </div>
 
       {/* ── Error banner ───────────────────────────────────── */}
@@ -501,6 +622,7 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
         loading={isLoading}
         emptyTitle="No residents found"
         emptyDescription="Try adjusting your filters or add a new resident."
+        onRowClick={(r) => void loadOverview(r.id)}
       />
 
       {/* ══ DIALOGS ══════════════════════════════════════════ */}
@@ -535,35 +657,62 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
                 <OutlineBtn label="Add Unit" icon={<Plus style={{ width: "11px", height: "11px" }} />} onClick={() => setOwnerForm((p) => ({ ...p, units: [...p.units, makeUnitDraft()] }))} />
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                {ownerForm.units.map((ud, ui) => (
-                  <div key={ui} style={{ borderRadius: "8px", border: `1px solid ${ACCENTS[ui % ACCENTS.length]}25`, background: `${ACCENTS[ui % ACCENTS.length]}04`, overflow: "hidden" }}>
-                    <div style={{ padding: "10px 14px", borderBottom: "1px solid #F3F4F6", display: "flex", alignItems: "center", justifyContent: "space-between", background: `${ACCENTS[ui % ACCENTS.length]}08` }}>
-                      <span style={{ fontSize: "12px", fontWeight: 700, color: ACCENTS[ui % ACCENTS.length] }}>Assignment #{ui + 1}</span>
+                {ownerForm.units.map((ud, ui) => {
+                  const roleOpt = ROLE_OPTIONS.find((r) => r.value === ud.role) ?? ROLE_OPTIONS[0];
+                  const cardAccent = roleOpt.color;
+                  return (
+                  <div key={ui} style={{ borderRadius: "8px", border: `1px solid ${cardAccent}25`, background: `${cardAccent}04`, overflow: "hidden" }}>
+                    <div style={{ padding: "10px 14px", borderBottom: "1px solid #F3F4F6", display: "flex", alignItems: "center", justifyContent: "space-between", background: `${cardAccent}08` }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ fontSize: "12px", fontWeight: 700, color: cardAccent }}>Assignment #{ui + 1}</span>
+                        <span style={{ fontSize: "10px", fontWeight: 700, padding: "2px 7px", borderRadius: "4px", background: roleOpt.bg, color: roleOpt.color, textTransform: "uppercase", letterSpacing: "0.04em" }}>{roleOpt.label}</span>
+                      </div>
                       {ownerForm.units.length > 1 && <button type="button" onClick={() => setOwnerForm((p) => ({ ...p, units: p.units.filter((_, idx) => idx !== ui) }))} style={{ fontSize: "11px", color: "#DC2626", background: "none", border: "none", cursor: "pointer" }}>Remove</button>}
                     </div>
-                    <div style={{ padding: "12px 14px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-                      <Field label="Unit">
-                        <select value={ud.unitId} style={selectStyle} onChange={(e) => setOwnerForm((p) => ({ ...p, units: p.units.map((u, i) => i === ui ? { ...u, unitId: e.target.value } : u) }))}>
-                          <option value="">Select unit</option>
-                          {unitOptions.map((u) => <option key={u.id} value={u.id}>{u.label}</option>)}
-                        </select>
-                      </Field>
-                      <Field label="Payment Mode">
-                        <select value={ud.paymentMode} style={selectStyle} onChange={(e) => { const mode = e.target.value as OwnerPaymentMode; setOwnerForm((p) => ({ ...p, units: p.units.map((u, i) => i === ui ? { ...u, paymentMode: mode, installments: mode === "INSTALLMENT" && !u.installments.length ? [makeInstallmentDraft()] : mode === "CASH" ? [] : u.installments } : u) })); }}>
-                          <option value="CASH">Cash</option>
-                          <option value="INSTALLMENT">Installment</option>
-                        </select>
-                      </Field>
-                      <Field label="Contract Signed Date"><input type="date" value={ud.contractSignedAt} style={inputStyle} onChange={(e) => setOwnerForm((p) => ({ ...p, units: p.units.map((u, i) => i === ui ? { ...u, contractSignedAt: e.target.value } : u) }))} /></Field>
-                      <Field label="Contract File" hint={ud.contractFile?.name ?? "Optional"}>
-                        <input type="file" accept="image/*,application/pdf" style={inputStyle} onChange={(e) => setOwnerForm((p) => ({ ...p, units: p.units.map((u, i) => i === ui ? { ...u, contractFile: e.target.files?.[0] ?? null } : u) }))} />
-                      </Field>
-                      <div style={{ gridColumn: "span 2" }}>
-                        <Field label="Notes"><input value={ud.notes} style={inputStyle} placeholder="Optional notes…" onChange={(e) => setOwnerForm((p) => ({ ...p, units: p.units.map((u, i) => i === ui ? { ...u, notes: e.target.value } : u) }))} /></Field>
+                    <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: "10px" }}>
+                      {/* Unit + Role row */}
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                        <Field label="Unit">
+                          <select value={ud.unitId} style={selectStyle} onChange={(e) => setOwnerForm((p) => ({ ...p, units: p.units.map((u, i) => i === ui ? { ...u, unitId: e.target.value } : u) }))}>
+                            <option value="">Select unit</option>
+                            {unitOptions.map((u) => <option key={u.id} value={u.id}>{u.label}</option>)}
+                          </select>
+                        </Field>
+                        <Field label="Role">
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "4px" }}>
+                            {ROLE_OPTIONS.map((r) => {
+                              const isSelected = ud.role === r.value;
+                              return (
+                                <button key={r.value} type="button" onClick={() => setOwnerForm((p) => ({ ...p, units: p.units.map((u, i) => i === ui ? { ...u, role: r.value, ...(r.value !== "OWNER" ? { paymentMode: "CASH" as const, installments: [], contractFile: null, contractSignedAt: "", notes: "" } : {}) } : u) }))}
+                                  style={{ padding: "6px 4px", borderRadius: "6px", border: `1.5px solid ${isSelected ? r.color + "50" : "#E5E7EB"}`, background: isSelected ? r.bg : "#FAFAFA", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: "1px", transition: "all 120ms" }}>
+                                  <span style={{ fontSize: "11.5px", fontWeight: 700, color: isSelected ? r.color : "#374151", fontFamily: "'Work Sans', sans-serif" }}>{r.label}</span>
+                                  <span style={{ fontSize: "9px", color: isSelected ? r.color + "CC" : "#9CA3AF", fontFamily: "'Work Sans', sans-serif", textAlign: "center", lineHeight: 1.2 }}>{r.desc}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </Field>
                       </div>
+
+                      {/* Owner-only fields: payment, contract */}
+                      {ud.role === "OWNER" && (
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                          <Field label="Payment Mode">
+                            <select value={ud.paymentMode} style={selectStyle} onChange={(e) => { const mode = e.target.value as OwnerPaymentMode; setOwnerForm((p) => ({ ...p, units: p.units.map((u, i) => i === ui ? { ...u, paymentMode: mode, installments: mode === "INSTALLMENT" && !u.installments.length ? [makeInstallmentDraft()] : mode === "CASH" ? [] : u.installments } : u) })); }}>
+                              <option value="CASH">Cash</option>
+                              <option value="INSTALLMENT">Installment</option>
+                            </select>
+                          </Field>
+                          <Field label="Contract Signed Date"><input type="date" value={ud.contractSignedAt} style={inputStyle} onChange={(e) => setOwnerForm((p) => ({ ...p, units: p.units.map((u, i) => i === ui ? { ...u, contractSignedAt: e.target.value } : u) }))} /></Field>
+                          <Field label="Contract File" hint={ud.contractFile?.name ?? "Optional"}>
+                            <input type="file" accept="image/*,application/pdf" style={inputStyle} onChange={(e) => setOwnerForm((p) => ({ ...p, units: p.units.map((u, i) => i === ui ? { ...u, contractFile: e.target.files?.[0] ?? null } : u) }))} />
+                          </Field>
+                          <Field label="Notes"><input value={ud.notes} style={inputStyle} placeholder="Optional notes…" onChange={(e) => setOwnerForm((p) => ({ ...p, units: p.units.map((u, i) => i === ui ? { ...u, notes: e.target.value } : u) }))} /></Field>
+                        </div>
+                      )}
                     </div>
 
-                    {ud.paymentMode === "INSTALLMENT" && (
+                    {ud.role === "OWNER" && ud.paymentMode === "INSTALLMENT" && (
                       <div style={{ padding: "0 14px 14px" }}>
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "8px" }}>
                           <p style={{ fontSize: "11.5px", fontWeight: 700, color: "#374151" }}>Installments / Checks</p>
@@ -589,7 +738,7 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
                       </div>
                     )}
                   </div>
-                ))}
+                  ); })}
               </div>
             </div>
           </div>
@@ -597,48 +746,6 @@ export function ResidentManagement({ onNavigateToCreate }: ResidentManagementPro
           <div style={{ padding: "14px 24px", borderTop: "1px solid #F3F4F6", display: "flex", justifyContent: "flex-end", gap: "8px" }}>
             <GhostBtn label="Cancel" onClick={() => setCreateMode(null)} />
             <PrimaryBtn label="Create Resident" onClick={() => void handleCreateOwner()} loading={saving} />
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* ── Quick create dialog ─────────────────────────────── */}
-      <Dialog open={createMode === "quick"} onOpenChange={(o: any) => !o && setCreateMode(null)}>
-        <DialogContent style={{ maxWidth: "520px", borderRadius: "10px", border: "1px solid #EBEBEB", padding: 0, overflow: "hidden", fontFamily: "'Work Sans', sans-serif" }}>
-          <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid #F3F4F6" }}>
-            <DialogHeader>
-              <DialogTitle style={{ fontFamily: "'Work Sans', sans-serif", fontWeight: 700, fontSize: "15px", color: "#111827" }}>Quick Add Resident</DialogTitle>
-              <DialogDescription style={{ fontSize: "12px", color: "#9CA3AF", marginTop: "3px" }}>Lightweight flow — base user, resident profile, optional unit assignment.</DialogDescription>
-            </DialogHeader>
-          </div>
-          <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "13px" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-              <Field label="Name (EN)" required><input value={residentForm.nameEN} onChange={(e) => setResidentForm((p) => ({ ...p, nameEN: e.target.value }))} placeholder="Ahmed Ali" style={inputStyle} /></Field>
-              <Field label="Name (AR)"><input value={residentForm.nameAR} onChange={(e) => setResidentForm((p) => ({ ...p, nameAR: e.target.value }))} placeholder="أحمد علي" style={{ ...inputStyle, direction: "rtl" }} /></Field>
-              <Field label="Email"><input type="email" value={residentForm.email} onChange={(e) => setResidentForm((p) => ({ ...p, email: e.target.value }))} placeholder="resident@example.com" style={inputStyle} /></Field>
-              <Field label="Phone"><input value={residentForm.phone} onChange={(e) => setResidentForm((p) => ({ ...p, phone: e.target.value }))} placeholder="+201000000000" style={inputStyle} /></Field>
-              <Field label="National ID"><input value={residentForm.nationalId} onChange={(e) => setResidentForm((p) => ({ ...p, nationalId: e.target.value }))} style={inputStyle} /></Field>
-              <Field label="Date of Birth"><input type="date" value={residentForm.dateOfBirth} onChange={(e) => setResidentForm((p) => ({ ...p, dateOfBirth: e.target.value }))} style={inputStyle} /></Field>
-              <Field label="Password" hint="Leave empty to auto-generate."><input type="password" value={residentForm.password} onChange={(e) => setResidentForm((p) => ({ ...p, password: e.target.value }))} style={inputStyle} /></Field>
-            </div>
-            <Field label="Assign Unit" hint="Optional — leaves unassigned if blank.">
-              <select value={residentForm.unitId} onChange={(e) => setResidentForm((p) => ({ ...p, unitId: e.target.value }))} style={selectStyle}>
-                <option value="">No unit assignment</option>
-                {unitOptions.map((u) => <option key={u.id} value={u.id}>{u.label}</option>)}
-              </select>
-            </Field>
-            {residentForm.unitId && (
-              <Field label="Unit Role">
-                <select value={residentForm.unitRole} onChange={(e) => setResidentForm((p) => ({ ...p, unitRole: e.target.value as CreateResidentForm["unitRole"] }))} style={selectStyle}>
-                  <option value="FAMILY">Family</option>
-                  <option value="TENANT">Tenant</option>
-                  <option value="OWNER">Owner</option>
-                </select>
-              </Field>
-            )}
-          </div>
-          <div style={{ padding: "14px 24px", borderTop: "1px solid #F3F4F6", display: "flex", justifyContent: "flex-end", gap: "8px" }}>
-            <GhostBtn label="Cancel" onClick={() => setCreateMode(null)} />
-            <PrimaryBtn label="Create Resident" onClick={() => void handleCreateResident()} loading={saving} />
           </div>
         </DialogContent>
       </Dialog>

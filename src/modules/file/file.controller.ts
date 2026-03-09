@@ -55,6 +55,24 @@ function validateImageOrPdf(file: Express.Multer.File) {
   }
 }
 
+function validateMedia(file: Express.Multer.File) {
+  const allowedMimeTypes = [
+    'image/jpeg', 'image/png', 'image/jpg', 'image/webp',
+    'application/pdf',
+    'video/mp4', 'video/quicktime', 'video/webm',
+    'audio/mpeg', 'audio/mp4', 'audio/ogg', 'audio/webm', 'audio/wav',
+  ];
+  if (!allowedMimeTypes.includes(file.mimetype)) {
+    throw new BadRequestException(
+      'Only images, PDFs, videos (mp4/mov/webm), and audio (mp3/m4a/ogg/wav) are allowed',
+    );
+  }
+  const maxSize = 50 * 1024 * 1024; // 50MB
+  if (file.size > maxSize) {
+    throw new BadRequestException('File size must be less than 50MB');
+  }
+}
+
 function validateImage(file: Express.Multer.File) {
   const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/jpg'];
   if (!allowedMimeTypes.includes(file.mimetype)) {
@@ -195,7 +213,7 @@ export class FileController {
   }
 
   @Post('upload/service-attachment')
-  @ApiOperation({ summary: 'Upload a service attachment (image/pdf)' })
+  @ApiOperation({ summary: 'Upload a service attachment (image/pdf/video/audio)' })
   @UseInterceptors(FileInterceptor('file'))
   async uploadServiceAttachment(
     @UploadedFile() file: Express.Multer.File,
@@ -203,7 +221,7 @@ export class FileController {
     if (!file) {
       throw new BadRequestException('File is missing.');
     }
-    validateImageOrPdf(file);
+    validateMedia(file);
     return this.fileService.handleUpload(
       file,
       ATTACHMENTS_BUCKET,
@@ -238,6 +256,23 @@ export class FileController {
       throw new BadRequestException('File is missing.');
     }
     validateImage(file);
+    return this.fileService.handleUpload(
+      file,
+      ATTACHMENTS_BUCKET,
+      $Enums.FileCategory.SERVICE_ATTACHMENT,
+    );
+  }
+
+  @Post('upload/evidence')
+  @ApiOperation({ summary: 'Upload evidence media (image/pdf/video/audio)' })
+  @UseInterceptors(FileInterceptor('file'))
+  async uploadEvidence(
+    @UploadedFile() file: Express.Multer.File,
+  ): Promise<FileUploadResult> {
+    if (!file) {
+      throw new BadRequestException('File is missing.');
+    }
+    validateMedia(file);
     return this.fileService.handleUpload(
       file,
       ATTACHMENTS_BUCKET,

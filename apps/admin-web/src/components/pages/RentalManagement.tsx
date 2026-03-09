@@ -443,7 +443,7 @@ export function RentalManagement() {
     return leases.filter((l) => (l.status === 'ACTIVE' || l.status === 'EXPIRING_SOON') && new Date(l.endDate) < now);
   }, [leases]);
 
-  const activeLeaseFilters = [leaseStatus !== 'all', leaseCommunity !== (communities[0]?.id ?? ''), leaseExpiring].filter(Boolean).length;
+  const activeLeaseFilters = [leaseStatus !== 'all', !!leaseCommunity, leaseExpiring].filter(Boolean).length;
 
   // ── Loaders ───────────────────────────────────────────────────
 
@@ -454,7 +454,6 @@ export function RentalManagement() {
       rentalService.listCommunities(),
     ]);
     setSettings(s); setStats(st); setCommunities(comms);
-    if (!leaseCommunity && comms[0]) setLeaseCommunity(comms[0].id);
   }, [leaseCommunity]);
 
   const loadLeases = useCallback(async () => {
@@ -551,15 +550,9 @@ export function RentalManagement() {
     <div style={{ fontFamily: "'Work Sans', sans-serif" }}>
 
       {/* ── Header ─────────────────────────────────────────── */}
-      <div style={{ marginBottom: '20px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-        <div>
-          <h1 style={{ fontSize: '18px', fontWeight: 900, color: '#111827', letterSpacing: '-0.02em', margin: 0 }}>Rental / Lease</h1>
-          <p style={{ fontSize: '13px', color: '#6B7280', margin: '4px 0 0' }}>Leases, requests, and operations controls.</p>
-        </div>
-        <button type="button" onClick={() => void refreshAll()}
-          style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px', border: '1px solid #E5E7EB', background: '#FFF', color: '#374151', cursor: 'pointer', fontSize: '12.5px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
-          <RefreshCw style={{ width: '12px', height: '12px' }} /> Refresh
-        </button>
+      <div style={{ marginBottom: '20px' }}>
+        <h1 style={{ fontSize: '18px', fontWeight: 900, color: '#111827', letterSpacing: '-0.02em', margin: 0 }}>Rental / Lease</h1>
+        <p style={{ fontSize: '13px', color: '#6B7280', margin: '4px 0 0' }}>Leases, requests, and operations controls.</p>
       </div>
 
       {/* ── Suspension banner ──────────────────────────────── */}
@@ -576,16 +569,20 @@ export function RentalManagement() {
 
       {/* ── Stats ──────────────────────────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '20px' }}>
-        <StatCard icon="active-users"    title="Active Leases"       value={String(stats.activeLeases)}                               subtitle="Currently running" />
-        <StatCard icon="complaints-open" title="Expiring This Month" value={String(stats.expiringThisMonth)}                          subtitle="Within 30 days" />
-        <StatCard icon="tickets"         title="Pending Requests"    value={String(stats.pendingRentRequests)}                         subtitle="Awaiting review" />
-        <StatCard icon="revenue"         title="Monthly Revenue"     value={formatCurrency(stats.totalMonthlyRevenue)}                 subtitle="All active leases" />
+        <StatCard icon="active-users"    title="Active Leases"       value={String(stats.activeLeases)}                               subtitle="Currently running"  onClick={() => { setTab('leases'); setLeaseSubFilter('active'); setLeaseExpiring(false); }} />
+        <StatCard icon="complaints-open" title="Expiring This Month" value={String(stats.expiringThisMonth)}                          subtitle="Within 30 days"     onClick={() => { setTab('leases'); setLeaseSubFilter('all'); setLeaseExpiring(true); }} />
+        <StatCard icon="tickets"         title="Pending Requests"    value={String(stats.pendingRentRequests)}                         subtitle="Awaiting review"    onClick={() => { setTab('requests'); }} />
+        <StatCard icon="revenue"         title="Monthly Revenue"     value={formatCurrency(stats.totalMonthlyRevenue)}                 subtitle="All active leases"  onClick={() => { setTab('leases'); setLeaseSubFilter('all'); setLeaseExpiring(false); }} />
       </div>
 
       {/* ── Tabs ───────────────────────────────────────────── */}
-      <div style={{ display: 'flex', gap: '2px', padding: '4px', borderRadius: '10px', background: '#F3F4F6', marginBottom: '20px', width: 'fit-content' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '2px', padding: '4px', borderRadius: '10px', background: '#F3F4F6', marginBottom: '20px' }}>
         <TabBtn label="Leases"        active={tab === 'leases'}   onClick={() => setTab('leases')} />
         <TabBtn label="Rent Requests" active={tab === 'requests'} onClick={() => setTab('requests')} />
+        <button type="button" onClick={() => void refreshAll()}
+          style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '7px', border: '1px solid #E5E7EB', background: '#FFF', color: '#374151', cursor: 'pointer', fontSize: '12.5px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif", marginLeft: 'auto' }}>
+          <RefreshCw style={{ width: '12px', height: '12px' }} /> Refresh
+        </button>
       </div>
 
       {/* ══ Leases tab ════════════════════════════════════════ */}
@@ -666,6 +663,7 @@ export function RentalManagement() {
                   <option value="TERMINATED">Terminated</option>
                 </select>
                 <select value={leaseCommunity} onChange={(e) => setLeaseCommunity(e.target.value)} style={{ ...selectStyle, width: '180px' }}>
+                  <option value="">All Communities</option>
                   {communities.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </div>

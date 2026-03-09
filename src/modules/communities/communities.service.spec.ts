@@ -26,6 +26,9 @@ describe('CommunitiesService', () => {
     cluster: {
       findMany: jest.fn(),
     },
+    phase: {
+      findMany: jest.fn(),
+    },
     gate: {
       findMany: jest.fn(),
     },

@@ -25,29 +25,29 @@ import { UpdateClusterDto } from './dto/update-cluster.dto';
 export class ClustersController {
   constructor(private readonly clustersService: ClustersService) {}
 
-  @Get('communities/:communityId/clusters')
+  @Get('phases/:phaseId/clusters')
   @Permissions('unit.view_all', 'admin.view')
-  listClusters(@Param('communityId') communityId: string) {
-    return this.clustersService.listClusters(communityId);
+  listClusters(@Param('phaseId') phaseId: string) {
+    return this.clustersService.listClusters(phaseId);
   }
 
-  @Post('communities/:communityId/clusters')
+  @Post('phases/:phaseId/clusters')
   @HttpCode(HttpStatus.CREATED)
   @Permissions('unit.create', 'unit.update', 'admin.update')
   createCluster(
-    @Param('communityId') communityId: string,
+    @Param('phaseId') phaseId: string,
     @Body() dto: CreateClusterDto,
   ) {
-    return this.clustersService.createCluster(communityId, dto);
+    return this.clustersService.createCluster(phaseId, dto);
   }
 
-  @Patch('communities/:communityId/clusters/reorder')
+  @Patch('phases/:phaseId/clusters/reorder')
   @Permissions('unit.update', 'admin.update')
   reorderClusters(
-    @Param('communityId') communityId: string,
+    @Param('phaseId') phaseId: string,
     @Body() dto: ReorderClustersDto,
   ) {
-    return this.clustersService.reorderClusters(communityId, dto);
+    return this.clustersService.reorderClusters(phaseId, dto);
   }
 
   @Patch('clusters/:id')

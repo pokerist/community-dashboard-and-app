@@ -33,6 +33,7 @@ import { SystemSettings } from "./components/pages/SystemSettings";
 import { CommunityDirectory } from "./components/pages/CommunityDirectory";
 import { ApprovalsCenter } from "./components/pages/ApprovalsCenter";
 import { HospitalityPage } from "./components/pages/HospitalityPage";
+import { NewsManagement } from "./components/pages/NewsManagement";
 import { Toaster } from "./components/ui/sonner";
 import { toast } from "sonner";
 import apiClient, { isAuthenticated, removeAuthToken } from "./lib/api-client";
@@ -84,6 +85,7 @@ const VALID_SECTIONS = new Set([
   "directory",
   "approvals",
   "hospitality",
+  "news",
 ]);
 
 function normalizeSection(value?: string | null): string {
@@ -186,6 +188,7 @@ const SECTION_LABELS: Record<string, string> = {
   directory: "Community Directory",
   approvals: "Registrations & Approvals",
   hospitality: "Hospitality",
+  news: "News & Updates",
 };
 
 export default function App() {
@@ -195,7 +198,7 @@ export default function App() {
   const [unseenAdminNotifications, setUnseenAdminNotifications] = useState(0);
   const seenNotificationIdsRef = useRef<Set<string>>(new Set());
   const [sidebarBadges, setSidebarBadges] = useState<SidebarBadgeCounts>({
-    violations: 0, permits: 0, rental: 0, amenities: 0, approvals: 0,
+    tickets: 0, violations: 0, permits: 0, rental: 0, amenities: 0, approvals: 0,
   });
 
   const navigateToSection = useCallback((section: string) => {
@@ -308,7 +311,7 @@ export default function App() {
   /* ── Sidebar badge counts polling ─────────────────────────── */
   useEffect(() => {
     if (!authenticated) {
-      setSidebarBadges({ violations: 0, permits: 0, rental: 0, amenities: 0, approvals: 0 });
+      setSidebarBadges({ tickets: 0, violations: 0, permits: 0, rental: 0, amenities: 0, approvals: 0 });
       return;
     }
 
@@ -316,12 +319,14 @@ export default function App() {
 
     const fetchBadgeCounts = async () => {
       try {
-        const [violationsRes, permitsRes, rentalRes, amenitiesRes, approvalsRes] = await Promise.allSettled([
+        const [violationsRes, permitsRes, rentalRes, amenitiesRes, approvalsRes, complaintsRes, servicesRes] = await Promise.allSettled([
           apiClient.get("/violations/stats"),
           apiClient.get("/permits/stats"),
           apiClient.get("/rental/stats"),
           apiClient.get("/facilities/stats"),
           apiClient.get("/approvals/stats"),
+          apiClient.get("/complaints/stats"),
+          apiClient.get("/services/stats"),
         ]);
 
         if (!mounted) return;
@@ -334,9 +339,19 @@ export default function App() {
 
         const rentalPending = val(rentalRes, "pendingRentRequests");
         const rentalExpiring = val(rentalRes, "expiringThisMonth");
+        const tickets =
+          val(servicesRes, "openRequests") +
+          val(complaintsRes, "open") +
+          val(violationsRes, "open") +
+          val(violationsRes, "underReview") +
+          val(violationsRes, "appealed");
 
         setSidebarBadges({
-          violations: val(violationsRes, "pending"),
+          tickets,
+          violations:
+            val(violationsRes, "open") +
+            val(violationsRes, "underReview") +
+            val(violationsRes, "appealed"),
           permits: val(permitsRes, "pendingRequests"),
           rental: rentalPending + rentalExpiring,
           amenities: val(amenitiesRes, "pendingApprovals"),
@@ -346,7 +361,7 @@ export default function App() {
     };
 
     void fetchBadgeCounts();
-    const timer = window.setInterval(fetchBadgeCounts, 45_000);
+    const timer = window.setInterval(fetchBadgeCounts, 20_000);
     return () => { mounted = false; window.clearInterval(timer); };
   }, [authenticated]);
 
@@ -384,14 +399,21 @@ export default function App() {
     void loadBranding();
   }, [authenticated]);
 
-  const handleLogout = () => {
-    removeAuthToken();
-    localStorage.removeItem("refresh_token");
-    localStorage.removeItem("auth_user_id");
-    localStorage.removeItem("auth_email");
-    setAuthenticated(false);
-    navigateToSection("dashboard");
-    toast.message("Signed out — see you next time.");
+  const handleLogout = async () => {
+    const refreshToken = localStorage.getItem("refresh_token") || undefined;
+    try {
+      await apiClient.post("/auth/logout", { refreshToken });
+    } catch {
+      // Keep logout resilient even if backend revoke fails.
+    } finally {
+      removeAuthToken();
+      localStorage.removeItem("refresh_token");
+      localStorage.removeItem("auth_user_id");
+      localStorage.removeItem("auth_email");
+      setAuthenticated(false);
+      navigateToSection("dashboard");
+      toast.message("Signed out — see you next time.");
+    }
   };
 
   const currentAdminEmail = localStorage.getItem("auth_email") || "Admin";
@@ -436,6 +458,7 @@ export default function App() {
       case "directory":       return <CommunityDirectory />;
       case "approvals":       return <ApprovalsCenter />;
       case "hospitality":     return <HospitalityPage />;
+      case "news":            return <NewsManagement />;
       default:                return <DashboardOverview onNavigate={navigateToSection} />;
     }
   };

@@ -11,7 +11,6 @@ import {
   LeaseStatus,
   Prisma,
   RentRequestStatus,
-  UnitStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { RentRequestsService } from '../rent-requests/rent-requests.service';
@@ -393,11 +392,6 @@ export class RentalService {
         }
       }
 
-      await tx.unit.update({
-        where: { id: existing.unitId },
-        data: { status: UnitStatus.LEASED },
-      });
-
       return created;
     });
 
@@ -451,11 +445,6 @@ export class RentalService {
           },
         });
       }
-
-      await tx.unit.update({
-        where: { id: lease.unitId },
-        data: { status: UnitStatus.OCCUPIED },
-      });
 
       // Current schema does not include a dedicated lease notes field;
       // keep the reason validated and available at API level.

@@ -207,22 +207,7 @@ export class OwnersService {
             select: { id: true, status: true },
           });
           if (!unit) throw new BadRequestException(`Unit not found (${unitId})`);
-          if (
-            unit.status !== UnitStatus.AVAILABLE &&
-            unit.status !== UnitStatus.NOT_DELIVERED
-          ) {
-            throw new BadRequestException(
-              `Unit ${unitId} is not available for owner assignment`,
-            );
-          }
 
-          const existingPrimary = await tx.residentUnit.findFirst({
-            where: { unitId, isPrimary: true },
-            select: { id: true },
-          });
-          if (existingPrimary) {
-            throw new BadRequestException(`Unit ${unitId} already has a primary owner`);
-          }
 
           const contractFileId = assignment.contractFileId?.trim() || null;
           if (contractFileId) {
@@ -430,7 +415,7 @@ export class OwnersService {
 
           await tx.unit.update({
             where: { id: assignment.unitId },
-            data: { status: UnitStatus.NOT_DELIVERED, isDelivered: false },
+            data: { status: UnitStatus.UNDER_CONSTRUCTION },
           });
 
           const ownerUnitContract = await tx.ownerUnitContract.create({
@@ -587,8 +572,8 @@ export class OwnersService {
       });
       if (!unit) throw new BadRequestException(`Unit not found (${unitId})`);
       if (
-        unit.status !== UnitStatus.AVAILABLE &&
-        unit.status !== UnitStatus.NOT_DELIVERED
+        unit.status !== UnitStatus.OFF_PLAN &&
+        unit.status !== UnitStatus.UNDER_CONSTRUCTION
       ) {
         throw new BadRequestException(`Unit ${unitId} is not available for owner assignment`);
       }
@@ -725,7 +710,7 @@ export class OwnersService {
 
         await tx.unit.update({
           where: { id: assignment.unitId },
-          data: { status: UnitStatus.NOT_DELIVERED, isDelivered: false },
+          data: { status: UnitStatus.UNDER_CONSTRUCTION },
         });
 
         const contract = await tx.ownerUnitContract.create({
@@ -1552,11 +1537,8 @@ export class OwnersService {
       async (tx) => {
         // 1) Verify unit delivered
         const unit = await tx.unit.findUnique({ where: { id: unitId } });
-        // UnitStatus mixes delivery state with occupancy state; once leased/occupied we still treat it as delivered.
         const deliveredStatuses: UnitStatus[] = [
           UnitStatus.DELIVERED,
-          UnitStatus.OCCUPIED,
-          UnitStatus.LEASED,
         ];
         if (!unit || !deliveredStatuses.includes(unit.status)) {
           throw new BadRequestException(

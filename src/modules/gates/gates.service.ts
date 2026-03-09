@@ -28,6 +28,12 @@ const gateWithUnitsInclude = {
     where: { deletedAt: null },
     select: { unitId: true },
   },
+  gatePhases: {
+    select: { phaseId: true },
+  },
+  gateClusters: {
+    select: { clusterId: true },
+  },
 } as const;
 
 type GateWithUnitsRow = Prisma.GateGetPayload<{
@@ -107,6 +113,10 @@ export class GatesService {
   async createGate(communityId: string, dto: CreateGateDto): Promise<GateResponseDto> {
     await this.assertCommunityExists(communityId);
     await this.assertNoNameDuplicate(communityId, dto.name);
+    const phaseIds = this.normalizeIds(dto.phaseIds);
+    const clusterIds = this.normalizeIds(dto.clusterIds);
+    await this.assertPhaseIdsBelongToCommunity(phaseIds, communityId);
+    await this.assertClusterIdsBelongToCommunity(clusterIds, communityId, phaseIds);
 
     const created = await this.prisma.gate.create({
       data: {
@@ -118,6 +128,20 @@ export class GatesService {
         etaMinutes: dto.etaMinutes ?? null,
         isActive: true,
         isVisitorRequestRequired: dto.isVisitorRequestRequired ?? false,
+        ...(phaseIds.length
+          ? {
+              gatePhases: {
+                create: phaseIds.map((phaseId) => ({ phaseId })),
+              },
+            }
+          : {}),
+        ...(clusterIds.length
+          ? {
+              gateClusters: {
+                create: clusterIds.map((clusterId) => ({ clusterId })),
+              },
+            }
+          : {}),
       },
       include: gateWithUnitsInclude,
     });
@@ -152,10 +176,10 @@ export class GatesService {
   async updateGate(id: string, dto: UpdateGateDto): Promise<GateResponseDto> {
     const current = await this.prisma.gate.findFirst({
       where: { id, deletedAt: null },
-      select: {
-        id: true,
-        communityId: true,
-        name: true,
+      include: {
+        gatePhases: {
+          select: { phaseId: true },
+        },
       },
     });
     if (!current) {
@@ -164,6 +188,28 @@ export class GatesService {
 
     if (dto.name !== undefined) {
       await this.assertNoNameDuplicate(current.communityId, dto.name, id);
+    }
+
+    const phaseIds = dto.phaseIds !== undefined ? this.normalizeIds(dto.phaseIds) : undefined;
+    const clusterIds =
+      dto.clusterIds !== undefined ? this.normalizeIds(dto.clusterIds) : undefined;
+
+    if (phaseIds !== undefined) {
+      await this.assertPhaseIdsBelongToCommunity(phaseIds, current.communityId);
+    }
+    if (clusterIds !== undefined) {
+      await this.assertClusterIdsBelongToCommunity(
+        clusterIds,
+        current.communityId,
+        phaseIds ?? current.gatePhases.map((gp) => gp.phaseId),
+      );
+    }
+
+    if (dto.phaseIds !== undefined) {
+      await this.prisma.gatePhase.deleteMany({ where: { gateId: id } });
+    }
+    if (dto.clusterIds !== undefined) {
+      await this.prisma.gateCluster.deleteMany({ where: { gateId: id } });
     }
 
     const updated = await this.prisma.gate.update({
@@ -178,6 +224,20 @@ export class GatesService {
         ...(dto.status !== undefined ? { status: dto.status } : {}),
         ...(dto.isVisitorRequestRequired !== undefined
           ? { isVisitorRequestRequired: dto.isVisitorRequestRequired }
+          : {}),
+        ...(phaseIds !== undefined && phaseIds.length > 0
+          ? {
+              gatePhases: {
+                create: phaseIds.map((phaseId) => ({ phaseId })),
+              },
+            }
+          : {}),
+        ...(clusterIds !== undefined && clusterIds.length > 0
+          ? {
+              gateClusters: {
+                create: clusterIds.map((clusterId) => ({ clusterId })),
+              },
+            }
           : {}),
       },
       include: gateWithUnitsInclude,
@@ -487,27 +547,29 @@ export class GatesService {
     };
   }
 
-  async getGateStats(communityId: string): Promise<GateStatsResponseDto> {
-    await this.assertCommunityExists(communityId);
+  async getGateStats(communityId?: string): Promise<GateStatsResponseDto> {
+    if (communityId) {
+      await this.assertCommunityExists(communityId);
+    }
 
     const [totalGates, activeGates, gates] = await Promise.all([
       this.prisma.gate.count({
         where: {
-          communityId,
           deletedAt: null,
+          ...(communityId ? { communityId } : {}),
         },
       }),
       this.prisma.gate.count({
         where: {
-          communityId,
           deletedAt: null,
           isActive: true,
+          ...(communityId ? { communityId } : {}),
         },
       }),
       this.prisma.gate.findMany({
         where: {
-          communityId,
           deletedAt: null,
+          ...(communityId ? { communityId } : {}),
         },
         select: { id: true },
       }),
@@ -597,6 +659,68 @@ export class GatesService {
     return Array.from(new Set(value));
   }
 
+  private normalizeIds(value?: string[] | null): string[] {
+    if (!value) return [];
+    return [...new Set(value.map((id) => id.trim()).filter(Boolean))];
+  }
+
+  private async assertPhaseIdsBelongToCommunity(
+    phaseIds: string[],
+    communityId: string,
+  ): Promise<void> {
+    if (phaseIds.length === 0) return;
+
+    const phases = await this.prisma.phase.findMany({
+      where: {
+        id: { in: phaseIds },
+        communityId,
+        isActive: true,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+
+    if (phases.length !== phaseIds.length) {
+      throw new BadRequestException(
+        'phaseIds must belong to active phases in the same community',
+      );
+    }
+  }
+
+  private async assertClusterIdsBelongToCommunity(
+    clusterIds: string[],
+    communityId: string,
+    phaseIds?: string[],
+  ): Promise<void> {
+    if (clusterIds.length === 0) return;
+
+    const clusters = await this.prisma.cluster.findMany({
+      where: {
+        id: { in: clusterIds },
+        communityId,
+        isActive: true,
+        deletedAt: null,
+      },
+      select: { id: true, phaseId: true },
+    });
+
+    if (clusters.length !== clusterIds.length) {
+      throw new BadRequestException(
+        'clusterIds must belong to active clusters in the same community',
+      );
+    }
+
+    if (phaseIds && phaseIds.length > 0) {
+      const phaseSet = new Set(phaseIds);
+      const invalidCluster = clusters.find((cluster) => !phaseSet.has(cluster.phaseId));
+      if (invalidCluster) {
+        throw new BadRequestException(
+          'clusterIds must belong to one of the selected phaseIds',
+        );
+      }
+    }
+  }
+
   private async assertCommunityExists(communityId: string): Promise<void> {
     const community = await this.prisma.community.findUnique({
       where: { id: communityId },
@@ -650,6 +774,8 @@ export class GatesService {
       isVisitorRequestRequired: row.isVisitorRequestRequired,
       unitIds,
       unitCount: unitIds.length,
+      phaseIds: row.gatePhases.map((gp) => gp.phaseId),
+      clusterIds: row.gateClusters.map((gc) => gc.clusterId),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };

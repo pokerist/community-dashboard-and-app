@@ -164,8 +164,8 @@ export class LeasesService {
 
     // Business Rule: Can only lease if Unit is AVAILABLE or OCCUPIED (by owner)
     // If it is ALREADY LEASED, block it.
-    if (unit.status === UnitStatus.LEASED) {
-      throw new ConflictException('Unit is already LEASED.');
+    if (unit.status !== UnitStatus.DELIVERED) {
+      throw new ConflictException('Unit must be DELIVERED to create a lease.');
     }
 
     const ownerAccess = await this.prisma.unitAccess.findFirst({
@@ -398,11 +398,6 @@ export class LeasesService {
         // must be expired to prevent mixed/incorrect access on the same unit.
         await this.expireAutoFamilyAccessForUnit(tx, dto.unitId, dto.startDate);
 
-        await tx.unit.update({
-          where: { id: dto.unitId },
-          data: { status: UnitStatus.LEASED },
-        });
-
         await tx.residentUnit.create({
           data: {
             residentId: tenantResident.id,
@@ -548,12 +543,6 @@ export class LeasesService {
         ) {
           const endedAt = dto.endDate ?? new Date();
 
-          // Revert unit status
-          await tx.unit.update({
-            where: { id: existingLease.unitId },
-            data: { status: UnitStatus.OCCUPIED },
-          });
-
           if (existingLease.tenantId) {
             // Expire tenant access
             await tx.unitAccess.updateMany({
@@ -631,11 +620,6 @@ export class LeasesService {
     const result = await this.prisma.$transaction(
       async (tx) => {
         const deleted = await tx.lease.delete({ where: { id } });
-
-        await tx.unit.update({
-          where: { id: existingLease.unitId },
-          data: { status: UnitStatus.OCCUPIED },
-        });
 
         let cascade:
           | { tenantId: string; unitId: string; endedAt: Date }
@@ -905,11 +889,6 @@ export class LeasesService {
             endDate: terminationDate,
           },
           include: { unit: true, tenant: true },
-        });
-
-        await tx.unit.update({
-          where: { id: lease.unitId },
-          data: { status: UnitStatus.OCCUPIED },
         });
 
         if (lease.tenantId) {

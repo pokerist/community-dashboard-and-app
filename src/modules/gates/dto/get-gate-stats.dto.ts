@@ -1,8 +1,9 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsUUID } from 'class-validator';
+import { ApiPropertyOptional } from '@nestjs/swagger';
+import { IsOptional, IsUUID } from 'class-validator';
 
 export class GetGateStatsDto {
-  @ApiProperty({ example: 'community-uuid' })
+  @ApiPropertyOptional({ example: 'community-uuid' })
+  @IsOptional()
   @IsUUID()
-  communityId!: string;
+  communityId?: string;
 }

@@ -1,7 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
+  Audience,
+  Channel,
   InvoiceStatus,
   InvoiceType,
+  NotificationType,
   Prisma,
   ViolationActionStatus,
   ViolationActionType,
@@ -10,6 +13,7 @@ import {
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { InvoicesService } from '../invoices/invoices.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { ViolationIssuedEvent } from '../../events/contracts/violation-issued.event';
 import { ListAppealRequestsQueryDto } from './dto/list-appeal-requests-query.dto';
 import { ReviewAppealDto } from './dto/review-appeal.dto';
@@ -79,11 +83,194 @@ type ViolationAppealQueueRecord = Prisma.ViolationActionRequestGetPayload<{
 
 @Injectable()
 export class ViolationsService {
+  private readonly logger = new Logger(ViolationsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly invoicesService: InvoicesService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly notificationsService: NotificationsService,
   ) {}
+
+  private static readonly VALID_TRANSITIONS: Partial<Record<ViolationStatus, ViolationStatus[]>> = {
+    [ViolationStatus.PENDING]: [ViolationStatus.UNDER_REVIEW, ViolationStatus.CANCELLED],
+    [ViolationStatus.UNDER_REVIEW]: [ViolationStatus.APPEALED, ViolationStatus.PAID, ViolationStatus.CLOSED, ViolationStatus.CANCELLED],
+    [ViolationStatus.APPEALED]: [ViolationStatus.UNDER_REVIEW, ViolationStatus.PAID, ViolationStatus.CLOSED, ViolationStatus.CANCELLED],
+    [ViolationStatus.PAID]: [ViolationStatus.CLOSED],
+  };
+
+  private async recordStatusChange(
+    entityId: string,
+    fromStatus: string | null,
+    toStatus: string,
+    changedById: string,
+    note?: string,
+  ): Promise<void> {
+    await this.prisma.statusHistory.create({
+      data: {
+        entityType: 'VIOLATION',
+        entityId,
+        fromStatus,
+        toStatus,
+        changedById,
+        note: note?.trim() || null,
+      },
+    });
+  }
+
+  async getStatusHistory(violationId: string) {
+    const violation = await this.prisma.violation.findUnique({
+      where: { id: violationId },
+      select: { id: true },
+    });
+    if (!violation) {
+      throw new NotFoundException(`Violation ${violationId} not found`);
+    }
+
+    return this.prisma.statusHistory.findMany({
+      where: { entityType: 'VIOLATION', entityId: violationId },
+      include: {
+        changedBy: {
+          select: { id: true, nameEN: true, nameAR: true, email: true },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
+
+  async updateViolationStatus(
+    id: string,
+    status: ViolationStatus,
+    changedById: string,
+    note?: string,
+  ): Promise<ViolationDetailDto> {
+    const violation = await this.prisma.violation.findUnique({
+      where: { id },
+      select: { id: true, violationNumber: true, status: true, residentId: true },
+    });
+
+    if (!violation) {
+      throw new NotFoundException(`Violation ${id} not found`);
+    }
+
+    const allowed = ViolationsService.VALID_TRANSITIONS[violation.status] ?? [];
+    if (!allowed.includes(status)) {
+      throw new BadRequestException(
+        `Invalid violation status transition: ${violation.status} -> ${status}`,
+      );
+    }
+
+    const now = new Date();
+    const updateData: Prisma.ViolationUpdateInput = { status };
+
+    if (status === ViolationStatus.CLOSED || status === ViolationStatus.CANCELLED) {
+      updateData.closedAt = now;
+    }
+
+    await this.prisma.violation.update({
+      where: { id },
+      data: updateData,
+    });
+
+    await this.recordStatusChange(id, violation.status, status, changedById, note);
+
+    // Notify resident of status change
+    if (violation.residentId) {
+      const label = status.replace(/_/g, ' ').toLowerCase();
+      this.notificationsService
+        .sendNotification({
+          type: NotificationType.ANNOUNCEMENT,
+          title: 'Violation Status Updated',
+          messageEn: `Your violation ${violation.violationNumber} has been updated to ${label}.${note ? ` Note: ${note}` : ''}`,
+          channels: [Channel.IN_APP, Channel.PUSH],
+          targetAudience: Audience.SPECIFIC_RESIDENCES,
+          audienceMeta: { userIds: [violation.residentId] },
+          payload: { route: '/violations', entityType: 'VIOLATION', entityId: id },
+        })
+        .catch((err) =>
+          this.logger.error(`Status notification failed for violation ${id}`, err),
+        );
+    }
+
+    return this.getViolationDetail(id);
+  }
+
+  async addComment(
+    violationId: string,
+    body: string,
+    authorId: string,
+    isInternal = false,
+  ) {
+    const violation = await this.prisma.violation.findUnique({
+      where: { id: violationId },
+      select: { id: true, violationNumber: true, residentId: true, issuedById: true },
+    });
+    if (!violation) {
+      throw new NotFoundException(`Violation ${violationId} not found`);
+    }
+
+    const created = await this.prisma.violationComment.create({
+      data: {
+        violationId,
+        createdById: authorId,
+        body: body.trim(),
+        isInternal,
+      },
+      include: {
+        createdBy: {
+          select: { id: true, nameEN: true, nameAR: true, email: true },
+        },
+      },
+    });
+
+    // Notify relevant parties (skip internal notes for residents, skip self)
+    if (!isInternal) {
+      const recipientIds = new Set<string>();
+      if (violation.residentId && violation.residentId !== authorId) {
+        recipientIds.add(violation.residentId);
+      }
+      if (violation.issuedById && violation.issuedById !== authorId) {
+        recipientIds.add(violation.issuedById);
+      }
+      if (recipientIds.size > 0) {
+        this.notificationsService
+          .sendNotification({
+            type: NotificationType.ANNOUNCEMENT,
+            title: 'New Comment on Violation',
+            messageEn: `A new comment was posted on violation ${violation.violationNumber}.`,
+            channels: [Channel.IN_APP, Channel.PUSH],
+            targetAudience: Audience.SPECIFIC_RESIDENCES,
+            audienceMeta: { userIds: [...recipientIds] },
+            payload: { route: '/violations', entityType: 'VIOLATION', entityId: violationId },
+          })
+          .catch((err) =>
+            this.logger.error(`Comment notification failed for violation ${violationId}`, err),
+          );
+      }
+    }
+
+    return created;
+  }
+
+  async listComments(violationId: string) {
+    const violation = await this.prisma.violation.findUnique({
+      where: { id: violationId },
+      select: { id: true },
+    });
+    if (!violation) {
+      throw new NotFoundException(`Violation ${violationId} not found`);
+    }
+
+    return this.prisma.violationComment.findMany({
+      where: { violationId },
+      include: {
+        createdBy: {
+          select: { id: true, nameEN: true, nameAR: true, email: true },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
 
   private toUserName(input: {
     nameEN: string | null;
@@ -566,6 +753,8 @@ export class ViolationsService {
       return violation;
     });
 
+    await this.recordStatusChange(created.id, null, ViolationStatus.PENDING, issuedById);
+
     try {
       const recipientUserIds = dto.residentId ? [dto.residentId] : [];
       this.eventEmitter.emit(
@@ -601,7 +790,7 @@ export class ViolationsService {
     const category = await this.validateCategory(dto.categoryId);
 
     if (dto.fineAmount !== undefined && violation.status !== ViolationStatus.PENDING) {
-      throw new BadRequestException('fineAmount can only be updated while status is PENDING');
+      throw new BadRequestException('fineAmount can only be updated while status is OPEN');
     }
 
     await this.prisma.violation.update({
@@ -636,8 +825,8 @@ export class ViolationsService {
     if (!row) {
       throw new NotFoundException(`Violation ${id} not found`);
     }
-    if (row.status === ViolationStatus.PAID) {
-      throw new BadRequestException('Cannot cancel a paid violation');
+    if (row.status === ViolationStatus.PAID || row.status === ViolationStatus.CLOSED) {
+      throw new BadRequestException('Cannot cancel a resolved/closed violation');
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -657,6 +846,16 @@ export class ViolationsService {
         },
         data: {
           status: InvoiceStatus.CANCELLED,
+        },
+      });
+
+      await tx.statusHistory.create({
+        data: {
+          entityType: 'VIOLATION',
+          entityId: id,
+          fromStatus: row.status,
+          toStatus: ViolationStatus.CANCELLED,
+          changedById: adminId,
         },
       });
     });
@@ -828,6 +1027,12 @@ export class ViolationsService {
       throw new BadRequestException('Action request is not an appeal');
     }
 
+    // Fetch resident info for notification
+    const violationForNotify = await this.prisma.violation.findUnique({
+      where: { id: action.violationId },
+      select: { violationNumber: true, residentId: true },
+    });
+
     const reason = dto.reason?.trim() || null;
     const now = new Date();
 
@@ -873,6 +1078,24 @@ export class ViolationsService {
         });
       }
     });
+
+    // Notify resident of appeal result
+    if (violationForNotify?.residentId) {
+      const result = dto.approved ? 'approved' : 'rejected';
+      this.notificationsService
+        .sendNotification({
+          type: NotificationType.ANNOUNCEMENT,
+          title: `Violation Appeal ${dto.approved ? 'Approved' : 'Rejected'}`,
+          messageEn: `Your appeal for violation ${violationForNotify.violationNumber} has been ${result}.${reason ? ` Reason: ${reason}` : ''}`,
+          channels: [Channel.IN_APP, Channel.PUSH, Channel.EMAIL],
+          targetAudience: Audience.SPECIFIC_RESIDENCES,
+          audienceMeta: { userIds: [violationForNotify.residentId] },
+          payload: { route: '/violations', entityType: 'VIOLATION', entityId: action.violationId },
+        })
+        .catch((err) =>
+          this.logger.error(`Appeal review notification failed for ${action.violationId}`, err),
+        );
+    }
 
     return this.getViolationDetail(action.violationId);
   }
@@ -929,12 +1152,14 @@ export class ViolationsService {
   }
 
   async getViolationStats(): Promise<ViolationStatsDto> {
-    const [total, pending, paid, appealed, cancelled, pendingAppeals, issued, collected] =
+    const [total, open, underReview, appealed, resolved, closed, cancelled, pendingAppeals, issued, collected] =
       await Promise.all([
         this.prisma.violation.count(),
         this.prisma.violation.count({ where: { status: ViolationStatus.PENDING } }),
-        this.prisma.violation.count({ where: { status: ViolationStatus.PAID } }),
+        this.prisma.violation.count({ where: { status: ViolationStatus.UNDER_REVIEW } }),
         this.prisma.violation.count({ where: { status: ViolationStatus.APPEALED } }),
+        this.prisma.violation.count({ where: { status: ViolationStatus.PAID } }),
+        this.prisma.violation.count({ where: { status: ViolationStatus.CLOSED } }),
         this.prisma.violation.count({ where: { status: ViolationStatus.CANCELLED } }),
         this.prisma.violationActionRequest.count({
           where: {
@@ -979,9 +1204,11 @@ export class ViolationsService {
 
     return {
       total,
-      pending,
-      paid,
+      open,
+      underReview,
       appealed,
+      resolved,
+      closed,
       cancelled,
       pendingAppeals,
       totalFinesIssued: Number(issued._sum.fineAmount ?? 0),

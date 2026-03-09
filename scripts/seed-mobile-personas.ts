@@ -159,8 +159,6 @@ async function ensureUnit(input: {
 }) {
   const deliveredLikeStatuses: UnitStatus[] = [
     UnitStatus.DELIVERED,
-    UnitStatus.OCCUPIED,
-    UnitStatus.LEASED,
   ];
   const existing = await prisma.unit.findFirst({
     where: {
@@ -624,7 +622,7 @@ async function run() {
     communityId: communityGates.id,
     block: 'D',
     unitNumber: '412',
-    status: UnitStatus.LEASED,
+    status: UnitStatus.DELIVERED,
     isDelivered: true,
     bedrooms: 2,
     bathrooms: 2,
@@ -635,7 +633,7 @@ async function run() {
     communityId: communityKay.id,
     block: 'A',
     unitNumber: '0907',
-    status: UnitStatus.NOT_DELIVERED,
+    status: UnitStatus.UNDER_CONSTRUCTION,
     isDelivered: false,
     bedrooms: 3,
     bathrooms: 2,
@@ -777,6 +775,84 @@ async function run() {
     isPrimary: true,
   });
 
+  // ── Commercial Entity Personas ──────────────────────────────────────
+  const commercialUnit = await ensureUnit({
+    projectName: 'Alkarma Gates',
+    communityId: communityGates.id,
+    block: 'COM',
+    unitNumber: 'C-101',
+    type: UnitType.COMMERCIAL_UNIT,
+    status: UnitStatus.DELIVERED,
+    isDelivered: true,
+    bedrooms: 0,
+    bathrooms: 1,
+    sizeSqm: 200,
+  });
+  // Set category to COMMERCIAL
+  await prisma.unit.update({ where: { id: commercialUnit.id }, data: { category: 'COMMERCIAL' as any } });
+
+  const commOwnerDemo = await ensureDemoUser({
+    email: 'comm.owner@alkarma.demo',
+    nameEN: 'Tarek Nabil',
+    phone: '+201100000010',
+    nationalId: '29901010000010',
+    createResident: true,
+  });
+  const commTenantDemo = await ensureDemoUser({
+    email: 'comm.tenant@alkarma.demo',
+    nameEN: 'Sara Ahmed',
+    phone: '+201100000011',
+    nationalId: '29901010000011',
+    createResident: true,
+  });
+  const commStaffDemo = await ensureDemoUser({
+    email: 'comm.staff@alkarma.demo',
+    nameEN: 'Hassan Youssef',
+    phone: '+201100000012',
+    nationalId: '29901010000012',
+    createResident: true,
+  });
+
+  // Create commercial entity
+  let commEntity = await prisma.commercialEntity.findFirst({
+    where: { name: 'Demo Pharmacy', communityId: communityGates.id },
+  });
+  if (!commEntity) {
+    commEntity = await prisma.commercialEntity.create({
+      data: {
+        name: 'Demo Pharmacy',
+        description: '24/7 Pharmacy & Healthcare',
+        communityId: communityGates.id,
+        unitId: commercialUnit.id,
+        isActive: true,
+      },
+    });
+  }
+
+  // Add owner member
+  const ownerPerms = { can_work_orders: true, can_attendance: true, can_service_requests: true, can_tickets: true, can_photo_upload: true, can_task_reminders: true, can_invoices: true, can_staff_management: true };
+  await prisma.commercialEntityMember.upsert({
+    where: { entityId_userId: { entityId: commEntity.id, userId: commOwnerDemo.id } },
+    update: { role: 'OWNER' as any, permissions: ownerPerms, isActive: true, deletedAt: null },
+    create: { entityId: commEntity.id, userId: commOwnerDemo.id, role: 'OWNER' as any, permissions: ownerPerms, isActive: true },
+  });
+
+  // Add tenant member
+  const tenantPerms = { ...ownerPerms };
+  await prisma.commercialEntityMember.upsert({
+    where: { entityId_userId: { entityId: commEntity.id, userId: commTenantDemo.id } },
+    update: { role: 'TENANT' as any, permissions: tenantPerms, isActive: true, deletedAt: null },
+    create: { entityId: commEntity.id, userId: commTenantDemo.id, role: 'TENANT' as any, permissions: tenantPerms, isActive: true },
+  });
+
+  // Add staff member
+  const staffPerms = { can_work_orders: false, can_attendance: true, can_service_requests: false, can_tickets: false, can_photo_upload: false, can_task_reminders: false, can_invoices: false, can_staff_management: false };
+  await prisma.commercialEntityMember.upsert({
+    where: { entityId_userId: { entityId: commEntity.id, userId: commStaffDemo.id } },
+    update: { role: 'STAFF' as any, permissions: staffPerms, isActive: true, deletedAt: null },
+    create: { entityId: commEntity.id, userId: commStaffDemo.id, role: 'STAFF' as any, permissions: staffPerms, isActive: true },
+  });
+
   await cleanupAssistantDemoArtifacts();
   await deactivateLegacyDemoUsers();
 
@@ -787,6 +863,9 @@ async function run() {
   console.log('Family Member: nour.hassan.family@alkarma.demo / pass123');
   console.log('Authorized (Delegate): youssef.mahmoud.authorized@alkarma.demo / pass123');
   console.log('Contractor: mohamed.saber.contractor@alkarma.demo / pass123');
+  console.log('Commercial Owner: comm.owner@alkarma.demo / pass123');
+  console.log('Commercial Tenant: comm.tenant@alkarma.demo / pass123');
+  console.log('Commercial Staff: comm.staff@alkarma.demo / pass123');
 }
 
 run()

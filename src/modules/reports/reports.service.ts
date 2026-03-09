@@ -287,8 +287,7 @@ export class ReportsService {
       const entry = grouped.get(key)!;
       entry.totalUnits += 1;
       if (
-        unit.status === UnitStatus.OCCUPIED ||
-        unit.status === UnitStatus.LEASED
+        unit.status === UnitStatus.DELIVERED
       ) {
         entry.occupiedUnits += 1;
       }

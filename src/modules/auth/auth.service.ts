@@ -23,6 +23,7 @@ import { UpdateMeProfileDto } from './dto/update-me-profile.dto';
 import { CompleteActivationDto } from './dto/complete-activation.dto';
 import { UpdateActivationDraftDto } from './dto/update-activation-draft.dto';
 import { VerifyLoginTwoFactorDto } from './dto/verify-login-two-factor.dto';
+import { VerifySessionTakeoverDto } from './dto/verify-session-takeover.dto';
 import { UpdateMeSecurityDto } from './dto/update-me-security.dto';
 import { CreateProfileChangeRequestDto } from './dto/profile-change-request.dto';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -391,14 +392,19 @@ export class AuthService {
       return this.beginLoginTwoFactorChallenge(authUser);
     }
 
-    const isStaff = authUser.roles.some((ur) =>
-      this.SINGLE_SESSION_ROLES.includes(ur.role.name),
-    );
-    if (isStaff) {
-      await this.prisma.refreshToken.updateMany({
-        where: { userId: authUser.id, revoked: false },
-        data: { revoked: true },
-      });
+    // ── Single-session enforcement for ALL users ──
+    // If this account already has an active (non-revoked, non-expired) session,
+    // require OTP verification before allowing session takeover.
+    const activeSession = await this.prisma.refreshToken.findFirst({
+      where: {
+        userId: authUser.id,
+        revoked: false,
+        expiresAt: { gt: new Date() },
+      },
+    });
+
+    if (activeSession) {
+      return this.beginSessionTakeoverChallenge(authUser);
     }
 
     const tokens = await this.generateTokens(authUser);
@@ -569,6 +575,162 @@ export class AuthService {
     };
   }
 
+  // ── Session Takeover Challenge ──
+  // Triggered when a user tries to log in but already has an active session
+  // on another device. Sends OTP for identity verification before revoking
+  // the old session.
+  private async beginSessionTakeoverChallenge(user: any) {
+    const capabilities = await this.integrationConfigService.getMobileCapabilities();
+    const smsReady = capabilities.smsOtp && Boolean(user.phone);
+    const emailReady = capabilities.smtpMail && Boolean(user.email);
+
+    if (!smsReady && !emailReady) {
+      throw new ServiceUnavailableException(
+        'Session takeover requires OTP verification but no OTP channel is currently available.',
+      );
+    }
+
+    const channel: $Enums.Channel = smsReady ? 'SMS' : 'EMAIL';
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpHash = await bcrypt.hash(otp, 12);
+
+    // Invalidate any pending OTPs for this user
+    await this.prisma.phoneVerificationOtp.updateMany({
+      where: { userId: user.id, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+    await this.prisma.phoneVerificationOtp.create({
+      data: {
+        userId: user.id,
+        otpHash,
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+      },
+    });
+
+    await this.notificationsService.sendNotification(
+      {
+        type: 'OTP',
+        title: 'Session security verification',
+        messageEn:
+          channel === 'SMS'
+            ? `Your SSS Community session verification OTP: ${otp}`
+            : `Someone is attempting to sign in to your SSS Community account from a new device. Your verification OTP is ${otp}. It expires in 5 minutes. If this was not you, change your password immediately.`,
+        channels: [channel],
+        targetAudience: 'SPECIFIC_RESIDENCES',
+        audienceMeta: { userIds: [user.id] },
+        payload: {
+          eventKey: 'auth.session_takeover',
+          channel,
+        },
+      },
+      undefined,
+    );
+
+    const challengeToken = this.jwtService.sign(
+      {
+        sub: user.id,
+        purpose: 'SESSION_TAKEOVER',
+      },
+      {
+        expiresIn: '5m',
+      },
+    );
+
+    return {
+      sessionConflict: true,
+      challengeRequired: true,
+      challengeToken,
+      method: channel,
+      expiresInSeconds: 300,
+      message: 'Another device is already signed in. Verify your identity to continue.',
+      userStatus: user.userStatus,
+      mustCompleteActivation: false,
+    };
+  }
+
+  async verifySessionTakeover(dto: VerifySessionTakeoverDto) {
+    let payload: any;
+    try {
+      payload = this.jwtService.verify(dto.challengeToken);
+    } catch {
+      throw new UnauthorizedException('Session takeover challenge is invalid or expired.');
+    }
+
+    if (!payload?.sub || payload?.purpose !== 'SESSION_TAKEOVER') {
+      throw new UnauthorizedException('Invalid session takeover challenge.');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub as string },
+      include: { roles: { include: { role: true } } },
+    });
+    if (!user) throw new UnauthorizedException('User not found.');
+    if (user.lockedUntil && user.lockedUntil > new Date()) {
+      throw new ForbiddenException('Account temporarily locked. Try again later.');
+    }
+
+    const storedOtp = await this.prisma.phoneVerificationOtp.findFirst({
+      where: {
+        userId: user.id,
+        usedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (!storedOtp) {
+      throw new BadRequestException('Invalid or expired OTP.');
+    }
+
+    const isValid = await bcrypt.compare(String(dto.otp ?? '').trim(), storedOtp.otpHash);
+    if (!isValid) {
+      throw new BadRequestException('Invalid OTP.');
+    }
+
+    await this.prisma.phoneVerificationOtp.update({
+      where: { id: storedOtp.id },
+      data: { usedAt: new Date() },
+    });
+
+    // Revoke ALL existing sessions
+    await this.prisma.refreshToken.updateMany({
+      where: { userId: user.id, revoked: false },
+      data: { revoked: true },
+    });
+
+    // Bump sessionVersion — instantly invalidates all JWTs from old sessions
+    const updatedUser = await this.prisma.user.update({
+      where: { id: user.id },
+      data: { sessionVersion: { increment: 1 } },
+      include: { roles: { include: { role: true } } },
+    });
+
+    // Notify the old session(s) that they have been signed out
+    await this.notificationsService.sendNotification(
+      {
+        type: 'ANNOUNCEMENT',
+        title: 'Signed out',
+        messageEn:
+          'Your account was signed in from another device. You have been signed out for security.',
+        channels: ['PUSH'],
+        targetAudience: 'SPECIFIC_RESIDENCES',
+        audienceMeta: { userIds: [user.id] },
+        payload: {
+          eventKey: 'auth.session_revoked',
+          action: 'FORCE_LOGOUT',
+        },
+      },
+      undefined,
+    );
+
+    const tokens = await this.generateTokens(updatedUser);
+    await this.markSuccessfulLogin(user.id);
+    return {
+      ...tokens,
+      userStatus: updatedUser.userStatus,
+      mustCompleteActivation: updatedUser.userStatus !== 'ACTIVE',
+    };
+  }
+
   async verifyLoginTwoFactor(dto: VerifyLoginTwoFactorDto) {
     let payload: any;
     try {
@@ -644,15 +806,15 @@ export class AuthService {
       }
     }
 
-    const isStaff = user.roles.some((ur) =>
-      this.SINGLE_SESSION_ROLES.includes(ur.role.name),
-    );
-    if (isStaff) {
-      await this.prisma.refreshToken.updateMany({
-        where: { userId: user.id, revoked: false },
-        data: { revoked: true },
-      });
-    }
+    // Single-session: revoke all existing sessions and bump version
+    await this.prisma.refreshToken.updateMany({
+      where: { userId: user.id, revoked: false },
+      data: { revoked: true },
+    });
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { sessionVersion: { increment: 1 } },
+    });
 
     const tokens = await this.generateTokens(user);
     await this.markSuccessfulLogin(user.id);
@@ -1676,6 +1838,7 @@ export class AuthService {
       sub: user.id,
       roles,
       permissions: Array.from(permissions), // convert Set to array for JWT
+      sv: user.sessionVersion ?? 0, // session version — used to invalidate old JWTs on session takeover
     };
 
     const accessToken = this.jwtService.sign(payload, {
@@ -1823,6 +1986,51 @@ export class AuthService {
     });
 
     return this.generateTokens(user);
+  }
+
+  async logout(userId: string, incomingRefreshToken?: string) {
+    const activeTokens = await this.prisma.refreshToken.findMany({
+      where: {
+        userId,
+        revoked: false,
+        expiresAt: { gt: new Date() },
+      },
+      select: {
+        id: true,
+        tokenHash: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (activeTokens.length === 0) {
+      return { success: true, revokedCount: 0 };
+    }
+
+    if (incomingRefreshToken && incomingRefreshToken.trim().length > 0) {
+      for (const token of activeTokens) {
+        const isMatch = await bcrypt.compare(
+          incomingRefreshToken,
+          token.tokenHash,
+        );
+        if (isMatch) {
+          await this.prisma.refreshToken.update({
+            where: { id: token.id },
+            data: { revoked: true },
+          });
+          return { success: true, revokedCount: 1 };
+        }
+      }
+    }
+
+    const revokeResult = await this.prisma.refreshToken.updateMany({
+      where: {
+        userId,
+        revoked: false,
+      },
+      data: { revoked: true },
+    });
+
+    return { success: true, revokedCount: revokeResult.count };
   }
 
   // ================= FORGOT PASSWORD =================

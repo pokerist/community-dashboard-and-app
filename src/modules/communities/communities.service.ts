@@ -6,7 +6,6 @@ import {
 } from '@nestjs/common';
 import {
   ComplaintStatus,
-  EntryRole,
   UnitStatus,
   UserStatusEnum,
 } from '@prisma/client';
@@ -25,6 +24,12 @@ export class CommunitiesService {
       include: {
         _count: {
           select: {
+            phases: {
+              where: {
+                isActive: true,
+                deletedAt: null,
+              },
+            },
             clusters: {
               where: {
                 isActive: true,
@@ -55,7 +60,7 @@ export class CommunitiesService {
           code,
           displayOrder: dto.displayOrder ?? 0,
           isActive: dto.isActive ?? true,
-          allowedEntryRoles: dto.allowedEntryRoles ?? [],
+          guidelines: dto.guidelines ?? null,
         },
       });
     } catch (error: unknown) {
@@ -85,9 +90,7 @@ export class CommunitiesService {
         ...(nextCode !== undefined ? { code: nextCode } : {}),
         ...(dto.displayOrder !== undefined ? { displayOrder: dto.displayOrder } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
-        ...(dto.allowedEntryRoles !== undefined
-          ? { allowedEntryRoles: dto.allowedEntryRoles }
-          : {}),
+        ...(dto.guidelines !== undefined ? { guidelines: dto.guidelines } : {}),
       },
     });
 
@@ -116,32 +119,6 @@ export class CommunitiesService {
     return { success: true };
   }
 
-  async updateAllowedEntryRoles(
-    id: string,
-    roles: EntryRole[],
-  ): Promise<{ id: string; allowedEntryRoles: EntryRole[] }> {
-    const community = await this.prisma.community.findUnique({
-      where: { id },
-      select: { id: true },
-    });
-    if (!community) {
-      throw new NotFoundException('Community not found');
-    }
-
-    const updated = await this.prisma.community.update({
-      where: { id },
-      data: {
-        allowedEntryRoles: roles,
-      },
-      select: {
-        id: true,
-        allowedEntryRoles: true,
-      },
-    });
-
-    return updated;
-  }
-
   async getCommunityStats(id: string): Promise<CommunityStatsResponseDto> {
     const community = await this.prisma.community.findUnique({
       where: { id },
@@ -167,18 +144,18 @@ export class CommunitiesService {
       this.prisma.unit.count({
         where: unitWhere,
       }),
-      this.prisma.unit.count({
+      this.prisma.residentUnit.count({
         where: {
-          ...unitWhere,
-          status: {
-            in: [UnitStatus.OCCUPIED, UnitStatus.LEASED, UnitStatus.RENTED],
+          unit: unitWhere,
+          resident: {
+            user: { userStatus: UserStatusEnum.ACTIVE },
           },
         },
       }),
       this.prisma.unit.count({
         where: {
           ...unitWhere,
-          isDelivered: true,
+          status: UnitStatus.DELIVERED,
         },
       }),
       this.prisma.residentUnit.count({
@@ -222,7 +199,7 @@ export class CommunitiesService {
         name: true,
         code: true,
         isActive: true,
-        allowedEntryRoles: true,
+        guidelines: true,
         createdAt: true,
       },
     });
@@ -230,7 +207,33 @@ export class CommunitiesService {
       throw new NotFoundException('Community not found');
     }
 
-    const [clusters, gates, stats] = await Promise.all([
+    const [phases, clusters, gates, stats] = await Promise.all([
+      this.prisma.phase.findMany({
+        where: {
+          communityId: id,
+          isActive: true,
+          deletedAt: null,
+        },
+        orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }],
+        include: {
+          _count: {
+            select: {
+              units: {
+                where: {
+                  isActive: true,
+                  deletedAt: null,
+                },
+              },
+              clusters: {
+                where: {
+                  isActive: true,
+                  deletedAt: null,
+                },
+              },
+            },
+          },
+        },
+      }),
       this.prisma.cluster.findMany({
         where: {
           communityId: id,
@@ -265,6 +268,12 @@ export class CommunitiesService {
           allowedRoles: true,
           etaMinutes: true,
           isActive: true,
+          gateClusters: {
+            select: { clusterId: true },
+          },
+          gatePhases: {
+            select: { phaseId: true },
+          },
         },
       }),
       this.getCommunityStats(id),
@@ -275,9 +284,18 @@ export class CommunitiesService {
       name: community.name,
       code: community.code,
       isActive: community.isActive,
-      allowedEntryRoles: community.allowedEntryRoles,
+      guidelines: community.guidelines,
+      phases: phases.map((phase) => ({
+        id: phase.id,
+        name: phase.name,
+        code: phase.code,
+        displayOrder: phase.displayOrder,
+        unitCount: phase._count.units,
+        clusterCount: phase._count.clusters,
+      })),
       clusters: clusters.map((cluster) => ({
         id: cluster.id,
+        phaseId: cluster.phaseId,
         name: cluster.name,
         code: cluster.code,
         displayOrder: cluster.displayOrder,
@@ -290,6 +308,8 @@ export class CommunitiesService {
         allowedRoles: gate.allowedRoles,
         etaMinutes: gate.etaMinutes,
         isActive: gate.isActive,
+        phaseIds: gate.gatePhases.map((gp) => gp.phaseId),
+        clusterIds: gate.gateClusters.map((gc) => gc.clusterId),
       })),
       stats,
       createdAt: community.createdAt.toISOString(),

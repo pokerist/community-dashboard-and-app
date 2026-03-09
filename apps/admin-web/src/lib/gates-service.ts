@@ -38,6 +38,8 @@ export type GateRow = {
   isVisitorRequestRequired: boolean;
   unitIds: string[];
   unitCount: number;
+  phaseIds?: string[];
+  clusterIds?: string[];
   createdAt: string;
   updatedAt: string;
 };
@@ -78,7 +80,8 @@ export type ClusterOption = {
 
 export type GateCreatePayload = {
   communityId: string;
-  clusterId?: string;
+  phaseIds?: string[];
+  clusterIds?: string[];
   name: string;
   allowedRoles: GateAccessRole[];
   etaMinutes?: number;
@@ -211,10 +214,10 @@ const gatesService = {
   },
 
   async listClusterOptions(communityId: string): Promise<ClusterOption[]> {
-    const response = await apiClient.get<Array<{ id: string; name: string; code: string | null }>>(
-      `/communities/${communityId}/clusters`,
+    const response = await apiClient.get<{ clusters: Array<{ id: string; name: string; code: string | null }> }>(
+      `/communities/${communityId}/detail`,
     );
-    const rows = Array.isArray(response.data) ? response.data : [];
+    const rows = Array.isArray(response.data?.clusters) ? response.data.clusters : [];
     return rows.map((row) => ({
       id: row.id,
       label: row.code ? `${row.name} (${row.code})` : row.name,

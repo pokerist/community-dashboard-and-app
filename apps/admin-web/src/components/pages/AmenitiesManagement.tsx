@@ -5,6 +5,7 @@ import {
   ChevronLeft, ChevronRight, SlidersHorizontal, ChevronDown,
   CalendarRange, Zap,
 } from 'lucide-react';
+import { IconPicker } from '../IconPicker';
 import { toast } from 'sonner';
 import { StatCard } from '../StatCard';
 import { DataTable, type DataTableColumn } from '../DataTable';
@@ -29,12 +30,28 @@ const COLOR_PRESETS = [
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 const FACILITY_TYPE_LABELS: Record<FacilityType, string> = {
+  [FacilityType.SPORTS]: 'Sports',
+  [FacilityType.FITNESS]: 'Fitness',
+  [FacilityType.AQUATICS]: 'Aquatics',
+  [FacilityType.RECREATION]: 'Recreation',
+  [FacilityType.WELLNESS]: 'Wellness',
+  [FacilityType.EVENTS]: 'Events',
+  [FacilityType.KIDS]: 'Kids',
+  [FacilityType.OUTDOOR]: 'Outdoor',
+  // legacy
   [FacilityType.GYM]: 'Gym',
   [FacilityType.POOL]: 'Pool',
   [FacilityType.TENNIS_COURT]: 'Tennis Court',
   [FacilityType.MULTIPURPOSE_HALL]: 'Multipurpose Hall',
   [FacilityType.CUSTOM]: 'Custom',
 };
+
+/** New general categories shown in the create/edit form dropdown */
+const FACILITY_TYPE_OPTIONS: FacilityType[] = [
+  FacilityType.SPORTS, FacilityType.FITNESS, FacilityType.AQUATICS,
+  FacilityType.RECREATION, FacilityType.WELLNESS, FacilityType.EVENTS,
+  FacilityType.KIDS, FacilityType.OUTDOOR,
+];
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -61,7 +78,7 @@ type ExceptionFormState = {
 };
 
 const EMPTY_FACILITY_FORM: FacilityFormState = {
-  name: '', type: FacilityType.CUSTOM, description: '',
+  name: '', type: FacilityType.SPORTS, description: '',
   iconName: '', color: COLOR_PRESETS[0], capacity: '',
   billingCycle: BillingCycle.NONE, price: '',
   maxReservationsPerDay: '', requiresPrepayment: false,
@@ -99,11 +116,21 @@ function amountLabel(v: number | null) {
 }
 
 function iconForType(type: FacilityType) {
-  return type === FacilityType.POOL ? Waves : Dumbbell;
+  if (type === FacilityType.POOL || type === FacilityType.AQUATICS) return Waves;
+  return Dumbbell;
 }
 
 function categoryPillColor(type: FacilityType): { bg: string; text: string; border: string } {
   switch (type) {
+    case FacilityType.SPORTS:            return { bg: '#D1FAE5', text: '#065F46', border: '#6EE7B7' };
+    case FacilityType.FITNESS:           return { bg: '#FEF3C7', text: '#92400E', border: '#FDE68A' };
+    case FacilityType.AQUATICS:          return { bg: '#DBEAFE', text: '#1E40AF', border: '#93C5FD' };
+    case FacilityType.RECREATION:        return { bg: '#EDE9FE', text: '#5B21B6', border: '#C4B5FD' };
+    case FacilityType.WELLNESS:          return { bg: '#FCE7F3', text: '#9D174D', border: '#F9A8D4' };
+    case FacilityType.EVENTS:            return { bg: '#FFF7ED', text: '#9A3412', border: '#FDBA74' };
+    case FacilityType.KIDS:              return { bg: '#F0FDFA', text: '#0F766E', border: '#5EEAD4' };
+    case FacilityType.OUTDOOR:           return { bg: '#F0FDF4', text: '#166534', border: '#86EFAC' };
+    // legacy
     case FacilityType.GYM:               return { bg: '#FEF3C7', text: '#92400E', border: '#FDE68A' };
     case FacilityType.POOL:              return { bg: '#DBEAFE', text: '#1E40AF', border: '#93C5FD' };
     case FacilityType.TENNIS_COURT:      return { bg: '#D1FAE5', text: '#065F46', border: '#6EE7B7' };
@@ -337,15 +364,15 @@ function FacilityFormModal({ open, editingId, form, setForm, onClose, onSave }: 
             <Field label="Facility Name" required span2>
               <input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. Main Swimming Pool" style={inputStyle} />
             </Field>
-            <Field label="Type">
+            <Field label="Category">
               <select value={form.type} onChange={(e) => set('type', e.target.value as FacilityType)} style={selectStyle}>
-                {Object.values(FacilityType).map((t) => (
+                {FACILITY_TYPE_OPTIONS.map((t) => (
                   <option key={t} value={t}>{FACILITY_TYPE_LABELS[t] ?? t}</option>
                 ))}
               </select>
             </Field>
-            <Field label="Icon Name" hint="Lucide icon name e.g. waves">
-              <input value={form.iconName} onChange={(e) => set('iconName', e.target.value)} placeholder="waves" style={inputStyle} />
+            <Field label="Icon" hint="pick an icon">
+              <IconPicker value={form.iconName} onChange={(v) => set('iconName', v)} color={form.color || '#6B7280'} allowEmpty />
             </Field>
             <Field label="Description" span2>
               <textarea value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="Describe this facility…" style={textareaStyle} />
@@ -923,7 +950,7 @@ export function AmenitiesManagement() {
       </div>
 
       {/* ── Top-level tabs ─────────────────────────────────── */}
-      <div style={{ display: 'flex', gap: '2px', padding: '4px', borderRadius: '10px', background: '#EBEBEB', width: 'fit-content' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '2px', padding: '4px', borderRadius: '10px', background: '#EBEBEB' }}>
         <TabBtn label="Facilities" active={tab === 'facilities'} onClick={() => setTab('facilities')} />
         <TabBtn label="Bookings"   active={tab === 'bookings'}   onClick={() => setTab('bookings')} />
       </div>
@@ -933,10 +960,10 @@ export function AmenitiesManagement() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {/* Stats */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
-            <StatCard icon="occupancy"    title="Total Facilities"   value={String(stats?.totalFacilities ?? 0)}                            subtitle="All configured" />
-            <StatCard icon="active-users" title="Active"             value={String(stats?.activeFacilities ?? 0)}                           subtitle="Bookable now" />
-            <StatCard icon="tickets"      title="Bookings Today"     value={String(stats?.bookingsToday ?? 0)}                              subtitle="All facilities" />
-            <StatCard icon="revenue"      title="Revenue This Month" value={`EGP ${(stats?.revenueThisMonth ?? 0).toLocaleString()}`}       subtitle="Collected" />
+            <StatCard icon="occupancy"    title="Total Facilities"   value={String(stats?.totalFacilities ?? 0)}                            subtitle="All configured" onClick={() => setTab('facilities')} />
+            <StatCard icon="active-users" title="Active"             value={String(stats?.activeFacilities ?? 0)}                           subtitle="Bookable now"  onClick={() => setTab('facilities')} />
+            <StatCard icon="tickets"      title="Bookings Today"     value={String(stats?.bookingsToday ?? 0)}                              subtitle="All facilities" onClick={() => setTab('bookings')} />
+            <StatCard icon="revenue"      title="Revenue This Month" value={`EGP ${(stats?.revenueThisMonth ?? 0).toLocaleString()}`}       subtitle="Collected"     onClick={() => setTab('bookings')} />
           </div>
 
           {/* Facilities card */}
@@ -954,7 +981,7 @@ export function AmenitiesManagement() {
 
             {/* Category filter pills */}
             <div style={{ padding: '12px 18px 0', display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
-              {(['ALL' as const, ...Object.values(FacilityType)] as const).map((t) => {
+              {(['ALL' as const, ...FACILITY_TYPE_OPTIONS, ...facilities.map((f) => f.type).filter((t) => !FACILITY_TYPE_OPTIONS.includes(t)).filter((v, i, a) => a.indexOf(v) === i)] as const).map((t) => {
                 const isActive = categoryFilter === t;
                 const label = t === 'ALL' ? 'All Categories' : (FACILITY_TYPE_LABELS[t] ?? t);
                 const pillColor = t !== 'ALL' ? categoryPillColor(t) : null;
@@ -1018,10 +1045,10 @@ export function AmenitiesManagement() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {/* Stats */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
-            <StatCard icon="tickets"         title="Total Bookings"    value={String((stats?.bookingsByStatus.PENDING ?? 0) + (stats?.bookingsByStatus.APPROVED ?? 0) + (stats?.bookingsByStatus.CANCELLED ?? 0) + (stats?.bookingsByStatus.REJECTED ?? 0))} subtitle="All statuses" />
-            <StatCard icon="complaints-open" title="Pending Approval"  value={String(stats?.pendingApprovals ?? 0)}                              subtitle="Awaiting action" />
-            <StatCard icon="active-users"    title="Approved Today"    value={String(stats?.bookingsToday ?? 0)}                                  subtitle="Daily activity" />
-            <StatCard icon="revenue"         title="Revenue This Month" value={`EGP ${(stats?.revenueThisMonth ?? 0).toLocaleString()}`}          subtitle="Collected" />
+            <StatCard icon="tickets"         title="Total Bookings"    value={String((stats?.bookingsByStatus.PENDING ?? 0) + (stats?.bookingsByStatus.APPROVED ?? 0) + (stats?.bookingsByStatus.CANCELLED ?? 0) + (stats?.bookingsByStatus.REJECTED ?? 0))} subtitle="All statuses" onClick={() => setTab('bookings')} />
+            <StatCard icon="complaints-open" title="Pending Approval"  value={String(stats?.pendingApprovals ?? 0)}                              subtitle="Awaiting action" onClick={() => setTab('bookings')} />
+            <StatCard icon="active-users"    title="Approved Today"    value={String(stats?.bookingsToday ?? 0)}                                  subtitle="Daily activity" onClick={() => setTab('bookings')} />
+            <StatCard icon="revenue"         title="Revenue This Month" value={`EGP ${(stats?.revenueThisMonth ?? 0).toLocaleString()}`}          subtitle="Collected"      onClick={() => setTab('bookings')} />
           </div>
 
           {/* Table card */}

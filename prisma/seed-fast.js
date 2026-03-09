@@ -323,16 +323,49 @@ async function main() {
       },
     });
 
-    const residentialCluster = await prisma.cluster.upsert({
+    const northPhase = await prisma.phase.upsert({
       where: {
         communityId_name: {
           communityId: community.id,
-          name: 'Residential Core',
+          name: 'North Phase',
         },
       },
       update: { displayOrder: 1, isActive: true },
       create: {
         communityId: community.id,
+        name: 'North Phase',
+        displayOrder: 1,
+        isActive: true,
+      },
+    });
+
+    const retailPhase = await prisma.phase.upsert({
+      where: {
+        communityId_name: {
+          communityId: community.id,
+          name: 'Retail Phase',
+        },
+      },
+      update: { displayOrder: 2, isActive: true },
+      create: {
+        communityId: community.id,
+        name: 'Retail Phase',
+        displayOrder: 2,
+        isActive: true,
+      },
+    });
+
+    const residentialCluster = await prisma.cluster.upsert({
+      where: {
+        phaseId_name: {
+          phaseId: northPhase.id,
+          name: 'Residential Core',
+        },
+      },
+      update: { displayOrder: 1, isActive: true, communityId: community.id },
+      create: {
+        communityId: community.id,
+        phaseId: northPhase.id,
         name: 'Residential Core',
         displayOrder: 1,
         isActive: true,
@@ -340,16 +373,17 @@ async function main() {
     });
     const retailCluster = await prisma.cluster.upsert({
       where: {
-        communityId_name: {
-          communityId: community.id,
+        phaseId_name: {
+          phaseId: retailPhase.id,
           name: 'Retail Strip',
         },
       },
-      update: { displayOrder: 2, isActive: true },
+      update: { displayOrder: 1, isActive: true, communityId: community.id },
       create: {
         communityId: community.id,
+        phaseId: retailPhase.id,
         name: 'Retail Strip',
-        displayOrder: 2,
+        displayOrder: 1,
         isActive: true,
       },
     });
@@ -384,24 +418,34 @@ async function main() {
       }),
     ]);
 
-    const [unitA, unitB, unitC] = await Promise.all([
+    const [unitA, unitB, unitC, unitD] = await Promise.all([
       upsertUnit(community.id, 'A', '101', {
+        phaseId: northPhase.id,
         clusterId: residentialCluster.id,
         bedrooms: 2,
         bathrooms: 1,
         sizeSqm: 120,
       }),
       upsertUnit(community.id, 'B', '202', {
-        clusterId: null, // edge case: unit with no cluster
+        phaseId: northPhase.id, // phase-level unit (no cluster)
+        clusterId: null,
         bedrooms: 3,
         bathrooms: 2,
         sizeSqm: 160,
       }),
       upsertUnit(community.id, 'R', '015', {
+        phaseId: retailPhase.id,
         clusterId: retailCluster.id,
         bedrooms: 0,
         bathrooms: 1,
         sizeSqm: 95,
+      }),
+      upsertUnit(community.id, 'C', '303', {
+        phaseId: null, // community-level unit (no phase/cluster)
+        clusterId: null,
+        bedrooms: 2,
+        bathrooms: 2,
+        sizeSqm: 140,
       }),
     ]);
 
@@ -422,6 +466,7 @@ async function main() {
       data: [
         { gateId: mainGate.id, unitId: unitA.id },
         { gateId: mainGate.id, unitId: unitB.id },
+        { gateId: mainGate.id, unitId: unitD.id },
         { gateId: serviceGate.id, unitId: unitC.id },
         { gateId: towerBGate.id, unitId: unitB.id },
       ],
@@ -937,7 +982,7 @@ async function main() {
     console.log('Fast seed complete.');
     console.log('- Super Admin: test@admin.com / pass123');
     console.log('- Manager: manager@test.com / pass123');
-    console.log('- Community: Alkarma Heights Community (3 gates, 2 clusters)');
+    console.log('- Community: Alkarma Heights Community (2 phases, 2 clusters, 3 gates)');
     console.log('- Compound Staff: active expiring soon + suspended expired + inactive');
   } finally {
     await prisma.$queryRaw`SELECT pg_advisory_unlock(885122009)`;

@@ -239,8 +239,6 @@ export class DelegatesService {
     }
     const allowedUnitStatuses: UnitStatus[] = [
       UnitStatus.DELIVERED,
-      UnitStatus.OCCUPIED,
-      UnitStatus.LEASED,
     ];
     if (!allowedUnitStatuses.includes(unit.status)) {
       throw new ForbiddenException(

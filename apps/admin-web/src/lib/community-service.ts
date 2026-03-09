@@ -1,20 +1,12 @@
-import apiClient from "./api-client";
-
-export type EntryRole =
-  | "RESIDENT_OWNER"
-  | "RESIDENT_FAMILY"
-  | "RESIDENT_TENANT"
-  | "VISITOR"
-  | "WORKER"
-  | "STAFF";
+import apiClient from './api-client';
 
 export type GateRole =
-  | "RESIDENT"
-  | "VISITOR"
-  | "WORKER"
-  | "DELIVERY"
-  | "STAFF"
-  | "RIDESHARE";
+  | 'RESIDENT'
+  | 'VISITOR'
+  | 'WORKER'
+  | 'DELIVERY'
+  | 'STAFF'
+  | 'RIDESHARE';
 
 export interface CommunityListItem {
   id: string;
@@ -22,8 +14,9 @@ export interface CommunityListItem {
   code: string | null;
   isActive: boolean;
   displayOrder: number;
-  allowedEntryRoles: EntryRole[];
+  guidelines: string | null;
   _count?: {
+    phases?: number;
     clusters?: number;
     gates?: number;
   };
@@ -37,9 +30,22 @@ export interface CommunityStats {
   openComplaints: number;
 }
 
+export interface PhaseItem {
+  id: string;
+  communityId?: string;
+  name: string;
+  code: string | null;
+  displayOrder: number;
+  description?: string | null;
+  isActive?: boolean;
+  unitCount: number;
+  clusterCount?: number;
+}
+
 export interface ClusterItem {
   id: string;
   communityId?: string;
+  phaseId: string;
   name: string;
   code: string | null;
   displayOrder: number;
@@ -55,7 +61,9 @@ export interface GateItem {
   allowedRoles: GateRole[];
   etaMinutes: number | null;
   isActive?: boolean;
-  status?: "ACTIVE" | "INACTIVE" | "SUSPENDED";
+  status?: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
+  phaseIds?: string[];
+  clusterIds?: string[];
 }
 
 export interface CommunityDetail {
@@ -63,7 +71,8 @@ export interface CommunityDetail {
   name: string;
   code: string | null;
   isActive: boolean;
-  allowedEntryRoles: EntryRole[];
+  guidelines: string | null;
+  phases: PhaseItem[];
   clusters: ClusterItem[];
   gates: GateItem[];
   stats: CommunityStats;
@@ -72,10 +81,15 @@ export interface CommunityDetail {
 
 export interface CreateCommunityPayload {
   name: string;
+  isActive?: boolean;
+  guidelines?: string;
+}
+
+export interface CreatePhasePayload {
+  name: string;
   code?: string;
   displayOrder?: number;
-  isActive?: boolean;
-  allowedEntryRoles?: EntryRole[];
+  description?: string;
 }
 
 export interface CreateClusterPayload {
@@ -86,19 +100,20 @@ export interface CreateClusterPayload {
 
 export interface CreateGatePayload {
   name: string;
-  code?: string;
   allowedRoles: GateRole[];
   etaMinutes?: number;
+  phaseIds?: string[];
+  clusterIds?: string[];
 }
 
 const communityService = {
   async listCommunities(): Promise<CommunityListItem[]> {
-    const response = await apiClient.get<CommunityListItem[]>("/communities");
+    const response = await apiClient.get<CommunityListItem[]>('/communities');
     return Array.isArray(response.data) ? response.data : [];
   },
 
   async createCommunity(payload: CreateCommunityPayload): Promise<CommunityListItem> {
-    const response = await apiClient.post<CommunityListItem>("/communities", payload);
+    const response = await apiClient.post<CommunityListItem>('/communities', payload);
     return response.data;
   },
 
@@ -106,10 +121,7 @@ const communityService = {
     id: string,
     payload: Partial<CreateCommunityPayload>,
   ): Promise<CommunityListItem> {
-    const response = await apiClient.patch<CommunityListItem>(
-      `/communities/${id}`,
-      payload,
-    );
+    const response = await apiClient.patch<CommunityListItem>(`/communities/${id}`, payload);
     return response.data;
   },
 
@@ -128,36 +140,45 @@ const communityService = {
     return response.data;
   },
 
-  async updateEntryRoles(id: string, roles: EntryRole[]) {
-    const response = await apiClient.patch<{ id: string; allowedEntryRoles: EntryRole[] }>(
-      `/communities/${id}/entry-roles`,
-      { roles },
-    );
-    return response.data;
-  },
-
-  async listClusters(communityId: string): Promise<ClusterItem[]> {
-    const response = await apiClient.get<ClusterItem[]>(
-      `/communities/${communityId}/clusters`,
-    );
+  async listPhases(communityId: string): Promise<PhaseItem[]> {
+    const response = await apiClient.get<PhaseItem[]>(`/communities/${communityId}/phases`);
     return Array.isArray(response.data) ? response.data : [];
   },
 
-  async createCluster(
-    communityId: string,
-    payload: CreateClusterPayload,
-  ): Promise<ClusterItem> {
-    const response = await apiClient.post<ClusterItem>(
-      `/communities/${communityId}/clusters`,
-      payload,
+  async createPhase(communityId: string, payload: CreatePhasePayload): Promise<PhaseItem> {
+    const response = await apiClient.post<PhaseItem>(`/communities/${communityId}/phases`, payload);
+    return response.data;
+  },
+
+  async updatePhase(id: string, payload: Partial<CreatePhasePayload>): Promise<PhaseItem> {
+    const response = await apiClient.patch<PhaseItem>(`/phases/${id}`, payload);
+    return response.data;
+  },
+
+  async deletePhase(id: string): Promise<{ success: true }> {
+    const response = await apiClient.delete<{ success: true }>(`/phases/${id}`);
+    return response.data;
+  },
+
+  async reorderPhases(communityId: string, orderedIds: string[]) {
+    const response = await apiClient.patch<{ success: true }>(
+      `/communities/${communityId}/phases/reorder`,
+      { orderedIds },
     );
     return response.data;
   },
 
-  async updateCluster(
-    id: string,
-    payload: Partial<CreateClusterPayload>,
-  ): Promise<ClusterItem> {
+  async listClusters(phaseId: string): Promise<ClusterItem[]> {
+    const response = await apiClient.get<ClusterItem[]>(`/phases/${phaseId}/clusters`);
+    return Array.isArray(response.data) ? response.data : [];
+  },
+
+  async createCluster(phaseId: string, payload: CreateClusterPayload): Promise<ClusterItem> {
+    const response = await apiClient.post<ClusterItem>(`/phases/${phaseId}/clusters`, payload);
+    return response.data;
+  },
+
+  async updateCluster(id: string, payload: Partial<CreateClusterPayload>): Promise<ClusterItem> {
     const response = await apiClient.patch<ClusterItem>(`/clusters/${id}`, payload);
     return response.data;
   },
@@ -167,29 +188,20 @@ const communityService = {
     return response.data;
   },
 
-  async reorderClusters(communityId: string, orderedIds: string[]) {
-    const response = await apiClient.patch<{ success: true }>(
-      `/communities/${communityId}/clusters/reorder`,
-      { orderedIds },
-    );
+  async reorderClusters(phaseId: string, orderedIds: string[]) {
+    const response = await apiClient.patch<{ success: true }>(`/phases/${phaseId}/clusters/reorder`, {
+      orderedIds,
+    });
     return response.data;
   },
 
   async listGates(communityId: string): Promise<GateItem[]> {
-    const response = await apiClient.get<GateItem[]>(
-      `/communities/${communityId}/gates`,
-    );
+    const response = await apiClient.get<GateItem[]>('/gates', { params: { communityId } });
     return Array.isArray(response.data) ? response.data : [];
   },
 
-  async createGate(
-    communityId: string,
-    payload: CreateGatePayload,
-  ): Promise<GateItem> {
-    const response = await apiClient.post<GateItem>(
-      `/communities/${communityId}/gates`,
-      payload,
-    );
+  async createGate(communityId: string, payload: CreateGatePayload): Promise<GateItem> {
+    const response = await apiClient.post<GateItem>('/gates', { communityId, ...payload });
     return response.data;
   },
 
@@ -210,4 +222,3 @@ const communityService = {
 };
 
 export default communityService;
-

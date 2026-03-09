@@ -5,11 +5,12 @@ import { ViolationsController } from './violations.controller';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { InvoicesModule } from '../invoices/invoices.module';
 import { AuthModule } from '../auth/auth.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 import { ViolationCategoriesController } from './violation-categories.controller';
 import { ViolationCategoriesService } from './violation-categories.service';
 
 @Module({
-  imports: [PrismaModule, InvoicesModule, AuthModule],
+  imports: [PrismaModule, InvoicesModule, AuthModule, NotificationsModule],
   controllers: [ViolationsController, ViolationCategoriesController],
   providers: [ViolationsService, ViolationCategoriesService],
 })

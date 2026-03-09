@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { GateAccessMode, UnitStatus, UnitType } from '@prisma/client';
+import { GateAccessMode, UnitCategory, UnitStatus, UnitType } from '@prisma/client';
 import {
   IsArray,
   IsBoolean,
@@ -23,6 +23,11 @@ export class CreateUnitDto {
   @IsUUID()
   clusterId?: string;
 
+  @ApiPropertyOptional({ example: 'phase-uuid' })
+  @IsOptional()
+  @IsUUID()
+  phaseId?: string;
+
   @ApiPropertyOptional({ example: 'Block A' })
   @IsOptional()
   @IsString()
@@ -33,11 +38,16 @@ export class CreateUnitDto {
   @IsString()
   unitNumber!: string;
 
+  @ApiPropertyOptional({ example: UnitCategory.RESIDENTIAL, enum: UnitCategory })
+  @IsOptional()
+  @IsEnum(UnitCategory)
+  category?: UnitCategory;
+
   @ApiProperty({ example: UnitType.APARTMENT, enum: UnitType })
   @IsEnum(UnitType)
   type!: UnitType;
 
-  @ApiPropertyOptional({ example: UnitStatus.AVAILABLE, enum: UnitStatus })
+  @ApiPropertyOptional({ example: UnitStatus.OFF_PLAN, enum: UnitStatus })
   @IsOptional()
   @IsEnum(UnitStatus)
   status?: UnitStatus;

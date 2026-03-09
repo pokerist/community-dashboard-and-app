@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ComplaintStatus, Priority } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { ComplaintsService } from './complaints.service';
 
 type MockFn<TArgs extends unknown[] = unknown[], TResult = unknown> = jest.Mock<
@@ -33,6 +34,14 @@ describe('ComplaintsService', () => {
     complaintComment: {
       create: jest.fn(),
     },
+    statusHistory: {
+      create: jest.fn(),
+      findMany: jest.fn(),
+    },
+    attachment: {
+      createMany: jest.fn(),
+      findMany: jest.fn(),
+    },
     complaint: {
       findFirst: jest.fn(),
       create: jest.fn(),
@@ -54,6 +63,12 @@ describe('ComplaintsService', () => {
           provide: PrismaService,
           useValue: mockPrisma,
         },
+        {
+          provide: NotificationsService,
+          useValue: {
+            sendNotification: jest.fn().mockResolvedValue(undefined),
+          },
+        },
       ],
     }).compile();
 
@@ -61,6 +76,8 @@ describe('ComplaintsService', () => {
 
     capturedCreateData = null;
     jest.clearAllMocks();
+    mockPrisma.attachment.findMany.mockResolvedValue([]);
+    mockPrisma.statusHistory.create.mockResolvedValue({});
   });
 
   it('sets slaDeadline from category.slaHours when creating a complaint', async () => {

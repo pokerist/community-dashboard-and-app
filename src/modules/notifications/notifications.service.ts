@@ -59,6 +59,7 @@ type PushDispatchStatus = {
 
 type AudienceMeta = {
   communityIds?: string[];
+  phaseIds?: string[];
   clusterIds?: string[];
   unitIds?: string[];
   userIds?: string[];
@@ -823,13 +824,17 @@ export class NotificationsService {
         return { ...meta, userIds: legacyUserIds };
       }
       case Audience.SPECIFIC_BLOCKS: {
+        const phaseIds = this.getStringArray(meta.phaseIds);
         const clusterIds = this.getStringArray(meta.clusterIds);
         const blocksRaw = meta.blocks ?? meta.block;
         const legacyBlocks = this.getStringArray(blocksRaw);
-        if (clusterIds.length === 0 && legacyBlocks.length === 0) {
+        if (phaseIds.length === 0 && clusterIds.length === 0 && legacyBlocks.length === 0) {
           throw new BadRequestException(
-            'audienceMeta.clusterIds is required for SPECIFIC_BLOCKS',
+            'audienceMeta.phaseIds or audienceMeta.clusterIds is required for SPECIFIC_BLOCKS',
           );
+        }
+        if (phaseIds.length > 0) {
+          return { ...meta, phaseIds, clusterIds };
         }
         if (clusterIds.length > 0) {
           return { ...meta, clusterIds };
@@ -897,8 +902,20 @@ export class NotificationsService {
         }
         break;
       case Audience.SPECIFIC_BLOCKS: {
+        const phaseIds = this.getStringArray(meta.phaseIds);
         const clusterIds = this.getStringArray(meta.clusterIds);
         const legacyBlocks = this.getStringArray(meta.blocks ?? meta.block);
+
+        if (phaseIds.length > 0) {
+          const accesses = await this.prisma.unitAccess.findMany({
+            where: {
+              status: 'ACTIVE',
+              unit: { phaseId: { in: phaseIds } },
+            },
+            select: { userId: true },
+          });
+          recipients.push(...accesses.map((row) => row.userId).filter(Boolean));
+        }
 
         if (clusterIds.length > 0) {
           const accesses = await this.prisma.unitAccess.findMany({
@@ -909,18 +926,18 @@ export class NotificationsService {
             select: { userId: true },
           });
           recipients.push(...accesses.map((row) => row.userId).filter(Boolean));
-          break;
         }
 
-        if (legacyBlocks.length === 0) break;
-        const accesses = await this.prisma.unitAccess.findMany({
-          where: {
-            status: 'ACTIVE',
-            unit: { block: { in: legacyBlocks } },
-          },
-          select: { userId: true },
-        });
-        recipients.push(...accesses.map((row) => row.userId).filter(Boolean));
+        if (legacyBlocks.length > 0) {
+          const accesses = await this.prisma.unitAccess.findMany({
+            where: {
+              status: 'ACTIVE',
+              unit: { block: { in: legacyBlocks } },
+            },
+            select: { userId: true },
+          });
+          recipients.push(...accesses.map((row) => row.userId).filter(Boolean));
+        }
         break;
       }
     }
@@ -960,6 +977,7 @@ export class NotificationsService {
         unit: {
           select: {
             block: true,
+            phaseId: true,
             clusterId: true,
             communityId: true,
           },
@@ -982,6 +1000,13 @@ export class NotificationsService {
           .filter(Boolean),
       ),
     ] as string[];
+    const phaseIds = [
+      ...new Set(
+        userUnits
+          .map((u) => (u.unit?.phaseId ? String(u.unit.phaseId) : null))
+          .filter(Boolean),
+      ),
+    ] as string[];
     const blocks = [
       ...new Set(
         userUnits
@@ -990,7 +1015,7 @@ export class NotificationsService {
       ),
     ] as string[];
 
-    return { unitIds, communityIds, clusterIds, blocks };
+    return { unitIds, communityIds, phaseIds, clusterIds, blocks };
   }
 
   private async buildUserNotificationWhereClause(
@@ -1012,6 +1037,10 @@ export class NotificationsService {
         ...ctx.unitIds.map((unitId) => ({
           targetAudience: Audience.SPECIFIC_UNITS,
           audienceMeta: { path: ['unitIds'], array_contains: unitId },
+        })),
+        ...ctx.phaseIds.map((phaseId) => ({
+          targetAudience: Audience.SPECIFIC_BLOCKS,
+          audienceMeta: { path: ['phaseIds'], array_contains: phaseId },
         })),
         ...ctx.clusterIds.map((clusterId) => ({
           targetAudience: Audience.SPECIFIC_BLOCKS,

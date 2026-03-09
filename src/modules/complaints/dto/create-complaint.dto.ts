@@ -1,6 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Priority } from '@prisma/client';
-import { IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
+import {
+  IsArray,
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+} from 'class-validator';
 
 export class CreateComplaintDto {
   @ApiProperty({ description: 'Unit ID', format: 'uuid' })
@@ -26,4 +33,13 @@ export class CreateComplaintDto {
   @IsOptional()
   @IsEnum(Priority)
   priority?: Priority;
+
+  @ApiPropertyOptional({
+    description: 'File IDs to attach as evidence',
+    type: [String],
+  })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  attachmentIds?: string[];
 }

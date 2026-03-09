@@ -1,6 +1,6 @@
 import { humanizeEnum } from "./live-data";
 
-export type TicketKind = "SERVICE" | "REQUEST" | "COMPLAINT";
+export type TicketKind = "SERVICE" | "REQUEST" | "COMPLAINT" | "VIOLATION";
 
 function normalized(value?: string | null): string {
   return String(value ?? "").toUpperCase();
@@ -26,6 +26,17 @@ export function adminTicketStatusLabel(kind: TicketKind | string, value?: string
   const key = normalized(value);
   const ticketKind = normalized(kind);
   if (!key) return "—";
+  if (ticketKind === "VIOLATION") {
+    switch (key) {
+      case "PENDING":      return "Pending Review";
+      case "UNDER_REVIEW":  return "Under Review";
+      case "APPEALED":      return "Appealed";
+      case "PAID":          return "Paid";
+      case "CLOSED":        return "Closed";
+      case "CANCELLED":     return "Cancelled";
+      default:              return humanizeEnum(key);
+    }
+  }
   switch (key) {
     case "NEW":
       return "Pending Approval";

@@ -26,7 +26,9 @@ export class InvoiceListItemDto {
   invoiceNumber!: string;
   unitNumber!: string;
   communityName!: string;
+  residentId!: string | null;
   residentName!: string | null;
+  residentPhone!: string | null;
   type!: InvoiceType;
   categoryLabel!: string | null;
   amount!: number;

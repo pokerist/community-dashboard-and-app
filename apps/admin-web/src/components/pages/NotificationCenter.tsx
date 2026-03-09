@@ -43,6 +43,7 @@ type SendForm = {
   channels: NotificationChannel[];
   targetAudience: NotificationAudience;
   communityIds: string[];
+  phaseIds: string[];
   clusterIds: string[];
   unitIds: string[];
 };
@@ -50,7 +51,7 @@ type SendForm = {
 const DEFAULT_FORM: SendForm = {
   type: 'ANNOUNCEMENT', titleEn: '', titleAr: '', messageEn: '', messageAr: '',
   channels: ['IN_APP', 'PUSH'], targetAudience: 'ALL',
-  communityIds: [], clusterIds: [], unitIds: [],
+  communityIds: [], phaseIds: [], clusterIds: [], unitIds: [],
 };
 
 type TemplateForm = {
@@ -383,7 +384,7 @@ export function NotificationCenter() {
       messageAr: form.messageAr.trim() || undefined, channels: form.channels, targetAudience: form.targetAudience,
       audienceMeta: form.targetAudience === 'ALL' ? undefined
         : form.targetAudience === 'SPECIFIC_RESIDENCES' ? { communityIds: form.communityIds }
-          : form.targetAudience === 'SPECIFIC_BLOCKS' ? { clusterIds: form.clusterIds }
+          : form.targetAudience === 'SPECIFIC_BLOCKS' ? { phaseIds: form.phaseIds, clusterIds: form.clusterIds }
             : { unitIds: form.unitIds },
     };
     setSaving(true);
@@ -665,9 +666,14 @@ export function NotificationCenter() {
                   </Field>
                 )}
                 {form.targetAudience === 'SPECIFIC_BLOCKS' && (
-                  <Field label="Cluster IDs (comma-separated)">
-                    <input value={form.clusterIds.join(', ')} onChange={(e) => setForm((p) => ({ ...p, clusterIds: splitCsv(e.target.value) }))} placeholder="id1, id2, id3" style={inputStyle} />
-                  </Field>
+                  <>
+                    <Field label="Phase IDs (comma-separated)">
+                      <input value={form.phaseIds.join(', ')} onChange={(e) => setForm((p) => ({ ...p, phaseIds: splitCsv(e.target.value) }))} placeholder="id1, id2, id3" style={inputStyle} />
+                    </Field>
+                    <Field label="Cluster IDs (comma-separated)">
+                      <input value={form.clusterIds.join(', ')} onChange={(e) => setForm((p) => ({ ...p, clusterIds: splitCsv(e.target.value) }))} placeholder="id1, id2, id3" style={inputStyle} />
+                    </Field>
+                  </>
                 )}
                 {form.targetAudience === 'SPECIFIC_UNITS' && (
                   <Field label="Units">

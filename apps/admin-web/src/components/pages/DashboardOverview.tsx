@@ -133,6 +133,14 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
     if (selectedCard === "openComplaints")      return "Open Complaints";
     if (selectedCard === "currentVisitors")     return "Checked-In Visitors";
     if (selectedCard === "revenueCurrentMonth") return "Revenue Breakdown";
+    if (selectedCard === "totalRegisteredDevices") return "Registered Devices";
+    if (selectedCard === "activeMobileUsers")   return "Active Mobile Users";
+    if (selectedCard === "totalComplaints")      return "Total Complaints";
+    if (selectedCard === "closedComplaints")     return "Closed Complaints";
+    if (selectedCard === "ticketsByStatus")      return "Tickets by Status";
+    if (selectedCard === "occupancyRate")        return "Occupancy Rate";
+    if (selectedCard === "blueCollarWorkers")    return "Blue Collar Workers";
+    if (selectedCard === "totalCars")            return "Registered Vehicles";
     return "Detail View";
   }, [selectedCard]);
 
@@ -358,9 +366,7 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
                 {detailTitle}
               </DialogTitle>
               <DialogDescription style={{ fontSize: "12.5px", color: "#9CA3AF", marginTop: "3px" }}>
-                {selectedCard === "openComplaints" || selectedCard === "currentVisitors" || selectedCard === "revenueCurrentMonth"
-                  ? `Latest records for ${stats?.periodLabel ?? period}.`
-                  : "Detail view coming soon for this metric."}
+                {`Showing data for ${stats?.periodLabel ?? period}.`}
               </DialogDescription>
             </DialogHeader>
           </div>
@@ -376,14 +382,29 @@ export function DashboardOverview({ onNavigate }: DashboardOverviewProps) {
             {selectedCard === "revenueCurrentMonth" && (
               <RevenueTable rows={revenueDetailQuery.data ?? []} loading={revenueDetailQuery.isLoading} />
             )}
-            {selectedCard !== "openComplaints" && selectedCard !== "currentVisitors" && selectedCard !== "revenueCurrentMonth" && (
-              <div style={{ padding: "32px 0", textAlign: "center" }}>
-                <div style={{ width: "40px", height: "40px", borderRadius: "10px", background: "#F3F4F6", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="1.8"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                </div>
-                <p style={{ fontSize: "13.5px", fontWeight: 600, color: "#6B7280" }}>Detail view coming soon</p>
-                <p style={{ fontSize: "12px", color: "#9CA3AF", marginTop: "4px" }}>Drill-down for this metric is under construction.</p>
-              </div>
+            {selectedCard === "totalRegisteredDevices" && kpis && (
+              <DevicesDetailPanel android={kpis.totalRegisteredDevicesByPlatform.android} ios={kpis.totalRegisteredDevicesByPlatform.ios} total={kpis.totalRegisteredDevices} />
+            )}
+            {selectedCard === "activeMobileUsers" && kpis && (
+              <ActiveUsersDetailPanel android={kpis.activeMobileUsersByPlatform.android} ios={kpis.activeMobileUsersByPlatform.ios} total={kpis.activeMobileUsers} totalDevices={kpis.totalRegisteredDevices} />
+            )}
+            {selectedCard === "totalComplaints" && kpis && (
+              <TotalComplaintsDetailPanel open={kpis.openComplaints} closed={kpis.closedComplaints} total={kpis.totalComplaints} />
+            )}
+            {selectedCard === "closedComplaints" && kpis && (
+              <ClosedComplaintsDetailPanel open={kpis.openComplaints} closed={kpis.closedComplaints} total={kpis.totalComplaints} />
+            )}
+            {selectedCard === "ticketsByStatus" && kpis && (
+              <TicketsByStatusDetailPanel tickets={kpis.ticketsByStatus} />
+            )}
+            {selectedCard === "occupancyRate" && kpis && (
+              <OccupancyRateDetailPanel rate={kpis.occupancyRate} />
+            )}
+            {selectedCard === "blueCollarWorkers" && kpis && (
+              <SimpleCountPanel count={kpis.blueCollarWorkers} label="Blue collar workers currently registered in the system." icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2"/><circle cx="8.5" cy="7" r="4"/><path d="M20 8v6M23 11h-6"/></svg>} />
+            )}
+            {selectedCard === "totalCars" && kpis && (
+              <SimpleCountPanel count={kpis.totalCars} label="Vehicles registered across all units in the community." icon={<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6B7280" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M5 17h14M5 17a2 2 0 01-2-2V9a2 2 0 012-2h1l2-3h8l2 3h1a2 2 0 012 2v6a2 2 0 01-2 2M5 17l-1 2h2M19 17l1 2h-2"/><circle cx="7.5" cy="13" r="1.5"/><circle cx="16.5" cy="13" r="1.5"/></svg>} />
             )}
           </div>
         </DialogContent>
@@ -432,4 +453,211 @@ function RevenueTable({ rows, loading }: { rows: RevenueDrilldownItem[]; loading
     { key: "paidAt", header: "Paid At", render: (r) => <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "12px", color: "#9CA3AF" }}>{formatDateTime(r.paidDate)}</span> },
   ];
   return <DataTable columns={cols} rows={rows} rowKey={(r) => r.id} loading={loading} emptyTitle="No revenue records for this period" />;
+}
+
+// ─── Inline Detail Panels ─────────────────────────────────────
+
+const MONO = "'DM Mono', monospace";
+const SANS = "'Work Sans', sans-serif";
+
+function PlatformBar({ android, ios, total }: { android: number; ios: number; total: number }) {
+  const aPct = total > 0 ? (android / total) * 100 : 50;
+  const iPct = total > 0 ? (ios / total) * 100 : 50;
+  return (
+    <div style={{ marginTop: "16px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#9CA3AF", marginBottom: "6px", fontFamily: SANS }}>
+        <span>Android — {aPct.toFixed(1)}%</span>
+        <span>iOS — {iPct.toFixed(1)}%</span>
+      </div>
+      <div style={{ display: "flex", height: "8px", borderRadius: "4px", overflow: "hidden", background: "#F3F4F6" }}>
+        <div style={{ width: `${aPct}%`, background: "#34D399", borderRadius: "4px 0 0 4px", transition: "width 300ms ease" }} />
+        <div style={{ width: `${iPct}%`, background: "#60A5FA", borderRadius: "0 4px 4px 0", transition: "width 300ms ease" }} />
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: "6px", fontSize: "11px", fontFamily: SANS }}>
+        <span style={{ color: "#34D399", fontWeight: 600 }}>■ Android</span>
+        <span style={{ color: "#60A5FA", fontWeight: 600 }}>■ iOS</span>
+      </div>
+    </div>
+  );
+}
+
+function StatRow({ label, value, color }: { label: string; value: string | number; color?: string }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #F3F4F6" }}>
+      <span style={{ fontSize: "13px", color: "#6B7280", fontFamily: SANS }}>{label}</span>
+      <span style={{ fontSize: "14px", fontWeight: 700, color: color ?? "#111827", fontFamily: MONO }}>{typeof value === "number" ? value.toLocaleString() : value}</span>
+    </div>
+  );
+}
+
+function DevicesDetailPanel({ android, ios, total }: { android: number; ios: number; total: number }) {
+  return (
+    <div style={{ padding: "8px 0" }}>
+      <div style={{ textAlign: "center", marginBottom: "20px" }}>
+        <span style={{ fontSize: "40px", fontWeight: 800, color: "#111827", fontFamily: MONO, letterSpacing: "-0.03em" }}>{total.toLocaleString()}</span>
+        <p style={{ fontSize: "12px", color: "#9CA3AF", marginTop: "4px", fontFamily: SANS }}>Total registered devices</p>
+      </div>
+      <StatRow label="Android devices" value={android} color="#059669" />
+      <StatRow label="iOS devices" value={ios} color="#3B82F6" />
+      <StatRow label="Total" value={total} />
+      <PlatformBar android={android} ios={ios} total={total} />
+    </div>
+  );
+}
+
+function ActiveUsersDetailPanel({ android, ios, total, totalDevices }: { android: number; ios: number; total: number; totalDevices: number }) {
+  const adoptionRate = totalDevices > 0 ? (total / totalDevices) * 100 : 0;
+  return (
+    <div style={{ padding: "8px 0" }}>
+      <div style={{ textAlign: "center", marginBottom: "20px" }}>
+        <span style={{ fontSize: "40px", fontWeight: 800, color: "#111827", fontFamily: MONO, letterSpacing: "-0.03em" }}>{total.toLocaleString()}</span>
+        <p style={{ fontSize: "12px", color: "#9CA3AF", marginTop: "4px", fontFamily: SANS }}>Active mobile users</p>
+      </div>
+      <StatRow label="Android users" value={android} color="#059669" />
+      <StatRow label="iOS users" value={ios} color="#3B82F6" />
+      <StatRow label="Total active" value={total} />
+      <StatRow label="Adoption rate" value={`${adoptionRate.toFixed(1)}%`} color="#7C3AED" />
+      <div style={{ marginTop: "12px", padding: "10px 14px", background: "#F5F3FF", borderRadius: "8px" }}>
+        <p style={{ fontSize: "12px", color: "#7C3AED", fontFamily: SANS }}>
+          <span style={{ fontWeight: 700 }}>{adoptionRate.toFixed(1)}%</span> of {totalDevices.toLocaleString()} registered devices are actively used.
+        </p>
+      </div>
+      <PlatformBar android={android} ios={ios} total={total} />
+    </div>
+  );
+}
+
+function ComplaintsBar({ open, closed, total }: { open: number; closed: number; total: number }) {
+  const openPct = total > 0 ? (open / total) * 100 : 0;
+  const closedPct = total > 0 ? (closed / total) * 100 : 0;
+  return (
+    <div style={{ marginTop: "16px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#9CA3AF", marginBottom: "6px", fontFamily: SANS }}>
+        <span>Open — {openPct.toFixed(1)}%</span>
+        <span>Closed — {closedPct.toFixed(1)}%</span>
+      </div>
+      <div style={{ display: "flex", height: "8px", borderRadius: "4px", overflow: "hidden", background: "#F3F4F6" }}>
+        <div style={{ width: `${openPct}%`, background: "#F59E0B", borderRadius: "4px 0 0 4px", transition: "width 300ms ease" }} />
+        <div style={{ width: `${closedPct}%`, background: "#10B981", borderRadius: "0 4px 4px 0", transition: "width 300ms ease" }} />
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: "6px", fontSize: "11px", fontFamily: SANS }}>
+        <span style={{ color: "#F59E0B", fontWeight: 600 }}>■ Open</span>
+        <span style={{ color: "#10B981", fontWeight: 600 }}>■ Closed</span>
+      </div>
+    </div>
+  );
+}
+
+function TotalComplaintsDetailPanel({ open, closed, total }: { open: number; closed: number; total: number }) {
+  const resolutionRate = total > 0 ? (closed / total) * 100 : 0;
+  return (
+    <div style={{ padding: "8px 0" }}>
+      <div style={{ textAlign: "center", marginBottom: "20px" }}>
+        <span style={{ fontSize: "40px", fontWeight: 800, color: "#111827", fontFamily: MONO, letterSpacing: "-0.03em" }}>{total.toLocaleString()}</span>
+        <p style={{ fontSize: "12px", color: "#9CA3AF", marginTop: "4px", fontFamily: SANS }}>Total complaints filed</p>
+      </div>
+      <StatRow label="Open complaints" value={open} color="#D97706" />
+      <StatRow label="Closed complaints" value={closed} color="#059669" />
+      <StatRow label="Resolution rate" value={`${resolutionRate.toFixed(1)}%`} color="#059669" />
+      <ComplaintsBar open={open} closed={closed} total={total} />
+    </div>
+  );
+}
+
+function ClosedComplaintsDetailPanel({ open, closed, total }: { open: number; closed: number; total: number }) {
+  const resolutionRate = total > 0 ? (closed / total) * 100 : 0;
+  return (
+    <div style={{ padding: "8px 0" }}>
+      <div style={{ textAlign: "center", marginBottom: "20px" }}>
+        <span style={{ fontSize: "40px", fontWeight: 800, color: "#059669", fontFamily: MONO, letterSpacing: "-0.03em" }}>{closed.toLocaleString()}</span>
+        <p style={{ fontSize: "12px", color: "#9CA3AF", marginTop: "4px", fontFamily: SANS }}>Complaints resolved</p>
+      </div>
+      <StatRow label="Closed" value={closed} color="#059669" />
+      <StatRow label="Still open" value={open} color="#D97706" />
+      <StatRow label="Total" value={total} />
+      <StatRow label="Resolution rate" value={`${resolutionRate.toFixed(1)}%`} color="#059669" />
+      <ComplaintsBar open={open} closed={closed} total={total} />
+    </div>
+  );
+}
+
+function TicketsByStatusDetailPanel({ tickets }: { tickets: Record<string, number> }) {
+  const statusConfig: Array<{ key: string; label: string; color: string }> = [
+    { key: "NEW", label: "New", color: "#3B82F6" },
+    { key: "IN_PROGRESS", label: "In Progress", color: "#D97706" },
+    { key: "RESOLVED", label: "Resolved", color: "#059669" },
+    { key: "CLOSED", label: "Closed", color: "#6B7280" },
+  ];
+  const total = Object.values(tickets).reduce((s, v) => s + v, 0);
+
+  return (
+    <div style={{ padding: "8px 0" }}>
+      <div style={{ textAlign: "center", marginBottom: "24px" }}>
+        <span style={{ fontSize: "40px", fontWeight: 800, color: "#111827", fontFamily: MONO, letterSpacing: "-0.03em" }}>{total.toLocaleString()}</span>
+        <p style={{ fontSize: "12px", color: "#9CA3AF", marginTop: "4px", fontFamily: SANS }}>Total tickets</p>
+      </div>
+      {statusConfig.map(({ key, label, color }) => {
+        const count = tickets[key] ?? 0;
+        const pct = total > 0 ? (count / total) * 100 : 0;
+        return (
+          <div key={key} style={{ marginBottom: "14px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "5px" }}>
+              <span style={{ fontSize: "13px", color: "#6B7280", fontFamily: SANS }}>{label}</span>
+              <span style={{ fontSize: "13px", fontWeight: 700, fontFamily: MONO, color }}>
+                {count.toLocaleString()} <span style={{ fontWeight: 500, fontSize: "11px", color: "#9CA3AF" }}>({pct.toFixed(1)}%)</span>
+              </span>
+            </div>
+            <div style={{ height: "6px", borderRadius: "3px", background: "#F3F4F6", overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${pct}%`, background: color, borderRadius: "3px", transition: "width 300ms ease" }} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function OccupancyRateDetailPanel({ rate }: { rate: number }) {
+  const pct = Math.min(100, Math.max(0, rate));
+  const circumference = 2 * Math.PI * 54;
+  const offset = circumference - (pct / 100) * circumference;
+  const color = pct >= 80 ? "#059669" : pct >= 50 ? "#D97706" : "#EF4444";
+
+  return (
+    <div style={{ padding: "16px 0", textAlign: "center" }}>
+      <div style={{ position: "relative", width: "140px", height: "140px", margin: "0 auto" }}>
+        <svg width="140" height="140" viewBox="0 0 140 140" style={{ transform: "rotate(-90deg)" }}>
+          <circle cx="70" cy="70" r="54" fill="none" stroke="#F3F4F6" strokeWidth="10" />
+          <circle cx="70" cy="70" r="54" fill="none" stroke={color} strokeWidth="10" strokeLinecap="round"
+            strokeDasharray={circumference} strokeDashoffset={offset}
+            style={{ transition: "stroke-dashoffset 600ms ease" }} />
+        </svg>
+        <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+          <span style={{ fontSize: "28px", fontWeight: 800, color: "#111827", fontFamily: MONO, letterSpacing: "-0.03em" }}>{pct.toFixed(1)}%</span>
+        </div>
+      </div>
+      <p style={{ marginTop: "16px", fontSize: "13px", color: "#6B7280", fontFamily: SANS }}>
+        {pct >= 80 ? "High occupancy — community is well utilized." : pct >= 50 ? "Moderate occupancy — room for growth." : "Low occupancy — significant vacancies."}
+      </p>
+      <div style={{ marginTop: "16px", height: "8px", borderRadius: "4px", background: "#F3F4F6", overflow: "hidden", maxWidth: "320px", margin: "16px auto 0" }}>
+        <div style={{ height: "100%", width: `${pct}%`, background: color, borderRadius: "4px", transition: "width 300ms ease" }} />
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", maxWidth: "320px", margin: "6px auto 0", fontSize: "11px", color: "#9CA3AF", fontFamily: SANS }}>
+        <span>0%</span>
+        <span>100%</span>
+      </div>
+    </div>
+  );
+}
+
+function SimpleCountPanel({ count, label, icon }: { count: number; label: string; icon: React.ReactNode }) {
+  return (
+    <div style={{ padding: "24px 0", textAlign: "center" }}>
+      <div style={{ width: "48px", height: "48px", borderRadius: "12px", background: "#F3F4F6", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+        {icon}
+      </div>
+      <span style={{ fontSize: "44px", fontWeight: 800, color: "#111827", fontFamily: MONO, letterSpacing: "-0.03em", display: "block" }}>{count.toLocaleString()}</span>
+      <p style={{ marginTop: "8px", fontSize: "13px", color: "#9CA3AF", fontFamily: SANS, maxWidth: "280px", margin: "8px auto 0" }}>{label}</p>
+    </div>
+  );
 }

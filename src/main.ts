@@ -72,7 +72,8 @@ async function bootstrap() {
         .map((value) => value.trim())
         .filter((value) => value.length > 0)
     : [];
-  const localhostOriginPattern = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+  const localhostOriginPattern =
+    /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
 
   app.enableCors({
     origin: (origin, callback) => {

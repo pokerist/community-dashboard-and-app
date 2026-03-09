@@ -13,6 +13,7 @@ import {
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { LogoutDto } from './dto/logout.dto';
 import { SignupWithReferralDto } from '../referrals/dto/signup-with-referral.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
@@ -24,6 +25,7 @@ import { UpdateMeProfilePhotoDto } from './dto/update-me-profile-photo.dto';
 import { CompleteActivationDto } from './dto/complete-activation.dto';
 import { UpdateActivationDraftDto } from './dto/update-activation-draft.dto';
 import { VerifyLoginTwoFactorDto } from './dto/verify-login-two-factor.dto';
+import { VerifySessionTakeoverDto } from './dto/verify-session-takeover.dto';
 import { UpdateMeSecurityDto } from './dto/update-me-security.dto';
 import {
   CreateProfileChangeRequestDto,
@@ -67,10 +69,26 @@ export class AuthController {
     return this.authService.refresh(dto.userId, dto.refreshToken);
   }
 
+  @Post('logout')
+  @ApiOperation({ summary: 'Revoke current user refresh session(s)' })
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  logout(@Request() req: any, @Body() dto: LogoutDto) {
+    return this.authService.logout(req.user.id, dto?.refreshToken);
+  }
+
   @Post('login/2fa/verify')
   @ApiOperation({ summary: 'Complete login by verifying 2FA OTP challenge' })
   verifyLoginTwoFactor(@Body() dto: VerifyLoginTwoFactorDto) {
     return this.authService.verifyLoginTwoFactor(dto);
+  }
+
+  @Post('login/session-takeover')
+  @ApiOperation({
+    summary: 'Verify OTP to take over an existing session from another device',
+  })
+  verifySessionTakeover(@Body() dto: VerifySessionTakeoverDto) {
+    return this.authService.verifySessionTakeover(dto);
   }
 
   @Post('forgot-password')

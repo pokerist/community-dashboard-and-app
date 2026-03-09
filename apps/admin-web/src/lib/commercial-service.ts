@@ -1,7 +1,7 @@
 import apiClient from "./api-client";
 import { extractRows } from "./live-data";
 
-export type CommercialMemberRole = "OWNER" | "HR" | "STAFF";
+export type CommercialMemberRole = "OWNER" | "TENANT" | "HR" | "FINANCE" | "STAFF";
 
 export type CommercialMemberPermissions = {
   can_work_orders: boolean;
@@ -10,6 +10,8 @@ export type CommercialMemberPermissions = {
   can_tickets: boolean;
   can_photo_upload: boolean;
   can_task_reminders: boolean;
+  can_invoices: boolean;
+  can_staff_management: boolean;
 };
 
 export type CommercialEntityMember = {
@@ -19,6 +21,8 @@ export type CommercialEntityMember = {
   role: CommercialMemberRole;
   permissions: CommercialMemberPermissions;
   createdById: string | null;
+  photoFileId: string | null;
+  nationalIdFileId: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -34,9 +38,20 @@ export type CommercialEntity = {
   createdAt: string;
   updatedAt: string;
   owner: CommercialEntityMember | null;
+  tenants: CommercialEntityMember[];
   hrMembers: CommercialEntityMember[];
+  financeMembers: CommercialEntityMember[];
   staffMembers: CommercialEntityMember[];
   memberCount: number;
+};
+
+export type AuditLogEntry = {
+  id: string;
+  entityId: string;
+  action: string;
+  actorUserId: string | null;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
 };
 
 export type CommercialDirectoryUserStatus = "ACTIVE" | "INACTIVE";
@@ -148,7 +163,9 @@ function unitLabel(row: UnitRow): string {
 
 export const COMMERCIAL_MEMBER_ROLES: CommercialMemberRole[] = [
   "OWNER",
+  "TENANT",
   "HR",
+  "FINANCE",
   "STAFF",
 ];
 
@@ -159,6 +176,8 @@ export const COMMERCIAL_PERMISSION_KEYS: Array<keyof CommercialMemberPermissions
   "can_tickets",
   "can_photo_upload",
   "can_task_reminders",
+  "can_invoices",
+  "can_staff_management",
 ];
 
 const commercialService = {
@@ -247,6 +266,39 @@ const commercialService = {
     const response = await apiClient.put<CommercialEntityMember>(
       `/commercial/members/${memberId}/permissions`,
       payload,
+    );
+    return response.data;
+  },
+
+  async getAuditLogs(
+    entityId: string,
+    options?: { limit?: number; offset?: number },
+  ): Promise<{ data: AuditLogEntry[]; total: number }> {
+    const response = await apiClient.get<{ data: AuditLogEntry[]; total: number }>(
+      `/commercial/entities/${entityId}/audit-logs`,
+      { params: options },
+    );
+    return response.data;
+  },
+
+  async updateMemberPhoto(
+    memberId: string,
+    photoFileId: string | null,
+  ): Promise<CommercialEntityMember> {
+    const response = await apiClient.patch<CommercialEntityMember>(
+      `/commercial/members/${memberId}/photo`,
+      { photoFileId },
+    );
+    return response.data;
+  },
+
+  async updateMemberNationalId(
+    memberId: string,
+    nationalIdFileId: string | null,
+  ): Promise<CommercialEntityMember> {
+    const response = await apiClient.patch<CommercialEntityMember>(
+      `/commercial/members/${memberId}/national-id`,
+      { nationalIdFileId },
     );
     return response.data;
   },

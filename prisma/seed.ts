@@ -975,16 +975,33 @@ async function seedFastPath(params: {
     },
   });
 
-  const residentialCluster = await prisma.cluster.upsert({
+  const defaultPhase = await prisma.phase.upsert({
     where: {
       communityId_name: {
         communityId: community.id,
-        name: 'Residential Core',
+        name: 'Default Phase',
       },
     },
     update: { displayOrder: 1, isActive: true },
     create: {
       communityId: community.id,
+      name: 'Default Phase',
+      displayOrder: 1,
+      isActive: true,
+    },
+  });
+
+  const residentialCluster = await prisma.cluster.upsert({
+    where: {
+      phaseId_name: {
+        phaseId: defaultPhase.id,
+        name: 'Residential Core',
+      },
+    },
+    update: { displayOrder: 1, isActive: true, communityId: community.id, phaseId: defaultPhase.id },
+    create: {
+      communityId: community.id,
+      phaseId: defaultPhase.id,
       name: 'Residential Core',
       displayOrder: 1,
       isActive: true,
@@ -993,14 +1010,15 @@ async function seedFastPath(params: {
 
   const retailCluster = await prisma.cluster.upsert({
     where: {
-      communityId_name: {
-        communityId: community.id,
+      phaseId_name: {
+        phaseId: defaultPhase.id,
         name: 'Retail Strip',
       },
     },
-    update: { displayOrder: 2, isActive: true },
+    update: { displayOrder: 2, isActive: true, communityId: community.id, phaseId: defaultPhase.id },
     create: {
       communityId: community.id,
+      phaseId: defaultPhase.id,
       name: 'Retail Strip',
       displayOrder: 2,
       isActive: true,
@@ -1072,6 +1090,7 @@ async function seedFastPath(params: {
       bedrooms: number;
       bathrooms: number;
       sizeSqm: number;
+      phaseId: string | null;
       clusterId: string | null;
     },
   ) {
@@ -1089,6 +1108,7 @@ async function seedFastPath(params: {
         where: { id: existing.id },
         data: {
           communityId: community.id,
+          phaseId: data.phaseId,
           clusterId: data.clusterId,
           type: 'APARTMENT',
           bedrooms: data.bedrooms,
@@ -1103,6 +1123,7 @@ async function seedFastPath(params: {
       data: {
         projectName: 'Alkarma Heights',
         communityId: community.id,
+        phaseId: data.phaseId,
         clusterId: data.clusterId,
         block,
         unitNumber,
@@ -1120,18 +1141,21 @@ async function seedFastPath(params: {
     bedrooms: 2,
     bathrooms: 1,
     sizeSqm: 120,
+    phaseId: defaultPhase.id,
     clusterId: residentialCluster.id,
   });
   const unitB = await upsertUnit('B', '202', {
     bedrooms: 3,
     bathrooms: 2,
     sizeSqm: 160,
+    phaseId: defaultPhase.id,
     clusterId: null, // edge case: no cluster
   });
   const unitC = await upsertUnit('R', '015', {
     bedrooms: 0,
     bathrooms: 1,
     sizeSqm: 95,
+    phaseId: defaultPhase.id,
     clusterId: retailCluster.id,
   });
 
@@ -1810,20 +1834,42 @@ async function seed() {
     },
   });
 
-  const residentialCluster = await prisma.cluster.upsert({
+  const defaultPhase = await prisma.phase.upsert({
     where: {
       communityId_name: {
         communityId: community.id,
+        name: 'Default Phase',
+      },
+    },
+    update: {
+      displayOrder: 1,
+      isActive: true,
+    },
+    create: {
+      communityId: community.id,
+      name: 'Default Phase',
+      displayOrder: 1,
+      isActive: true,
+    },
+  });
+
+  const residentialCluster = await prisma.cluster.upsert({
+    where: {
+      phaseId_name: {
+        phaseId: defaultPhase.id,
         name: 'Residential Core',
       },
     },
     update: {
       displayOrder: 1,
       description: 'Primary residential buildings',
+      phaseId: defaultPhase.id,
+      communityId: community.id,
       isActive: true,
     },
     create: {
       communityId: community.id,
+      phaseId: defaultPhase.id,
       name: 'Residential Core',
       displayOrder: 1,
       description: 'Primary residential buildings',
@@ -1833,18 +1879,21 @@ async function seed() {
 
   const retailCluster = await prisma.cluster.upsert({
     where: {
-      communityId_name: {
-        communityId: community.id,
+      phaseId_name: {
+        phaseId: defaultPhase.id,
         name: 'Retail Strip',
       },
     },
     update: {
       displayOrder: 2,
       description: 'Commercial and retail units',
+      phaseId: defaultPhase.id,
+      communityId: community.id,
       isActive: true,
     },
     create: {
       communityId: community.id,
+      phaseId: defaultPhase.id,
       name: 'Retail Strip',
       displayOrder: 2,
       description: 'Commercial and retail units',
@@ -1856,6 +1905,7 @@ async function seed() {
     where: { id: unitA.id },
     data: {
       communityId: community.id,
+      phaseId: defaultPhase.id,
       clusterId: residentialCluster.id,
       isActive: true,
       isDelivered: true,
@@ -1867,6 +1917,7 @@ async function seed() {
     where: { id: unitB.id },
     data: {
       communityId: community.id,
+      phaseId: defaultPhase.id,
       clusterId: null, // edge case: unit with no cluster
       isActive: true,
       isDelivered: true,
@@ -1889,6 +1940,7 @@ async function seed() {
       data: {
         projectName: 'Alkarma Heights',
         communityId: community.id,
+        phaseId: defaultPhase.id,
         clusterId: retailCluster.id,
         block: 'R',
         unitNumber: '015',

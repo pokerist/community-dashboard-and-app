@@ -15,6 +15,7 @@ export class ComplaintCategoriesService {
     description: string | null;
     isActive: boolean;
     displayOrder: number;
+    defaultAssigneeId: string | null;
     createdAt: Date;
     updatedAt: Date;
   }): ComplaintCategoryItemDto {
@@ -25,6 +26,7 @@ export class ComplaintCategoriesService {
       description: row.description,
       isActive: row.isActive,
       displayOrder: row.displayOrder,
+      defaultAssigneeId: row.defaultAssigneeId,
       createdAt: row.createdAt.toISOString(),
       updatedAt: row.updatedAt.toISOString(),
     };
@@ -55,6 +57,7 @@ export class ComplaintCategoriesService {
         name: dto.name.trim(),
         slaHours: dto.slaHours,
         description: dto.description?.trim() || null,
+        defaultAssigneeId: dto.defaultAssigneeId ?? null,
       },
     });
 
@@ -93,6 +96,8 @@ export class ComplaintCategoriesService {
         slaHours: dto.slaHours,
         description:
           dto.description === undefined ? undefined : dto.description.trim() || null,
+        defaultAssigneeId:
+          dto.defaultAssigneeId === undefined ? undefined : dto.defaultAssigneeId ?? null,
       },
     });
 

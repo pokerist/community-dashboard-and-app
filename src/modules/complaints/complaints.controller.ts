@@ -110,8 +110,22 @@ export class ComplaintsController {
 
   @Patch(':id/status')
   @Permissions('complaint.manage')
-  updateStatus(@Param('id') id: string, @Body() dto: UpdateComplaintStatusDto) {
-    return this.complaintsService.updateStatus(id, dto.status, dto.resolutionNotes);
+  updateStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdateComplaintStatusDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const adminId = req.user?.id;
+    if (!adminId) {
+      throw new BadRequestException('Invalid auth context');
+    }
+    return this.complaintsService.updateStatus(id, dto.status, dto.resolutionNotes, adminId);
+  }
+
+  @Get(':id/history')
+  @Permissions('complaint.view_all', 'complaint.view_own')
+  getStatusHistory(@Param('id') id: string) {
+    return this.complaintsService.getStatusHistory(id);
   }
 
   @Post(':id/comments')

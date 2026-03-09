@@ -1,20 +1,18 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsBoolean, IsEnum, IsOptional, IsString, IsUUID } from 'class-validator';
-import { UnitStatus, UnitType } from '@prisma/client';
+import { UnitCategory, UnitStatus, UnitType } from '@prisma/client';
 import { BaseQueryDto } from '../../../common/dto/base-query.dto';
 
 export type UnitDisplayStatus =
   | 'OFF_PLAN'
   | 'UNDER_CONSTRUCTION'
-  | 'DELIVERED'
-  | 'OCCUPIED';
+  | 'DELIVERED';
 
 const DISPLAY_STATUS_VALUES: UnitDisplayStatus[] = [
   'OFF_PLAN',
   'UNDER_CONSTRUCTION',
   'DELIVERED',
-  'OCCUPIED',
 ];
 
 export class UnitQueryDto extends BaseQueryDto {
@@ -23,10 +21,15 @@ export class UnitQueryDto extends BaseQueryDto {
   @IsEnum(UnitType)
   type?: UnitType;
 
-  @ApiPropertyOptional({ enum: UnitStatus, example: UnitStatus.OCCUPIED })
+  @ApiPropertyOptional({ enum: UnitStatus, example: UnitStatus.OFF_PLAN })
   @IsOptional()
   @IsEnum(UnitStatus)
   status?: UnitStatus;
+
+  @ApiPropertyOptional({ enum: UnitCategory, example: UnitCategory.RESIDENTIAL })
+  @IsOptional()
+  @IsEnum(UnitCategory)
+  category?: UnitCategory;
 
   @ApiPropertyOptional({ example: 'Block A' })
   @IsOptional()
@@ -42,6 +45,11 @@ export class UnitQueryDto extends BaseQueryDto {
   @IsOptional()
   @IsUUID()
   clusterId?: string;
+
+  @ApiPropertyOptional({ example: 'phase-uuid' })
+  @IsOptional()
+  @IsUUID()
+  phaseId?: string;
 
   @ApiPropertyOptional({ enum: DISPLAY_STATUS_VALUES, example: 'DELIVERED' })
   @IsOptional()

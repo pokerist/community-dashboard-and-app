@@ -14,12 +14,17 @@ export interface BillingInvoice {
   dueDate: string | null;
   status: InvoiceStatus;
   category: string;
+  categoryLabel: string | null;
   notes: string | null;
   communityId: string | null;
+  communityName: string | null;
   unitId: string | null;
+  unitNumber: string | null;
   residentId: string | null;
+  residentName: string | null;
+  residentPhone: string | null;
   unit: { id: string; unitNumber: string } | null;
-  resident: { id: string; nameEN: string | null } | null;
+  resident: { id: string; nameEN: string | null; phone?: string | null } | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -120,12 +125,17 @@ function normalizeInvoice(v: unknown): BillingInvoice {
     dueDate: strOrNull(r.dueDate),
     status: parseInvoiceStatus(r.status),
     category: str(r.category, str(r.type, "OTHER")),
+    categoryLabel: strOrNull(r.categoryLabel),
     notes: strOrNull(r.notes),
     communityId: strOrNull(r.communityId),
+    communityName: strOrNull(r.communityName),
     unitId: strOrNull(r.unitId),
+    unitNumber: strOrNull(r.unitNumber) ?? (unit ? str(unit.unitNumber, null as any) : null),
     residentId: strOrNull(r.residentId),
+    residentName: strOrNull(r.residentName) ?? (resident ? strOrNull(resident.nameEN ?? resident.name) : null),
+    residentPhone: resident ? strOrNull(resident.phone) : null,
     unit: unit ? { id: str(unit.id), unitNumber: str(unit.unitNumber, "--") } : null,
-    resident: resident ? { id: str(resident.id), nameEN: strOrNull(resident.nameEN ?? resident.name) } : null,
+    resident: resident ? { id: str(resident.id), nameEN: strOrNull(resident.nameEN ?? resident.name), phone: strOrNull(resident.phone) } : null,
     createdAt: str(r.createdAt, new Date(0).toISOString()),
     updatedAt: str(r.updatedAt, str(r.createdAt, new Date(0).toISOString())),
   };
@@ -161,14 +171,21 @@ function normalizePayment(v: unknown): BillingPayment {
 
 function normalizeStats(v: unknown): BillingStats {
   const r = isObj(v) ? v : {};
+  // Backend returns: totalRevenue, pendingAmount, overdueAmount, overdueCount, paidThisMonth, invoicesByStatus
+  const byStatus = isObj(r.invoicesByStatus) ? r.invoicesByStatus : {};
+  const pendingCount = num(byStatus.PENDING);
+  const paidCount = num(byStatus.PAID);
+  const overdueCount = num(r.overdueCount, num(byStatus.OVERDUE));
+  const voidCount = num(byStatus.VOID) + num(byStatus.CANCELLED);
+  const totalCount = pendingCount + paidCount + overdueCount + voidCount;
   return {
-    totalInvoiced: num(r.totalInvoiced),
-    totalCollected: num(r.totalCollected),
-    totalOverdue: num(r.totalOverdue),
-    pendingCount: num(r.pendingCount),
-    overdueCount: num(r.overdueCount),
-    paidCount: num(r.paidCount),
-    totalCount: num(r.totalCount),
+    totalInvoiced: num(r.totalRevenue) + num(r.pendingAmount) + num(r.overdueAmount),
+    totalCollected: num(r.totalRevenue),
+    totalOverdue: num(r.overdueAmount),
+    pendingCount,
+    overdueCount,
+    paidCount,
+    totalCount,
   };
 }
 
@@ -258,30 +275,25 @@ const billingService = {
     if (params.page) query.page = params.page;
     if (params.limit) query.limit = params.limit;
 
-    try {
-      const res = await apiClient.get("/invoices/payments", { params: query });
-      return normalizePaginated(res.data, normalizePayment);
-    } catch {
-      // If no dedicated payments endpoint, derive from invoices with PAID status
-      const invoiceQuery = { ...query, status: "PAID" };
-      const res = await apiClient.get("/invoices", { params: invoiceQuery });
-      const paginated = normalizePaginated(res.data, normalizeInvoice);
-      const payments: BillingPayment[] = paginated.data.map((inv) => ({
-        id: inv.id,
-        invoiceId: inv.id,
-        amount: inv.amount,
-        currency: inv.currency,
-        method: "CASH",
-        referenceNumber: inv.invoiceNumber,
-        notes: inv.notes,
-        paidAt: inv.updatedAt,
-        status: "COMPLETED",
-        invoice: { id: inv.id, title: inv.title, unit: inv.unit },
-        recordedBy: null,
-        createdAt: inv.updatedAt,
-      }));
-      return { data: payments, total: paginated.total };
-    }
+    // Derive payments from paid invoices to avoid relying on non-canonical endpoints.
+    const invoiceQuery = { ...query, status: "PAID" };
+    const res = await apiClient.get("/invoices", { params: invoiceQuery });
+    const paginated = normalizePaginated(res.data, normalizeInvoice);
+    const payments: BillingPayment[] = paginated.data.map((inv) => ({
+      id: inv.id,
+      invoiceId: inv.id,
+      amount: inv.amount,
+      currency: inv.currency,
+      method: "CASH",
+      referenceNumber: inv.invoiceNumber,
+      notes: inv.notes,
+      paidAt: inv.updatedAt,
+      status: "COMPLETED",
+      invoice: { id: inv.id, title: inv.title, unit: inv.unit },
+      recordedBy: null,
+      createdAt: inv.updatedAt,
+    }));
+    return { data: payments, total: paginated.total };
   },
 
   async createInvoice(payload: CreateInvoicePayload): Promise<BillingInvoice> {
@@ -344,8 +356,8 @@ const billingService = {
   },
 
   async listResidentOptions(communityId: string): Promise<Array<{ id: string; label: string }>> {
-    const res = await apiClient.get("/users", {
-      params: { communityId, role: "RESIDENT", limit: 500 },
+    const res = await apiClient.get("/admin/users", {
+      params: { userType: "resident", take: 500, skip: 0 },
     });
     const payload = res.data;
     const rows = Array.isArray(payload)
@@ -353,7 +365,21 @@ const billingService = {
       : Array.isArray(payload?.data)
         ? payload.data
         : [];
-    return rows.map((r: Record<string, unknown>) => ({
+
+    const filtered = rows.filter((row: Record<string, unknown>) => {
+      if (!communityId) return true;
+      if (strOrNull(row.communityId) === communityId) return true;
+      const resident = isObj(row.resident) ? row.resident : null;
+      if (resident && strOrNull(resident.communityId) === communityId) return true;
+      const unitAccesses = Array.isArray(row.unitAccesses) ? row.unitAccesses : [];
+      return unitAccesses.some((ua) => {
+        if (!isObj(ua)) return false;
+        const unit = isObj(ua.unit) ? ua.unit : null;
+        return unit ? strOrNull(unit.communityId) === communityId : false;
+      });
+    });
+
+    return filtered.map((r: Record<string, unknown>) => ({
       id: str(r.id),
       label: str(r.nameEN, str(r.name, str(r.email, "--"))),
     }));

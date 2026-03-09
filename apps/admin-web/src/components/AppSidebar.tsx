@@ -23,6 +23,7 @@ import {
   BookOpen,
   Shield,
   Ticket,
+  Newspaper,
 } from "lucide-react";
 import logo from "../assets/0c7a0cd1f45864e0108618f40b9f2a75ac95e9dc.png";
 import type { ComponentType } from "react";
@@ -58,7 +59,8 @@ const menuSections: NavSection[] = [
   {
     group: "People",
     items: [
-      { title: "Residents & Users", icon: Users, section: "residents", match: ["residents", "residents-create", "users"] },
+      { title: "Residents", icon: Users, section: "residents", match: ["residents", "residents-create", "users"] },
+      { title: "Dashboard Users", icon: Shield, section: "dashboard-users" },
       { title: "Registrations", icon: ClipboardCheck, section: "approvals" },
       { title: "Compound Staff", icon: Users, section: "compound-staff" },
       { title: "Attendance & Schedules", icon: Clock, section: "attendance" },
@@ -95,6 +97,7 @@ const menuSections: NavSection[] = [
     group: "Engagement",
     items: [
       { title: "Notifications", icon: Bell, section: "notifications" },
+      { title: "News & Updates", icon: Newspaper, section: "news" },
       { title: "Marketing", icon: Megaphone, section: "marketing" },
       { title: "Surveys", icon: BarChart3, section: "surveys" },
     ],
@@ -117,6 +120,7 @@ const menuSections: NavSection[] = [
 ];
 
 export type SidebarBadgeCounts = {
+  tickets: number;
   violations: number;
   permits: number;
   rental: number;

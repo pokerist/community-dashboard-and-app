@@ -7,8 +7,8 @@ describe('ClustersService', () => {
   let service: ClustersService;
 
   const prismaMock = {
-    community: {
-      findUnique: jest.fn(),
+    phase: {
+      findFirst: jest.fn(),
     },
     cluster: {
       findMany: jest.fn(),
@@ -53,14 +53,14 @@ describe('ClustersService', () => {
   });
 
   it('rejects reorderClusters when orderedIds contains duplicates', async () => {
-    prismaMock.community.findUnique.mockResolvedValue({ id: 'community-1' });
+    prismaMock.phase.findFirst.mockResolvedValue({ id: 'phase-1', communityId: 'community-1' });
     prismaMock.cluster.findMany.mockResolvedValue([
       { id: 'cluster-1' },
       { id: 'cluster-2' },
     ]);
 
     await expect(
-      service.reorderClusters('community-1', {
+      service.reorderClusters('phase-1', {
         orderedIds: ['cluster-1', 'cluster-1'],
       }),
     ).rejects.toThrow(BadRequestException);

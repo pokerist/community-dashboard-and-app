@@ -1,10 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { EntryRole } from '@prisma/client';
 import {
-  ArrayUnique,
-  IsArray,
   IsBoolean,
-  IsEnum,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -37,15 +33,9 @@ export class CreateCommunityDto {
   @IsBoolean()
   isActive?: boolean;
 
-  @ApiProperty({
-    required: false,
-    isArray: true,
-    enum: EntryRole,
-    example: [EntryRole.RESIDENT_OWNER, EntryRole.VISITOR, EntryRole.STAFF],
-  })
+  @ApiProperty({ required: false, example: 'No pets allowed in common areas.' })
   @IsOptional()
-  @IsArray()
-  @ArrayUnique()
-  @IsEnum(EntryRole, { each: true })
-  allowedEntryRoles?: EntryRole[];
+  @IsString()
+  @MaxLength(10000)
+  guidelines?: string;
 }

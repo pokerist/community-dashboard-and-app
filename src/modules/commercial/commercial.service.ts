@@ -15,6 +15,8 @@ export interface CommercialMemberPermissions {
   can_tickets: boolean;
   can_photo_upload: boolean;
   can_task_reminders: boolean;
+  can_invoices: boolean;
+  can_staff_management: boolean;
 }
 
 export interface CommercialEntityMemberResponse {
@@ -24,6 +26,8 @@ export interface CommercialEntityMemberResponse {
   role: CommercialEntityMemberRole;
   permissions: CommercialMemberPermissions;
   createdById: string | null;
+  photoFileId: string | null;
+  nationalIdFileId: string | null;
   isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
@@ -39,9 +43,20 @@ export interface CommercialEntityResponse {
   createdAt: Date;
   updatedAt: Date;
   owner: CommercialEntityMemberResponse | null;
+  tenants: CommercialEntityMemberResponse[];
   hrMembers: CommercialEntityMemberResponse[];
+  financeMembers: CommercialEntityMemberResponse[];
   staffMembers: CommercialEntityMemberResponse[];
   memberCount: number;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  entityId: string;
+  action: string;
+  actorUserId: string | null;
+  metadata: Record<string, unknown> | null;
+  createdAt: Date;
 }
 
 export interface ListCommercialEntitiesInput {
@@ -108,6 +123,8 @@ const EMPTY_PERMISSIONS: CommercialMemberPermissions = {
   can_tickets: false,
   can_photo_upload: false,
   can_task_reminders: false,
+  can_invoices: false,
+  can_staff_management: false,
 };
 
 @Injectable()
@@ -202,6 +219,11 @@ export class CommercialService {
       throw new NotFoundException('Commercial entity not found after creation');
     }
 
+    await this.logAudit(created.id, 'ENTITY_CREATED', actorUserId, {
+      name,
+      ownerUserId: input.ownerUserId,
+    });
+
     return this.mapEntity(created);
   }
 
@@ -266,6 +288,10 @@ export class CommercialService {
       },
     });
 
+    await this.logAudit(entityId, 'ENTITY_UPDATED', null, {
+      changes: input,
+    });
+
     return this.mapEntity(updated);
   }
 
@@ -293,6 +319,8 @@ export class CommercialService {
         },
       });
     });
+
+    await this.logAudit(entityId, 'ENTITY_REMOVED', null);
 
     return { success: true };
   }
@@ -360,6 +388,12 @@ export class CommercialService {
       await this.ensureUnitBelongsToCommunity(entity.unitId, entity.communityId);
     }
 
+    await this.logAudit(entityId, 'MEMBER_ADDED', ctx.actorUserId, {
+      memberId: member.id,
+      userId: input.userId,
+      role: input.role,
+    });
+
     return this.mapMember(member);
   }
 
@@ -400,6 +434,11 @@ export class CommercialService {
       },
     });
 
+    await this.logAudit(member.entityId, 'MEMBER_UPDATED', ctx.actorUserId, {
+      memberId,
+      changes: input,
+    });
+
     return this.mapMember(updated);
   }
 
@@ -419,7 +458,98 @@ export class CommercialService {
       },
     });
 
+    await this.logAudit(member.entityId, 'MEMBER_REMOVED', ctx.actorUserId, {
+      memberId,
+      userId: member.userId,
+      role: member.role,
+    });
+
     return { success: true };
+  }
+
+  // ── Audit Logging ──────────────────────────────────────────
+
+  async getAuditLogs(
+    entityId: string,
+    options?: { limit?: number; offset?: number },
+  ): Promise<{ data: AuditLogEntry[]; total: number }> {
+    await this.findEntityForMutation(entityId);
+    const limit = options?.limit ?? 50;
+    const offset = options?.offset ?? 0;
+
+    const [rows, total] = await Promise.all([
+      this.prisma.commercialEntityAuditLog.findMany({
+        where: { entityId },
+        orderBy: { createdAt: 'desc' },
+        take: limit,
+        skip: offset,
+      }),
+      this.prisma.commercialEntityAuditLog.count({
+        where: { entityId },
+      }),
+    ]);
+
+    return {
+      data: rows.map((r) => ({
+        id: r.id,
+        entityId: r.entityId,
+        action: r.action,
+        actorUserId: r.actorUserId,
+        metadata: (r.metadata as Record<string, unknown>) ?? null,
+        createdAt: r.createdAt,
+      })),
+      total,
+    };
+  }
+
+  async logAudit(
+    entityId: string,
+    action: string,
+    actorUserId: string | null,
+    metadata?: Record<string, unknown>,
+  ): Promise<void> {
+    await this.prisma.commercialEntityAuditLog.create({
+      data: {
+        entityId,
+        action,
+        actorUserId,
+        metadata: metadata ? (metadata as Prisma.InputJsonValue) : undefined,
+      },
+    });
+  }
+
+  // ── Member Document Uploads ───────────────────────────────
+
+  async updateMemberPhoto(
+    memberId: string,
+    photoFileId: string | null,
+  ): Promise<CommercialEntityMemberResponse> {
+    const member = await this.findMemberForMutation(memberId);
+    const updated = await this.prisma.commercialEntityMember.update({
+      where: { id: memberId },
+      data: { photoFileId },
+    });
+    await this.logAudit(member.entityId, 'MEMBER_PHOTO_UPDATED', null, {
+      memberId,
+      photoFileId,
+    });
+    return this.mapMember(updated);
+  }
+
+  async updateMemberNationalId(
+    memberId: string,
+    nationalIdFileId: string | null,
+  ): Promise<CommercialEntityMemberResponse> {
+    const member = await this.findMemberForMutation(memberId);
+    const updated = await this.prisma.commercialEntityMember.update({
+      where: { id: memberId },
+      data: { nationalIdFileId },
+    });
+    await this.logAudit(member.entityId, 'MEMBER_ID_UPDATED', null, {
+      memberId,
+      nationalIdFileId,
+    });
+    return this.mapMember(updated);
   }
 
   async getMemberPermissions(memberId: string): Promise<CommercialMemberPermissions> {
@@ -609,6 +739,7 @@ export class CommercialService {
       );
     }
 
+    // OWNER can manage all roles except other OWNERs (admin-only)
     if (actorMember.role === CommercialEntityMemberRole.OWNER) {
       if (targetRole === CommercialEntityMemberRole.OWNER) {
         throw new ForbiddenException('Owners cannot create or update owner assignments');
@@ -616,6 +747,18 @@ export class CommercialService {
       return;
     }
 
+    // TENANT has same management rights as OWNER (except managing OWNERs/TENANTs)
+    if (actorMember.role === CommercialEntityMemberRole.TENANT) {
+      if (
+        targetRole === CommercialEntityMemberRole.OWNER ||
+        targetRole === CommercialEntityMemberRole.TENANT
+      ) {
+        throw new ForbiddenException('Tenants cannot manage owner or tenant assignments');
+      }
+      return;
+    }
+
+    // HR can manage STAFF only
     if (actorMember.role === CommercialEntityMemberRole.HR) {
       if (targetRole !== CommercialEntityMemberRole.STAFF) {
         throw new ForbiddenException('HR can only manage STAFF members');
@@ -623,7 +766,7 @@ export class CommercialService {
       return;
     }
 
-    throw new ForbiddenException('Commercial staff members cannot manage members');
+    throw new ForbiddenException('This role cannot manage members');
   }
 
   private isSystemPrivileged(permissions: string[], roles: string[]): boolean {
@@ -641,9 +784,10 @@ export class CommercialService {
   private defaultPermissionsForRole(
     role: CommercialEntityMemberRole,
   ): CommercialMemberPermissions {
+    // OWNER and TENANT get full permissions
     if (
       role === CommercialEntityMemberRole.OWNER ||
-      role === CommercialEntityMemberRole.HR
+      role === CommercialEntityMemberRole.TENANT
     ) {
       return {
         can_work_orders: true,
@@ -652,9 +796,41 @@ export class CommercialService {
         can_tickets: true,
         can_photo_upload: true,
         can_task_reminders: true,
+        can_invoices: true,
+        can_staff_management: true,
       };
     }
-    return { ...EMPTY_PERMISSIONS };
+    // HR can manage staff and most operational permissions
+    if (role === CommercialEntityMemberRole.HR) {
+      return {
+        can_work_orders: true,
+        can_attendance: true,
+        can_service_requests: true,
+        can_tickets: true,
+        can_photo_upload: true,
+        can_task_reminders: true,
+        can_invoices: false,
+        can_staff_management: true,
+      };
+    }
+    // FINANCE can view invoices and payments
+    if (role === CommercialEntityMemberRole.FINANCE) {
+      return {
+        can_work_orders: false,
+        can_attendance: false,
+        can_service_requests: false,
+        can_tickets: false,
+        can_photo_upload: false,
+        can_task_reminders: false,
+        can_invoices: true,
+        can_staff_management: false,
+      };
+    }
+    // STAFF gets minimal permissions (check in/out, delivery requests)
+    return {
+      ...EMPTY_PERMISSIONS,
+      can_attendance: true,
+    };
   }
 
   private normalizePermissions(
@@ -690,6 +866,14 @@ export class CommercialService {
         input.can_task_reminders !== undefined
           ? Boolean(input.can_task_reminders)
           : defaults.can_task_reminders,
+      can_invoices:
+        input.can_invoices !== undefined
+          ? Boolean(input.can_invoices)
+          : defaults.can_invoices,
+      can_staff_management:
+        input.can_staff_management !== undefined
+          ? Boolean(input.can_staff_management)
+          : defaults.can_staff_management,
     };
   }
 
@@ -704,6 +888,8 @@ export class CommercialService {
       can_tickets: next.can_tickets ?? base.can_tickets,
       can_photo_upload: next.can_photo_upload ?? base.can_photo_upload,
       can_task_reminders: next.can_task_reminders ?? base.can_task_reminders,
+      can_invoices: next.can_invoices ?? base.can_invoices,
+      can_staff_management: next.can_staff_management ?? base.can_staff_management,
     };
   }
 
@@ -720,19 +906,28 @@ export class CommercialService {
       can_tickets: Boolean(record.can_tickets),
       can_photo_upload: Boolean(record.can_photo_upload),
       can_task_reminders: Boolean(record.can_task_reminders),
+      can_invoices: Boolean(record.can_invoices),
+      can_staff_management: Boolean(record.can_staff_management),
     };
   }
 
   private mapEntity(row: EntityWithMembers): CommercialEntityResponse {
     const members = row.members.map((member) => this.mapMember(member));
-    const owner = members.find(
-      (member) => member.role === CommercialEntityMemberRole.OWNER && member.isActive,
+    const activeMembers = members.filter((m) => m.isActive);
+    const owner = activeMembers.find(
+      (member) => member.role === CommercialEntityMemberRole.OWNER,
     );
-    const hrMembers = members.filter(
-      (member) => member.role === CommercialEntityMemberRole.HR && member.isActive,
+    const tenants = activeMembers.filter(
+      (member) => member.role === CommercialEntityMemberRole.TENANT,
     );
-    const staffMembers = members.filter(
-      (member) => member.role === CommercialEntityMemberRole.STAFF && member.isActive,
+    const hrMembers = activeMembers.filter(
+      (member) => member.role === CommercialEntityMemberRole.HR,
+    );
+    const financeMembers = activeMembers.filter(
+      (member) => member.role === CommercialEntityMemberRole.FINANCE,
+    );
+    const staffMembers = activeMembers.filter(
+      (member) => member.role === CommercialEntityMemberRole.STAFF,
     );
 
     return {
@@ -745,9 +940,11 @@ export class CommercialService {
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       owner: owner ?? null,
+      tenants,
       hrMembers,
+      financeMembers,
       staffMembers,
-      memberCount: members.filter((member) => member.isActive).length,
+      memberCount: activeMembers.length,
     };
   }
 
@@ -759,6 +956,8 @@ export class CommercialService {
       role: member.role,
       permissions: this.parsePermissions(member.permissions),
       createdById: member.createdById,
+      photoFileId: member.photoFileId,
+      nationalIdFileId: member.nationalIdFileId,
       isActive: member.isActive,
       createdAt: member.createdAt,
       updatedAt: member.updatedAt,

@@ -25,6 +25,10 @@ import { ListCommercialEntitiesDto } from './dto/list-commercial-entities.dto';
 import { SetCommercialMemberPermissionsDto } from './dto/set-commercial-staff-access.dto';
 import { UpdateCommercialEntityDto } from './dto/update-commercial-entity.dto';
 import { UpdateCommercialMemberDto } from './dto/update-commercial-staff.dto';
+import {
+  UpdateMemberNationalIdDto,
+  UpdateMemberPhotoDto,
+} from './dto/update-member-document.dto';
 
 interface AuthenticatedRequest extends Request {
   user: {
@@ -143,5 +147,43 @@ export class CommercialController {
       actorPermissions: req.user.permissions ?? [],
       actorRoles: req.user.roles ?? [],
     });
+  }
+
+  // ── Audit Logs ────────────────────────────────────────────
+
+  @Get('entities/:entityId/audit-logs')
+  @Permissions('commercial.view_all', 'admin.view')
+  getAuditLogs(
+    @Param('entityId') entityId: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    return this.commercialService.getAuditLogs(entityId, {
+      limit: limit ? Number(limit) : undefined,
+      offset: offset ? Number(offset) : undefined,
+    });
+  }
+
+  // ── Member Document Uploads ───────────────────────────────
+
+  @Patch('members/:memberId/photo')
+  @Permissions('commercial.update', 'admin.update')
+  updateMemberPhoto(
+    @Param('memberId') memberId: string,
+    @Body() dto: UpdateMemberPhotoDto,
+  ) {
+    return this.commercialService.updateMemberPhoto(memberId, dto.photoFileId);
+  }
+
+  @Patch('members/:memberId/national-id')
+  @Permissions('commercial.update', 'admin.update')
+  updateMemberNationalId(
+    @Param('memberId') memberId: string,
+    @Body() dto: UpdateMemberNationalIdDto,
+  ) {
+    return this.commercialService.updateMemberNationalId(
+      memberId,
+      dto.nationalIdFileId,
+    );
   }
 }

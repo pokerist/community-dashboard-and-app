@@ -22,11 +22,37 @@ export class ComplaintCategoryItemDto {
   @ApiProperty()
   displayOrder!: number;
 
+  @ApiPropertyOptional()
+  defaultAssigneeId!: string | null;
+
   @ApiProperty()
   createdAt!: string;
 
   @ApiProperty()
   updatedAt!: string;
+}
+
+export class StatusHistoryItemDto {
+  @ApiProperty()
+  id!: string;
+
+  @ApiPropertyOptional()
+  fromStatus!: string | null;
+
+  @ApiProperty()
+  toStatus!: string;
+
+  @ApiProperty()
+  changedById!: string;
+
+  @ApiProperty()
+  changedByName!: string;
+
+  @ApiPropertyOptional()
+  note!: string | null;
+
+  @ApiProperty()
+  createdAt!: string;
 }
 
 export class ComplaintListItemDto {
@@ -124,6 +150,20 @@ export class ComplaintDetailInvoiceDto {
   dueDate!: string;
 }
 
+export class ComplaintDetailAttachmentDto {
+  @ApiProperty()
+  id!: string;
+
+  @ApiPropertyOptional()
+  fileName!: string | null;
+
+  @ApiPropertyOptional()
+  mimeType!: string | null;
+
+  @ApiPropertyOptional()
+  url!: string | null;
+}
+
 export class ComplaintDetailDto {
   @ApiProperty()
   id!: string;
@@ -202,6 +242,9 @@ export class ComplaintDetailDto {
 
   @ApiProperty({ type: [ComplaintDetailInvoiceDto] })
   invoices!: ComplaintDetailInvoiceDto[];
+
+  @ApiProperty({ type: [ComplaintDetailAttachmentDto] })
+  attachments!: ComplaintDetailAttachmentDto[];
 }
 
 export class ComplaintStatsByCategoryDto {

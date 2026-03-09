@@ -1,47 +1,47 @@
 import apiClient from "./api-client";
 import type { GateItem } from "./community-service";
 
+export type UnitCategory = "RESIDENTIAL" | "COMMERCIAL";
+
 export type UnitType =
   | "VILLA"
   | "APARTMENT"
   | "PENTHOUSE"
   | "DUPLEX"
-  | "TOWNHOUSE";
+  | "TOWNHOUSE"
+  | "ADMINISTRATIVE"
+  | "COMMERCIAL_UNIT";
 
 export type UnitStatus =
-  | "AVAILABLE"
-  | "HELD"
-  | "UNRELEASED"
-  | "NOT_DELIVERED"
-  | "DELIVERED"
-  | "OCCUPIED"
-  | "LEASED"
-  | "RENTED";
+  | "OFF_PLAN"
+  | "UNDER_CONSTRUCTION"
+  | "DELIVERED";
 
 export type UnitDisplayStatus =
   | "OFF_PLAN"
   | "UNDER_CONSTRUCTION"
-  | "DELIVERED"
-  | "OCCUPIED";
+  | "DELIVERED";
 
 export type GateAccessMode = "ALL_GATES" | "SELECTED_GATES";
 
 export interface UnitListItem {
   id: string;
   communityId: string | null;
+  phaseId: string | null;
   clusterId: string | null;
   unitNumber: string;
   block: string | null;
+  category: UnitCategory;
   type: UnitType;
   status: UnitStatus;
   displayStatus: UnitDisplayStatus;
   isDelivered: boolean;
   isActive: boolean;
   communityName: string;
+  phaseName: string | null;
   clusterName: string | null;
   bedrooms: number | null;
   sizeSqm: number | null;
-  price: number | null;
   residentCount: number;
   createdAt: string;
 }
@@ -61,11 +61,23 @@ export interface UnitDetail extends UnitListItem {
   }>;
   currentResidents: Array<{
     id: string;
+    residentId: string;
     userId: string;
     name: string | null;
     email: string | null;
     phone: string | null;
+    userStatus: string | null;
     isPrimary: boolean;
+    role: string;
+    assignedAt: string;
+    familyMembers: Array<{
+      id: string;
+      name: string | null;
+      email: string | null;
+      phone: string | null;
+      relationship: string;
+      status: string;
+    }>;
   }>;
   recentComplaints: Array<{
     id: string;
@@ -86,8 +98,9 @@ export interface UnitListQuery {
   limit?: number;
   search?: string;
   communityId?: string;
+  phaseId?: string;
   clusterId?: string;
-  status?: UnitStatus;
+  category?: UnitCategory;
   displayStatus?: UnitDisplayStatus;
   includeInactive?: boolean;
   isActive?: boolean;
@@ -105,9 +118,11 @@ export interface PaginatedResponse<T> {
 
 export interface CreateUnitPayload {
   communityId: string;
+  phaseId?: string;
   clusterId?: string;
   block?: string;
   unitNumber: string;
+  category?: UnitCategory;
   type: UnitType;
   status?: UnitStatus;
   isDelivered?: boolean;
@@ -115,7 +130,6 @@ export interface CreateUnitPayload {
   bedrooms?: number;
   bathrooms?: number;
   sizeSqm?: number;
-  price?: number;
   gateAccessMode?: GateAccessMode;
   allowedGateIds?: string[];
 }

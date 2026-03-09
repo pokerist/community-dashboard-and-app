@@ -261,7 +261,7 @@ export class DashboardService {
       }),
       this.prisma.unit.count({
         where: {
-          status: 'OCCUPIED',
+          status: 'DELIVERED',
           isActive: true,
           deletedAt: null,
         },
@@ -748,9 +748,15 @@ export class DashboardService {
       : 0;
 
     // Occupancy rate
-    const totalUnits = await this.prisma.unit.count();
+    const totalUnits = await this.prisma.unit.count({
+      where: { isActive: true, deletedAt: null },
+    });
     const occupiedUnits = await this.prisma.unit.count({
-      where: { status: 'OCCUPIED' },
+      where: {
+        status: 'DELIVERED',
+        isActive: true,
+        deletedAt: null,
+      },
     });
     const occupancyRate =
       totalUnits > 0 ? Math.round((occupiedUnits / totalUnits) * 100) : 0;
@@ -1011,9 +1017,14 @@ export class DashboardService {
   async getOccupancy(query: DashboardOccupancyQueryDto) {
     const { projectName, block } = query;
 
-    const whereClause: Prisma.UnitWhereInput = {};
+    const whereClause: Prisma.UnitWhereInput = {
+      isActive: true,
+      deletedAt: null,
+    };
     if (projectName) whereClause.projectName = projectName;
     if (block) whereClause.block = block;
+
+    const occupiedStatuses = 'DELIVERED' as const;
 
     // Get occupancy by project/block
     const occupancyData = await this.prisma.unit.groupBy({
@@ -1029,7 +1040,9 @@ export class DashboardService {
           where: {
             projectName: group.projectName,
             block: group.block,
-            status: 'OCCUPIED',
+            status: occupiedStatuses,
+            isActive: true,
+            deletedAt: null,
           },
         });
         return {
@@ -1048,7 +1061,7 @@ export class DashboardService {
     const occupiedUnits = await this.prisma.unit.count({
       where: {
         ...whereClause,
-        status: 'OCCUPIED',
+        status: occupiedStatuses,
       },
     });
 

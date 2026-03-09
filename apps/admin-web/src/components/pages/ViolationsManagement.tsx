@@ -9,6 +9,7 @@ import { StatCard } from '../StatCard';
 import { DataTable, type DataTableColumn } from '../DataTable';
 import { DrawerForm } from '../DrawerForm';
 import { EmptyState } from '../EmptyState';
+import { MediaGrid } from '../MediaGrid';
 import { StatusBadge } from '../StatusBadge';
 import violationsService, {
   type ViolationActionRequestItem,
@@ -19,6 +20,7 @@ import violationsService, {
   type ViolationListItem,
   type ViolationStats,
 } from '../../lib/violationsService';
+import complaintsService from '../../lib/complaintsService';
 
 // ─── Constants ────────────────────────────────────────────────
 
@@ -79,6 +81,54 @@ function InfoPair({ label, value, mono }: { label: string; value: string; mono?:
     <div style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #EBEBEB', background: '#FFF' }}>
       <p style={{ fontSize: '9.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 3px', fontFamily: "'Work Sans', sans-serif" }}>{label}</p>
       <p style={{ fontSize: '13px', fontWeight: 600, color: '#111827', margin: 0, fontFamily: mono ? "'DM Mono', monospace" : "'Work Sans', sans-serif" }}>{value}</p>
+    </div>
+  );
+}
+
+function TicketProgressBar({ steps, currentStep, labels }: {
+  steps: string[];
+  currentStep: string;
+  labels: Record<string, string>;
+}) {
+  const currentIdx = steps.indexOf(currentStep);
+  return (
+    <div style={{ padding: '14px 16px', borderRadius: '10px', border: '1px solid #EBEBEB', background: '#FFF' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0', position: 'relative' }}>
+        {steps.map((step, i) => {
+          const isDone = i < currentIdx;
+          const isCurrent = i === currentIdx;
+          const isLast = i === steps.length - 1;
+          return (
+            <div key={step} style={{ display: 'flex', alignItems: 'center', flex: isLast ? '0 0 auto' : '1 1 0' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', position: 'relative', zIndex: 1 }}>
+                <div style={{
+                  width: '24px', height: '24px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: isDone ? '#10B981' : isCurrent ? '#2563EB' : '#E5E7EB',
+                  color: isDone || isCurrent ? '#FFF' : '#9CA3AF',
+                  fontSize: '10px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif",
+                  transition: 'all 200ms ease',
+                }}>
+                  {isDone ? '\u2713' : i + 1}
+                </div>
+                <span style={{
+                  fontSize: '9px', fontWeight: isCurrent ? 700 : 500,
+                  color: isDone ? '#10B981' : isCurrent ? '#2563EB' : '#9CA3AF',
+                  fontFamily: "'Work Sans', sans-serif", whiteSpace: 'nowrap',
+                }}>
+                  {labels[step] ?? step}
+                </span>
+              </div>
+              {!isLast && (
+                <div style={{
+                  flex: 1, height: '2px', marginBottom: '18px',
+                  background: isDone ? '#10B981' : '#E5E7EB',
+                  transition: 'all 200ms ease',
+                }} />
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -336,7 +386,11 @@ function ActionCard({ action, onReview }: {
 function DetailContent({ detail, onReload }: {
   detail: ViolationDetail; onReload: () => void;
 }) {
-  const [subTab,          setSubTab]          = useState<'details' | 'evidence' | 'appeals' | 'invoices'>('details');
+  const [subTab,          setSubTab]          = useState<'details' | 'comments' | 'evidence' | 'appeals' | 'invoices'>('details');
+  const [comments,        setComments]        = useState<Array<{ id: string; body: string; isInternal: boolean; createdBy: { nameEN: string | null; nameAR: string | null; email: string | null }; createdAt: string }>>([]);
+  const [commentText,     setCommentText]     = useState('');
+  const [commentInternal, setCommentInternal] = useState(false);
+  const [postingComment,  setPostingComment]  = useState(false);
   const [showCancelInput, setShowCancelInput] = useState(false);
   const [cancelInput,     setCancelInput]     = useState('');
 
@@ -349,6 +403,23 @@ function DetailContent({ detail, onReload }: {
       else                                          await violationsService.reviewFixSubmission(row.id, approved, reason);
       toast.success('Review saved'); onReload();
     } catch { toast.error('Failed to save review'); }
+  };
+
+  useEffect(() => {
+    violationsService.listComments(detail.id).then(setComments).catch(() => {});
+  }, [detail.id]);
+
+  const postComment = async () => {
+    if (!commentText.trim()) return;
+    setPostingComment(true);
+    try {
+      await violationsService.addComment(detail.id, { body: commentText, isInternal: commentInternal });
+      setCommentText(''); setCommentInternal(false);
+      const updated = await violationsService.listComments(detail.id);
+      setComments(updated);
+      toast.success('Comment added');
+    } catch { toast.error('Failed to add comment'); }
+    finally { setPostingComment(false); }
   };
 
   const handleMarkPaid = async () => {
@@ -394,9 +465,17 @@ function DetailContent({ detail, onReload }: {
         </div>
       </div>
 
+      {/* Progress bar */}
+      <TicketProgressBar
+        steps={['PENDING', 'UNDER_REVIEW', 'APPEALED', 'PAID', 'CLOSED']}
+        currentStep={detail.status}
+        labels={{ PENDING: 'Pending', UNDER_REVIEW: 'Under Review', APPEALED: 'Appealed', PAID: 'Paid', CLOSED: 'Closed' }}
+      />
+
       {/* Sub-tabs */}
       <div style={{ display: 'flex', gap: '2px', padding: '3px', borderRadius: '8px', background: '#F3F4F6' }}>
         <SmallTabBtn label="Details"                                   active={subTab === 'details'}  onClick={() => setSubTab('details')} />
+        <SmallTabBtn label="Comments"                                  active={subTab === 'comments'} onClick={() => setSubTab('comments')} />
         <SmallTabBtn label="Evidence"                                  active={subTab === 'evidence'} onClick={() => setSubTab('evidence')} />
         <SmallTabBtn label={`Appeals (${detailAppeals.length + detailFixes.length})`} active={subTab === 'appeals'}  onClick={() => setSubTab('appeals')} />
         <SmallTabBtn label={`Invoices (${detail.invoices.length})`}    active={subTab === 'invoices'} onClick={() => setSubTab('invoices')} />
@@ -427,7 +506,7 @@ function DetailContent({ detail, onReload }: {
           </div>
 
           {/* Actions */}
-          {detail.status === ViolationStatus.PENDING && (
+          {(detail.status === ViolationStatus.PENDING || detail.status === ViolationStatus.UNDER_REVIEW) && (
             <div style={{ padding: '14px 16px', borderRadius: '10px', border: '1px solid #EBEBEB', background: '#FFF', display: 'flex', flexDirection: 'column', gap: '10px' }}>
               <p style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.07em', margin: 0, fontFamily: "'Work Sans', sans-serif" }}>Actions</p>
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
@@ -455,25 +534,52 @@ function DetailContent({ detail, onReload }: {
         </div>
       )}
 
+      {/* ── Comments ── */}
+      {subTab === 'comments' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {comments.length === 0 && (
+            <EmptyState title="No comments yet" description="Add a comment below." />
+          )}
+          {comments.map((c) => {
+            const name = c.createdBy.nameEN ?? c.createdBy.nameAR ?? c.createdBy.email ?? 'Unknown';
+            return (
+              <div key={c.id} style={{ padding: '10px 12px', borderRadius: '9px', border: '1px solid #EBEBEB', background: c.isInternal ? '#FFFBEB' : '#FFF' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: '#111827', fontFamily: "'Work Sans', sans-serif" }}>{name}</span>
+                  <span style={{ fontSize: '10.5px', color: '#9CA3AF', fontFamily: "'DM Mono', monospace" }}>{fmtDateTime(c.createdAt)}</span>
+                </div>
+                {c.isInternal && (
+                  <span style={{ display: 'inline-block', fontSize: '9px', fontWeight: 700, padding: '1px 6px', borderRadius: '4px', background: '#FEF3C7', color: '#D97706', marginBottom: '4px' }}>INTERNAL</span>
+                )}
+                <p style={{ fontSize: '13px', color: '#374151', margin: 0, lineHeight: 1.6, fontFamily: "'Work Sans', sans-serif" }}>{c.body}</p>
+              </div>
+            );
+          })}
+          {/* New comment form */}
+          <div style={{ padding: '12px', borderRadius: '9px', border: '1px solid #EBEBEB', background: '#F9FAFB', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <textarea value={commentText} onChange={(e) => setCommentText(e.target.value)}
+              placeholder="Write a comment..." style={textareaStyle} />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', color: '#6B7280', cursor: 'pointer', fontFamily: "'Work Sans', sans-serif" }}>
+                <input type="checkbox" checked={commentInternal} onChange={(e) => setCommentInternal(e.target.checked)} />
+                Internal note
+              </label>
+              <button type="button" onClick={() => void postComment()} disabled={postingComment || !commentText.trim()}
+                style={{ padding: '6px 14px', borderRadius: '6px', background: '#111827', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif", opacity: postingComment || !commentText.trim() ? 0.5 : 1 }}>
+                {postingComment ? 'Posting...' : 'Post Comment'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Evidence ── */}
       {subTab === 'evidence' && (
-        detail.photoEvidence.length === 0
-          ? <EmptyState title="No photo evidence" description="Evidence files will appear here." />
-          : (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-              {detail.photoEvidence.map((f) => (
-                <a key={f.id} href={f.url ?? '#'} target="_blank" rel="noreferrer"
-                  style={{ borderRadius: '9px', border: '1px solid #EBEBEB', overflow: 'hidden', background: '#FAFAFA', textDecoration: 'none', display: 'block' }}>
-                  <img src={f.url ?? ''} alt={f.fileName ?? 'Evidence'} style={{ width: '100%', height: '120px', objectFit: 'cover', display: 'block' }} />
-                  <div style={{ padding: '8px 10px' }}>
-                    <p style={{ fontSize: '11px', color: '#6B7280', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: "'Work Sans', sans-serif" }}>
-                      {f.fileName ?? f.id}
-                    </p>
-                  </div>
-                </a>
-              ))}
-            </div>
-          )
+        <MediaGrid
+          items={detail.photoEvidence.map((f) => ({ id: f.id, fileName: f.fileName, mimeType: f.mimeType, url: f.url }))}
+          emptyTitle="No evidence"
+          emptyDescription="Evidence files will appear here."
+        />
       )}
 
       {/* ── Appeals & Fixes ── */}
@@ -558,6 +664,62 @@ export function ViolationsManagement() {
   // Category modal
   const [catModalOpen,    setCatModalOpen]    = useState(false);
   const [editingCategory, setEditingCategory] = useState<ViolationCategoryItem | null>(null);
+
+  // Issue violation drawer
+  const [createOpen,   setCreateOpen]   = useState(false);
+  const [creating,     setCreating]     = useState(false);
+  const [vDescription, setVDescription] = useState('');
+  const [vUnitId,      setVUnitId]      = useState('');
+  const [vCategoryId,  setVCategoryId]  = useState('');
+  const [vFine,        setVFine]        = useState('');
+  const [vFiles,       setVFiles]       = useState<File[]>([]);
+  const [vUploading,   setVUploading]   = useState(false);
+  const [units,        setUnits]        = useState<{ id: string; unitNumber: string }[]>([]);
+
+  const resetCreate = () => { setVDescription(''); setVUnitId(''); setVCategoryId(''); setVFine(''); setVFiles([]); };
+
+  const openCreateDrawer = async () => {
+    resetCreate();
+    setCreateOpen(true);
+    if (units.length === 0) {
+      try { setUnits(await complaintsService.listUnits()); } catch { /* ignore */ }
+    }
+  };
+
+  const uploadEvidence = async (file: File): Promise<string> => {
+    const fd = new FormData(); fd.append('file', file);
+    const res = await fetch(`${(import.meta as any).env?.VITE_API_BASE_URL ?? 'http://localhost:4003'}/files/upload/evidence`, {
+      method: 'POST', body: fd,
+      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    });
+    if (!res.ok) throw new Error('Upload failed');
+    const data = await res.json();
+    return data.id;
+  };
+
+  const handleCreateViolation = async () => {
+    if (!vUnitId) { toast.error('Select a unit'); return; }
+    if (!vDescription.trim()) { toast.error('Description is required'); return; }
+    if (vFiles.length === 0) { toast.error('At least one evidence file (photo/video) is required'); return; }
+    setCreating(true);
+    try {
+      setVUploading(true);
+      const photoEvidenceIds = await Promise.all(vFiles.map(uploadEvidence));
+      setVUploading(false);
+      await violationsService.createViolation({
+        unitId: vUnitId,
+        categoryId: vCategoryId || undefined,
+        description: vDescription.trim(),
+        fineAmount: vFine ? Number(vFine) : undefined,
+        photoEvidenceIds,
+      });
+      toast.success('Violation issued');
+      setCreateOpen(false);
+      resetCreate();
+      void loadViolations();
+    } catch { toast.error('Failed to issue violation'); }
+    finally { setCreating(false); setVUploading(false); }
+  };
 
   // ── Loaders ───────────────────────────────────────────────────
 
@@ -681,7 +843,7 @@ export function ViolationsManagement() {
       </div>
 
       {/* ── Tabs ───────────────────────────────────────────── */}
-      <div style={{ display: 'flex', gap: '2px', padding: '4px', borderRadius: '10px', background: '#F3F4F6', marginBottom: '20px', width: 'fit-content' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '2px', padding: '4px', borderRadius: '10px', background: '#F3F4F6', marginBottom: '20px' }}>
         <TabBtn label="Violations" active={tab === 'violations'} onClick={() => setTab('violations')} />
         <TabBtn label="Appeals"    active={tab === 'appeals'}    onClick={() => setTab('appeals')} />
         <TabBtn label="Settings"   active={tab === 'settings'}   onClick={() => setTab('settings')} />
@@ -692,10 +854,10 @@ export function ViolationsManagement() {
         <>
           {/* Stats */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '20px' }}>
-            <StatCard icon="complaints-total" title="Total Violations"   value={String(stats?.total ?? 0)}                       subtitle="All records" />
-            <StatCard icon="complaints-open"  title="Pending Payment"    value={String(stats?.pending ?? 0)}                      subtitle="Awaiting payment" />
-            <StatCard icon="revenue"          title="Fines Collected"    value={money(stats?.totalFinesCollected ?? 0)}            subtitle="Status = PAID" />
-            <StatCard icon="tickets"          title="Pending Appeals"    value={String(stats?.pendingAppeals ?? 0)}                subtitle="Appeal queue" />
+            <StatCard icon="complaints-total" title="Total Violations"   value={String(stats?.total ?? 0)}                       subtitle="All records"        onClick={() => { setTab('violations'); setStatus('ALL'); setPage(1); }} />
+            <StatCard icon="complaints-open"  title="Open / Under Review" value={String((stats?.open ?? 0) + (stats?.underReview ?? 0))} subtitle="Active violations" onClick={() => { setTab('violations'); setStatus('PENDING'); setPage(1); }} />
+            <StatCard icon="revenue"          title="Fines Collected"    value={money(stats?.totalFinesCollected ?? 0)}            subtitle="Status = RESOLVED"  onClick={() => { setTab('violations'); setStatus('PAID'); setPage(1); }} />
+            <StatCard icon="tickets"          title="Pending Appeals"    value={String(stats?.pendingAppeals ?? 0)}                subtitle="Appeal queue"        onClick={() => { setTab('appeals'); setPage(1); }} />
           </div>
 
           {/* Table card */}
@@ -704,17 +866,25 @@ export function ViolationsManagement() {
               search={search} setSearch={(v) => { setSearch(v); setPage(1); }}
               filtersOpen={filtersOpen} setFiltersOpen={setFiltersOpen} activeFilters={vActiveFilters}
               extra={
-                <button type="button" onClick={() => { setHasAppeal((p) => !p); setPage(1); }}
-                  style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 10px', borderRadius: '6px', border: `1px solid ${hasAppeal ? '#DDD6FE' : '#E5E7EB'}`, background: hasAppeal ? '#EDE9FE' : '#FAFAFA', color: hasAppeal ? '#7C3AED' : '#9CA3AF', fontSize: '11.5px', fontWeight: 700, cursor: 'pointer', fontFamily: "'Work Sans', sans-serif", flexShrink: 0, transition: 'all 120ms' }}>
-                  Has Appeal
-                </button>
+                <>
+                  <button type="button" onClick={() => { setHasAppeal((p) => !p); setPage(1); }}
+                    style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 10px', borderRadius: '6px', border: `1px solid ${hasAppeal ? '#DDD6FE' : '#E5E7EB'}`, background: hasAppeal ? '#EDE9FE' : '#FAFAFA', color: hasAppeal ? '#7C3AED' : '#9CA3AF', fontSize: '11.5px', fontWeight: 700, cursor: 'pointer', fontFamily: "'Work Sans', sans-serif", flexShrink: 0, transition: 'all 120ms' }}>
+                    Has Appeal
+                  </button>
+                  <button type="button" onClick={() => void openCreateDrawer()}
+                    style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 14px', borderRadius: '6px', background: '#111827', color: '#FFF', border: 'none', fontSize: '12px', fontWeight: 700, cursor: 'pointer', fontFamily: "'Work Sans', sans-serif", flexShrink: 0, boxShadow: '0 1px 4px rgba(0,0,0,0.12)' }}>
+                    <Plus style={{ width: '12px', height: '12px' }} /> Issue Violation
+                  </button>
+                </>
               }
             >
               <select value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }} style={{ ...selectStyle, width: '150px' }}>
                 <option value="ALL">All Statuses</option>
                 <option value="PENDING">Pending</option>
-                <option value="PAID">Paid</option>
+                <option value="UNDER_REVIEW">Under Review</option>
                 <option value="APPEALED">Appealed</option>
+                <option value="PAID">Paid</option>
+                <option value="CLOSED">Closed</option>
                 <option value="CANCELLED">Cancelled</option>
               </select>
               <select value={categoryId} onChange={(e) => { setCategoryId(e.target.value); setPage(1); }} style={{ ...selectStyle, width: '170px' }}>
@@ -730,7 +900,6 @@ export function ViolationsManagement() {
 
             <DataTable
               columns={violationCols} rows={rows} rowKey={(r) => r.id} loading={loading}
-              rowStyle={(r) => r.status === ViolationStatus.APPEALED ? { borderLeft: '3px solid #C4B5FD' } : {}}
               emptyTitle="No violations found" emptyDescription="Try adjusting your search or filters."
             />
 
@@ -833,7 +1002,7 @@ export function ViolationsManagement() {
         open={detailOpen} onOpenChange={setDetailOpen}
         title="Violation Detail"
         description="Review violation details, appeals and actions."
-        widthClassName="w-full sm:max-w-[560px]"
+        width={560}
       >
         {!detail
           ? <EmptyState title="No violation selected" description="Select a violation from the list." />
@@ -851,6 +1020,110 @@ export function ViolationsManagement() {
         open={catModalOpen} onClose={() => setCatModalOpen(false)}
         editing={editingCategory} onSaved={() => void loadViolations()}
       />
+
+      {/* ══ Issue violation drawer ══════════════════════════════ */}
+      <DrawerForm
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        title="Issue Violation"
+        description="Create a violation against a unit/resident."
+        width={480}
+        footer={
+          <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+            <button type="button" onClick={() => setCreateOpen(false)}
+              style={{ padding: '7px 14px', borderRadius: '7px', border: '1px solid #E5E7EB', background: '#FFF', color: '#374151', cursor: 'pointer', fontSize: '12.5px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+              Cancel
+            </button>
+            <button type="button" onClick={() => void handleCreateViolation()} disabled={creating}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 16px', borderRadius: '8px', background: creating ? '#9CA3AF' : '#111827', color: '#FFF', border: 'none', cursor: creating ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif" }}>
+              <Check style={{ width: '13px', height: '13px' }} />
+              {creating ? (vUploading ? 'Uploading…' : 'Issuing…') : 'Issue Violation'}
+            </button>
+          </div>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          {/* Unit */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <label style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'Work Sans', sans-serif" }}>
+              Unit <span style={{ color: '#EF4444' }}>*</span>
+            </label>
+            <select value={vUnitId} onChange={(e) => setVUnitId(e.target.value)} style={selectStyle}>
+              <option value="">— Select Unit —</option>
+              {units.map((u) => <option key={u.id} value={u.id}>{u.unitNumber}</option>)}
+            </select>
+          </div>
+
+          {/* Category */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <label style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'Work Sans', sans-serif" }}>Category</label>
+            <select value={vCategoryId} onChange={(e) => setVCategoryId(e.target.value)} style={selectStyle}>
+              <option value="">— Optional —</option>
+              {categories.filter((c) => c.isActive).map((c) => <option key={c.id} value={c.id}>{c.name} ({money(c.defaultFineAmount)})</option>)}
+            </select>
+          </div>
+
+          {/* Fine */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <label style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'Work Sans', sans-serif" }}>Fine Amount (EGP)</label>
+            <input type="number" min={0} value={vFine} onChange={(e) => setVFine(e.target.value)} placeholder="Optional — defaults from category" style={{ ...inputStyle, fontFamily: "'DM Mono', monospace" }} />
+          </div>
+
+          {/* Description */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <label style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'Work Sans', sans-serif" }}>
+              Description <span style={{ color: '#EF4444' }}>*</span>
+            </label>
+            <textarea value={vDescription} onChange={(e) => setVDescription(e.target.value)} placeholder="Describe the violation…" style={textareaStyle} />
+          </div>
+
+          {/* Evidence (required) */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <label style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'Work Sans', sans-serif" }}>
+              Evidence <span style={{ color: '#EF4444' }}>*</span>
+            </label>
+            <p style={{ fontSize: '11px', color: '#9CA3AF', margin: 0, fontFamily: "'Work Sans', sans-serif" }}>
+              Photos, videos, or documents. At least one required.
+            </p>
+            <label style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+              padding: '14px', borderRadius: '9px', border: '2px dashed #D1D5DB', background: '#FAFAFA',
+              cursor: 'pointer', fontSize: '12.5px', fontWeight: 600, color: '#6B7280',
+              fontFamily: "'Work Sans', sans-serif",
+            }}>
+              <Plus style={{ width: '14px', height: '14px' }} />
+              Add Files
+              <input
+                type="file"
+                multiple
+                accept="image/*,application/pdf,video/mp4,video/quicktime,video/webm,audio/mpeg,audio/mp4,audio/ogg,audio/webm,audio/wav"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const files = Array.from(e.target.files ?? []);
+                  if (files.length) setVFiles((prev) => [...prev, ...files]);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+            {vFiles.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px' }}>
+                {vFiles.map((f, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 10px', borderRadius: '7px', background: '#F0FDF4', border: '1px solid #BBF7D0' }}>
+                    <span style={{ fontSize: '11.5px', color: '#15803D', fontWeight: 600, fontFamily: "'Work Sans', sans-serif", overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '280px' }}>
+                      {f.name}
+                    </span>
+                    <button type="button" onClick={() => setVFiles((prev) => prev.filter((_, j) => j !== i))}
+                      style={{ width: '20px', height: '20px', borderRadius: '50%', border: 'none', background: '#FEE2E2', color: '#DC2626', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <X style={{ width: '10px', height: '10px' }} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </DrawerForm>
+
     </div>
   );
 }

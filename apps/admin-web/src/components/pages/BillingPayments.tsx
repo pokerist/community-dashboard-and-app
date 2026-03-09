@@ -287,10 +287,13 @@ function InvoiceDetailModal({ invoice, onClose, onRecordPayment }: {
         {/* Info grid */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', padding: '0 22px 14px' }}>
           {[
-            { label: 'Amount',   value: `${invoice.currency} ${invoice.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, mono: true },
-            { label: 'Due Date', value: invoice.dueDate ? formatDateTime(invoice.dueDate) : '—',                                        mono: true },
-            { label: 'Unit',     value: invoice.unit?.unitNumber ?? '—',                                                                mono: false },
-            { label: 'Resident', value: invoice.resident?.nameEN ?? '—',                                                               mono: false },
+            { label: 'Amount',    value: `${invoice.currency} ${invoice.amount.toLocaleString('en-US', { minimumFractionDigits: 2 })}`, mono: true },
+            { label: 'Due Date',  value: invoice.dueDate ? formatDateTime(invoice.dueDate) : '—',                                        mono: true },
+            { label: 'Unit',      value: invoice.unitNumber ?? invoice.unit?.unitNumber ?? '—',                                           mono: false },
+            { label: 'Community', value: invoice.communityName ?? '—',                                                                    mono: false },
+            { label: 'Resident',  value: invoice.residentName ?? invoice.resident?.nameEN ?? '—',                                         mono: false },
+            { label: 'Phone',     value: invoice.residentPhone ?? invoice.resident?.phone ?? '—',                                         mono: true },
+            { label: 'Category',  value: invoice.categoryLabel ?? humanizeEnum(invoice.category),                                         mono: false },
           ].map(({ label, value, mono }) => (
             <div key={label} style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #EBEBEB', background: '#FFF' }}>
               <p style={{ fontSize: '9.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 3px' }}>{label}</p>
@@ -314,7 +317,7 @@ function InvoiceDetailModal({ invoice, onClose, onRecordPayment }: {
           {canPay && (
             <button type="button" onClick={() => { onClose(); onRecordPayment(invoice); }}
               style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 18px', borderRadius: '8px', background: '#111827', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif", boxShadow: '0 2px 8px rgba(0,0,0,0.15)' }}>
-              <CreditCard style={{ width: '12px', height: '12px' }} /> Record Payment
+              <CreditCard style={{ width: '12px', height: '12px' }} /> Paid
             </button>
           )}
         </div>
@@ -513,9 +516,25 @@ export function BillingPayments() {
         <p style={{ fontSize: '10.5px', color: '#9CA3AF', margin: '1px 0 0', fontFamily: "'DM Mono', monospace" }}>#{r.invoiceNumber ?? r.id.slice(0, 8).toUpperCase()}</p>
       </div>
     )},
-    { key: 'unit',     header: 'Unit',     render: (r) => <span style={{ fontSize: '12px', color: '#374151' }}>{r.unit?.unitNumber ?? '—'}</span> },
-    { key: 'resident', header: 'Resident', render: (r) => <span style={{ fontSize: '12px', color: '#374151' }}>{r.resident?.nameEN ?? '—'}</span> },
-    { key: 'category', header: 'Category', render: (r) => <CatChip category={r.category} /> },
+    { key: 'unit', header: 'Unit / Community', render: (r) => (
+      <div>
+        <span style={{ fontSize: '12px', fontWeight: 700, color: '#111827' }}>{r.unitNumber ?? r.unit?.unitNumber ?? '—'}</span>
+        {r.communityName && <p style={{ fontSize: '10px', color: '#9CA3AF', margin: '1px 0 0' }}>{r.communityName}</p>}
+      </div>
+    )},
+    { key: 'resident', header: 'Resident', render: (r) => (
+      <div>
+        <span style={{ fontSize: '12px', color: '#374151', fontWeight: 600 }}>{r.residentName ?? r.resident?.nameEN ?? '—'}</span>
+        {(r.residentPhone ?? r.resident?.phone) && <p style={{ fontSize: '10px', color: '#9CA3AF', margin: '1px 0 0', fontFamily: "'DM Mono', monospace" }}>{r.residentPhone ?? r.resident?.phone}</p>}
+        {r.residentId && <p style={{ fontSize: '9px', color: '#D1D5DB', margin: '1px 0 0', fontFamily: "'DM Mono', monospace" }}>{r.residentId.slice(0, 8)}</p>}
+      </div>
+    )},
+    { key: 'category', header: 'Category', render: (r) => (
+      <div>
+        <CatChip category={r.category} />
+        {r.categoryLabel && r.categoryLabel !== r.category && <p style={{ fontSize: '9.5px', color: '#9CA3AF', margin: '2px 0 0' }}>{r.categoryLabel}</p>}
+      </div>
+    )},
     { key: 'amount',   header: 'Amount',   render: (r) => <MonoAmount amount={r.amount} currency={r.currency} /> },
     { key: 'due',      header: 'Due Date', render: (r) => (
       <span style={{ fontSize: '11.5px', fontFamily: "'DM Mono', monospace", color: r.status === 'OVERDUE' ? '#DC2626' : '#6B7280', fontWeight: r.status === 'OVERDUE' ? 700 : 400 }}>
@@ -526,7 +545,7 @@ export function BillingPayments() {
     { key: 'actions', header: '', render: (r) => (
       <div style={{ display: 'flex', gap: '5px', justifyContent: 'flex-end' }}>
         <ActionBtn label="View" icon={<FileText    style={{ width: '10px', height: '10px' }} />} onClick={() => { setSelectedInvoice(r); setDetailOpen(true); }} />
-        <ActionBtn label="Pay"  icon={<CheckCircle2 style={{ width: '10px', height: '10px' }} />} variant="success" onClick={() => openRecordPayment(r)} disabled={r.status === 'PAID' || r.status === 'VOID'} />
+        <ActionBtn label="Paid" icon={<CheckCircle2 style={{ width: '10px', height: '10px' }} />} variant="success" onClick={() => openRecordPayment(r)} disabled={r.status === 'PAID' || r.status === 'VOID'} />
         <ActionBtn label="Void" icon={<XCircle     style={{ width: '10px', height: '10px' }} />} variant="danger"  onClick={() => void voidInvoice(r)}   disabled={r.status === 'VOID' || r.status === 'PAID'} />
       </div>
     )},
@@ -568,31 +587,22 @@ export function BillingPayments() {
             style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '36px', height: '36px', borderRadius: '7px', border: '1px solid #E5E7EB', background: '#FFF', color: '#6B7280', cursor: isBootstrapping ? 'not-allowed' : 'pointer' }}>
             <RefreshCw style={{ width: '13px', height: '13px', animation: isBootstrapping ? 'spin 1s linear infinite' : 'none' }} />
           </button>
-          {/* Single context-aware action button — switches with the active tab */}
-          {activeTab === 'invoices' ? (
-            <button type="button"
-              onClick={() => { setInvoiceForm({ ...INIT_INVOICE, communityId: selectedCommunityId }); setInvoiceDrawerOpen(true); }}
-              style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 16px', height: '36px', borderRadius: '8px', background: '#111827', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif", boxShadow: '0 2px 6px rgba(0,0,0,0.15)' }}>
-              <Plus style={{ width: '13px', height: '13px' }} /> New Invoice
-            </button>
-          ) : (
-            <button type="button"
-              onClick={() => { setPaymentForm(INIT_PAYMENT); setPaymentDrawerOpen(true); }}
-              style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 16px', height: '36px', borderRadius: '8px', background: '#2563EB', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif", boxShadow: '0 2px 6px rgba(37,99,235,0.3)' }}>
-              <CreditCard style={{ width: '13px', height: '13px' }} /> Record Payment
-            </button>
-          )}
+          <button type="button"
+            onClick={() => { setInvoiceForm({ ...INIT_INVOICE, communityId: selectedCommunityId }); setInvoiceDrawerOpen(true); }}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 16px', height: '36px', borderRadius: '8px', background: '#111827', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif", boxShadow: '0 2px 6px rgba(0,0,0,0.15)' }}>
+            <Plus style={{ width: '13px', height: '13px' }} /> New Invoice
+          </button>
         </div>
       </div>
 
       {/* ── Stats — StatCard component ─────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '10px', marginBottom: '20px' }}>
-        <StatCard icon="revenue"            title="Total Invoiced" value={`EGP ${fmt(stats.totalInvoiced)}`}   subtitle="Gross raised" />
-        <StatCard icon="revenue"            title="Collected"      value={`EGP ${fmt(stats.totalCollected)}`}  subtitle="Payments received" />
-        <StatCard icon="complaints-open"    title="Overdue"        value={`EGP ${fmt(stats.totalOverdue)}`}    subtitle="Past due date" />
-        <StatCard icon="complaints-total"   title="Pending"        value={String(stats.pendingCount)}           subtitle="Awaiting payment" />
-        <StatCard icon="complaints-closed"  title="Paid"           value={String(stats.paidCount)}              subtitle="Invoices settled" />
-        <StatCard icon="tickets"            title="Total"          value={String(stats.totalCount)}             subtitle="All invoices" />
+        <StatCard icon="revenue"            title="Total Invoiced" value={`EGP ${fmt(stats.totalInvoiced)}`}   subtitle="Gross raised"      onClick={() => { setActiveTab('invoices'); setInvFilters((p) => ({ ...p, status: 'all', page: 1 })); }} />
+        <StatCard icon="revenue"            title="Collected"      value={`EGP ${fmt(stats.totalCollected)}`}  subtitle="Payments received" onClick={() => setActiveTab('payments')} />
+        <StatCard icon="complaints-open"    title="Overdue"        value={`EGP ${fmt(stats.totalOverdue)}`}    subtitle="Past due date"     onClick={() => { setActiveTab('invoices'); setInvFilters((p) => ({ ...p, status: 'OVERDUE', page: 1 })); }} />
+        <StatCard icon="complaints-total"   title="Pending"        value={String(stats.pendingCount)}           subtitle="Awaiting payment"  onClick={() => { setActiveTab('invoices'); setInvFilters((p) => ({ ...p, status: 'PENDING', page: 1 })); }} />
+        <StatCard icon="complaints-closed"  title="Paid"           value={String(stats.paidCount)}              subtitle="Invoices settled"  onClick={() => { setActiveTab('invoices'); setInvFilters((p) => ({ ...p, status: 'PAID', page: 1 })); }} />
+        <StatCard icon="tickets"            title="Total"          value={String(stats.totalCount)}             subtitle="All invoices"      onClick={() => { setActiveTab('invoices'); setInvFilters((p) => ({ ...p, status: 'all', page: 1 })); }} />
       </div>
 
       {/* ── Tabs ───────────────────────────────────────────── */}

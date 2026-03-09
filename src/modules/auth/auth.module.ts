@@ -4,6 +4,7 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { PermissionsGuard } from './guards/permissions.guard';
+import { ModuleAccessGuard } from './guards/module-access.guard';
 import { PermissionCacheService } from './permission-cache.service';
 import { PassportModule } from '@nestjs/passport';
 import { JwtStrategy } from './jwt.strategy';
@@ -31,6 +32,7 @@ import { SystemSettingsModule } from '../system-settings/system-settings.module'
     JwtAuthGuard,
     JwtStrategy,
     PermissionsGuard,
+    ModuleAccessGuard,
     PermissionCacheService,
   ],
   controllers: [AuthController],

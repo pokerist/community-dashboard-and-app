@@ -76,8 +76,8 @@ async function ensureUnits() {
     ['Alkarma Gates', 'V', UnitType.VILLA, 1, 8],
     ['Alkarma Kay', 'T', UnitType.TOWNHOUSE, 1, 6],
   ] as const;
-  const statuses = [UnitStatus.OCCUPIED, UnitStatus.OCCUPIED, UnitStatus.LEASED, UnitStatus.DELIVERED, UnitStatus.AVAILABLE, UnitStatus.NOT_DELIVERED];
-  const deliveredStatuses: UnitStatus[] = [UnitStatus.DELIVERED, UnitStatus.OCCUPIED, UnitStatus.LEASED];
+  const statuses = [UnitStatus.DELIVERED, UnitStatus.DELIVERED, UnitStatus.DELIVERED, UnitStatus.DELIVERED, UnitStatus.OFF_PLAN, UnitStatus.UNDER_CONSTRUCTION];
+  const deliveredStatuses: UnitStatus[] = [UnitStatus.DELIVERED];
   for (const [projectName, block, type, start, count] of defs) {
     for (let i = 0; i < count; i++) {
       const unitNumber = String(start + i);

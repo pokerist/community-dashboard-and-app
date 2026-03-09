@@ -39,6 +39,16 @@ export class CommercialMemberPermissionsDto {
   @IsOptional()
   @IsBoolean()
   can_task_reminders?: boolean;
+
+  @ApiPropertyOptional({ example: false })
+  @IsOptional()
+  @IsBoolean()
+  can_invoices?: boolean;
+
+  @ApiPropertyOptional({ example: false })
+  @IsOptional()
+  @IsBoolean()
+  can_staff_management?: boolean;
 }
 
 export class AddCommercialMemberDto {

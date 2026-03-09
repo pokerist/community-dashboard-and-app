@@ -1,4 +1,4 @@
-import { GateAccessMode, GateRole, UnitStatus, UnitType } from '@prisma/client';
+import { GateAccessMode, GateRole, UnitCategory, UnitStatus, UnitType } from '@prisma/client';
 import { UnitDisplayStatus } from './unit-query.dto';
 
 export interface GateItem {
@@ -39,15 +39,18 @@ export interface ComplaintItem {
 export interface UnitListItem {
   id: string;
   communityId: string | null;
+  phaseId: string | null;
   clusterId: string | null;
   unitNumber: string;
   block: string | null;
+  category: UnitCategory;
   type: UnitType;
   status: UnitStatus;
   displayStatus: UnitDisplayStatus;
   isDelivered: boolean;
   isActive: boolean;
   communityName: string;
+  phaseName: string | null;
   clusterName: string | null;
   bedrooms: number | null;
   sizeSqm: number | null;

@@ -46,6 +46,7 @@ import { MarketingModule } from './modules/marketing/marketing.module';
 import { SurveyModule } from './modules/survey/survey.module';
 import { OrderingModule } from './modules/ordering/ordering.module';
 import { HospitalityModule } from './modules/hospitality/hospitality.module';
+import { NewsModule } from './modules/news/news.module';
 
 @Module({
   imports: [
@@ -96,6 +97,7 @@ import { HospitalityModule } from './modules/hospitality/hospitality.module';
     SurveyModule,
     OrderingModule,
     HospitalityModule,
+    NewsModule,
   ],
   controllers: [],
   providers: [],
