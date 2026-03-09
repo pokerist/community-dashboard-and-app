@@ -22,7 +22,7 @@
     "useUnknownInCatchVariables": true,
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false,
-    "types": ["node", "jest", "express", "multer"]
+    "types": ["node", "express", "multer"]
   },
   "exclude": ["node_modules", "dist", "apps", "apps/**/*"]
 }
