@@ -29,6 +29,12 @@ npm run start:prod
 - `npm run db:init:fresh`
 - `npm run db:init:fresh:reset`
 
+## Security
+
+- `npm run audit:prod` runs `npm audit --omit=dev`
+- `npm run audit:prod:gate` enforces: `critical/high/moderate = 0` and only allowlisted low advisories
+- Exception details are documented in `SECURITY_EXCEPTIONS.md`
+
 ## Deploy
 
 ```bash
