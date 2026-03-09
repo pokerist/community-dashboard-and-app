@@ -35,6 +35,10 @@
     "seed:tickets": "ts-node scripts/seed-tickets.ts",
     "seed:professional-demo": "ts-node scripts/reset-professional-demo.ts",
     "permissions:sync": "ts-node scripts/sync-permissions.ts",
+    "dev:stack:start": "powershell -ExecutionPolicy Bypass -File scripts/dev-stack-start.ps1",
+    "dev:stack:stop": "powershell -ExecutionPolicy Bypass -File scripts/dev-stack-stop.ps1",
+    "auth:force-signout": "node scripts/force-signout-user.js",
+    "auth:force-signout:test-admin": "node scripts/force-signout-user.js test@admin.com",
     "smoke:mobile-personas": "powershell -ExecutionPolicy Bypass -File scripts/mobile-persona-smoke.ps1",
     "smoke:admin-stack:linux": "bash scripts/deploy/smoke-admin-stack.sh"
   },
@@ -88,6 +92,7 @@
     "husky": "^9.1.7",
     "jest": "^29.7.0",
     "lint-staged": "^16.2.7",
+    "playwright": "^1.58.2",
     "prettier": "^3.0.0",
     "prisma": "^5.22.0",
     "source-map-support": "^0.5.21",

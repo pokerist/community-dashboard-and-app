@@ -399,14 +399,21 @@ export default function App() {
     void loadBranding();
   }, [authenticated]);
 
-  const handleLogout = () => {
-    removeAuthToken();
-    localStorage.removeItem("refresh_token");
-    localStorage.removeItem("auth_user_id");
-    localStorage.removeItem("auth_email");
-    setAuthenticated(false);
-    navigateToSection("dashboard");
-    toast.message("Signed out — see you next time.");
+  const handleLogout = async () => {
+    const refreshToken = localStorage.getItem("refresh_token") || undefined;
+    try {
+      await apiClient.post("/auth/logout", { refreshToken });
+    } catch {
+      // Keep logout resilient even if backend revoke fails.
+    } finally {
+      removeAuthToken();
+      localStorage.removeItem("refresh_token");
+      localStorage.removeItem("auth_user_id");
+      localStorage.removeItem("auth_email");
+      setAuthenticated(false);
+      navigateToSection("dashboard");
+      toast.message("Signed out — see you next time.");
+    }
   };
 
   const currentAdminEmail = localStorage.getItem("auth_email") || "Admin";

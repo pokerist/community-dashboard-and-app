@@ -37,6 +37,7 @@ function deriveCategory(type: UnitType, explicit?: UnitCategory): UnitCategory {
 interface UnitListRecord {
   id: string;
   communityId: string | null;
+  phaseId: string | null;
   clusterId: string | null;
   unitNumber: string;
   block: string | null;
@@ -50,6 +51,7 @@ interface UnitListRecord {
   price: Prisma.Decimal | null;
   createdAt: Date;
   community: { name: string } | null;
+  phase: { name: string } | null;
   cluster: { name: string } | null;
   residents: Array<{ id: string }>;
 }
@@ -123,6 +125,7 @@ export class UnitsService {
     return {
       id: record.id,
       communityId: record.communityId,
+      phaseId: record.phaseId,
       clusterId: record.clusterId,
       unitNumber: record.unitNumber,
       block: record.block,
@@ -133,6 +136,7 @@ export class UnitsService {
       isDelivered: record.isDelivered,
       isActive: record.isActive,
       communityName: record.community?.name ?? '-',
+      phaseName: record.phase?.name ?? null,
       clusterName: record.cluster?.name ?? null,
       bedrooms: record.bedrooms,
       sizeSqm: record.sizeSqm,
@@ -175,10 +179,28 @@ export class UnitsService {
     return { id: community.id, name: community.name };
   }
 
+  private async assertPhaseBelongsToCommunity(
+    phaseId: string,
+    communityId: string,
+  ): Promise<void> {
+    const phase = await this.prisma.phase.findFirst({
+      where: {
+        id: phaseId,
+        communityId,
+        isActive: true,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (!phase) {
+      throw new BadRequestException('phaseId is invalid for the selected community');
+    }
+  }
+
   private async assertClusterBelongsToCommunity(
     clusterId: string,
     communityId: string,
-  ): Promise<void> {
+  ): Promise<{ id: string; phaseId: string }> {
     const cluster = await this.prisma.cluster.findFirst({
       where: {
         id: clusterId,
@@ -186,12 +208,47 @@ export class UnitsService {
         isActive: true,
         deletedAt: null,
       },
-      select: { id: true },
+      select: { id: true, phaseId: true },
     });
     if (!cluster) {
       throw new BadRequestException(
         'clusterId is invalid for the selected community',
       );
+    }
+    return cluster;
+  }
+
+  private async validateHierarchyPlacement(params: {
+    communityId: string;
+    phaseId?: string | null;
+    clusterId?: string | null;
+  }): Promise<void> {
+    const phaseId = params.phaseId ?? null;
+    const clusterId = params.clusterId ?? null;
+
+    if (!phaseId && !clusterId) {
+      return;
+    }
+
+    if (phaseId && !clusterId) {
+      await this.assertPhaseBelongsToCommunity(phaseId, params.communityId);
+      return;
+    }
+
+    if (!phaseId && clusterId) {
+      throw new BadRequestException('phaseId is required when clusterId is provided');
+    }
+
+    if (clusterId && phaseId) {
+      const cluster = await this.assertClusterBelongsToCommunity(
+        clusterId,
+        params.communityId,
+      );
+      if (cluster.phaseId !== phaseId) {
+        throw new BadRequestException(
+          'clusterId is invalid for the selected phase in this community',
+        );
+      }
     }
   }
 
@@ -245,6 +302,7 @@ export class UnitsService {
       category,
       block,
       communityId,
+      phaseId,
       clusterId,
       displayStatus,
       includeInactive,
@@ -259,6 +317,7 @@ export class UnitsService {
       ...(category ? { category } : {}),
       ...(block ? { block } : {}),
       ...(communityId ? { communityId } : {}),
+      ...(phaseId ? { phaseId } : {}),
       ...(clusterId ? { clusterId } : {}),
       ...this.displayStatusWhere(displayStatus),
       ...this.activeFilterWhere({ includeInactive, isActive }),
@@ -269,6 +328,7 @@ export class UnitsService {
       where,
       include: {
         community: { select: { name: true } },
+        phase: { select: { name: true } },
         cluster: { select: { name: true } },
         residents: { select: { id: true } },
       },
@@ -297,6 +357,7 @@ export class UnitsService {
       status,
       block,
       communityId,
+      phaseId,
       clusterId,
       displayStatus,
       includeInactive,
@@ -310,6 +371,7 @@ export class UnitsService {
       ...(normalizedStatus ? { status: normalizedStatus } : {}),
       ...(block ? { block } : {}),
       ...(communityId ? { communityId } : {}),
+      ...(phaseId ? { phaseId } : {}),
       ...(clusterId ? { clusterId } : {}),
       ...this.displayStatusWhere(displayStatus),
       ...this.activeFilterWhere({ includeInactive, isActive }),
@@ -339,6 +401,7 @@ export class UnitsService {
       where,
       include: {
         community: { select: { name: true } },
+        phase: { select: { name: true } },
         cluster: { select: { name: true } },
         residents: { select: { id: true } },
       },
@@ -355,6 +418,7 @@ export class UnitsService {
       where: { id },
       include: {
         community: { select: { name: true } },
+        phase: { select: { name: true } },
         cluster: { select: { name: true } },
         residents: {
           include: {
@@ -443,6 +507,7 @@ export class UnitsService {
     return {
       id: unit.id,
       communityId: unit.communityId,
+      phaseId: unit.phaseId,
       clusterId: unit.clusterId,
       unitNumber: unit.unitNumber,
       block: unit.block,
@@ -453,6 +518,7 @@ export class UnitsService {
       isDelivered: unit.isDelivered,
       isActive: unit.isActive,
       communityName: unit.community?.name ?? '-',
+      phaseName: unit.phase?.name ?? null,
       clusterName: unit.cluster?.name ?? null,
       bedrooms: unit.bedrooms,
       sizeSqm: unit.sizeSqm,
@@ -520,9 +586,11 @@ export class UnitsService {
 
   async create(dto: CreateUnitDto) {
     const community = await this.assertCommunity(dto.communityId);
-    if (dto.clusterId) {
-      await this.assertClusterBelongsToCommunity(dto.clusterId, dto.communityId);
-    }
+    await this.validateHierarchyPlacement({
+      communityId: dto.communityId,
+      phaseId: dto.phaseId,
+      clusterId: dto.clusterId,
+    });
 
     const mode = dto.gateAccessMode ?? GateAccessMode.ALL_GATES;
     const allowedGateIds = await this.validateGateAccessConfig({
@@ -536,6 +604,7 @@ export class UnitsService {
     const created = await this.prisma.unit.create({
       data: {
         communityId: dto.communityId,
+        phaseId: dto.phaseId,
         clusterId: dto.clusterId,
         projectName: community.name,
         block: dto.block,
@@ -576,6 +645,7 @@ export class UnitsService {
       select: {
         id: true,
         communityId: true,
+        phaseId: true,
         clusterId: true,
         gateAccessMode: true,
         allowedGateIds: true,
@@ -591,11 +661,13 @@ export class UnitsService {
     }
     const community = await this.assertCommunity(nextCommunityId);
 
-    const nextClusterId =
-      dto.clusterId !== undefined ? dto.clusterId : current.clusterId;
-    if (nextClusterId) {
-      await this.assertClusterBelongsToCommunity(nextClusterId, nextCommunityId);
-    }
+    const nextPhaseId = dto.phaseId !== undefined ? dto.phaseId : current.phaseId;
+    const nextClusterId = dto.clusterId !== undefined ? dto.clusterId : current.clusterId;
+    await this.validateHierarchyPlacement({
+      communityId: nextCommunityId,
+      phaseId: nextPhaseId,
+      clusterId: nextClusterId,
+    });
 
     const nextMode = dto.gateAccessMode ?? current.gateAccessMode;
     const nextGateIds =
@@ -610,6 +682,7 @@ export class UnitsService {
       where: { id },
       data: {
         ...(dto.communityId !== undefined ? { communityId: dto.communityId } : {}),
+        ...(dto.phaseId !== undefined ? { phaseId: dto.phaseId } : {}),
         ...(dto.clusterId !== undefined ? { clusterId: dto.clusterId } : {}),
         ...(dto.block !== undefined ? { block: dto.block } : {}),
         ...(dto.unitNumber !== undefined ? { unitNumber: dto.unitNumber.trim() } : {}),
@@ -707,6 +780,7 @@ export class UnitsService {
       },
       include: {
         community: { select: { name: true } },
+        phase: { select: { name: true } },
         cluster: { select: { name: true } },
         residents: { select: { id: true } },
       },

@@ -1,8 +1,18 @@
-import { CommunityStructure, GateRole } from '@prisma/client';
+import { GateRole } from '@prisma/client';
 import { CommunityStatsResponseDto } from './community-stats-response.dto';
+
+export interface PhaseItem {
+  id: string;
+  name: string;
+  code: string | null;
+  displayOrder: number;
+  unitCount: number;
+  clusterCount: number;
+}
 
 export interface ClusterItem {
   id: string;
+  phaseId: string;
   name: string;
   code: string | null;
   displayOrder: number;
@@ -16,6 +26,7 @@ export interface GateItem {
   allowedRoles: GateRole[];
   etaMinutes: number | null;
   isActive: boolean;
+  phaseIds: string[];
   clusterIds: string[];
 }
 
@@ -24,8 +35,8 @@ export class CommunityDetailResponseDto {
   name!: string;
   code!: string | null;
   isActive!: boolean;
-  structureType!: CommunityStructure;
   guidelines!: string | null;
+  phases!: PhaseItem[];
   clusters!: ClusterItem[];
   gates!: GateItem[];
   stats!: CommunityStatsResponseDto;

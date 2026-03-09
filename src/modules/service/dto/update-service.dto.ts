@@ -19,6 +19,7 @@ import {
 import { EligibilityType, ServiceCategory } from '@prisma/client';
 import { Type } from 'class-transformer';
 import { CreateServiceFieldDto } from './create-service-field.dto';
+import { CreateMicroServiceDto } from './create-service.dto';
 
 export class UpdateServiceDto {
   @IsString()
@@ -94,4 +95,11 @@ export class UpdateServiceDto {
   @Type(() => CreateServiceFieldDto)
   @IsOptional()
   fields?: CreateServiceFieldDto[];
+
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => CreateMicroServiceDto)
+  @IsOptional()
+  microServices?: CreateMicroServiceDto[];
 }

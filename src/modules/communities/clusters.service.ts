@@ -12,6 +12,7 @@ import { UpdateClusterDto } from './dto/update-cluster.dto';
 export interface ClusterListItem {
   id: string;
   communityId: string;
+  phaseId: string;
   name: string;
   code: string | null;
   displayOrder: number;
@@ -25,11 +26,11 @@ export interface ClusterListItem {
 export class ClustersService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async listClusters(communityId: string): Promise<ClusterListItem[]> {
-    await this.assertCommunityExists(communityId);
+  async listClusters(phaseId: string): Promise<ClusterListItem[]> {
+    await this.assertPhaseExists(phaseId);
     const rows = await this.prisma.cluster.findMany({
       where: {
-        communityId,
+        phaseId,
         isActive: true,
         deletedAt: null,
       },
@@ -51,6 +52,7 @@ export class ClustersService {
     return rows.map((row) => ({
       id: row.id,
       communityId: row.communityId,
+      phaseId: row.phaseId,
       name: row.name,
       code: row.code,
       displayOrder: row.displayOrder,
@@ -62,17 +64,18 @@ export class ClustersService {
   }
 
   async createCluster(
-    communityId: string,
+    phaseId: string,
     dto: CreateClusterDto,
   ): Promise<ClusterListItem> {
-    await this.assertCommunityExists(communityId);
+    const phase = await this.assertPhaseExists(phaseId);
     const name = dto.name.trim();
     const code = dto.code?.trim() || null;
 
     try {
       const created = await this.prisma.cluster.create({
         data: {
-          communityId,
+          communityId: phase.communityId,
+          phaseId,
           name,
           code,
           displayOrder: dto.displayOrder ?? 0,
@@ -95,6 +98,7 @@ export class ClustersService {
       return {
         id: created.id,
         communityId: created.communityId,
+        phaseId: created.phaseId,
         name: created.name,
         code: created.code,
         displayOrder: created.displayOrder,
@@ -110,7 +114,7 @@ export class ClustersService {
         'code' in error &&
         (error as { code?: string }).code === 'P2002'
       ) {
-        throw new ConflictException('Cluster name already exists in this community');
+        throw new ConflictException('Cluster name already exists in this phase');
       }
       throw error;
     }
@@ -166,6 +170,7 @@ export class ClustersService {
       return {
         id: updated.id,
         communityId: updated.communityId,
+        phaseId: updated.phaseId,
         name: updated.name,
         code: updated.code,
         displayOrder: updated.displayOrder,
@@ -181,7 +186,7 @@ export class ClustersService {
         'code' in error &&
         (error as { code?: string }).code === 'P2002'
       ) {
-        throw new ConflictException('Cluster name already exists in this community');
+        throw new ConflictException('Cluster name already exists in this phase');
       }
       throw error;
     }
@@ -226,14 +231,14 @@ export class ClustersService {
   }
 
   async reorderClusters(
-    communityId: string,
+    phaseId: string,
     dto: ReorderClustersDto,
   ): Promise<{ success: true }> {
-    await this.assertCommunityExists(communityId);
+    await this.assertPhaseExists(phaseId);
 
     const clusters = await this.prisma.cluster.findMany({
       where: {
-        communityId,
+        phaseId,
         isActive: true,
         deletedAt: null,
       },
@@ -254,10 +259,10 @@ export class ClustersService {
       );
     }
 
-    const hasInvalidId = nextIds.some((id) => !existingIds.has(id));
+    const hasInvalidId = nextIds.some((entryId) => !existingIds.has(entryId));
     if (hasInvalidId) {
       throw new BadRequestException(
-        'orderedIds contains cluster IDs that do not belong to this community',
+        'orderedIds contains cluster IDs that do not belong to this phase',
       );
     }
 
@@ -268,9 +273,9 @@ export class ClustersService {
     }
 
     await this.prisma.$transaction(
-      nextIds.map((id, index) =>
+      nextIds.map((entryId, index) =>
         this.prisma.cluster.update({
-          where: { id },
+          where: { id: entryId },
           data: { displayOrder: index },
         }),
       ),
@@ -279,13 +284,17 @@ export class ClustersService {
     return { success: true };
   }
 
-  private async assertCommunityExists(communityId: string): Promise<void> {
-    const community = await this.prisma.community.findUnique({
-      where: { id: communityId },
-      select: { id: true },
+  private async assertPhaseExists(phaseId: string): Promise<{
+    id: string;
+    communityId: string;
+  }> {
+    const phase = await this.prisma.phase.findFirst({
+      where: { id: phaseId, isActive: true, deletedAt: null },
+      select: { id: true, communityId: true },
     });
-    if (!community) {
-      throw new NotFoundException('Community not found');
+    if (!phase) {
+      throw new NotFoundException('Phase not found');
     }
+    return phase;
   }
 }

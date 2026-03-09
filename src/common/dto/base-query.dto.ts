@@ -25,12 +25,12 @@ export class BaseQueryDto {
     example: 10,
     default: 10,
     minimum: 1,
-    maximum: 100,
+    maximum: 500,
   })
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(100)
+  @Max(500)
   @IsOptional()
   limit?: number = 10;
 

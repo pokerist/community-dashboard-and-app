@@ -24,6 +24,12 @@ export class CommunitiesService {
       include: {
         _count: {
           select: {
+            phases: {
+              where: {
+                isActive: true,
+                deletedAt: null,
+              },
+            },
             clusters: {
               where: {
                 isActive: true,
@@ -54,7 +60,6 @@ export class CommunitiesService {
           code,
           displayOrder: dto.displayOrder ?? 0,
           isActive: dto.isActive ?? true,
-          structureType: dto.structureType,
           guidelines: dto.guidelines ?? null,
         },
       });
@@ -85,7 +90,6 @@ export class CommunitiesService {
         ...(nextCode !== undefined ? { code: nextCode } : {}),
         ...(dto.displayOrder !== undefined ? { displayOrder: dto.displayOrder } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
-        ...(dto.structureType !== undefined ? { structureType: dto.structureType } : {}),
         ...(dto.guidelines !== undefined ? { guidelines: dto.guidelines } : {}),
       },
     });
@@ -195,7 +199,6 @@ export class CommunitiesService {
         name: true,
         code: true,
         isActive: true,
-        structureType: true,
         guidelines: true,
         createdAt: true,
       },
@@ -204,7 +207,33 @@ export class CommunitiesService {
       throw new NotFoundException('Community not found');
     }
 
-    const [clusters, gates, stats] = await Promise.all([
+    const [phases, clusters, gates, stats] = await Promise.all([
+      this.prisma.phase.findMany({
+        where: {
+          communityId: id,
+          isActive: true,
+          deletedAt: null,
+        },
+        orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }],
+        include: {
+          _count: {
+            select: {
+              units: {
+                where: {
+                  isActive: true,
+                  deletedAt: null,
+                },
+              },
+              clusters: {
+                where: {
+                  isActive: true,
+                  deletedAt: null,
+                },
+              },
+            },
+          },
+        },
+      }),
       this.prisma.cluster.findMany({
         where: {
           communityId: id,
@@ -242,6 +271,9 @@ export class CommunitiesService {
           gateClusters: {
             select: { clusterId: true },
           },
+          gatePhases: {
+            select: { phaseId: true },
+          },
         },
       }),
       this.getCommunityStats(id),
@@ -252,10 +284,18 @@ export class CommunitiesService {
       name: community.name,
       code: community.code,
       isActive: community.isActive,
-      structureType: community.structureType,
       guidelines: community.guidelines,
+      phases: phases.map((phase) => ({
+        id: phase.id,
+        name: phase.name,
+        code: phase.code,
+        displayOrder: phase.displayOrder,
+        unitCount: phase._count.units,
+        clusterCount: phase._count.clusters,
+      })),
       clusters: clusters.map((cluster) => ({
         id: cluster.id,
+        phaseId: cluster.phaseId,
         name: cluster.name,
         code: cluster.code,
         displayOrder: cluster.displayOrder,
@@ -268,6 +308,7 @@ export class CommunitiesService {
         allowedRoles: gate.allowedRoles,
         etaMinutes: gate.etaMinutes,
         isActive: gate.isActive,
+        phaseIds: gate.gatePhases.map((gp) => gp.phaseId),
         clusterIds: gate.gateClusters.map((gc) => gc.clusterId),
       })),
       stats,

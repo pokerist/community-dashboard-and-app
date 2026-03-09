@@ -23,6 +23,11 @@ export class CreateUnitDto {
   @IsUUID()
   clusterId?: string;
 
+  @ApiPropertyOptional({ example: 'phase-uuid' })
+  @IsOptional()
+  @IsUUID()
+  phaseId?: string;
+
   @ApiPropertyOptional({ example: 'Block A' })
   @IsOptional()
   @IsString()

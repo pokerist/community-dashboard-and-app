@@ -190,6 +190,9 @@ Each module has detailed documentation in its respective directory:
 - [Postman Collection (Mobile Core)](./postman/community-dashboard-mobile.postman_collection.json) - Import-ready collection with auth/refresh middleware.
 - [Postman Environment (Local)](./postman/community-dashboard-mobile.postman_environment.json) - Ready-to-edit local variables.
 - [Architecture (Full Stack)](./ARCHITECTURE.md) - Backend/Admin/Mobile integration map and data flows.
+- [PM Handover Review](./PM_HANDOVER_REVIEW.md) - Product/operations handover guide for backend + admin ownership.
+- [Logical Diagrams](./LOGICAL_DIAGRAMS.md) - L0/L1/L2 logical flow and data diagrams for implementation and onboarding.
+- [Mobile Contract Matrix](./MOBILE_CONTRACT_MATRIX.md) - Endpoint alignment matrix and canonical mobile-facing contracts.
 - [Run Local](./RUN_LOCAL.md) - End-to-end local startup for backend/admin/mobile.
 - [Run Demo](./RUN_DEMO.md) - Demo reset + seed + smoke checklist before presentations.
 - [Deployment (Domain + HTTPS)](./DEPLOYMENT.md) - Reverse proxy, HTTPS, and production-oriented deployment notes.

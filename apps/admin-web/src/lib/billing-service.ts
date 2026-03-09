@@ -275,30 +275,25 @@ const billingService = {
     if (params.page) query.page = params.page;
     if (params.limit) query.limit = params.limit;
 
-    try {
-      const res = await apiClient.get("/invoices/payments", { params: query });
-      return normalizePaginated(res.data, normalizePayment);
-    } catch {
-      // If no dedicated payments endpoint, derive from invoices with PAID status
-      const invoiceQuery = { ...query, status: "PAID" };
-      const res = await apiClient.get("/invoices", { params: invoiceQuery });
-      const paginated = normalizePaginated(res.data, normalizeInvoice);
-      const payments: BillingPayment[] = paginated.data.map((inv) => ({
-        id: inv.id,
-        invoiceId: inv.id,
-        amount: inv.amount,
-        currency: inv.currency,
-        method: "CASH",
-        referenceNumber: inv.invoiceNumber,
-        notes: inv.notes,
-        paidAt: inv.updatedAt,
-        status: "COMPLETED",
-        invoice: { id: inv.id, title: inv.title, unit: inv.unit },
-        recordedBy: null,
-        createdAt: inv.updatedAt,
-      }));
-      return { data: payments, total: paginated.total };
-    }
+    // Derive payments from paid invoices to avoid relying on non-canonical endpoints.
+    const invoiceQuery = { ...query, status: "PAID" };
+    const res = await apiClient.get("/invoices", { params: invoiceQuery });
+    const paginated = normalizePaginated(res.data, normalizeInvoice);
+    const payments: BillingPayment[] = paginated.data.map((inv) => ({
+      id: inv.id,
+      invoiceId: inv.id,
+      amount: inv.amount,
+      currency: inv.currency,
+      method: "CASH",
+      referenceNumber: inv.invoiceNumber,
+      notes: inv.notes,
+      paidAt: inv.updatedAt,
+      status: "COMPLETED",
+      invoice: { id: inv.id, title: inv.title, unit: inv.unit },
+      recordedBy: null,
+      createdAt: inv.updatedAt,
+    }));
+    return { data: payments, total: paginated.total };
   },
 
   async createInvoice(payload: CreateInvoicePayload): Promise<BillingInvoice> {
@@ -361,8 +356,8 @@ const billingService = {
   },
 
   async listResidentOptions(communityId: string): Promise<Array<{ id: string; label: string }>> {
-    const res = await apiClient.get("/users", {
-      params: { communityId, role: "RESIDENT", limit: 500 },
+    const res = await apiClient.get("/admin/users", {
+      params: { userType: "resident", take: 500, skip: 0 },
     });
     const payload = res.data;
     const rows = Array.isArray(payload)
@@ -370,7 +365,21 @@ const billingService = {
       : Array.isArray(payload?.data)
         ? payload.data
         : [];
-    return rows.map((r: Record<string, unknown>) => ({
+
+    const filtered = rows.filter((row: Record<string, unknown>) => {
+      if (!communityId) return true;
+      if (strOrNull(row.communityId) === communityId) return true;
+      const resident = isObj(row.resident) ? row.resident : null;
+      if (resident && strOrNull(resident.communityId) === communityId) return true;
+      const unitAccesses = Array.isArray(row.unitAccesses) ? row.unitAccesses : [];
+      return unitAccesses.some((ua) => {
+        if (!isObj(ua)) return false;
+        const unit = isObj(ua.unit) ? ua.unit : null;
+        return unit ? strOrNull(unit.communityId) === communityId : false;
+      });
+    });
+
+    return filtered.map((r: Record<string, unknown>) => ({
       id: str(r.id),
       label: str(r.nameEN, str(r.name, str(r.email, "--"))),
     }));

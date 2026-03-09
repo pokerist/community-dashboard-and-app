@@ -184,7 +184,7 @@ export function GatesManagement() {
   const openCreate = () => { resetForm(); setDrawerOpen(true); };
   const openEdit = (gate: GateRow) => {
     setEditingGate(gate);
-    setForm({ name: gate.name, clusterId: (gate as any).clusterId ?? '', allowedRoles: gate.allowedRoles, etaMinutes: gate.etaMinutes ? String(gate.etaMinutes) : '' });
+    setForm({ name: gate.name, clusterId: gate.clusterIds?.[0] ?? '', allowedRoles: gate.allowedRoles, etaMinutes: gate.etaMinutes ? String(gate.etaMinutes) : '' });
     setDrawerOpen(true);
   };
 
@@ -264,10 +264,10 @@ export function GatesManagement() {
     try {
       const clusterId = form.clusterId || undefined;
       if (editingGate) {
-        await gatesService.updateGate(editingGate.id, { name: form.name.trim(), clusterId, allowedRoles: form.allowedRoles, etaMinutes });
+        await gatesService.updateGate(editingGate.id, { name: form.name.trim(), clusterIds: clusterId ? [clusterId] : [], allowedRoles: form.allowedRoles, etaMinutes });
         toast.success('Gate updated');
       } else {
-        await gatesService.createGate({ communityId: selectedCommunityId, name: form.name.trim(), clusterId, allowedRoles: form.allowedRoles, etaMinutes });
+        await gatesService.createGate({ communityId: selectedCommunityId, name: form.name.trim(), clusterIds: clusterId ? [clusterId] : [], allowedRoles: form.allowedRoles, etaMinutes });
         toast.success('Gate created');
       }
       setDrawerOpen(false);

@@ -1038,6 +1038,7 @@ model Unit {
   id             String         @id @default(uuid())
   projectName    String
   communityId    String?
+  phaseId        String?
   clusterId      String?
   gateAccessMode GateAccessMode @default(ALL_GATES)
   allowedGateIds String[]       @default([])
@@ -1062,6 +1063,7 @@ model Unit {
   serviceRequests ServiceRequest[]
   residents       ResidentUnit[]
   community       Community?       @relation(fields: [communityId], references: [id], onDelete: SetNull)
+  phase          Phase?           @relation(fields: [phaseId], references: [id], onDelete: SetNull)
   cluster         Cluster?         @relation(fields: [clusterId], references: [id], onDelete: SetNull)
   leases          Lease[]
   invoices        Invoice[]
@@ -1092,10 +1094,12 @@ model Unit {
   permitRequests           PermitRequest[]
 
   @@index([communityId])
+  @@index([phaseId])
   @@index([clusterId])
+  @@index([communityId, phaseId, clusterId])
 }
 
-model Cluster {
+model Phase {
   id           String    @id @default(uuid())
   communityId  String
   name         String
@@ -1107,9 +1111,10 @@ model Cluster {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  community    Community     @relation(fields: [communityId], references: [id], onDelete: Cascade)
-  units        Unit[]
-  gateClusters GateCluster[]
+  community  Community   @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  clusters   Cluster[]
+  units      Unit[]
+  gatePhases GatePhase[]
 
   @@unique([communityId, name])
   @@index([communityId])
@@ -1118,9 +1123,30 @@ model Cluster {
   @@index([deletedAt])
 }
 
-enum CommunityStructure {
-  CLUSTERS
-  PHASES
+model Cluster {
+  id           String    @id @default(uuid())
+  communityId  String
+  phaseId      String
+  name         String
+  code         String?
+  displayOrder Int       @default(0)
+  description  String?
+  isActive     Boolean   @default(true)
+  deletedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  community    Community     @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  phase        Phase         @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+  units        Unit[]
+  gateClusters GateCluster[]
+
+  @@unique([phaseId, name])
+  @@index([communityId])
+  @@index([phaseId])
+  @@index([communityId, phaseId, displayOrder])
+  @@index([isActive])
+  @@index([deletedAt])
 }
 
 model Community {
@@ -1128,13 +1154,13 @@ model Community {
   name              String              @unique
   code              String?             @unique
   isActive          Boolean             @default(true)
-  structureType     CommunityStructure  @default(CLUSTERS)
   guidelines        String?
   displayOrder      Int             @default(0)
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
 
   units              Unit[]
+  phases             Phase[]
   clusters           Cluster[]
   gates              Gate[]
   commercialEntities CommercialEntity[]
@@ -1163,6 +1189,7 @@ model Gate {
   entryLogs             GateEntryLog[]
   compoundStaffAccesses CompoundStaffGateAccess[]
   gateClusters          GateCluster[]
+  gatePhases            GatePhase[]
 
   @@unique([communityId, name])
   @@index([communityId])
@@ -1183,6 +1210,20 @@ model GateCluster {
   @@unique([gateId, clusterId])
   @@index([gateId])
   @@index([clusterId])
+}
+
+model GatePhase {
+  id        String   @id @default(uuid())
+  gateId    String
+  phaseId   String
+  createdAt DateTime @default(now())
+
+  gate  Gate  @relation(fields: [gateId], references: [id], onDelete: Cascade)
+  phase Phase @relation(fields: [phaseId], references: [id], onDelete: Cascade)
+
+  @@unique([gateId, phaseId])
+  @@index([gateId])
+  @@index([phaseId])
 }
 
 model GateUnitAccess {

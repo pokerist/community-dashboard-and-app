@@ -27,6 +27,7 @@ export type GateAccessMode = "ALL_GATES" | "SELECTED_GATES";
 export interface UnitListItem {
   id: string;
   communityId: string | null;
+  phaseId: string | null;
   clusterId: string | null;
   unitNumber: string;
   block: string | null;
@@ -37,6 +38,7 @@ export interface UnitListItem {
   isDelivered: boolean;
   isActive: boolean;
   communityName: string;
+  phaseName: string | null;
   clusterName: string | null;
   bedrooms: number | null;
   sizeSqm: number | null;
@@ -96,6 +98,7 @@ export interface UnitListQuery {
   limit?: number;
   search?: string;
   communityId?: string;
+  phaseId?: string;
   clusterId?: string;
   category?: UnitCategory;
   displayStatus?: UnitDisplayStatus;
@@ -115,6 +118,7 @@ export interface PaginatedResponse<T> {
 
 export interface CreateUnitPayload {
   communityId: string;
+  phaseId?: string;
   clusterId?: string;
   block?: string;
   unitNumber: string;

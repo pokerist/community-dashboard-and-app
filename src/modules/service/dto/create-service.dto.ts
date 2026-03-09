@@ -127,3 +127,4 @@ export class CreateMicroServiceDto {
   @IsOptional()
   @Type(() => Number)
   displayOrder?: number;
+}

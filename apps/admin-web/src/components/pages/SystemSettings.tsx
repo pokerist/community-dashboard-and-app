@@ -74,6 +74,17 @@ type Role = {
 
 type MobileAccessMap = Record<string, Record<string, boolean>>;
 
+function ensureArray<T>(value: unknown): T[] {
+  if (Array.isArray(value)) return value as T[];
+  if (value && typeof value === "object") {
+    const payload = value as Record<string, unknown>;
+    if (Array.isArray(payload.data)) return payload.data as T[];
+    if (Array.isArray(payload.rows)) return payload.rows as T[];
+    if (Array.isArray(payload.items)) return payload.items as T[];
+  }
+  return [];
+}
+
 // ─── Design tokens ────────────────────────────────────────────
 
 const inputStyle: React.CSSProperties = {
@@ -532,6 +543,7 @@ function DataPanel({ settings, onChange, onBackupNow }: { settings: DataSettings
 }
 
 function DepartmentsPanel({ departments, onRefresh }: { departments: Department[]; onRefresh: () => void }) {
+  const safeDepartments = ensureArray<Department>(departments);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingDept, setEditingDept] = useState<Department | null>(null);
   const [form, setForm] = useState({ name: "", description: "", head: "" });
@@ -579,7 +591,7 @@ function DepartmentsPanel({ departments, onRefresh }: { departments: Department[
         </button>
       </div>
 
-      {departments.length === 0 ? (
+      {safeDepartments.length === 0 ? (
         <p style={{ fontSize: "13px", color: "#9CA3AF", textAlign: "center", padding: "24px" }}>No departments found. Create your first department.</p>
       ) : (
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -593,7 +605,7 @@ function DepartmentsPanel({ departments, onRefresh }: { departments: Department[
             </tr>
           </thead>
           <tbody>
-            {departments.map((dept) => (
+            {safeDepartments.map((dept) => (
               <tr key={dept.id}>
                 <td style={{ ...tableCell, fontWeight: 600 }}>{dept.name}</td>
                 <td style={{ ...tableCell, color: "#6B7280" }}>{dept.description}</td>
@@ -644,6 +656,8 @@ function DepartmentsPanel({ departments, onRefresh }: { departments: Department[
 }
 
 function SystemUsersPanel({ users, departments, onRefresh }: { users: SystemUser[]; departments: Department[]; onRefresh: () => void }) {
+  const safeUsers = ensureArray<SystemUser>(users);
+  const safeDepartments = ensureArray<Department>(departments);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<SystemUser | null>(null);
   const [form, setForm] = useState({ fullName: "", email: "", role: "staff", department: "", password: "" });
@@ -694,7 +708,7 @@ function SystemUsersPanel({ users, departments, onRefresh }: { users: SystemUser
         </button>
       </div>
 
-      {users.length === 0 ? (
+      {safeUsers.length === 0 ? (
         <p style={{ fontSize: "13px", color: "#9CA3AF", textAlign: "center", padding: "24px" }}>No system users found.</p>
       ) : (
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -709,7 +723,7 @@ function SystemUsersPanel({ users, departments, onRefresh }: { users: SystemUser
             </tr>
           </thead>
           <tbody>
-            {users.map((user) => (
+            {safeUsers.map((user) => (
               <tr key={user.id}>
                 <td style={{ ...tableCell, fontWeight: 600 }}>{user.fullName}</td>
                 <td style={{ ...tableCell, fontFamily: "'DM Mono', monospace", fontSize: "12px" }}>{user.email}</td>
@@ -760,7 +774,7 @@ function SystemUsersPanel({ users, departments, onRefresh }: { users: SystemUser
                 <Field label="Department">
                   <select value={form.department} onChange={(e) => setForm((p) => ({ ...p, department: e.target.value }))} style={selectStyle}>
                     <option value="">Select department</option>
-                    {departments.map((d) => (
+                    {safeDepartments.map((d) => (
                       <option key={d.id} value={d.name}>{d.name}</option>
                     ))}
                   </select>
@@ -784,6 +798,7 @@ function SystemUsersPanel({ users, departments, onRefresh }: { users: SystemUser
 }
 
 function RolesPanel({ roles, onRefresh }: { roles: Role[]; onRefresh: () => void }) {
+  const safeRoles = ensureArray<Role>(roles);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingRole, setEditingRole] = useState<Role | null>(null);
   const [form, setForm] = useState({ name: "", description: "", permissions: [] as string[] });
@@ -796,7 +811,11 @@ function RolesPanel({ roles, onRefresh }: { roles: Role[]; onRefresh: () => void
 
   const openEdit = (role: Role) => {
     setEditingRole(role);
-    setForm({ name: role.name, description: role.description, permissions: [...role.permissions] });
+    setForm({
+      name: role.name,
+      description: role.description,
+      permissions: ensureArray<string>(role.permissions),
+    });
     setDialogOpen(true);
   };
 
@@ -832,7 +851,7 @@ function RolesPanel({ roles, onRefresh }: { roles: Role[]; onRefresh: () => void
         </button>
       </div>
 
-      {roles.length === 0 ? (
+      {safeRoles.length === 0 ? (
         <p style={{ fontSize: "13px", color: "#9CA3AF", textAlign: "center", padding: "24px" }}>No roles defined. Create your first role.</p>
       ) : (
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -845,13 +864,13 @@ function RolesPanel({ roles, onRefresh }: { roles: Role[]; onRefresh: () => void
             </tr>
           </thead>
           <tbody>
-            {roles.map((role) => (
+            {safeRoles.map((role) => (
               <tr key={role.id}>
                 <td style={{ ...tableCell, fontWeight: 600 }}>{role.name}</td>
                 <td style={{ ...tableCell, color: "#6B7280" }}>{role.description}</td>
                 <td style={tableCell}>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: "2px 8px", borderRadius: "10px", fontSize: "11px", fontWeight: 700, background: "#EEF2FF", color: "#4F46E5" }}>
-                    {role.permissions.length} permissions
+                    {ensureArray<string>(role.permissions).length} permissions
                   </span>
                 </td>
                 <td style={{ ...tableCell, textAlign: "right" }}>
@@ -1054,29 +1073,37 @@ export function SystemSettings() {
   const loadDepartments = useCallback(async () => {
     try {
       const res = await apiClient.get("/admin/departments");
-      setDepartments(res.data ?? []);
+      setDepartments(ensureArray<Department>(res.data));
     } catch { /* silently fail, list stays empty */ }
   }, []);
 
   const loadSystemUsers = useCallback(async () => {
     try {
       const res = await apiClient.get("/admin/system-users");
-      setSystemUsers(res.data ?? []);
+      setSystemUsers(ensureArray<SystemUser>(res.data));
     } catch { /* silently fail */ }
   }, []);
 
   const loadRoles = useCallback(async () => {
     try {
       const res = await apiClient.get("/admin/roles");
-      setRoles(res.data ?? []);
+      const normalized = ensureArray<Role>(res.data).map((role) => ({
+        ...role,
+        permissions: ensureArray<string>((role as unknown as Record<string, unknown>).permissions),
+      }));
+      setRoles(normalized);
     } catch { /* silently fail */ }
   }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiClient.get("/admin/settings").catch(() => ({ data: {} }));
-      const d = res.data ?? {};
+      const canonicalRes = await apiClient.get("/system-settings").catch(() => null);
+      const fallbackRes =
+        canonicalRes ?? (await apiClient.get("/admin/settings").catch(() => ({ data: {} })));
+      const d = (fallbackRes as { data?: { data?: Record<string, unknown> } }).data?.data
+        ?? (fallbackRes as { data?: Record<string, unknown> }).data
+        ?? {};
       const g = { ...DEFAULT_GENERAL, ...(d.general ?? {}) };
       const n = { ...DEFAULT_NOTIF, ...(d.notifications ?? {}) };
       const s = { ...DEFAULT_SEC, ...(d.security ?? {}) };
@@ -1107,10 +1134,45 @@ export function SystemSettings() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      await apiClient.patch("/admin/settings", {
-        general, notifications: notif, security, appearance, localization,
-        data, authentication, mobileAccess,
-      });
+      try {
+        await Promise.all([
+          apiClient.patch("/system-settings/general", {
+            companyName: general.companyName,
+            timezone: general.timezone,
+            currency: localization.currency,
+            dateFormat: localization.dateFormat,
+            defaultLanguage: localization.defaultLanguage,
+          }),
+          apiClient.patch("/system-settings/notifications", {
+            enableEmail: notif.emailEnabled,
+            enablePush: notif.pushEnabled,
+            enableSms: notif.smsEnabled,
+          }),
+          apiClient.patch("/system-settings/security", {
+            enforce2fa: authentication.require2fa,
+            minPasswordLength: authentication.passwordMinLength,
+            rateLimitPerMinute: authentication.maxRequestsPerMinute,
+            sessionTimeoutMinutes: authentication.sessionTimeoutMinutes,
+          }),
+          apiClient.patch("/system-settings/backup", {
+            autoBackups: data.backupEnabled,
+            retentionDays: data.retentionDays,
+          }),
+          apiClient.patch("/system-settings/brand", {
+            companyName: general.companyName,
+            supportEmail: general.supportEmail,
+            supportPhone: general.supportPhone,
+            logoFileId: general.logoFileId,
+            primaryColor: appearance.primaryColor,
+            accentColor: appearance.accentColor,
+          }),
+        ]);
+      } catch {
+        await apiClient.patch("/admin/settings", {
+          general, notifications: notif, security, appearance, localization,
+          data, authentication, mobileAccess,
+        });
+      }
       setSaved({ general, notif, security, appearance, localization, data, authentication, mobileAccess });
       setDirty(false); toast.success("Settings saved");
     } catch { toast.error("Failed to save settings"); }
@@ -1131,7 +1193,9 @@ export function SystemSettings() {
 
   const handleBackupNow = async () => {
     try {
-      await apiClient.post("/admin/backup/trigger");
+      await apiClient
+        .post("/system-settings/backup/create", { label: "Manual admin backup" })
+        .catch(() => apiClient.post("/admin/backup/trigger"));
       toast.success("Backup triggered successfully");
     } catch { toast.error("Failed to trigger backup"); }
   };

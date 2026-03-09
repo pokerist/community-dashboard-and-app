@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../ui/dialog";
 import { DataTable, type DataTableColumn } from "../DataTable";
 import { StatusBadge } from "../StatusBadge";
-import communityService, { type ClusterItem, type CommunityListItem, type GateItem } from "../../lib/community-service";
+import communityService, { type ClusterItem, type CommunityListItem, type GateItem, type PhaseItem } from "../../lib/community-service";
 import apiClient, { handleApiError } from "../../lib/api-client";
 import unitService, {
   type CreateUnitPayload,
@@ -141,16 +141,16 @@ const inputStyle: React.CSSProperties = { width: "100%", padding: "8px 10px", bo
 const selectStyle: React.CSSProperties = { ...inputStyle, cursor: "pointer" };
 
 type UnitForm = {
-  communityId: string; clusterId: string; unitNumber: string; block: string;
+  communityId: string; phaseId: string; clusterId: string; unitNumber: string; block: string;
   category: UnitCategory; type: UnitType; status: UnitDisplayStatus;
   bedrooms: string; sizeSqm: string;
   gateAccessMode: GateAccessMode; allowedGateIds: string[];
 };
-const defaultForm: UnitForm = { communityId: "", clusterId: "", unitNumber: "", block: "", category: "RESIDENTIAL", type: "APARTMENT", status: "OFF_PLAN", bedrooms: "", sizeSqm: "", gateAccessMode: "ALL_GATES", allowedGateIds: [] };
+const defaultForm: UnitForm = { communityId: "", phaseId: "", clusterId: "", unitNumber: "", block: "", category: "RESIDENTIAL", type: "APARTMENT", status: "OFF_PLAN", bedrooms: "", sizeSqm: "", gateAccessMode: "ALL_GATES", allowedGateIds: [] };
 
-const CSV_TEMPLATE = `unitNumber,block,type,status,communityId,clusterId,bedrooms,sizeSqm
-A-101,A,APARTMENT,OFF_PLAN,<communityId>,,2,120
-B-202,B,VILLA,OFF_PLAN,<communityId>,,4,300`;
+const CSV_TEMPLATE = `unitNumber,block,type,status,communityId,phaseId,clusterId,bedrooms,sizeSqm
+A-101,A,APARTMENT,OFF_PLAN,<communityId>,,,2,120
+B-202,B,VILLA,OFF_PLAN,<communityId>,<phaseId>,<clusterId>,4,300`;
 
 // ─── Stat card for page header ────────────────────────────────
 function UnitStat({ label, value, accent, icon, onClick, active }: { label: string; value: string | number; accent: string; icon: React.ReactNode; onClick?: () => void; active?: boolean }) {
@@ -187,9 +187,11 @@ export function UnitsManagement() {
   const [units, setUnits]               = useState<UnitListItem[]>([]);
   const [loading, setLoading]           = useState(false);
   const [communities, setCommunities]   = useState<CommunityListItem[]>([]);
+  const [phases, setPhases]             = useState<PhaseItem[]>([]);
   const [clusters, setClusters]         = useState<ClusterItem[]>([]);
   const [search, setSearch]             = useState("");
   const [communityFilter, setCF]        = useState("all");
+  const [phaseFilter, setPF]            = useState("all");
   const [clusterFilter, setKF]          = useState("all");
   const [statusFilter, setSF]           = useState("all");
   const [categoryFilter, setCatF]       = useState("all");
@@ -199,6 +201,7 @@ export function UnitsManagement() {
   const [formOpen, setFormOpen]           = useState(false);
   const [editingUnit, setEditingUnit]     = useState<UnitListItem | null>(null);
   const [form, setForm]                   = useState<UnitForm>(defaultForm);
+  const [formPhases, setFormPhases]     = useState<PhaseItem[]>([]);
   const [formClusters, setFormClusters]   = useState<ClusterItem[]>([]);
   const [formGates, setFormGates]         = useState<GateItem[]>([]);
 
@@ -223,32 +226,46 @@ export function UnitsManagement() {
     catch (e) { toast.error("Failed to load communities", { description: handleApiError(e) }); }
   }, []);
 
-  const loadClusters = useCallback(async () => {
-    if (communityFilter === "all") { setClusters([]); setKF("all"); return; }
+  const loadPhases = useCallback(async () => {
+    if (communityFilter === "all") { setPhases([]); setPF("all"); return; }
     try {
-      const rows = await communityService.listClusters(communityFilter);
+      const rows = await communityService.listPhases(communityFilter);
+      setPhases(rows);
+      if (phaseFilter !== "all" && !rows.some((r) => r.id === phaseFilter)) setPF("all");
+    } catch { setPhases([]); setPF("all"); }
+  }, [communityFilter, phaseFilter]);
+
+  const loadClusters = useCallback(async () => {
+    if (phaseFilter === "all") { setClusters([]); setKF("all"); return; }
+    try {
+      const rows = await communityService.listClusters(phaseFilter);
       setClusters(rows);
       if (clusterFilter !== "all" && !rows.some((r) => r.id === clusterFilter)) setKF("all");
     } catch { setClusters([]); setKF("all"); }
-  }, [clusterFilter, communityFilter]);
+  }, [clusterFilter, phaseFilter]);
 
   const loadUnits = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await unitService.listUnits({ page: 1, limit: 100, search: search.trim() || undefined, communityId: communityFilter !== "all" ? communityFilter : undefined, clusterId: clusterFilter !== "all" ? clusterFilter : undefined, displayStatus: statusFilter !== "all" ? statusFilter as UnitDisplayStatus : undefined, category: categoryFilter !== "all" ? categoryFilter as UnitCategory : undefined, includeInactive: showInactive });
+      const res = await unitService.listUnits({ page: 1, limit: 100, search: search.trim() || undefined, communityId: communityFilter !== "all" ? communityFilter : undefined, phaseId: phaseFilter !== "all" ? phaseFilter : undefined, clusterId: clusterFilter !== "all" ? clusterFilter : undefined, displayStatus: statusFilter !== "all" ? statusFilter as UnitDisplayStatus : undefined, category: categoryFilter !== "all" ? categoryFilter as UnitCategory : undefined, includeInactive: showInactive });
       setUnits(res.data);
     } catch (e) { toast.error("Failed to load units", { description: handleApiError(e) }); setUnits([]); }
     finally { setLoading(false); }
-  }, [categoryFilter, clusterFilter, communityFilter, search, showInactive, statusFilter]);
+  }, [categoryFilter, clusterFilter, communityFilter, phaseFilter, search, showInactive, statusFilter]);
 
   useEffect(() => { void loadCommunities(); }, [loadCommunities]);
+  useEffect(() => { void loadPhases(); }, [loadPhases]);
   useEffect(() => { void loadClusters(); }, [loadClusters]);
   useEffect(() => { void loadUnits(); }, [loadUnits]);
 
-  const loadFormDeps = useCallback(async (communityId: string) => {
-    if (!communityId) { setFormClusters([]); setFormGates([]); return; }
-    const [cl, ga] = await Promise.all([communityService.listClusters(communityId).catch(() => []), communityService.listGates(communityId).catch(() => [])]);
-    setFormClusters(cl); setFormGates(ga);
+  const loadFormDeps = useCallback(async (communityId: string, phaseId?: string) => {
+    if (!communityId) { setFormPhases([]); setFormClusters([]); setFormGates([]); return; }
+    const [ph, ga] = await Promise.all([communityService.listPhases(communityId).catch(() => []), communityService.listGates(communityId).catch(() => [])]);
+    setFormPhases(ph);
+    const effectivePhaseId = phaseId ?? ph[0]?.id ?? '';
+    if (effectivePhaseId) setFormClusters(await communityService.listClusters(effectivePhaseId).catch(() => []));
+    else setFormClusters([]);
+    setFormGates(ga);
   }, []);
 
   // Residents are now included directly in the detail response (currentResidents)
@@ -262,8 +279,8 @@ export function UnitsManagement() {
 
   const openEdit = async (unit: UnitListItem) => {
     setEditingUnit(unit);
-    setForm({ ...defaultForm, communityId: unit.communityId ?? "", clusterId: unit.clusterId ?? "", unitNumber: unit.unitNumber, block: unit.block ?? "", category: unit.category ?? "RESIDENTIAL", type: unit.type, status: backendToDisplayStatus(unit.status), bedrooms: unit.bedrooms != null ? String(unit.bedrooms) : "", sizeSqm: unit.sizeSqm != null ? String(unit.sizeSqm) : "" });
-    await loadFormDeps(unit.communityId ?? "");
+    setForm({ ...defaultForm, communityId: unit.communityId ?? "", phaseId: unit.phaseId ?? "", clusterId: unit.clusterId ?? "", unitNumber: unit.unitNumber, block: unit.block ?? "", category: unit.category ?? "RESIDENTIAL", type: unit.type, status: backendToDisplayStatus(unit.status), bedrooms: unit.bedrooms != null ? String(unit.bedrooms) : "", sizeSqm: unit.sizeSqm != null ? String(unit.sizeSqm) : "" });
+    await loadFormDeps(unit.communityId ?? "", unit.phaseId ?? undefined);
     try { const ga = await unitService.getUnitGateAccess(unit.id); setForm((p) => ({ ...p, gateAccessMode: ga.mode, allowedGateIds: ga.gates.map((g) => g.id) })); } catch { /* ignore */ }
     setFormOpen(true);
   };
@@ -271,7 +288,7 @@ export function UnitsManagement() {
   const saveForm = async () => {
     if (!form.communityId || !form.unitNumber.trim()) { toast.error("Community and unit number required"); return; }
     if (form.gateAccessMode === "SELECTED_GATES" && !form.allowedGateIds.length) { toast.error("Select at least one gate"); return; }
-    const payload: CreateUnitPayload = { communityId: form.communityId, clusterId: form.clusterId || undefined, unitNumber: form.unitNumber.trim(), block: form.block.trim() || undefined, category: form.category, type: form.type, status: DISPLAY_TO_BACKEND_STATUS[form.status] as any, bedrooms: form.bedrooms ? Number(form.bedrooms) : undefined, sizeSqm: form.sizeSqm ? Number(form.sizeSqm) : undefined, gateAccessMode: form.gateAccessMode, allowedGateIds: form.gateAccessMode === "SELECTED_GATES" ? form.allowedGateIds : [] };
+    const payload: CreateUnitPayload = { communityId: form.communityId, phaseId: form.phaseId || undefined, clusterId: form.clusterId || undefined, unitNumber: form.unitNumber.trim(), block: form.block.trim() || undefined, category: form.category, type: form.type, status: DISPLAY_TO_BACKEND_STATUS[form.status] as any, bedrooms: form.bedrooms ? Number(form.bedrooms) : undefined, sizeSqm: form.sizeSqm ? Number(form.sizeSqm) : undefined, gateAccessMode: form.gateAccessMode, allowedGateIds: form.gateAccessMode === "SELECTED_GATES" ? form.allowedGateIds : [] };
     try {
       if (editingUnit) { await unitService.updateUnit(editingUnit.id, payload); toast.success("Unit updated"); }
       else { await unitService.createUnit(payload); toast.success("Unit created"); }
@@ -344,7 +361,7 @@ export function UnitsManagement() {
   }), [units]);
 
   // Active filters count for badge
-  const activeFilters = [communityFilter !== "all", clusterFilter !== "all", statusFilter !== "all", categoryFilter !== "all", showInactive].filter(Boolean).length;
+  const activeFilters = [communityFilter !== "all", phaseFilter !== "all", clusterFilter !== "all", statusFilter !== "all", categoryFilter !== "all", showInactive].filter(Boolean).length;
 
   // ── Table columns ────────────────────────────────────────────
   const columns: DataTableColumn<UnitListItem>[] = [
@@ -495,15 +512,22 @@ export function UnitsManagement() {
           <div style={{ padding: "12px 14px", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "10px", alignItems: "end" }}>
             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
               <label style={{ fontSize: "10.5px", fontWeight: 600, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em" }}>Community</label>
-              <select value={communityFilter} onChange={(e) => setCF(e.target.value)} style={selectStyle}>
+              <select value={communityFilter} onChange={(e) => { setCF(e.target.value); setPF("all"); setKF("all"); }} style={selectStyle}>
                 <option value="all">All communities</option>
                 {communities.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-              <label style={{ fontSize: "10.5px", fontWeight: 600, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em" }}>{(() => { const c = communities.find(c => c.id === communityFilter); return c?.structureType === "PHASES" ? "Phase" : "Cluster"; })()}</label>
-              <select value={clusterFilter} onChange={(e) => setKF(e.target.value)} disabled={communityFilter === "all"} style={{ ...selectStyle, opacity: communityFilter === "all" ? 0.5 : 1 }}>
-                <option value="all">{(() => { const c = communities.find(c => c.id === communityFilter); return c?.structureType === "PHASES" ? "All phases" : "All clusters"; })()}</option>
+              <label style={{ fontSize: "10.5px", fontWeight: 600, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em" }}>Phase</label>
+              <select value={phaseFilter} onChange={(e) => { setPF(e.target.value); setKF("all"); }} disabled={communityFilter === "all"} style={{ ...selectStyle, opacity: communityFilter === "all" ? 0.5 : 1 }}>
+                <option value="all">All phases</option>
+                {phases.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <label style={{ fontSize: "10.5px", fontWeight: 600, color: "#9CA3AF", textTransform: "uppercase", letterSpacing: "0.07em" }}>Cluster</label>
+              <select value={clusterFilter} onChange={(e) => setKF(e.target.value)} disabled={phaseFilter === "all"} style={{ ...selectStyle, opacity: phaseFilter === "all" ? 0.5 : 1 }}>
+                <option value="all">All clusters</option>
                 {clusters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
@@ -562,14 +586,20 @@ export function UnitsManagement() {
             {/* Location */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
               <Field label="Community">
-                <select value={form.communityId} style={selectStyle} onChange={(e) => { const cid = e.target.value; setForm((p) => ({ ...p, communityId: cid, clusterId: "", allowedGateIds: [] })); void loadFormDeps(cid); }}>
+                <select value={form.communityId} style={selectStyle} onChange={(e) => { const cid = e.target.value; setForm((p) => ({ ...p, communityId: cid, phaseId: "", clusterId: "", allowedGateIds: [] })); void loadFormDeps(cid); }}>
                   <option value="">Select community</option>
                   {communities.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </Field>
-              <Field label={(() => { const c = communities.find(c => c.id === form.communityId); return c?.structureType === "PHASES" ? "Phase" : "Cluster"; })()}>
-                <select value={form.clusterId} style={selectStyle} onChange={(e) => setForm((p) => ({ ...p, clusterId: e.target.value }))}>
-                  <option value="">{(() => { const c = communities.find(c => c.id === form.communityId); return c?.structureType === "PHASES" ? "No phase" : "No cluster"; })()}</option>
+              <Field label="Phase">
+                <select value={form.phaseId} style={selectStyle} onChange={async (e) => { const pid = e.target.value; setForm((p) => ({ ...p, phaseId: pid, clusterId: "" })); setFormClusters(pid ? await communityService.listClusters(pid).catch(() => []) : []); }}>
+                  <option value="">No phase</option>
+                  {formPhases.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </Field>
+              <Field label="Cluster">
+                <select value={form.clusterId} style={selectStyle} onChange={(e) => setForm((p) => ({ ...p, clusterId: e.target.value }))} disabled={!form.phaseId}>
+                  <option value="">No cluster</option>
                   {formClusters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
               </Field>

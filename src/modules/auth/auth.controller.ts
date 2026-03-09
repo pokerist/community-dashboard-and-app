@@ -13,6 +13,7 @@ import {
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { LogoutDto } from './dto/logout.dto';
 import { SignupWithReferralDto } from '../referrals/dto/signup-with-referral.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
@@ -66,6 +67,14 @@ export class AuthController {
   @ApiOperation({ summary: 'Refresh access token using refresh token' })
   refresh(@Body() dto: RefreshTokenDto) {
     return this.authService.refresh(dto.userId, dto.refreshToken);
+  }
+
+  @Post('logout')
+  @ApiOperation({ summary: 'Revoke current user refresh session(s)' })
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  logout(@Request() req: any, @Body() dto: LogoutDto) {
+    return this.authService.logout(req.user.id, dto?.refreshToken);
   }
 
   @Post('login/2fa/verify')

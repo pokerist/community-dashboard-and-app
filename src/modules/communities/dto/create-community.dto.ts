@@ -1,8 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { CommunityStructure } from '@prisma/client';
 import {
   IsBoolean,
-  IsEnum,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -34,15 +32,6 @@ export class CreateCommunityDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
-
-  @ApiProperty({
-    required: false,
-    enum: CommunityStructure,
-    example: CommunityStructure.CLUSTERS,
-  })
-  @IsOptional()
-  @IsEnum(CommunityStructure)
-  structureType?: CommunityStructure;
 
   @ApiProperty({ required: false, example: 'No pets allowed in common areas.' })
   @IsOptional()

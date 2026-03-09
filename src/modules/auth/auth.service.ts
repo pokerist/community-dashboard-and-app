@@ -1988,6 +1988,51 @@ export class AuthService {
     return this.generateTokens(user);
   }
 
+  async logout(userId: string, incomingRefreshToken?: string) {
+    const activeTokens = await this.prisma.refreshToken.findMany({
+      where: {
+        userId,
+        revoked: false,
+        expiresAt: { gt: new Date() },
+      },
+      select: {
+        id: true,
+        tokenHash: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (activeTokens.length === 0) {
+      return { success: true, revokedCount: 0 };
+    }
+
+    if (incomingRefreshToken && incomingRefreshToken.trim().length > 0) {
+      for (const token of activeTokens) {
+        const isMatch = await bcrypt.compare(
+          incomingRefreshToken,
+          token.tokenHash,
+        );
+        if (isMatch) {
+          await this.prisma.refreshToken.update({
+            where: { id: token.id },
+            data: { revoked: true },
+          });
+          return { success: true, revokedCount: 1 };
+        }
+      }
+    }
+
+    const revokeResult = await this.prisma.refreshToken.updateMany({
+      where: {
+        userId,
+        revoked: false,
+      },
+      data: { revoked: true },
+    });
+
+    return { success: true, revokedCount: revokeResult.count };
+  }
+
   // ================= FORGOT PASSWORD =================
   async forgotPassword(dto: ForgotPasswordDto) {
     const { email, phone } = dto;

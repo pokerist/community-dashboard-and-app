@@ -46,6 +46,11 @@ export class UnitQueryDto extends BaseQueryDto {
   @IsUUID()
   clusterId?: string;
 
+  @ApiPropertyOptional({ example: 'phase-uuid' })
+  @IsOptional()
+  @IsUUID()
+  phaseId?: string;
+
   @ApiPropertyOptional({ enum: DISPLAY_STATUS_VALUES, example: 'DELIVERED' })
   @IsOptional()
   @IsEnum(DISPLAY_STATUS_VALUES)

@@ -58,4 +58,10 @@ export class CreateGateDto {
   @IsArray()
   @IsString({ each: true })
   clusterIds?: string[];
+
+  @ApiPropertyOptional({ example: ['phase-uuid-1'], description: 'Phase IDs this gate serves' })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  phaseIds?: string[];
 }

@@ -1,818 +1,537 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, Building, DoorOpen, LayoutGrid, Search, ChevronRight, FileText } from "lucide-react";
-import { toast } from "sonner";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
-import { Input } from "../ui/input";
-import { Label } from "../ui/label";
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  ArrowDown,
+  ArrowUp,
+  Building,
+  DoorOpen,
+  FileText,
+  LayoutGrid,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+} from 'lucide-react';
+import { toast } from 'sonner';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 import communityService, {
   type ClusterItem,
   type CommunityDetail,
   type CommunityListItem,
-  type CommunityStructure,
   type GateItem,
   type GateRole,
-} from "../../lib/community-service";
-import { handleApiError } from "../../lib/api-client";
+  type PhaseItem,
+} from '../../lib/community-service';
+import { handleApiError } from '../../lib/api-client';
 
-// ─── Constants ────────────────────────────────────────────────
+const GATE_ROLE_OPTIONS: GateRole[] = ['RESIDENT', 'VISITOR', 'WORKER', 'DELIVERY', 'STAFF', 'RIDESHARE'];
 
-const GATE_ROLE_OPTIONS: GateRole[] = ["RESIDENT","VISITOR","WORKER","DELIVERY","STAFF","RIDESHARE"];
-
-// Teal → Blue → Pink cycling (matches DataTable / design system)
-const ACCENTS = ["#0D9488", "#2563EB", "#BE185D"];
-const accentFor = (i: number) => ACCENTS[i % ACCENTS.length];
-
-const GATE_ROLE_COLORS: Record<GateRole, { bg: string; color: string }> = {
-  RESIDENT:  { bg: "#EFF6FF", color: "#1D4ED8" },
-  VISITOR:   { bg: "#ECFDF5", color: "#065F46" },
-  WORKER:    { bg: "#FFFBEB", color: "#92400E" },
-  DELIVERY:  { bg: "#FFF7ED", color: "#9A3412" },
-  STAFF:     { bg: "#F5F3FF", color: "#5B21B6" },
-  RIDESHARE: { bg: "#F0FDFA", color: "#0D9488" },
+type CommunityFormState = { name: string; isActive: boolean; guidelines: string };
+type PhaseFormState = { name: string };
+type ClusterFormState = { name: string };
+type GateFormState = {
+  name: string;
+  etaMinutes: string;
+  allowedRoles: GateRole[];
+  phaseIds: string[];
+  clusterIds: string[];
 };
 
-// ─── Form types ───────────────────────────────────────────────
-
-type CommunityFormState = { name: string; isActive: boolean; structureType: CommunityStructure; guidelines: string };
-type ClusterFormState   = { name: string };
-type GateFormState      = { name: string; etaMinutes: string; allowedRoles: GateRole[]; clusterIds: string[] };
-
-const defaultCommunityForm: CommunityFormState = { name: "", isActive: true, structureType: "CLUSTERS", guidelines: "" };
-const defaultClusterForm: ClusterFormState     = { name: "" };
-const defaultGateForm: GateFormState           = { name: "", etaMinutes: "", allowedRoles: ["VISITOR"], clusterIds: [] };
-
-// ─── Shared small components ──────────────────────────────────
-
-function Chip({ label, bg, color }: { label: string; bg: string; color: string }) {
-  return (
-    <span style={{ fontSize: "10.5px", fontWeight: 600, padding: "2px 8px", borderRadius: "5px", background: bg, color, display: "inline-block", whiteSpace: "nowrap" }}>
-      {label}
-    </span>
-  );
-}
-
-function IconBtn({
-  icon, onClick, danger = false, disabled = false, title,
-}: { icon: React.ReactNode; onClick: () => void; danger?: boolean; disabled?: boolean; title?: string }) {
-  const [hov, setHov] = useState(false);
-  return (
-    <button
-      type="button"
-      title={title}
-      disabled={disabled}
-      onClick={(e) => { e.stopPropagation(); onClick(); }}
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
-      style={{
-        width: "28px", height: "28px", borderRadius: "6px",
-        border: `1px solid ${hov && !disabled ? (danger ? "#FCA5A5" : "#EBEBEB") : "#EBEBEB"}`,
-        background: hov && !disabled ? (danger ? "#FEF2F2" : "#F5F5F5") : "#FFFFFF",
-        color: disabled ? "#D1D5DB" : (danger ? "#DC2626" : "#6B7280"),
-        cursor: disabled ? "not-allowed" : "pointer",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        transition: "all 120ms ease", flexShrink: 0,
-      }}
-    >
-      {icon}
-    </button>
-  );
-}
-
-function PrimaryBtn({ label, icon, onClick }: { label: string; icon?: React.ReactNode; onClick: () => void }) {
-  const [hov, setHov] = useState(false);
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
-      style={{
-        display: "flex", alignItems: "center", gap: "6px",
-        padding: "7px 14px", borderRadius: "7px",
-        background: hov ? "#1D4ED8" : "#2563EB",
-        color: "#FFFFFF", border: "none", cursor: "pointer",
-        fontSize: "12.5px", fontWeight: 600,
-        transition: "background 120ms ease",
-        fontFamily: "'Work Sans', sans-serif",
-        boxShadow: "0 1px 3px rgba(37,99,235,0.25)",
-      }}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-}
-
-function GhostBtn({ label, onClick }: { label: string; onClick: () => void }) {
-  const [hov, setHov] = useState(false);
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
-      style={{
-        padding: "7px 14px", borderRadius: "7px",
-        background: hov ? "#F5F5F5" : "#FFFFFF",
-        color: "#6B7280", border: "1px solid #E5E7EB", cursor: "pointer",
-        fontSize: "12.5px", fontWeight: 500,
-        transition: "background 120ms ease",
-        fontFamily: "'Work Sans', sans-serif",
-      }}
-    >
-      {label}
-    </button>
-  );
-}
-
-// ─── Form field primitives ────────────────────────────────────
-
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
-      <label style={{ fontSize: "12px", fontWeight: 600, color: "#374151", fontFamily: "'Work Sans', sans-serif" }}>{label}</label>
-      {hint && <p style={{ fontSize: "11px", color: "#9CA3AF", marginTop: "-2px" }}>{hint}</p>}
-      {children}
-    </div>
-  );
-}
+const defaultCommunityForm: CommunityFormState = { name: '', isActive: true, guidelines: '' };
+const defaultPhaseForm: PhaseFormState = { name: '' };
+const defaultClusterForm: ClusterFormState = { name: '' };
+const defaultGateForm: GateFormState = {
+  name: '',
+  etaMinutes: '',
+  allowedRoles: ['VISITOR'],
+  phaseIds: [],
+  clusterIds: [],
+};
 
 const inputStyle: React.CSSProperties = {
-  width: "100%", padding: "8px 10px", borderRadius: "7px",
-  border: "1px solid #E5E7EB", fontSize: "13px", color: "#111827",
-  background: "#FFFFFF", outline: "none", fontFamily: "'Work Sans', sans-serif",
-  boxSizing: "border-box",
+  width: '100%',
+  padding: '8px 10px',
+  borderRadius: '7px',
+  border: '1px solid #E5E7EB',
+  fontSize: '13px',
+  color: '#111827',
+  background: '#FFFFFF',
+  outline: 'none',
+  fontFamily: "'Work Sans', sans-serif",
+  boxSizing: 'border-box',
 };
 
-// ─── Pagination ───────────────────────────────────────────────
-
-const PAGE_SIZE = 8;
-
-function Pagination({ page, total, pageSize, onChange }: { page: number; total: number; pageSize: number; onChange: (p: number) => void }) {
-  const pages = Math.ceil(total / pageSize);
-  if (pages <= 1) return null;
+function IconBtn({ icon, onClick, danger = false, disabled = false }: {
+  icon: React.ReactNode;
+  onClick: () => void;
+  danger?: boolean;
+  disabled?: boolean;
+}) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: "4px", justifyContent: "flex-end", padding: "12px 16px", borderTop: "1px solid #F3F4F6" }}>
-      <span style={{ fontSize: "11.5px", color: "#9CA3AF", marginRight: "8px", fontFamily: "'Work Sans', sans-serif" }}>
-        {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
-      </span>
-      {Array.from({ length: pages }).map((_, i) => {
-        const p = i + 1;
-        const active = p === page;
-        return (
-          <button
-            key={p}
-            type="button"
-            onClick={() => onChange(p)}
-            style={{
-              width: "28px", height: "28px", borderRadius: "6px", border: "none",
-              background: active ? "#111827" : "transparent",
-              color: active ? "#FFFFFF" : "#6B7280",
-              fontSize: "12px", fontWeight: active ? 700 : 400, cursor: "pointer",
-              fontFamily: "'DM Mono', monospace",
-            }}
-          >
-            {p}
-          </button>
-        );
-      })}
-    </div>
+    <button
+      type='button'
+      disabled={disabled}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      style={{
+        width: '28px',
+        height: '28px',
+        borderRadius: '6px',
+        border: '1px solid #EBEBEB',
+        background: '#FFFFFF',
+        color: disabled ? '#D1D5DB' : danger ? '#DC2626' : '#6B7280',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      {icon}
+    </button>
   );
 }
 
-// ─── Main component ───────────────────────────────────────────
+function PrimaryBtn({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type='button'
+      onClick={onClick}
+      style={{
+        padding: '7px 14px',
+        borderRadius: '7px',
+        background: '#2563EB',
+        color: '#FFFFFF',
+        border: 'none',
+        cursor: 'pointer',
+        fontSize: '12.5px',
+        fontWeight: 600,
+      }}
+    >
+      {label}
+    </button>
+  );
+}
 
 export function CommunitiesManagement() {
-  const [communities, setCommunities]             = useState<CommunityListItem[]>([]);
-  const [selectedCommunityId, setSelectedId]       = useState<string | null>(null);
-  const [selectedDetail, setSelectedDetail]        = useState<CommunityDetail | null>(null);
-  const [isLoadingList, setIsLoadingList]           = useState(false);
-  const [isLoadingDetail, setIsLoadingDetail]      = useState(false);
-  const [search, setSearch]                        = useState("");
-  const [page, setPage]                            = useState(1);
-  const [activeTab, setActiveTab]                  = useState<"clusters" | "gates" | "guidelines">("clusters");
-  const [editingGuidelines, setEditingGuidelines]  = useState(false);
-  const [guidelinesText, setGuidelinesText]        = useState("");
+  const [communities, setCommunities] = useState<CommunityListItem[]>([]);
+  const [selectedCommunityId, setSelectedCommunityId] = useState<string | null>(null);
+  const [selectedDetail, setSelectedDetail] = useState<CommunityDetail | null>(null);
+  const [selectedPhaseId, setSelectedPhaseId] = useState<string>('');
+  const [search, setSearch] = useState('');
+  const [activeTab, setActiveTab] = useState<'phases' | 'clusters' | 'gates' | 'guidelines'>('phases');
 
   const [communityDialogOpen, setCommunityDialogOpen] = useState(false);
-  const [editingCommunity, setEditingCommunity]       = useState<CommunityListItem | null>(null);
-  const [communityForm, setCommunityForm]             = useState<CommunityFormState>(defaultCommunityForm);
-
+  const [phaseDialogOpen, setPhaseDialogOpen] = useState(false);
   const [clusterDialogOpen, setClusterDialogOpen] = useState(false);
-  const [editingCluster, setEditingCluster]       = useState<ClusterItem | null>(null);
-  const [clusterForm, setClusterForm]             = useState<ClusterFormState>(defaultClusterForm);
-
   const [gateDialogOpen, setGateDialogOpen] = useState(false);
-  const [editingGate, setEditingGate]       = useState<GateItem | null>(null);
-  const [gateForm, setGateForm]             = useState<GateFormState>(defaultGateForm);
 
-  // ── Data loading ────────────────────────────────────────────
+  const [editingCommunity, setEditingCommunity] = useState<CommunityListItem | null>(null);
+  const [editingPhase, setEditingPhase] = useState<PhaseItem | null>(null);
+  const [editingCluster, setEditingCluster] = useState<ClusterItem | null>(null);
+  const [editingGate, setEditingGate] = useState<GateItem | null>(null);
+
+  const [communityForm, setCommunityForm] = useState<CommunityFormState>(defaultCommunityForm);
+  const [phaseForm, setPhaseForm] = useState<PhaseFormState>(defaultPhaseForm);
+  const [clusterForm, setClusterForm] = useState<ClusterFormState>(defaultClusterForm);
+  const [gateForm, setGateForm] = useState<GateFormState>(defaultGateForm);
+
   const loadCommunities = useCallback(async () => {
-    setIsLoadingList(true);
     try {
       const rows = await communityService.listCommunities();
       setCommunities(rows);
-      if (!selectedCommunityId && rows.length > 0) setSelectedId(rows[0].id);
+      if (!selectedCommunityId && rows.length > 0) setSelectedCommunityId(rows[0].id);
     } catch (e) {
-      toast.error("Failed to load communities", { description: handleApiError(e) });
-    } finally {
-      setIsLoadingList(false);
+      toast.error('Failed to load communities', { description: handleApiError(e) });
     }
   }, [selectedCommunityId]);
 
   const loadDetail = useCallback(async (id: string) => {
-    setIsLoadingDetail(true);
     try {
-      setSelectedDetail(await communityService.getCommunityDetail(id));
+      const detail = await communityService.getCommunityDetail(id);
+      setSelectedDetail(detail);
+      const phaseId = detail.phases[0]?.id ?? '';
+      setSelectedPhaseId((prev) => (prev && detail.phases.some((p) => p.id === prev) ? prev : phaseId));
     } catch (e) {
-      toast.error("Failed to load detail", { description: handleApiError(e) });
+      toast.error('Failed to load community detail', { description: handleApiError(e) });
       setSelectedDetail(null);
-    } finally {
-      setIsLoadingDetail(false);
     }
   }, []);
 
-  useEffect(() => { void loadCommunities(); }, [loadCommunities]);
   useEffect(() => {
-    if (!selectedCommunityId) { setSelectedDetail(null); return; }
-    void loadDetail(selectedCommunityId);
-  }, [loadDetail, selectedCommunityId]);
+    void loadCommunities();
+  }, [loadCommunities]);
 
-  // ── Filtered + paginated list ────────────────────────────────
+  useEffect(() => {
+    if (selectedCommunityId) void loadDetail(selectedCommunityId);
+  }, [selectedCommunityId, loadDetail]);
+
   const filtered = useMemo(() => {
     const t = search.trim().toLowerCase();
     if (!t) return communities;
-    return communities.filter((c) =>
-      c.name.toLowerCase().includes(t)
-    );
+    return communities.filter((c) => c.name.toLowerCase().includes(t));
   }, [communities, search]);
 
-  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
-  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const clustersForPhase = useMemo(() => {
+    if (!selectedDetail || !selectedPhaseId) return [];
+    return selectedDetail.clusters.filter((c) => c.phaseId === selectedPhaseId);
+  }, [selectedDetail, selectedPhaseId]);
+
   const selectedCommunity = communities.find((c) => c.id === selectedCommunityId) ?? null;
 
-  // ── Community CRUD ───────────────────────────────────────────
-  const openCreateCommunity = () => { setEditingCommunity(null); setCommunityForm(defaultCommunityForm); setCommunityDialogOpen(true); };
-  const openEditCommunity = (c: CommunityListItem) => {
-    setEditingCommunity(c);
-    setCommunityForm({ name: c.name, isActive: c.isActive !== false, structureType: c.structureType ?? "CLUSTERS", guidelines: c.guidelines ?? "" });
-    setCommunityDialogOpen(true);
-  };
   const saveCommunity = async () => {
-    if (!communityForm.name.trim()) { toast.error("Name is required"); return; }
-    const payload = { name: communityForm.name.trim(), isActive: communityForm.isActive, structureType: communityForm.structureType, guidelines: communityForm.guidelines.trim() || undefined };
+    if (!communityForm.name.trim()) return toast.error('Community name is required');
+    const payload = {
+      name: communityForm.name.trim(),
+      isActive: communityForm.isActive,
+      guidelines: communityForm.guidelines.trim() || undefined,
+    };
     try {
-      if (editingCommunity) { await communityService.updateCommunity(editingCommunity.id, payload); toast.success("Community updated"); }
-      else { const created = await communityService.createCommunity(payload); setSelectedId(created.id); toast.success("Community created"); }
+      if (editingCommunity) {
+        await communityService.updateCommunity(editingCommunity.id, payload);
+      } else {
+        const created = await communityService.createCommunity(payload);
+        setSelectedCommunityId(created.id);
+      }
       setCommunityDialogOpen(false);
       await loadCommunities();
-    } catch (e) { toast.error("Failed to save", { description: handleApiError(e) }); }
-  };
-  const removeCommunity = async (c: CommunityListItem) => {
-    try {
-      await communityService.deleteCommunity(c.id);
-      toast.success("Community deleted");
-      if (selectedCommunityId === c.id) setSelectedId(null);
-      await loadCommunities();
-    } catch (e) { toast.error("Cannot delete", { description: handleApiError(e) }); }
-  };
-  const openEditGuidelines = () => { setGuidelinesText(selectedDetail?.guidelines ?? ""); setEditingGuidelines(true); };
-  const saveGuidelines = async () => {
-    if (!selectedCommunityId) return;
-    try {
-      await communityService.updateCommunity(selectedCommunityId, { guidelines: guidelinesText.trim() || undefined });
-      toast.success("Guidelines saved");
-      setEditingGuidelines(false);
-      await loadDetail(selectedCommunityId);
-    } catch (e) { toast.error("Failed to save guidelines", { description: handleApiError(e) }); }
+    } catch (e) {
+      toast.error('Failed to save community', { description: handleApiError(e) });
+    }
   };
 
-  // ── Cluster CRUD ─────────────────────────────────────────────
-  const openCreateCluster = () => { setEditingCluster(null); setClusterForm(defaultClusterForm); setClusterDialogOpen(true); };
-  const openEditCluster = (cl: ClusterItem) => { setEditingCluster(cl); setClusterForm({ name: cl.name }); setClusterDialogOpen(true); };
-  const saveCluster = async () => {
-    if (!selectedCommunityId || !clusterForm.name.trim()) { toast.error("Name is required"); return; }
-    const payload = { name: clusterForm.name.trim() };
+  const savePhase = async () => {
+    if (!selectedCommunityId || !phaseForm.name.trim()) return toast.error('Phase name is required');
     try {
-      if (editingCluster) { await communityService.updateCluster(editingCluster.id, payload); toast.success("Cluster updated"); }
-      else { await communityService.createCluster(selectedCommunityId, payload); toast.success("Cluster created"); }
+      if (editingPhase) await communityService.updatePhase(editingPhase.id, { name: phaseForm.name.trim() });
+      else await communityService.createPhase(selectedCommunityId, { name: phaseForm.name.trim() });
+      setPhaseDialogOpen(false);
+      await loadDetail(selectedCommunityId);
+      await loadCommunities();
+    } catch (e) {
+      toast.error('Failed to save phase', { description: handleApiError(e) });
+    }
+  };
+
+  const saveCluster = async () => {
+    if (!selectedCommunityId || !selectedPhaseId || !clusterForm.name.trim()) return toast.error('Select phase and enter cluster name');
+    try {
+      if (editingCluster) await communityService.updateCluster(editingCluster.id, { name: clusterForm.name.trim() });
+      else await communityService.createCluster(selectedPhaseId, { name: clusterForm.name.trim() });
       setClusterDialogOpen(false);
       await loadDetail(selectedCommunityId);
       await loadCommunities();
-    } catch (e) { toast.error("Failed to save cluster", { description: handleApiError(e) }); }
+    } catch (e) {
+      toast.error('Failed to save cluster', { description: handleApiError(e) });
+    }
   };
-  const removeCluster = async (cl: ClusterItem) => {
-    if (!selectedCommunityId) return;
-    if (cl.unitCount > 0) { toast.error("Cannot delete cluster with units"); return; }
-    try { await communityService.deleteCluster(cl.id); toast.success("Cluster deactivated"); await loadDetail(selectedCommunityId); await loadCommunities(); }
-    catch (e) { toast.error("Failed to delete", { description: handleApiError(e) }); }
-  };
-  const reorderCluster = async (id: string, dir: "up" | "down") => {
+
+  const reorderPhase = async (id: string, dir: 'up' | 'down') => {
     if (!selectedCommunityId || !selectedDetail) return;
-    const items = [...selectedDetail.clusters];
-    const idx = items.findIndex((c) => c.id === id);
-    const swap = dir === "up" ? idx - 1 : idx + 1;
+    const items = [...selectedDetail.phases];
+    const idx = items.findIndex((x) => x.id === id);
+    const swap = dir === 'up' ? idx - 1 : idx + 1;
     if (idx < 0 || swap < 0 || swap >= items.length) return;
     [items[idx], items[swap]] = [items[swap], items[idx]];
-    try { await communityService.reorderClusters(selectedCommunityId, items.map((c) => c.id)); await loadDetail(selectedCommunityId); toast.success("Order updated"); }
-    catch (e) { toast.error("Reorder failed", { description: handleApiError(e) }); }
+    try {
+      await communityService.reorderPhases(selectedCommunityId, items.map((x) => x.id));
+      await loadDetail(selectedCommunityId);
+    } catch (e) {
+      toast.error('Failed to reorder phases', { description: handleApiError(e) });
+    }
   };
 
-  // ── Gate CRUD ────────────────────────────────────────────────
-  const openCreateGate = () => { setEditingGate(null); setGateForm(defaultGateForm); setGateDialogOpen(true); };
-  const openEditGate = (g: GateItem) => { setEditingGate(g); setGateForm({ name: g.name, etaMinutes: g.etaMinutes ? String(g.etaMinutes) : "", allowedRoles: g.allowedRoles.length ? g.allowedRoles : ["VISITOR"], clusterIds: g.clusterIds ?? [] }); setGateDialogOpen(true); };
-  const toggleGateRole = (r: GateRole) => setGateForm((p) => ({ ...p, allowedRoles: p.allowedRoles.includes(r) ? p.allowedRoles.filter((x) => x !== r) : [...p.allowedRoles, r] }));
-  const saveGate = async () => {
-    if (!selectedCommunityId || !gateForm.name.trim()) { toast.error("Name is required"); return; }
-    if (!gateForm.allowedRoles.length) { toast.error("Select at least one role"); return; }
-    const payload = { name: gateForm.name.trim(), etaMinutes: gateForm.etaMinutes.trim() ? Number(gateForm.etaMinutes) : undefined, allowedRoles: gateForm.allowedRoles, clusterIds: gateForm.clusterIds.length ? gateForm.clusterIds : undefined };
+  const reorderCluster = async (id: string, dir: 'up' | 'down') => {
+    if (!selectedCommunityId || !selectedPhaseId) return;
+    const items = [...clustersForPhase];
+    const idx = items.findIndex((x) => x.id === id);
+    const swap = dir === 'up' ? idx - 1 : idx + 1;
+    if (idx < 0 || swap < 0 || swap >= items.length) return;
+    [items[idx], items[swap]] = [items[swap], items[idx]];
     try {
-      if (editingGate) { await communityService.updateGate(editingGate.id, payload); await communityService.updateGateRoles(editingGate.id, gateForm.allowedRoles); toast.success("Gate updated"); }
-      else { await communityService.createGate(selectedCommunityId, payload); toast.success("Gate created"); }
+      await communityService.reorderClusters(selectedPhaseId, items.map((x) => x.id));
+      await loadDetail(selectedCommunityId);
+    } catch (e) {
+      toast.error('Failed to reorder clusters', { description: handleApiError(e) });
+    }
+  };
+
+  const saveGate = async () => {
+    if (!selectedCommunityId || !gateForm.name.trim()) return toast.error('Gate name is required');
+    if (!gateForm.allowedRoles.length) return toast.error('Select at least one role');
+    const payload = {
+      name: gateForm.name.trim(),
+      etaMinutes: gateForm.etaMinutes ? Number(gateForm.etaMinutes) : undefined,
+      allowedRoles: gateForm.allowedRoles,
+      phaseIds: gateForm.phaseIds,
+      clusterIds: gateForm.clusterIds,
+    };
+    try {
+      if (editingGate) await communityService.updateGate(editingGate.id, payload);
+      else await communityService.createGate(selectedCommunityId, payload);
       setGateDialogOpen(false);
       await loadDetail(selectedCommunityId);
-      await loadCommunities();
-    } catch (e) { toast.error("Failed to save gate", { description: handleApiError(e) }); }
-  };
-  const removeGate = async (g: GateItem) => {
-    if (!selectedCommunityId) return;
-    try { await communityService.deleteGate(g.id); toast.success("Gate deactivated"); await loadDetail(selectedCommunityId); await loadCommunities(); }
-    catch (e) { toast.error("Failed to delete", { description: handleApiError(e) }); }
+    } catch (e) {
+      toast.error('Failed to save gate', { description: handleApiError(e) });
+    }
   };
 
-  // ─────────────────────────────────────────────────────────────
-  // RENDER
-  // ─────────────────────────────────────────────────────────────
   return (
-    <div style={{ padding: "0", fontFamily: "'Work Sans', sans-serif" }}>
-      <style>{`
-        .cm-row:hover { background: #FAFAFA !important; }
-        .cm-row-active { background: #F5F9FF !important; }
-        .cm-row-active:hover { background: #EFF6FF !important; }
-        .tab-btn { transition: all 120ms ease; }
-      `}</style>
-
-      {/* ── Page header ──────────────────────────────────────── */}
-      <div style={{ marginBottom: "20px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "16px" }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: '16px', fontFamily: "'Work Sans', sans-serif" }}>
+      <div style={{ border: '1px solid #EBEBEB', borderRadius: '10px', background: '#FFF' }}>
+        <div style={{ padding: '12px', borderBottom: '1px solid #F3F4F6' }}>
+          <div style={{ position: 'relative' }}>
+            <Search style={{ width: '12px', height: '12px', color: '#9CA3AF', position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }} />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder='Search communities...' style={{ ...inputStyle, paddingLeft: '28px' }} />
+          </div>
+        </div>
         <div>
-          <h1 style={{ fontSize: "18px", fontWeight: 800, color: "#111827", letterSpacing: "-0.02em", lineHeight: 1.2, margin: 0 }}>
-            Communities
-          </h1>
-          <p style={{ marginTop: "4px", fontSize: "13px", color: "#6B7280" }}>
-            Manage projects, phases, guidelines, clusters, and gates from one workspace.
-          </p>
+          {filtered.map((c) => (
+            <div
+              key={c.id}
+              onClick={() => setSelectedCommunityId(c.id)}
+              style={{
+                padding: '10px 12px',
+                borderBottom: '1px solid #F8FAFC',
+                cursor: 'pointer',
+                background: c.id === selectedCommunityId ? '#EFF6FF' : 'transparent',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <p style={{ margin: 0, fontSize: '13px', fontWeight: 700, color: '#111827' }}>{c.name}</p>
+                  <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#9CA3AF' }}>
+                    {(c._count?.phases ?? 0)} phases · {(c._count?.clusters ?? 0)} clusters · {(c._count?.gates ?? 0)} gates
+                  </p>
+                </div>
+                <IconBtn icon={<Pencil style={{ width: '11px', height: '11px' }} />} onClick={() => {
+                  setEditingCommunity(c);
+                  setCommunityForm({ name: c.name, isActive: c.isActive, guidelines: c.guidelines ?? '' });
+                  setCommunityDialogOpen(true);
+                }} />
+              </div>
+            </div>
+          ))}
         </div>
-        <PrimaryBtn label="Add Community" icon={<Plus style={{ width: "13px", height: "13px" }} />} onClick={openCreateCommunity} />
+        <div style={{ padding: '12px', borderTop: '1px solid #F3F4F6' }}>
+          <PrimaryBtn label='Add Community' onClick={() => {
+            setEditingCommunity(null);
+            setCommunityForm(defaultCommunityForm);
+            setCommunityDialogOpen(true);
+          }} />
+        </div>
       </div>
 
-      {/* ── Two-column layout: list left / workspace right ───── */}
-      <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: "16px", alignItems: "start" }}>
-
-        {/* ══ LEFT: Community list ══════════════════════════════ */}
-        <div style={{ borderRadius: "10px", border: "1px solid #EBEBEB", background: "#FFFFFF", boxShadow: "0 1px 4px rgba(0,0,0,0.05)", overflow: "hidden" }}>
-
-          {/* Search bar */}
-          <div style={{ padding: "12px", borderBottom: "1px solid #F3F4F6" }}>
-            <div style={{ position: "relative" }}>
-              <Search style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", width: "13px", height: "13px", color: "#9CA3AF" }} />
-              <input
-                placeholder="Search by name…"
-                value={search}
-                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-                style={{ ...inputStyle, paddingLeft: "32px", fontSize: "12.5px", background: "#F9FAFB" }}
-              />
-            </div>
-          </div>
-
-          {/* Count */}
-          <div style={{ padding: "8px 14px 6px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span style={{ fontSize: "10.5px", color: "#9CA3AF", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.07em" }}>
-              Communities
-            </span>
-            <span style={{ fontSize: "10.5px", color: "#9CA3AF", fontFamily: "'DM Mono', monospace" }}>
-              {filtered.length}
-            </span>
-          </div>
-
-          {/* Rows */}
-          <div>
-            {isLoadingList ? (
-              Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} style={{ padding: "12px 14px", borderBottom: "1px solid #F5F5F5", display: "flex", flexDirection: "column", gap: "7px" }}>
-                  <div style={{ height: "12px", width: "55%", borderRadius: "4px", backgroundImage: "linear-gradient(90deg,#F3F4F6 25%,#E9EAEC 50%,#F3F4F6 75%)", backgroundSize: "200% 100%", animation: "sk-shimmer 1.4s ease infinite" }} />
-                  <div style={{ height: "10px", width: "35%", borderRadius: "4px", backgroundImage: "linear-gradient(90deg,#F3F4F6 25%,#E9EAEC 50%,#F3F4F6 75%)", backgroundSize: "200% 100%", animation: "sk-shimmer 1.4s ease infinite" }} />
-                  <style>{`@keyframes sk-shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}`}</style>
+      <div style={{ border: '1px solid #EBEBEB', borderRadius: '10px', background: '#FFF' }}>
+        {selectedDetail ? (
+          <>
+            <div style={{ padding: '14px 16px', borderBottom: '1px solid #F3F4F6' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h2 style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>{selectedDetail.name}</h2>
+                  <p style={{ margin: '3px 0 0', fontSize: '12px', color: '#6B7280' }}>Manage phases, clusters, gates and guidelines</p>
                 </div>
-              ))
-            ) : paginated.length === 0 ? (
-              <div style={{ padding: "32px 16px", textAlign: "center" }}>
-                <p style={{ fontSize: "13px", color: "#9CA3AF" }}>No communities found.</p>
-              </div>
-            ) : paginated.map((c, ci) => {
-              const isActive = c.id === selectedCommunityId;
-              const accent = accentFor(ci);
-              return (
-                <div
-                  key={c.id}
-                  className={isActive ? "cm-row cm-row-active" : "cm-row"}
-                  onClick={() => setSelectedId(c.id)}
-                  style={{
-                    padding: "11px 14px",
-                    borderBottom: ci < paginated.length - 1 ? "1px solid #F5F5F5" : "none",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "10px",
-                    borderLeft: isActive ? `3px solid ${accent}` : "3px solid transparent",
-                    transition: "all 120ms ease",
-                  }}
-                >
-                  {/* Icon */}
-                  <div style={{ width: "32px", height: "32px", borderRadius: "8px", background: isActive ? `${accent}18` : "#F5F5F5", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    <Building style={{ width: "14px", height: "14px", color: isActive ? accent : "#9CA3AF" }} />
-                  </div>
-
-                  {/* Text */}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                      <p style={{ fontSize: "13px", fontWeight: 600, color: "#111827", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {c.name}
-                      </p>
-                      {c.isActive === false && (
-                        <span style={{ fontSize: "9.5px", fontWeight: 700, color: "#9CA3AF", background: "#F3F4F6", padding: "1px 5px", borderRadius: "4px", textTransform: "uppercase", letterSpacing: "0.05em", flexShrink: 0 }}>
-                          Inactive
-                        </span>
-                      )}
-                    </div>
-                    <div style={{ marginTop: "3px", display: "flex", alignItems: "center", gap: "8px" }}>
-                      <Chip
-                        label={c.structureType === "PHASES" ? "Phases" : "Clusters"}
-                        bg={c.structureType === "PHASES" ? "#FFF7ED" : "#EFF6FF"}
-                        color={c.structureType === "PHASES" ? "#9A3412" : "#1D4ED8"}
-                      />
-                      <span style={{ fontSize: "10.5px", color: "#9CA3AF" }}>
-                        {c._count?.clusters ?? 0} {c.structureType === "PHASES" ? "phases" : "clusters"} · {c._count?.gates ?? 0} gates
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Actions */}
-                  <div style={{ display: "flex", gap: "4px", flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
-                    <IconBtn icon={<Pencil style={{ width: "11px", height: "11px" }} />} onClick={() => openEditCommunity(c)} />
-                    <IconBtn icon={<Trash2 style={{ width: "11px", height: "11px" }} />} onClick={() => void removeCommunity(c)} danger />
-                  </div>
-
-                  {isActive && <ChevronRight style={{ width: "13px", height: "13px", color: accent, flexShrink: 0 }} />}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Pagination */}
-          <Pagination page={page} total={filtered.length} pageSize={PAGE_SIZE} onChange={setPage} />
-        </div>
-
-        {/* ══ RIGHT: Workspace ══════════════════════════════════ */}
-        <div style={{ borderRadius: "10px", border: "1px solid #EBEBEB", background: "#FFFFFF", boxShadow: "0 1px 4px rgba(0,0,0,0.05)", overflow: "hidden" }}>
-
-          {/* Workspace header */}
-          <div style={{ padding: "14px 20px", borderBottom: "1px solid #F3F4F6", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <div>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <h2 style={{ fontSize: "14px", fontWeight: 700, color: "#111827", letterSpacing: "-0.01em", lineHeight: 1 }}>
-                  {selectedCommunity ? selectedCommunity.name : "Workspace"}
-                </h2>
-                {selectedCommunity && (
-                  <Chip
-                    label={selectedCommunity.structureType === "PHASES" ? "Uses Phases" : "Uses Clusters"}
-                    bg={selectedCommunity.structureType === "PHASES" ? "#FFF7ED" : "#EFF6FF"}
-                    color={selectedCommunity.structureType === "PHASES" ? "#9A3412" : "#1D4ED8"}
-                  />
-                )}
-              </div>
-              <p style={{ marginTop: "3px", fontSize: "11.5px", color: "#9CA3AF" }}>
-                {selectedCommunity
-                  ? `${selectedCommunity.structureType === "PHASES" ? "Phases" : "Clusters"} and gates configuration`
-                  : "Select a community from the list"}
-              </p>
-            </div>
-          </div>
-          {!selectedCommunityId ? (
-            <div style={{ padding: "64px 24px", textAlign: "center" }}>
-              <div style={{ width: "48px", height: "48px", borderRadius: "50%", background: "#F3F4F6", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
-                <Building style={{ width: "20px", height: "20px", color: "#D1D5DB" }} />
-              </div>
-              <p style={{ fontSize: "13.5px", fontWeight: 600, color: "#6B7280" }}>No community selected</p>
-              <p style={{ marginTop: "4px", fontSize: "12px", color: "#9CA3AF" }}>Pick one from the list to manage its configuration.</p>
-            </div>
-          ) : isLoadingDetail ? (
-            <div style={{ padding: "32px 20px" }}>
-              {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} style={{ height: "52px", borderRadius: "8px", marginBottom: "8px", backgroundImage: "linear-gradient(90deg,#F3F4F6 25%,#E9EAEC 50%,#F3F4F6 75%)", backgroundSize: "200% 100%", animation: "sk-shimmer 1.4s ease infinite" }} />
-              ))}
-            </div>
-          ) : selectedDetail ? (
-            <div>
-              {/* Tabs */}
-              <div style={{ display: "flex", alignItems: "center", gap: "0", borderBottom: "1px solid #F3F4F6", padding: "0 20px" }}>
-                {([
-                  { key: "clusters" as const, label: selectedCommunity?.structureType === "PHASES" ? "Phases" : "Clusters", icon: <LayoutGrid style={{ width: "12px", height: "12px" }} />, count: selectedDetail.clusters.length },
-                  { key: "gates" as const,    label: "Gates",    icon: <DoorOpen  style={{ width: "12px", height: "12px" }} />, count: selectedDetail.gates.length },
-                  { key: "guidelines" as const, label: "Guidelines", icon: <FileText style={{ width: "12px", height: "12px" }} />, count: undefined },
-                ]).map((tab) => {
-                  const isTab = activeTab === tab.key;
-                  const accent = tab.key === "clusters" ? "#2563EB" : tab.key === "gates" ? "#0D9488" : "#92400E";
-                  return (
-                    <button
-                      key={tab.key}
-                      type="button"
-                      className="tab-btn"
-                      onClick={() => setActiveTab(tab.key)}
-                      style={{
-                        display: "flex", alignItems: "center", gap: "6px",
-                        padding: "11px 14px",
-                        fontSize: "12.5px", fontWeight: isTab ? 700 : 500,
-                        color: isTab ? accent : "#6B7280",
-                        background: "transparent", border: "none", cursor: "pointer",
-                        borderBottom: isTab ? `2px solid ${accent}` : "2px solid transparent",
-                        marginBottom: "-1px",
-                        fontFamily: "'Work Sans', sans-serif",
-                      }}
-                    >
-                      <span style={{ color: isTab ? accent : "#9CA3AF" }}>{tab.icon}</span>
-                      {tab.label}
-                      {tab.count !== undefined && (
-                        <span style={{ fontSize: "10px", fontWeight: 700, padding: "1px 5px", borderRadius: "5px", background: isTab ? `${accent}15` : "#F3F4F6", color: isTab ? accent : "#9CA3AF", fontFamily: "'DM Mono', monospace" }}>
-                          {tab.count}
-                        </span>
-                      )}
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  {(['phases', 'clusters', 'gates', 'guidelines'] as const).map((tab) => (
+                    <button key={tab} type='button' onClick={() => setActiveTab(tab)} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid #E5E7EB', background: activeTab === tab ? '#111827' : '#FFF', color: activeTab === tab ? '#FFF' : '#6B7280', fontSize: '11.5px', cursor: 'pointer' }}>
+                      {tab}
                     </button>
-                  );
-                })}
-
-                <div style={{ flex: 1 }} />
-
-                {/* Add button */}
-                {activeTab === "clusters" && (
-                  <PrimaryBtn label={selectedCommunity?.structureType === "PHASES" ? "Add Phase" : "Add Cluster"} icon={<Plus style={{ width: "12px", height: "12px" }} />} onClick={openCreateCluster} />
-                )}
-                {activeTab === "gates" && (
-                  <PrimaryBtn label="Add Gate" icon={<Plus style={{ width: "12px", height: "12px" }} />} onClick={openCreateGate} />
-                )}
-              </div>
-
-              {/* Tab content */}
-              <div style={{ padding: "16px 20px" }}>
-
-                {/* ── Clusters tab ─────────────────────────────── */}
-                {activeTab === "clusters" && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                    {selectedDetail.clusters.length === 0 ? (
-                      <div style={{ padding: "32px", textAlign: "center" }}>
-                        <p style={{ fontSize: "13px", color: "#9CA3AF" }}>No {selectedCommunity?.structureType === "PHASES" ? "phases" : "clusters"} yet. Add one above.</p>
-                      </div>
-                    ) : selectedDetail.clusters.map((cl, i) => (
-                      <div key={cl.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "12px 14px", borderRadius: "8px", border: "1px solid #EBEBEB", background: "#FAFAFA" }}>
-                        {/* Order index */}
-                        <span style={{ width: "20px", height: "20px", borderRadius: "5px", background: `${accentFor(i)}18`, color: accentFor(i), fontSize: "10.5px", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'DM Mono', monospace", flexShrink: 0 }}>
-                          {i + 1}
-                        </span>
-
-                        {/* Info */}
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <p style={{ fontSize: "13px", fontWeight: 600, color: "#111827", lineHeight: 1.2 }}>{cl.name}</p>
-                          <div style={{ marginTop: "3px", display: "flex", gap: "10px" }}>
-                            <span style={{ fontSize: "11px", color: "#9CA3AF" }}>{cl.unitCount} unit{cl.unitCount !== 1 ? "s" : ""}</span>
-                          </div>
-                        </div>
-
-                        {/* Actions */}
-                        <div style={{ display: "flex", gap: "4px" }}>
-                          <IconBtn icon={<ArrowUp style={{ width: "11px", height: "11px" }} />} onClick={() => void reorderCluster(cl.id, "up")} disabled={i === 0} />
-                          <IconBtn icon={<ArrowDown style={{ width: "11px", height: "11px" }} />} onClick={() => void reorderCluster(cl.id, "down")} disabled={i === selectedDetail.clusters.length - 1} />
-                          <IconBtn icon={<Pencil style={{ width: "11px", height: "11px" }} />} onClick={() => openEditCluster(cl)} />
-                          <IconBtn icon={<Trash2 style={{ width: "11px", height: "11px" }} />} onClick={() => void removeCluster(cl)} danger disabled={cl.unitCount > 0} title={cl.unitCount > 0 ? "Cannot delete while units are assigned" : "Delete cluster"} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* ── Gates tab ────────────────────────────────── */}
-                {activeTab === "gates" && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                    {selectedDetail.gates.length === 0 ? (
-                      <div style={{ padding: "32px", textAlign: "center" }}>
-                        <p style={{ fontSize: "13px", color: "#9CA3AF" }}>No gates yet. Add one above.</p>
-                      </div>
-                    ) : selectedDetail.gates.map((g, gi) => (
-                      <div key={g.id} style={{ display: "flex", alignItems: "flex-start", gap: "12px", padding: "12px 14px", borderRadius: "8px", border: "1px solid #EBEBEB", background: "#FAFAFA" }}>
-                        {/* Gate icon */}
-                        <div style={{ width: "32px", height: "32px", borderRadius: "8px", background: `${accentFor(gi)}15`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: "1px" }}>
-                          <DoorOpen style={{ width: "14px", height: "14px", color: accentFor(gi) }} />
-                        </div>
-
-                        {/* Info */}
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                            <p style={{ fontSize: "13px", fontWeight: 600, color: "#111827", lineHeight: 1.2 }}>{g.name}</p>
-                            {g.etaMinutes != null && (
-                              <span style={{ fontSize: "10.5px", color: "#9CA3AF" }}>ETA {g.etaMinutes} min</span>
-                            )}
-                          </div>
-                          <div style={{ marginTop: "7px", display: "flex", flexWrap: "wrap", gap: "4px" }}>
-                            {g.allowedRoles.map((r) => (
-                              <Chip key={r} label={r} bg={GATE_ROLE_COLORS[r].bg} color={GATE_ROLE_COLORS[r].color} />
-                            ))}
-                          </div>
-                          {g.clusterIds && g.clusterIds.length > 0 && selectedDetail && (
-                            <div style={{ marginTop: "5px", fontSize: "10.5px", color: "#6B7280" }}>
-                              <span style={{ fontWeight: 600 }}>Clusters:</span>{" "}
-                              {g.clusterIds.map((cid) => selectedDetail.clusters.find((cl) => cl.id === cid)?.name).filter(Boolean).join(", ") || "—"}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Actions */}
-                        <div style={{ display: "flex", gap: "4px", flexShrink: 0 }}>
-                          <IconBtn icon={<Pencil style={{ width: "11px", height: "11px" }} />} onClick={() => openEditGate(g)} />
-                          <IconBtn icon={<Trash2 style={{ width: "11px", height: "11px" }} />} onClick={() => void removeGate(g)} danger />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* ── Guidelines tab ─────────────────────────────── */}
-                {activeTab === "guidelines" && (
-                  <div>
-                    {editingGuidelines ? (
-                      <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                        <textarea
-                          value={guidelinesText}
-                          onChange={(e) => setGuidelinesText(e.target.value)}
-                          placeholder="Enter community guidelines, rules, and regulations..."
-                          rows={12}
-                          style={{ ...inputStyle, resize: "vertical", minHeight: "200px" }}
-                        />
-                        <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-                          <GhostBtn label="Cancel" onClick={() => setEditingGuidelines(false)} />
-                          <PrimaryBtn label="Save Guidelines" onClick={() => void saveGuidelines()} />
-                        </div>
-                      </div>
-                    ) : (
-                      <div>
-                        {selectedDetail.guidelines ? (
-                          <div style={{ padding: "16px", borderRadius: "8px", border: "1px solid #EBEBEB", background: "#FAFAFA" }}>
-                            <div style={{ fontSize: "13px", color: "#374151", lineHeight: 1.7, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                              {selectedDetail.guidelines}
-                            </div>
-                          </div>
-                        ) : (
-                          <div style={{ padding: "32px", textAlign: "center" }}>
-                            <p style={{ fontSize: "13px", color: "#9CA3AF" }}>No guidelines set for this community.</p>
-                          </div>
-                        )}
-                        <div style={{ marginTop: "12px", display: "flex", justifyContent: "flex-end" }}>
-                          <PrimaryBtn label={selectedDetail.guidelines ? "Edit Guidelines" : "Add Guidelines"} icon={<Pencil style={{ width: "12px", height: "12px" }} />} onClick={openEditGuidelines} />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
+                  ))}
+                </div>
               </div>
             </div>
-          ) : null}
-        </div>
+
+            <div style={{ padding: '16px' }}>
+              {activeTab === 'phases' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ marginBottom: '4px' }}><PrimaryBtn label='Add Phase' onClick={() => { setEditingPhase(null); setPhaseForm(defaultPhaseForm); setPhaseDialogOpen(true); }} /></div>
+                  {selectedDetail.phases.map((p, i) => (
+                    <div key={p.id} style={{ border: '1px solid #EBEBEB', borderRadius: '8px', padding: '10px 12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <Building style={{ width: '13px', height: '13px', color: '#2563EB' }} />
+                      <div style={{ flex: 1 }}>
+                        <p style={{ margin: 0, fontSize: '13px', fontWeight: 700 }}>{p.name}</p>
+                        <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#9CA3AF' }}>{p.unitCount} units · {p.clusterCount ?? 0} clusters</p>
+                      </div>
+                      <IconBtn icon={<ArrowUp style={{ width: '11px', height: '11px' }} />} onClick={() => void reorderPhase(p.id, 'up')} disabled={i === 0} />
+                      <IconBtn icon={<ArrowDown style={{ width: '11px', height: '11px' }} />} onClick={() => void reorderPhase(p.id, 'down')} disabled={i === selectedDetail.phases.length - 1} />
+                      <IconBtn icon={<Pencil style={{ width: '11px', height: '11px' }} />} onClick={() => { setEditingPhase(p); setPhaseForm({ name: p.name }); setPhaseDialogOpen(true); }} />
+                      <IconBtn icon={<Trash2 style={{ width: '11px', height: '11px' }} />} danger onClick={() => void (async () => {
+                        if (!selectedCommunityId) return;
+                        try { await communityService.deletePhase(p.id); await loadDetail(selectedCommunityId); } catch (e) { toast.error('Failed to delete phase', { description: handleApiError(e) }); }
+                      })()} disabled={(p.unitCount ?? 0) > 0 || (p.clusterCount ?? 0) > 0} />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {activeTab === 'clusters' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <select value={selectedPhaseId} onChange={(e) => setSelectedPhaseId(e.target.value)} style={{ ...inputStyle, width: '240px' }}>
+                    {selectedDetail.phases.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                  <div><PrimaryBtn label='Add Cluster' onClick={() => { setEditingCluster(null); setClusterForm(defaultClusterForm); setClusterDialogOpen(true); }} /></div>
+                  {clustersForPhase.map((c, i) => (
+                    <div key={c.id} style={{ border: '1px solid #EBEBEB', borderRadius: '8px', padding: '10px 12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <LayoutGrid style={{ width: '13px', height: '13px', color: '#0D9488' }} />
+                      <div style={{ flex: 1 }}>
+                        <p style={{ margin: 0, fontSize: '13px', fontWeight: 700 }}>{c.name}</p>
+                        <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#9CA3AF' }}>{c.unitCount} units</p>
+                      </div>
+                      <IconBtn icon={<ArrowUp style={{ width: '11px', height: '11px' }} />} onClick={() => void reorderCluster(c.id, 'up')} disabled={i === 0} />
+                      <IconBtn icon={<ArrowDown style={{ width: '11px', height: '11px' }} />} onClick={() => void reorderCluster(c.id, 'down')} disabled={i === clustersForPhase.length - 1} />
+                      <IconBtn icon={<Pencil style={{ width: '11px', height: '11px' }} />} onClick={() => { setEditingCluster(c); setClusterForm({ name: c.name }); setClusterDialogOpen(true); }} />
+                      <IconBtn icon={<Trash2 style={{ width: '11px', height: '11px' }} />} danger onClick={() => void (async () => {
+                        if (!selectedCommunityId) return;
+                        try { await communityService.deleteCluster(c.id); await loadDetail(selectedCommunityId); } catch (e) { toast.error('Failed to delete cluster', { description: handleApiError(e) }); }
+                      })()} disabled={(c.unitCount ?? 0) > 0} />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {activeTab === 'gates' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div><PrimaryBtn label='Add Gate' onClick={() => { setEditingGate(null); setGateForm(defaultGateForm); setGateDialogOpen(true); }} /></div>
+                  {selectedDetail.gates.map((g) => (
+                    <div key={g.id} style={{ border: '1px solid #EBEBEB', borderRadius: '8px', padding: '10px 12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <DoorOpen style={{ width: '13px', height: '13px', color: '#D97706' }} />
+                      <div style={{ flex: 1 }}>
+                        <p style={{ margin: 0, fontSize: '13px', fontWeight: 700 }}>{g.name}</p>
+                        <p style={{ margin: '2px 0 0', fontSize: '11px', color: '#9CA3AF' }}>
+                          Roles: {g.allowedRoles.join(', ')}
+                        </p>
+                      </div>
+                      <IconBtn icon={<Pencil style={{ width: '11px', height: '11px' }} />} onClick={() => {
+                        setEditingGate(g);
+                        setGateForm({
+                          name: g.name,
+                          etaMinutes: g.etaMinutes ? String(g.etaMinutes) : '',
+                          allowedRoles: g.allowedRoles,
+                          phaseIds: g.phaseIds ?? [],
+                          clusterIds: g.clusterIds ?? [],
+                        });
+                        setGateDialogOpen(true);
+                      }} />
+                      <IconBtn icon={<Trash2 style={{ width: '11px', height: '11px' }} />} danger onClick={() => void (async () => {
+                        if (!selectedCommunityId) return;
+                        try { await communityService.deleteGate(g.id); await loadDetail(selectedCommunityId); } catch (e) { toast.error('Failed to delete gate', { description: handleApiError(e) }); }
+                      })()} />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {activeTab === 'guidelines' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <FileText style={{ width: '14px', height: '14px', color: '#6B7280' }} />
+                  <textarea
+                    value={selectedDetail.guidelines ?? ''}
+                    onChange={(e) => setSelectedDetail((prev) => (prev ? { ...prev, guidelines: e.target.value } : prev))}
+                    rows={8}
+                    style={{ ...inputStyle, resize: 'vertical' }}
+                  />
+                  <div>
+                    <PrimaryBtn label='Save Guidelines' onClick={() => void (async () => {
+                      if (!selectedCommunityId || !selectedDetail) return;
+                      try {
+                        await communityService.updateCommunity(selectedCommunityId, { guidelines: selectedDetail.guidelines ?? '' });
+                        toast.success('Guidelines updated');
+                      } catch (e) {
+                        toast.error('Failed to save guidelines', { description: handleApiError(e) });
+                      }
+                    })()} />
+                  </div>
+                </div>
+              )}
+            </div>
+          </>
+        ) : (
+          <div style={{ padding: '24px', color: '#9CA3AF' }}>Select a community to manage.</div>
+        )}
       </div>
 
-      {/* ══ DIALOGS ═══════════════════════════════════════════ */}
-
-      {/* Community dialog */}
       <Dialog open={communityDialogOpen} onOpenChange={setCommunityDialogOpen}>
-        <DialogContent style={{ maxWidth: "560px", borderRadius: "10px", border: "1px solid #EBEBEB", padding: 0, overflow: "hidden", fontFamily: "'Work Sans', sans-serif" }}>
-          <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid #F3F4F6" }}>
-            <DialogHeader>
-              <DialogTitle style={{ fontFamily: "'Work Sans', sans-serif", fontWeight: 700, fontSize: "15px", color: "#111827" }}>
-                {editingCommunity ? "Edit Community" : "Add Community"}
-              </DialogTitle>
-              <DialogDescription style={{ fontSize: "12px", color: "#9CA3AF", marginTop: "3px" }}>
-                Configure base information for this community.
-              </DialogDescription>
-            </DialogHeader>
-          </div>
-          <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "16px" }}>
-            <Field label="Name"><input value={communityForm.name} onChange={(e) => setCommunityForm((p) => ({ ...p, name: e.target.value }))} placeholder="Al Karma Gates" style={inputStyle} /></Field>
-            <Field label="Structure Type" hint="Choose how this community is subdivided.">
-              <div style={{ display: "flex", gap: "8px" }}>
-                {(["CLUSTERS", "PHASES"] as CommunityStructure[]).map((st) => {
-                  const checked = communityForm.structureType === st;
-                  const lbl = st === "CLUSTERS" ? "Clusters" : "Phases";
-                  return (
-                    <label key={st} style={{ flex: 1, display: "flex", alignItems: "center", gap: "8px", padding: "10px 12px", border: `1px solid ${checked ? "#BFDBFE" : "#E5E7EB"}`, borderRadius: "7px", cursor: "pointer", background: checked ? "#EFF6FF" : "#FFFFFF", transition: "all 120ms ease", fontSize: "13px", fontWeight: checked ? 600 : 400, color: checked ? "#1D4ED8" : "#6B7280" }}>
-                      <input type="radio" name="structureType" checked={checked} onChange={() => setCommunityForm((p) => ({ ...p, structureType: st }))} style={{ accentColor: "#2563EB" }} />
-                      {lbl}
-                    </label>
-                  );
-                })}
-              </div>
-            </Field>
-            <Field label="Guidelines" hint="Community rules and regulations visible to residents.">
-              <textarea
-                value={communityForm.guidelines}
-                onChange={(e) => setCommunityForm((p) => ({ ...p, guidelines: e.target.value }))}
-                placeholder="e.g. No pets in common areas. Quiet hours 10 PM – 7 AM."
-                rows={4}
-                style={{ ...inputStyle, resize: "vertical", minHeight: "80px" }}
-              />
-            </Field>
-            <Field label="Status">
-              <label style={{ display: "flex", alignItems: "center", gap: "8px", padding: "9px 10px", border: "1px solid #E5E7EB", borderRadius: "7px", cursor: "pointer", fontSize: "13px", color: "#374151" }}>
-                <input type="checkbox" checked={communityForm.isActive} onChange={(e) => setCommunityForm((p) => ({ ...p, isActive: e.target.checked }))} />
-                Active community
-              </label>
-            </Field>
-          </div>
-          <div style={{ padding: "14px 24px", borderTop: "1px solid #F3F4F6", display: "flex", justifyContent: "flex-end", gap: "8px" }}>
-            <GhostBtn label="Cancel" onClick={() => setCommunityDialogOpen(false)} />
-            <PrimaryBtn label="Save Community" onClick={() => void saveCommunity()} />
+        <DialogContent style={{ maxWidth: '520px' }}>
+          <DialogHeader>
+            <DialogTitle>{editingCommunity ? 'Edit Community' : 'Add Community'}</DialogTitle>
+            <DialogDescription>Community basic settings.</DialogDescription>
+          </DialogHeader>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <input value={communityForm.name} onChange={(e) => setCommunityForm((p) => ({ ...p, name: e.target.value }))} placeholder='Community name' style={inputStyle} />
+            <textarea value={communityForm.guidelines} onChange={(e) => setCommunityForm((p) => ({ ...p, guidelines: e.target.value }))} rows={4} placeholder='Guidelines' style={inputStyle} />
+            <label style={{ fontSize: '12px', color: '#374151' }}><input type='checkbox' checked={communityForm.isActive} onChange={(e) => setCommunityForm((p) => ({ ...p, isActive: e.target.checked }))} /> Active</label>
+            <PrimaryBtn label='Save Community' onClick={() => void saveCommunity()} />
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Cluster dialog */}
+      <Dialog open={phaseDialogOpen} onOpenChange={setPhaseDialogOpen}>
+        <DialogContent style={{ maxWidth: '420px' }}>
+          <DialogHeader><DialogTitle>{editingPhase ? 'Edit Phase' : 'Add Phase'}</DialogTitle></DialogHeader>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <input value={phaseForm.name} onChange={(e) => setPhaseForm({ name: e.target.value })} placeholder='Phase name' style={inputStyle} />
+            <PrimaryBtn label='Save Phase' onClick={() => void savePhase()} />
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={clusterDialogOpen} onOpenChange={setClusterDialogOpen}>
-        <DialogContent style={{ maxWidth: "400px", borderRadius: "10px", border: "1px solid #EBEBEB", padding: 0, overflow: "hidden", fontFamily: "'Work Sans', sans-serif" }}>
-          <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid #F3F4F6" }}>
-            <DialogHeader>
-              <DialogTitle style={{ fontFamily: "'Work Sans', sans-serif", fontWeight: 700, fontSize: "15px", color: "#111827" }}>
-                {editingCluster
-                  ? `Edit ${selectedCommunity?.structureType === "PHASES" ? "Phase" : "Cluster"}`
-                  : `Add ${selectedCommunity?.structureType === "PHASES" ? "Phase" : "Cluster"}`}
-              </DialogTitle>
-              <DialogDescription style={{ fontSize: "12px", color: "#9CA3AF", marginTop: "3px" }}>
-                {selectedCommunity?.structureType === "PHASES" ? "Phases" : "Clusters"} organize units within a community.
-              </DialogDescription>
-            </DialogHeader>
-          </div>
-          <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "12px" }}>
-            <Field label="Name"><input value={clusterForm.name} onChange={(e) => setClusterForm((p) => ({ ...p, name: e.target.value }))} style={inputStyle} /></Field>
-          </div>
-          <div style={{ padding: "14px 24px", borderTop: "1px solid #F3F4F6", display: "flex", justifyContent: "flex-end", gap: "8px" }}>
-            <GhostBtn label="Cancel" onClick={() => setClusterDialogOpen(false)} />
-            <PrimaryBtn label={`Save ${selectedCommunity?.structureType === "PHASES" ? "Phase" : "Cluster"}`} onClick={() => void saveCluster()} />
+        <DialogContent style={{ maxWidth: '420px' }}>
+          <DialogHeader><DialogTitle>{editingCluster ? 'Edit Cluster' : 'Add Cluster'}</DialogTitle></DialogHeader>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <input value={clusterForm.name} onChange={(e) => setClusterForm({ name: e.target.value })} placeholder='Cluster name' style={inputStyle} />
+            <PrimaryBtn label='Save Cluster' onClick={() => void saveCluster()} />
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Gate dialog */}
       <Dialog open={gateDialogOpen} onOpenChange={setGateDialogOpen}>
-        <DialogContent style={{ maxWidth: "500px", borderRadius: "10px", border: "1px solid #EBEBEB", padding: 0, overflow: "hidden", fontFamily: "'Work Sans', sans-serif" }}>
-          <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid #F3F4F6" }}>
-            <DialogHeader>
-              <DialogTitle style={{ fontFamily: "'Work Sans', sans-serif", fontWeight: 700, fontSize: "15px", color: "#111827" }}>{editingGate ? "Edit Gate" : "Add Gate"}</DialogTitle>
-              <DialogDescription style={{ fontSize: "12px", color: "#9CA3AF", marginTop: "3px" }}>Define gate roles and expected ETA.</DialogDescription>
-            </DialogHeader>
-          </div>
-          <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "12px" }}>
-            <Field label="Name"><input value={gateForm.name} onChange={(e) => setGateForm((p) => ({ ...p, name: e.target.value }))} style={inputStyle} /></Field>
-            {selectedDetail && selectedDetail.clusters.length > 0 && (
-              <Field label="Clusters" hint="Which clusters does this gate serve?">
-                <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "2px" }}>
-                  {selectedDetail.clusters.map((cl) => {
-                    const checked = gateForm.clusterIds.includes(cl.id);
-                    return (
-                      <label key={cl.id} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 10px", border: `1px solid ${checked ? "#BFDBFE" : "#E5E7EB"}`, borderRadius: "7px", cursor: "pointer", background: checked ? "#EFF6FF" : "#FFFFFF", transition: "all 120ms ease", fontSize: "12.5px", fontWeight: checked ? 600 : 400, color: checked ? "#1D4ED8" : "#6B7280" }}>
-                        <input type="checkbox" checked={checked} onChange={() => setGateForm((p) => ({ ...p, clusterIds: checked ? p.clusterIds.filter((id) => id !== cl.id) : [...p.clusterIds, cl.id] }))} style={{ accentColor: "#2563EB" }} />
-                        {cl.name}
-                        <span style={{ fontSize: "10px", color: "#9CA3AF", marginLeft: "auto" }}>{cl.unitCount} unit{cl.unitCount !== 1 ? "s" : ""}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </Field>
-            )}
-            <Field label="ETA (minutes)" hint="Expected queue wait time at this gate.">
-              <input type="number" min={1} max={60} value={gateForm.etaMinutes} onChange={(e) => setGateForm((p) => ({ ...p, etaMinutes: e.target.value }))} style={inputStyle} />
-            </Field>
-            <Field label="Allowed Roles">
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "6px", marginTop: "2px" }}>
-                {GATE_ROLE_OPTIONS.map((role, ri) => {
-                  const checked = gateForm.allowedRoles.includes(role);
-                  const { bg, color } = GATE_ROLE_COLORS[role];
-                  return (
-                    <label key={role} style={{ display: "flex", alignItems: "center", gap: "7px", padding: "8px 10px", border: `1px solid ${checked ? color + "40" : "#E5E7EB"}`, borderRadius: "7px", cursor: "pointer", background: checked ? `${bg}` : "#FFFFFF", transition: "all 120ms ease", fontSize: "12px", fontWeight: checked ? 600 : 400, color: checked ? color : "#6B7280" }}>
-                      <input type="checkbox" checked={checked} onChange={() => toggleGateRole(role)} style={{ accentColor: color }} />
-                      {role}
-                    </label>
-                  );
-                })}
-              </div>
-            </Field>
-          </div>
-          <div style={{ padding: "14px 24px", borderTop: "1px solid #F3F4F6", display: "flex", justifyContent: "flex-end", gap: "8px" }}>
-            <GhostBtn label="Cancel" onClick={() => setGateDialogOpen(false)} />
-            <PrimaryBtn label="Save Gate" onClick={() => void saveGate()} />
+        <DialogContent style={{ maxWidth: '520px' }}>
+          <DialogHeader><DialogTitle>{editingGate ? 'Edit Gate' : 'Add Gate'}</DialogTitle></DialogHeader>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <input value={gateForm.name} onChange={(e) => setGateForm((p) => ({ ...p, name: e.target.value }))} placeholder='Gate name' style={inputStyle} />
+            <input type='number' value={gateForm.etaMinutes} onChange={(e) => setGateForm((p) => ({ ...p, etaMinutes: e.target.value }))} placeholder='ETA (minutes)' style={inputStyle} />
+            <label style={{ fontSize: '12px', color: '#374151' }}>Roles</label>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+              {GATE_ROLE_OPTIONS.map((r) => {
+                const checked = gateForm.allowedRoles.includes(r);
+                return (
+                  <button
+                    key={r}
+                    type='button'
+                    onClick={() => setGateForm((p) => ({ ...p, allowedRoles: checked ? p.allowedRoles.filter((x) => x !== r) : [...p.allowedRoles, r] }))}
+                    style={{ padding: '5px 10px', border: '1px solid #E5E7EB', borderRadius: '6px', background: checked ? '#EFF6FF' : '#FFF', color: checked ? '#2563EB' : '#6B7280', fontSize: '11.5px', cursor: 'pointer' }}
+                  >
+                    {r}
+                  </button>
+                );
+              })}
+            </div>
+            <label style={{ fontSize: '12px', color: '#374151' }}>Phase scope</label>
+            <select
+              multiple
+              value={gateForm.phaseIds}
+              onChange={(e) => {
+                const values = Array.from(e.target.selectedOptions).map((o) => o.value);
+                setGateForm((p) => ({ ...p, phaseIds: values }));
+              }}
+              style={{ ...inputStyle, height: '120px' }}
+            >
+              {(selectedDetail?.phases ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+            <label style={{ fontSize: '12px', color: '#374151' }}>Cluster scope</label>
+            <select
+              multiple
+              value={gateForm.clusterIds}
+              onChange={(e) => {
+                const values = Array.from(e.target.selectedOptions).map((o) => o.value);
+                setGateForm((p) => ({ ...p, clusterIds: values }));
+              }}
+              style={{ ...inputStyle, height: '120px' }}
+            >
+              {(selectedDetail?.clusters ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <PrimaryBtn label='Save Gate' onClick={() => void saveGate()} />
           </div>
         </DialogContent>
       </Dialog>

@@ -329,8 +329,14 @@ const approvalsService = {
     };
     if (filters.search) params.search = filters.search;
     if (filters.status && filters.status !== "ALL") params.status = filters.status;
-    const response = await apiClient.get("/rental/rent-requests", { params });
-    const raw = response.data;
+    let raw: unknown;
+    try {
+      const response = await apiClient.get("/rental/requests", { params });
+      raw = response.data;
+    } catch {
+      const legacyResponse = await apiClient.get("/rental/rent-requests", { params });
+      raw = legacyResponse.data;
+    }
     if (raw && typeof raw === "object" && "data" in raw) {
       return { data: (raw as any).data as TenantApprovalItem[], total: (raw as any).total ?? 0 };
     }
@@ -339,13 +345,25 @@ const approvalsService = {
   },
 
   async approveTenant(id: string): Promise<{ success: true }> {
-    const response = await apiClient.post(`/rental/rent-requests/${id}/approve`);
-    return response.data as { success: true };
+    try {
+      const response = await apiClient.post(`/rental/requests/${id}/approve`);
+      return response.data as { success: true };
+    } catch {
+      const legacyResponse = await apiClient.post(`/rental/rent-requests/${id}/approve`);
+      return legacyResponse.data as { success: true };
+    }
   },
 
   async rejectTenant(id: string, reason: string): Promise<{ success: true }> {
-    const response = await apiClient.post(`/rental/rent-requests/${id}/reject`, { reason });
-    return response.data as { success: true };
+    try {
+      const response = await apiClient.post(`/rental/requests/${id}/reject`, { reason });
+      return response.data as { success: true };
+    } catch {
+      const legacyResponse = await apiClient.post(`/rental/rent-requests/${id}/reject`, {
+        reason,
+      });
+      return legacyResponse.data as { success: true };
+    }
   },
 
   async fetchDocumentBlob(url: string): Promise<Blob> {
