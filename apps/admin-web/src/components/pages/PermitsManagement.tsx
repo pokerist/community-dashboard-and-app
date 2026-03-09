@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, Check, Eye, Pencil, Plus, Search, SlidersHorizontal, ChevronDown, X, CalendarRange } from 'lucide-react';
+import { IconPicker, resolveIcon } from '../IconPicker';
 import { PermitCategory, ServiceFieldType } from '@prisma/client';
 import { toast } from 'sonner';
 import { DataTable, type DataTableColumn } from '../DataTable';
@@ -33,7 +34,6 @@ const FIELD_TYPE_OPTIONS: ServiceFieldType[] = [
   ServiceFieldType.DATE, ServiceFieldType.BOOLEAN,  ServiceFieldType.MEMBER_SELECTOR, ServiceFieldType.FILE,
 ];
 
-const ICON_NAME_OPTIONS = ['Wrench', 'Shield', 'FileText', 'Key', 'Building', 'Car', 'Clock', 'Home', 'Users', 'AlertTriangle', 'Zap', 'Leaf'] as const;
 
 const COLOR_PALETTE = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#F97316', '#14B8A6', '#F43F5E'] as const;
 
@@ -309,10 +309,8 @@ function PermitTypeEditor({ selectedType, onRefresh }: {
         {editingAppearance ? (
           <div style={{ padding: '12px 14px', borderRadius: '9px', border: '1px dashed #D1D5DB', background: '#FAFAFA', display: 'flex', flexDirection: 'column', gap: '10px' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              <span style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', fontFamily: "'Work Sans', sans-serif" }}>Icon Name</span>
-              <select value={iconDraft} onChange={(e) => setIconDraft(e.target.value)} style={selectStyle}>
-                {ICON_NAME_OPTIONS.map((ic) => <option key={ic} value={ic}>{ic}</option>)}
-              </select>
+              <span style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', fontFamily: "'Work Sans', sans-serif" }}>Icon</span>
+              <IconPicker value={iconDraft} onChange={setIconDraft} color={colorDraft || '#6B7280'} />
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
               <span style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', fontFamily: "'Work Sans', sans-serif" }}>Color</span>
@@ -635,13 +633,8 @@ function CreateTypeDrawer({ open, onClose, onCreated }: {
 
         <SectionDivider label="Appearance (Mobile App)" />
 
-        <Field label="Icon Name" span2>
-          <select value={iconName} onChange={(e) => setIconName(e.target.value)} style={selectStyle}>
-            {ICON_NAME_OPTIONS.map((ic) => <option key={ic} value={ic}>{ic}</option>)}
-          </select>
-          <span style={{ fontSize: '10.5px', color: '#9CA3AF', fontFamily: "'Work Sans', sans-serif", marginTop: '2px' }}>
-            Lucide icon name displayed in the mobile app
-          </span>
+        <Field label="Icon" span2>
+          <IconPicker value={iconName} onChange={setIconName} color={color || '#6B7280'} />
         </Field>
 
         <Field label="Color" span2>
@@ -780,18 +773,18 @@ export function PermitsManagement() {
         <p style={{ fontSize: '13px', color: '#9CA3AF', margin: '4px 0 0' }}>Manage permit requests and configure permit types.</p>
       </div>
 
-      {/* ── Stats ──────────────────────────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '20px' }}>
-        <StatCard icon="complaints-total"  title="Total Requests"      value={String(stats?.totalRequests     ?? 0)} subtitle="All time" />
-        <StatCard icon="complaints-open"   title="Pending"             value={String(stats?.pendingRequests   ?? 0)} subtitle="Awaiting review" />
-        <StatCard icon="complaints-closed" title="Approved This Month" value={String(stats?.approvedThisMonth ?? 0)} subtitle="Current month" />
-        <StatCard icon="tickets"           title="Rejected This Month" value={String(stats?.rejectedThisMonth ?? 0)} subtitle="Current month" />
-      </div>
-
       {/* ── Tabs ────────────────────────────────────────────── */}
-      <div style={{ display: 'flex', gap: '2px', padding: '4px', borderRadius: '10px', background: '#F3F4F6', marginBottom: '20px', width: 'fit-content' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '2px', padding: '4px', borderRadius: '10px', background: '#F3F4F6', marginBottom: '20px' }}>
         <TabBtn label="Permit Types" active={activeTab === 'types'}    onClick={() => setActiveTab('types')} />
         <TabBtn label="Requests"     active={activeTab === 'requests'} onClick={() => setActiveTab('requests')} />
+      </div>
+
+      {/* ── Stats ──────────────────────────────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '20px' }}>
+        <StatCard icon="complaints-total"  title="Total Requests"      value={String(stats?.totalRequests     ?? 0)} subtitle="All time"        onClick={() => { setActiveTab('requests'); setStatus('ALL' as PermitStatusFilter); }} />
+        <StatCard icon="complaints-open"   title="Pending"             value={String(stats?.pendingRequests   ?? 0)} subtitle="Awaiting review"  onClick={() => { setActiveTab('requests'); setStatus('PENDING' as PermitStatusFilter); }} />
+        <StatCard icon="complaints-closed" title="Approved This Month" value={String(stats?.approvedThisMonth ?? 0)} subtitle="Current month"    onClick={() => { setActiveTab('requests'); setStatus('APPROVED' as PermitStatusFilter); }} />
+        <StatCard icon="tickets"           title="Rejected This Month" value={String(stats?.rejectedThisMonth ?? 0)} subtitle="Current month"    onClick={() => { setActiveTab('requests'); setStatus('REJECTED' as PermitStatusFilter); }} />
       </div>
 
       {/* ══ Types tab ═════════════════════════════════════════ */}

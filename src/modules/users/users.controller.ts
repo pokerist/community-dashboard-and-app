@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Body,
   Patch,
   Param,
@@ -33,11 +34,15 @@ import { UpsertDashboardRoleDto } from './dto/upsert-dashboard-role.dto';
 import { UpdateResidentProfileAdminDto } from './dto/update-resident-profile-admin.dto';
 import { AssignResidentUnitDto } from './dto/assign-resident-unit.dto';
 import { TransferOwnershipDto } from './dto/transfer-ownership.dto';
+import { UpdateUserRolesDto } from './dto/update-user-roles.dto';
+import { SetRoleStatusPermissionsDto } from './dto/set-role-status-permissions.dto';
+import { SetUserOverridesDto } from './dto/set-user-overrides.dto';
 
 import { ApiTags, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
+import { MODULE_KEYS, MODULE_LABELS } from '../auth/permission-constants';
 
 @ApiTags('Admin Users')
 @Controller('admin/users')
@@ -117,6 +122,19 @@ export class AdminUsersController {
     return this.usersService.updateRoleWithPermissions(roleId, dto);
   }
 
+  @Delete('roles/:roleId')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('admin.delete')
+  deleteRole(@Param('roleId') roleId: string) {
+    return this.usersService.deleteRole(roleId);
+  }
+
+  @Get('module-keys')
+  @Permissions('admin.view')
+  getModuleKeys() {
+    return { moduleKeys: MODULE_KEYS, labels: MODULE_LABELS };
+  }
+
   @Get('permissions')
   @Permissions('admin.view')
   @ApiQuery({ name: 'search', type: String, required: false })
@@ -135,6 +153,74 @@ export class AdminUsersController {
       page: page ? parseInt(page) : undefined,
       limit: limit ? parseInt(limit) : undefined,
     });
+  }
+
+  @Post('permissions/seed-app-pages')
+  @Permissions('admin.update')
+  seedAppPagePermissions() {
+    return this.usersService.seedAppPagePermissions();
+  }
+
+  // ============================================
+  //        USER ROLES & PERMISSION OVERRIDES
+  // ============================================
+
+  @Patch('dashboard/:userId/roles')
+  @Permissions('admin.update')
+  updateUserRoles(
+    @Param('userId') userId: string,
+    @Body() dto: UpdateUserRolesDto,
+  ) {
+    return this.usersService.updateUserRoles(userId, dto.roleIds);
+  }
+
+  @Get(':userId([0-9a-fA-F-]{36})/permission-overrides')
+  @Permissions('admin.view')
+  getUserPermissionOverrides(@Param('userId') userId: string) {
+    return this.usersService.getUserPermissionOverrides(userId);
+  }
+
+  @Put(':userId([0-9a-fA-F-]{36})/permission-overrides')
+  @Permissions('admin.update')
+  setUserPermissionOverrides(
+    @Param('userId') userId: string,
+    @Body() dto: SetUserOverridesDto,
+  ) {
+    return this.usersService.setUserPermissionOverrides(userId, dto.overrides);
+  }
+
+  @Get(':userId([0-9a-fA-F-]{36})/resolve-permissions')
+  @Permissions('admin.view')
+  @ApiQuery({ name: 'unitId', type: String, required: false })
+  resolvePermissions(
+    @Param('userId') userId: string,
+    @Query('unitId') unitId?: string,
+  ) {
+    return this.usersService.resolvePermissions(userId, unitId);
+  }
+
+  // ============================================
+  //     ROLE-STATUS PERMISSION MATRIX
+  // ============================================
+
+  @Get('roles/:roleId/status-permissions')
+  @Permissions('admin.view')
+  getRoleStatusPermissions(@Param('roleId') roleId: string) {
+    return this.usersService.getRoleStatusPermissions(roleId);
+  }
+
+  @Put('roles/:roleId/status-permissions/:unitStatus')
+  @Permissions('admin.update')
+  setRoleStatusPermissions(
+    @Param('roleId') roleId: string,
+    @Param('unitStatus') unitStatus: string,
+    @Body() dto: SetRoleStatusPermissionsDto,
+  ) {
+    return this.usersService.setRoleStatusPermissions(
+      roleId,
+      unitStatus,
+      dto.permissionKeys,
+    );
   }
 
   @Get(':id([0-9a-fA-F-]{36})')

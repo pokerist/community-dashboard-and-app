@@ -19,6 +19,8 @@ import { CreateViolationDto } from './dto/create-violation.dto';
 import { ListAppealRequestsQueryDto } from './dto/list-appeal-requests-query.dto';
 import { ReviewAppealDto } from './dto/review-appeal.dto';
 import { UpdateViolationDto } from './dto/update-violation.dto';
+import { UpdateViolationStatusDto } from './dto/update-violation-status.dto';
+import { AddViolationCommentDto } from './dto/add-violation-comment.dto';
 import { CreateViolationActionDto } from './dto/violation-action.dto';
 import { ViolationsQueryDto } from './dto/violations-query.dto';
 import { ViolationsService } from './violations.service';
@@ -154,5 +156,45 @@ export class ViolationsController {
       dto,
       reviewerUserId,
     );
+  }
+
+  @Patch(':id/status')
+  @Permissions('violation.update')
+  updateViolationStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdateViolationStatusDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const adminId = req.user?.id;
+    if (!adminId) {
+      throw new BadRequestException('Invalid auth context');
+    }
+    return this.violationsService.updateViolationStatus(id, dto.status, adminId, dto.note);
+  }
+
+  @Get(':id/comments')
+  @Permissions('violation.view_all', 'violation.view_own')
+  listComments(@Param('id') id: string) {
+    return this.violationsService.listComments(id);
+  }
+
+  @Post(':id/comments')
+  @Permissions('violation.view_all', 'violation.view_own', 'violation.update')
+  addComment(
+    @Param('id') id: string,
+    @Body() dto: AddViolationCommentDto,
+    @Req() req: AuthenticatedRequest,
+  ) {
+    const authorId = req.user?.id;
+    if (!authorId) {
+      throw new BadRequestException('Invalid auth context');
+    }
+    return this.violationsService.addComment(id, dto.body, authorId, dto.isInternal);
+  }
+
+  @Get(':id/history')
+  @Permissions('violation.view_all', 'violation.view_own')
+  getStatusHistory(@Param('id') id: string) {
+    return this.violationsService.getStatusHistory(id);
   }
 }

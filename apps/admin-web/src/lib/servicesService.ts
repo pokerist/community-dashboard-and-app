@@ -40,6 +40,24 @@ export type ServiceListItem = {
   iconName: string | null;
   iconTone: string;
   isUrgent: boolean;
+  microServicesCount: number;
+};
+
+export type MicroServiceItem = {
+  id: string;
+  name: string;
+  description: string | null;
+  price: number | null;
+  isActive: boolean;
+  displayOrder: number;
+};
+
+export type CreateMicroServiceInput = {
+  name: string;
+  description?: string;
+  price?: number;
+  isActive?: boolean;
+  displayOrder?: number;
 };
 
 export type ServiceDetail = {
@@ -58,6 +76,7 @@ export type ServiceDetail = {
   iconName: string | null;
   iconTone: string;
   fields: ServiceField[];
+  microServices: MicroServiceItem[];
   stats: {
     totalRequests: number;
     openRequests: number;
@@ -101,6 +120,7 @@ export type CreateServicePayload = {
   iconName?: string;
   iconTone?: string;
   fields?: CreateServiceFieldInput[];
+  microServices?: CreateMicroServiceInput[];
 };
 
 export type UpdateServicePayload = Partial<CreateServicePayload>;

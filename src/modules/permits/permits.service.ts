@@ -312,6 +312,8 @@ export class PermitsService {
           slug,
           category: dto.category,
           description: dto.description?.trim() || null,
+          iconName: dto.iconName?.trim() || null,
+          color: dto.color?.trim() || null,
           displayOrder: displayOrder + 1,
         },
         include: {
@@ -366,6 +368,14 @@ export class PermitsService {
             dto.description === undefined
               ? undefined
               : dto.description.trim() || null,
+          iconName:
+            dto.iconName === undefined
+              ? undefined
+              : dto.iconName?.trim() || null,
+          color:
+            dto.color === undefined
+              ? undefined
+              : dto.color?.trim() || null,
         },
       });
 

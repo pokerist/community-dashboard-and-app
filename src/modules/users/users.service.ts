@@ -187,10 +187,26 @@ export class UsersService {
       orderBy: { createdAt: 'desc' },
       include: {
         roles: { include: { role: true } },
-        resident: { include: { residentUnits: { include: { unit: true } } } },
+        resident: {
+          include: {
+            residentUnits: { include: { unit: true } },
+            familyOf: {
+              include: {
+                primaryResident: {
+                  include: { user: { select: { id: true, nameEN: true, email: true, phone: true } } },
+                },
+              },
+            },
+          },
+        },
         owner: true,
         tenant: true,
+        broker: true,
         admin: true,
+        unitAccesses: {
+          where: { status: 'ACTIVE' as any },
+          select: { id: true, role: true, unitId: true, delegateType: true },
+        },
         leasesAsOwner: true,
         leasesAsTenant: true,
         invoices: true,
@@ -378,6 +394,10 @@ export class UsersService {
         permissions: {
           include: { permission: true },
         },
+        statusPermissions: {
+          include: { permission: true },
+        },
+        moduleAccess: true,
         users: {
           select: { userId: true },
         },
@@ -459,7 +479,13 @@ export class UsersService {
     });
   }
 
-  async createRoleWithPermissions(input: { name: string; permissionKeys?: string[] }) {
+  async createRoleWithPermissions(input: {
+    name: string;
+    description?: string;
+    permissionKeys?: string[];
+    moduleKeys?: string[];
+    statusPermissions?: Record<string, string[]>;
+  }) {
     const roleName = input.name.trim();
     if (!roleName) throw new BadRequestException('Role name is required');
 
@@ -478,8 +504,17 @@ export class UsersService {
       throw new BadRequestException('One or more permissions are invalid');
     }
 
+    // Resolve status permissions
+    const statusPermData = await this.resolveStatusPermissionInput(input.statusPermissions);
+
     const role = await this.prisma.$transaction(async (tx) => {
-      const createdRole = await tx.role.create({ data: { name: roleName } });
+      const createdRole = await tx.role.create({
+        data: {
+          name: roleName,
+          description: input.description?.trim() || null,
+        },
+      });
+
       if (permissions.length > 0) {
         await tx.rolePermission.createMany({
           data: permissions.map((perm) => ({
@@ -488,6 +523,30 @@ export class UsersService {
           })),
         });
       }
+
+      // Module access
+      const moduleKeys = input.moduleKeys ?? [];
+      if (moduleKeys.length > 0) {
+        await tx.roleModuleAccess.createMany({
+          data: moduleKeys.map((moduleKey) => ({
+            roleId: createdRole.id,
+            moduleKey,
+            canAccess: true,
+          })),
+        });
+      }
+
+      // Status permissions
+      if (statusPermData.length > 0) {
+        await tx.roleStatusPermission.createMany({
+          data: statusPermData.map((sp) => ({
+            roleId: createdRole.id,
+            unitStatus: sp.unitStatus,
+            permissionId: sp.permissionId,
+          })),
+        });
+      }
+
       return createdRole;
     });
 
@@ -496,13 +555,52 @@ export class UsersService {
       where: { id: role.id },
       include: {
         permissions: { include: { permission: true } },
+        statusPermissions: { include: { permission: true } },
+        moduleAccess: true,
+        users: { select: { userId: true } },
       },
     });
   }
 
+  private async resolveStatusPermissionInput(
+    statusPermissions?: Record<string, string[]>,
+  ): Promise<Array<{ unitStatus: UnitStatus; permissionId: string }>> {
+    if (!statusPermissions) return [];
+
+    const result: Array<{ unitStatus: UnitStatus; permissionId: string }> = [];
+    const allKeys = new Set<string>();
+    for (const keys of Object.values(statusPermissions)) {
+      for (const key of keys) allKeys.add(key);
+    }
+    if (allKeys.size === 0) return [];
+
+    const perms = await this.prisma.permission.findMany({
+      where: { key: { in: Array.from(allKeys) } },
+      select: { id: true, key: true },
+    });
+    const keyToId = new Map(perms.map((p) => [p.key, p.id]));
+
+    for (const [status, keys] of Object.entries(statusPermissions)) {
+      const unitStatus = status as UnitStatus;
+      for (const key of keys) {
+        const permId = keyToId.get(key);
+        if (permId) {
+          result.push({ unitStatus, permissionId: permId });
+        }
+      }
+    }
+    return result;
+  }
+
   async updateRoleWithPermissions(
     roleId: string,
-    input: { name: string; permissionKeys?: string[] },
+    input: {
+      name: string;
+      description?: string;
+      permissionKeys?: string[];
+      moduleKeys?: string[];
+      statusPermissions?: Record<string, string[]>;
+    },
   ) {
     const role = await this.prisma.role.findUnique({ where: { id: roleId } });
     if (!role) throw new NotFoundException('Role not found');
@@ -528,11 +626,18 @@ export class UsersService {
       throw new BadRequestException('One or more permissions are invalid');
     }
 
+    const statusPermData = await this.resolveStatusPermissionInput(input.statusPermissions);
+
     await this.prisma.$transaction(async (tx) => {
       await tx.role.update({
         where: { id: roleId },
-        data: { name: roleName },
+        data: {
+          name: roleName,
+          description: input.description?.trim() ?? role.description,
+        },
       });
+
+      // Replace base permissions
       await tx.rolePermission.deleteMany({ where: { roleId } });
       if (permissions.length > 0) {
         await tx.rolePermission.createMany({
@@ -542,6 +647,34 @@ export class UsersService {
           })),
         });
       }
+
+      // Replace module access
+      if (input.moduleKeys !== undefined) {
+        await tx.roleModuleAccess.deleteMany({ where: { roleId } });
+        if (input.moduleKeys.length > 0) {
+          await tx.roleModuleAccess.createMany({
+            data: input.moduleKeys.map((moduleKey) => ({
+              roleId,
+              moduleKey,
+              canAccess: true,
+            })),
+          });
+        }
+      }
+
+      // Replace status permissions
+      if (input.statusPermissions !== undefined) {
+        await tx.roleStatusPermission.deleteMany({ where: { roleId } });
+        if (statusPermData.length > 0) {
+          await tx.roleStatusPermission.createMany({
+            data: statusPermData.map((sp) => ({
+              roleId,
+              unitStatus: sp.unitStatus,
+              permissionId: sp.permissionId,
+            })),
+          });
+        }
+      }
     });
 
     await this.permissionCacheService.refresh();
@@ -549,9 +682,297 @@ export class UsersService {
       where: { id: roleId },
       include: {
         permissions: { include: { permission: true } },
+        statusPermissions: { include: { permission: true } },
+        moduleAccess: true,
         users: { select: { userId: true } },
       },
     });
+  }
+
+  async deleteRole(roleId: string) {
+    const role = await this.prisma.role.findUnique({ where: { id: roleId } });
+    if (!role) throw new NotFoundException('Role not found');
+    if (role.isSystem) {
+      throw new ForbiddenException('Cannot delete a system role');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.roleModuleAccess.deleteMany({ where: { roleId } });
+      await tx.roleStatusPermission.deleteMany({ where: { roleId } });
+      await tx.rolePermission.deleteMany({ where: { roleId } });
+      await tx.userRole.deleteMany({ where: { roleId } });
+      await tx.role.delete({ where: { id: roleId } });
+    });
+
+    await this.permissionCacheService.refresh();
+    return { deleted: true };
+  }
+
+  // ── Assign / update roles for existing user ────────────────
+  async updateUserRoles(userId: string, roleIds: string[]) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    const uniqueIds = Array.from(new Set(roleIds));
+    if (uniqueIds.length > 0) {
+      const existing = await this.prisma.role.findMany({
+        where: { id: { in: uniqueIds } },
+        select: { id: true },
+      });
+      if (existing.length !== uniqueIds.length) {
+        throw new BadRequestException('One or more role IDs are invalid');
+      }
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.userRole.deleteMany({ where: { userId } });
+      if (uniqueIds.length > 0) {
+        await tx.userRole.createMany({
+          data: uniqueIds.map((roleId) => ({ userId, roleId })),
+        });
+      }
+    });
+
+    return this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { roles: { include: { role: true } } },
+    });
+  }
+
+  // ── Role-status permission matrix ──────────────────────────
+  async getRoleStatusPermissions(roleId: string) {
+    const role = await this.prisma.role.findUnique({
+      where: { id: roleId },
+      select: { id: true, name: true },
+    });
+    if (!role) throw new NotFoundException('Role not found');
+
+    const entries = await this.prisma.roleStatusPermission.findMany({
+      where: { roleId },
+      include: { permission: { select: { id: true, key: true } } },
+      orderBy: { unitStatus: 'asc' },
+    });
+
+    // Group by unitStatus
+    const matrix: Record<string, string[]> = {};
+    for (const entry of entries) {
+      const status = entry.unitStatus;
+      if (!matrix[status]) matrix[status] = [];
+      matrix[status].push(entry.permission.key);
+    }
+
+    return { roleId, roleName: role.name, matrix };
+  }
+
+  async setRoleStatusPermissions(
+    roleId: string,
+    unitStatus: string,
+    permissionKeys: string[],
+  ) {
+    const role = await this.prisma.role.findUnique({
+      where: { id: roleId },
+      select: { id: true },
+    });
+    if (!role) throw new NotFoundException('Role not found');
+
+    const status = unitStatus as UnitStatus;
+    const uniqueKeys = Array.from(new Set(permissionKeys));
+
+    const permissions =
+      uniqueKeys.length > 0
+        ? await this.prisma.permission.findMany({
+            where: { key: { in: uniqueKeys } },
+            select: { id: true, key: true },
+          })
+        : [];
+    if (permissions.length !== uniqueKeys.length) {
+      throw new BadRequestException('One or more permission keys are invalid');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.roleStatusPermission.deleteMany({
+        where: { roleId, unitStatus: status },
+      });
+      if (permissions.length > 0) {
+        await tx.roleStatusPermission.createMany({
+          data: permissions.map((perm) => ({
+            roleId,
+            unitStatus: status,
+            permissionId: perm.id,
+          })),
+        });
+      }
+    });
+
+    return this.getRoleStatusPermissions(roleId);
+  }
+
+  // ── User permission overrides ──────────────────────────────
+  async getUserPermissionOverrides(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    const overrides = await this.prisma.userPermissionOverride.findMany({
+      where: { userId },
+      include: { permission: { select: { id: true, key: true } } },
+    });
+
+    return overrides.map((o) => ({
+      id: o.id,
+      permissionKey: o.permission.key,
+      grant: o.grant,
+    }));
+  }
+
+  async setUserPermissionOverrides(
+    userId: string,
+    overrides: Array<{ permissionKey: string; grant: boolean }>,
+  ) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    const keys = overrides.map((o) => o.permissionKey);
+    const permissions = await this.prisma.permission.findMany({
+      where: { key: { in: keys } },
+      select: { id: true, key: true },
+    });
+    const keyToId = new Map(permissions.map((p) => [p.key, p.id]));
+
+    for (const key of keys) {
+      if (!keyToId.has(key)) {
+        throw new BadRequestException(`Invalid permission key: ${key}`);
+      }
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.userPermissionOverride.deleteMany({ where: { userId } });
+      if (overrides.length > 0) {
+        await tx.userPermissionOverride.createMany({
+          data: overrides.map((o) => ({
+            userId,
+            permissionId: keyToId.get(o.permissionKey)!,
+            grant: o.grant,
+          })),
+        });
+      }
+    });
+
+    return this.getUserPermissionOverrides(userId);
+  }
+
+  // ── Permission resolution (base + status + override) ───────
+  async resolvePermissions(
+    userId: string,
+    unitId?: string,
+  ): Promise<{ permissions: string[]; modules: string[]; unitStatus?: string }> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: {
+        roles: { include: { role: true } },
+        permissionOverrides: {
+          include: { permission: { select: { key: true } } },
+        },
+      },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    const roleNames = user.roles.map((ur) => ur.role.name);
+
+    // 1. Base role permissions
+    const basePermissions =
+      this.permissionCacheService.resolveUserPermissions(roleNames);
+
+    // 2. Unit-status permissions (if unit context provided)
+    let unitStatus: string | undefined;
+    const statusPermissions = new Set<string>();
+
+    if (unitId) {
+      const unit = await this.prisma.unit.findUnique({
+        where: { id: unitId },
+        select: { status: true },
+      });
+      if (unit) {
+        unitStatus = unit.status;
+        const roleIds = user.roles.map((ur) => ur.roleId);
+        if (roleIds.length > 0) {
+          const statusPerms =
+            await this.prisma.roleStatusPermission.findMany({
+              where: {
+                roleId: { in: roleIds },
+                unitStatus: unit.status,
+              },
+              include: { permission: { select: { key: true } } },
+            });
+          for (const sp of statusPerms) {
+            statusPermissions.add(sp.permission.key);
+          }
+        }
+      }
+    }
+
+    // 3. Merge: base + status permissions
+    const merged = new Set([...basePermissions, ...statusPermissions]);
+
+    // 4. Apply user overrides
+    for (const override of user.permissionOverrides) {
+      if (override.grant) {
+        merged.add(override.permission.key);
+      } else {
+        merged.delete(override.permission.key);
+      }
+    }
+
+    // 5. Resolve module access
+    const moduleAccess = this.permissionCacheService.resolveUserModules(roleNames);
+
+    return {
+      permissions: Array.from(merged).sort(),
+      modules: Array.from(moduleAccess).sort(),
+      unitStatus,
+    };
+  }
+
+  // ── Seed app page permissions ──────────────────────────────
+  async seedAppPagePermissions() {
+    const appPageKeys = [
+      'app.page.profile',
+      'app.page.dashboard',
+      'app.page.complaints',
+      'app.page.violations',
+      'app.page.services',
+      'app.page.amenities',
+      'app.page.payments',
+      'app.page.visitors',
+      'app.page.announcements',
+      'app.page.directory',
+      'app.page.maintenance',
+      'app.page.parking',
+      'app.page.deliveries',
+      'app.page.emergency',
+    ];
+
+    let created = 0;
+    for (const key of appPageKeys) {
+      const existing = await this.prisma.permission.findUnique({
+        where: { key },
+      });
+      if (!existing) {
+        await this.prisma.permission.create({ data: { key } });
+        created++;
+      }
+    }
+
+    await this.permissionCacheService.refresh();
+    return { seeded: created, total: appPageKeys.length };
   }
 
   async hardDeleteUser(id: string, purgeRelations: boolean = true) {
@@ -815,7 +1236,7 @@ export class UsersService {
       if (touchedUnitIds.length > 0) {
         await tx.unit.updateMany({
           where: { id: { in: touchedUnitIds } },
-          data: { status: UnitStatus.AVAILABLE },
+          data: { status: UnitStatus.OFF_PLAN },
         });
       }
 

@@ -287,13 +287,19 @@ export class ViolationStatsDto {
   total!: number;
 
   @ApiProperty()
-  pending!: number;
+  open!: number;
 
   @ApiProperty()
-  paid!: number;
+  underReview!: number;
 
   @ApiProperty()
   appealed!: number;
+
+  @ApiProperty()
+  resolved!: number;
+
+  @ApiProperty()
+  closed!: number;
 
   @ApiProperty()
   cancelled!: number;

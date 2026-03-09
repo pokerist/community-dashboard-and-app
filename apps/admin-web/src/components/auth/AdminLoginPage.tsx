@@ -7,6 +7,33 @@ type AdminLoginPageProps = {
   onLoginSuccess: () => void;
 };
 
+const BACKEND_BOOT_WAIT_MS = 15000;
+const BACKEND_BOOT_POLL_MS = 1000;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function waitForBackendReady(baseUrl: string): Promise<boolean> {
+  const deadline = Date.now() + BACKEND_BOOT_WAIT_MS;
+
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${baseUrl}/api`, {
+        method: "GET",
+        cache: "no-store",
+      });
+      if (response.ok) {
+        return true;
+      }
+    } catch {
+      // keep polling while backend is still booting
+    }
+
+    await sleep(BACKEND_BOOT_POLL_MS);
+  }
+
+  return false;
+}
+
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
   try {
     const parts = token.split(".");
@@ -190,6 +217,31 @@ export function AdminLoginPage({ onLoginSuccess }: AdminLoginPageProps) {
     setErrorMessage(null);
   };
 
+  const completeLogin = (res: { data?: any }) => {
+    const accessToken = res.data?.accessToken as string | undefined;
+    const refreshToken = res.data?.refreshToken as string | undefined;
+
+    if (!accessToken) {
+      throw new Error("Login response did not include accessToken");
+    }
+
+    setAuthToken(accessToken);
+    localStorage.setItem("auth_email", email);
+
+    if (refreshToken) {
+      localStorage.setItem("refresh_token", refreshToken);
+    }
+
+    const payload = decodeJwtPayload(accessToken);
+    const userId = payload?.sub;
+    if (typeof userId === "string") {
+      localStorage.setItem("auth_user_id", userId);
+    }
+
+    // Notify AuthProvider to fetch permissions & module access
+    window.dispatchEvent(new CustomEvent("auth:login"));
+  };
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setIsSubmitting(true);
@@ -197,30 +249,28 @@ export function AdminLoginPage({ onLoginSuccess }: AdminLoginPageProps) {
 
     try {
       const res = await apiClient.post("/auth/login", { email, password });
-      const accessToken = res.data?.accessToken as string | undefined;
-      const refreshToken = res.data?.refreshToken as string | undefined;
-
-      if (!accessToken) {
-        throw new Error("Login response did not include accessToken");
-      }
-
-      setAuthToken(accessToken);
-      localStorage.setItem("auth_email", email);
-
-      if (refreshToken) {
-        localStorage.setItem("refresh_token", refreshToken);
-      }
-
-      const payload = decodeJwtPayload(accessToken);
-      const userId = payload?.sub;
-      if (typeof userId === "string") {
-        localStorage.setItem("auth_user_id", userId);
-      }
+      completeLogin(res);
 
       toast.success("Logged in", { description: `Connected to ${apiBase}` });
       onLoginSuccess();
     } catch (error) {
-      const message = handleApiError(error);
+      let message = handleApiError(error);
+
+      if (message.includes("Cannot reach backend")) {
+        const isReady = await waitForBackendReady(apiBase);
+        if (isReady) {
+          try {
+            const retryResponse = await apiClient.post("/auth/login", { email, password });
+            completeLogin(retryResponse);
+            toast.success("Logged in", { description: `Connected to ${apiBase}` });
+            onLoginSuccess();
+            return;
+          } catch (retryError) {
+            message = handleApiError(retryError);
+          }
+        }
+      }
+
       setErrorMessage(message);
       toast.error("Login failed", { description: message });
     } finally {
@@ -397,12 +447,9 @@ export function AdminLoginPage({ onLoginSuccess }: AdminLoginPageProps) {
                     <div className="admin-login__alertTitle">
                       Backend is offline (development setup)
                     </div>
-                    <div>
-                      1){" "}
-                      <code>powershell -ExecutionPolicy Bypass -File scripts/dev-db-start.ps1</code>
-                    </div>
-                    <div>2) <code>npm run start:dev</code> from project root</div>
-                    <div>3) API URL stays: <code>{apiBase}</code></div>
+                    <div>1) Wait 10-15 seconds after restart, then retry login.</div>
+                    <div>2) If still offline: <code>pm2.cmd restart community-backend --update-env</code></div>
+                    <div>3) Verify backend: <code>{apiBase}/api</code></div>
                   </div>
                 </div>
               )}

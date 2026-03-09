@@ -25,24 +25,26 @@ enum RegistrationStatus {
 }
 
 enum UnitStatus {
-  AVAILABLE
-  HELD
-  UNRELEASED
-  NOT_DELIVERED
+  OFF_PLAN
+  UNDER_CONSTRUCTION
   DELIVERED
-  OCCUPIED
-  LEASED
-  RENTED
-  // UNDER_MAINTENANCE
-  // UNDER_CONSTRUCTION
+}
+
+enum UnitCategory {
+  RESIDENTIAL
+  COMMERCIAL
 }
 
 enum UnitType {
+  // Residential
   VILLA
   APARTMENT
   PENTHOUSE
   DUPLEX
   TOWNHOUSE
+  // Commercial
+  ADMINISTRATIVE
+  COMMERCIAL_UNIT
 }
 
 enum FinishingStatus {
@@ -162,7 +164,7 @@ enum InvoiceType {
 enum ComplaintStatus {
   NEW
   IN_PROGRESS
-  PENDING_RESIDENT  // Returned to resident awaiting their response/action
+  PENDING_RESIDENT // Returned to resident awaiting their response/action
   RESOLVED
   CLOSED
 }
@@ -176,12 +178,23 @@ enum Priority {
 
 enum ViolationStatus {
   PENDING
-  PAID
+  UNDER_REVIEW
   APPEALED
+  PAID
+  CLOSED
   CANCELLED
 }
 
 enum FacilityType {
+  SPORTS
+  FITNESS
+  AQUATICS
+  RECREATION
+  WELLNESS
+  EVENTS
+  KIDS
+  OUTDOOR
+  // legacy values kept for migration compatibility
   GYM
   POOL
   TENNIS_COURT
@@ -372,6 +385,8 @@ enum FileCategory {
   BIRTH_CERTIFICATE
   DELIVERY
   SERVICE_ATTACHMENT
+  COMMERCIAL_MEMBER_PHOTO
+  COMMERCIAL_MEMBER_ID
 }
 
 enum IncidentStatus {
@@ -476,15 +491,6 @@ enum GateRole {
   RIDESHARE
 }
 
-enum EntryRole {
-  RESIDENT_OWNER
-  RESIDENT_FAMILY
-  RESIDENT_TENANT
-  VISITOR
-  WORKER
-  STAFF
-}
-
 enum GateAccessMode {
   ALL_GATES
   SELECTED_GATES
@@ -502,7 +508,9 @@ enum GateScanResult {
 
 enum CommercialEntityMemberRole {
   OWNER
+  TENANT
   HR
+  FINANCE
   STAFF
 }
 
@@ -600,13 +608,15 @@ model User {
   phoneVerifiedAt  DateTime?
   twoFactorEnabled Boolean   @default(false)
 
-  lastLoginAt   DateTime?
-  loginAttempts Int       @default(0)
-  lockedUntil   DateTime?
+  lastLoginAt    DateTime?
+  loginAttempts  Int       @default(0)
+  lockedUntil    DateTime?
+  sessionVersion Int       @default(0)
 
   // Relations
   // Roles
-  roles UserRole[]
+  roles                UserRole[]
+  permissionOverrides  UserPermissionOverride[]
 
   // Leases (owner/tenant)
   leasesAsOwner        Lease[]       @relation("owner_leases")
@@ -626,8 +636,8 @@ model User {
   invoices Invoice[] @relation("user_invoices")
 
   // Service Requests
-  serviceRequests         ServiceRequest[] @relation("creator_requests")
-  assignedServiceRequests ServiceRequest[] @relation("assigned_to_service_requests")
+  serviceRequests         ServiceRequest[]        @relation("creator_requests")
+  assignedServiceRequests ServiceRequest[]        @relation("assigned_to_service_requests")
   serviceRequestComments  ServiceRequestComment[]
   complaintComments       ComplaintComment[]
 
@@ -674,6 +684,7 @@ model User {
   contractorMembers                ContractorMember[]
   commercialEntityMemberships      CommercialEntityMember[]   @relation("commercial_entity_member_user")
   commercialMembersCreated         CommercialEntityMember[]   @relation("commercial_entity_member_created_by")
+  commercialAuditActions           CommercialEntityAuditLog[] @relation("commercial_audit_actor")
   compoundStaffAssignments         CompoundStaff[]            @relation("compound_staff_user")
   compoundStaffAccessGranted       CompoundStaffAccess[]      @relation("compound_staff_access_granted_by")
   compoundStaffGateAccessesGranted CompoundStaffGateAccess[]  @relation("compound_staff_gate_access_granted_by")
@@ -706,6 +717,10 @@ model User {
   surveyResponses                  SurveyResponse[]
   surveysCreated                   Survey[]
   orders                           Order[]
+  complaintCategoryAssignments     ComplaintCategory[]        @relation("complaint_category_default_assignee")
+  violationComments                ViolationComment[]         @relation("violation_comment_author")
+  statusHistoryChanges             StatusHistory[]            @relation("status_history_user")
+  communityUpdates                 CommunityUpdate[]          @relation("community_update_author")
 
   @@index([email])
   @@index([phone])
@@ -856,11 +871,26 @@ model OrderItem {
 }
 
 model Role {
-  id               String           @id @default(uuid())
-  name             String           @unique
-  permissions      RolePermission[]
-  users            UserRole[]
-  assignedServices Service[]
+  id                    String                 @id @default(uuid())
+  name                  String                 @unique
+  description           String?
+  isSystem              Boolean                @default(false)
+  permissions           RolePermission[]
+  statusPermissions     RoleStatusPermission[]
+  users                 UserRole[]
+  assignedServices      Service[]
+  moduleAccess          RoleModuleAccess[]
+}
+
+model RoleModuleAccess {
+  roleId    String
+  moduleKey String
+  canAccess Boolean @default(false)
+
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, moduleKey])
+  @@index([roleId])
 }
 
 model UserRole {
@@ -963,7 +993,9 @@ model Permission {
   id  String @id @default(uuid())
   key String @unique // billing.create_invoice
 
-  rolePermissions RolePermission[]
+  rolePermissions       RolePermission[]
+  roleStatusPermissions RoleStatusPermission[]
+  userOverrides         UserPermissionOverride[]
 }
 
 model RolePermission {
@@ -976,6 +1008,32 @@ model RolePermission {
   @@id([roleId, permissionId])
 }
 
+model RoleStatusPermission {
+  id           String     @id @default(uuid())
+  roleId       String
+  unitStatus   UnitStatus
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, unitStatus, permissionId])
+  @@index([roleId, unitStatus])
+}
+
+model UserPermissionOverride {
+  id           String  @id @default(uuid())
+  userId       String
+  permissionId String
+  grant        Boolean @default(true)
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, permissionId])
+  @@index([userId])
+}
+
 model Unit {
   id             String         @id @default(uuid())
   projectName    String
@@ -985,13 +1043,14 @@ model Unit {
   allowedGateIds String[]       @default([])
   block          String?
   unitNumber     String
+  category       UnitCategory   @default(RESIDENTIAL)
   type           UnitType
   floors         Int?
   bedrooms       Int?
   bathrooms      Int?
   sizeSqm        Float?
   price          Decimal?       @db.Decimal(12, 2)
-  status         UnitStatus     @default(AVAILABLE)
+  status         UnitStatus     @default(OFF_PLAN)
   isDelivered    Boolean        @default(false)
   deliveryDate   DateTime?
   isActive       Boolean        @default(true)
@@ -1048,8 +1107,9 @@ model Cluster {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  community Community @relation(fields: [communityId], references: [id], onDelete: Cascade)
-  units     Unit[]
+  community    Community     @relation(fields: [communityId], references: [id], onDelete: Cascade)
+  units        Unit[]
+  gateClusters GateCluster[]
 
   @@unique([communityId, name])
   @@index([communityId])
@@ -1058,15 +1118,21 @@ model Cluster {
   @@index([deletedAt])
 }
 
+enum CommunityStructure {
+  CLUSTERS
+  PHASES
+}
+
 model Community {
-  id                String      @id @default(uuid())
-  name              String      @unique
-  code              String?     @unique
-  isActive          Boolean     @default(true)
-  allowedEntryRoles EntryRole[] @default([])
-  displayOrder      Int         @default(0)
-  createdAt         DateTime    @default(now())
-  updatedAt         DateTime    @updatedAt
+  id                String              @id @default(uuid())
+  name              String              @unique
+  code              String?             @unique
+  isActive          Boolean             @default(true)
+  structureType     CommunityStructure  @default(CLUSTERS)
+  guidelines        String?
+  displayOrder      Int             @default(0)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
 
   units              Unit[]
   clusters           Cluster[]
@@ -1075,6 +1141,7 @@ model Community {
   compoundStaff      CompoundStaff[]
   blueCollarSetting  BlueCollarSetting?
   blueCollarHolidays BlueCollarHoliday[]
+  communityUpdates   CommunityUpdate[]
 }
 
 model Gate {
@@ -1095,12 +1162,27 @@ model Gate {
   unitAccesses          GateUnitAccess[]
   entryLogs             GateEntryLog[]
   compoundStaffAccesses CompoundStaffGateAccess[]
+  gateClusters          GateCluster[]
 
   @@unique([communityId, name])
   @@index([communityId])
   @@index([communityId, isActive])
   @@index([status])
   @@index([deletedAt])
+}
+
+model GateCluster {
+  id        String   @id @default(uuid())
+  gateId    String
+  clusterId String
+  createdAt DateTime @default(now())
+
+  gate    Gate    @relation(fields: [gateId], references: [id], onDelete: Cascade)
+  cluster Cluster @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@unique([gateId, clusterId])
+  @@index([gateId])
+  @@index([clusterId])
 }
 
 model GateUnitAccess {
@@ -1363,9 +1445,10 @@ model CommercialEntity {
   unitId String
   unit   Unit   @relation(fields: [unitId], references: [id], onDelete: Restrict)
 
-  isActive Boolean                  @default(true)
-  members  CommercialEntityMember[]
-  staff    CompoundStaff[]
+  isActive  Boolean                     @default(true)
+  members   CommercialEntityMember[]
+  staff     CompoundStaff[]
+  auditLogs CommercialEntityAuditLog[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -1379,13 +1462,15 @@ model CommercialEntity {
 }
 
 model CommercialEntityMember {
-  id          String                     @id @default(uuid())
-  entityId    String
-  userId      String
-  role        CommercialEntityMemberRole
-  permissions Json?
-  createdById String?
-  isActive    Boolean                    @default(true)
+  id               String                     @id @default(uuid())
+  entityId         String
+  userId           String
+  role             CommercialEntityMemberRole
+  permissions      Json?
+  createdById      String?
+  photoFileId      String?
+  nationalIdFileId String?
+  isActive         Boolean                    @default(true)
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -1402,6 +1487,21 @@ model CommercialEntityMember {
   @@index([role])
   @@index([isActive])
   @@index([deletedAt])
+}
+
+model CommercialEntityAuditLog {
+  id          String   @id @default(uuid())
+  entityId    String
+  action      String   // ENTITY_CREATED, ENTITY_UPDATED, MEMBER_ADDED, MEMBER_REMOVED, MEMBER_ROLE_CHANGED, OWNER_CHANGED, TENANT_CHANGED, STAFF_ADDED, RENAMED, etc.
+  actorUserId String?
+  metadata    Json?    // details: changed fields, old/new values
+  createdAt   DateTime @default(now())
+
+  entity    CommercialEntity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+  actorUser User?            @relation("commercial_audit_actor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([entityId, createdAt])
+  @@index([actorUserId])
 }
 
 model Department {
@@ -1534,15 +1634,15 @@ model CompoundStaffActivityLog {
 }
 
 model AttendanceLog {
-  id          String    @id @default(uuid())
-  staffId     String
-  clockInAt   DateTime  @default(now())
-  clockOutAt  DateTime?
-  durationMin Int?      // calculated on clock-out
-  notes       String?
-  recordedById String?  // admin user who recorded (null = self-clock)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id           String    @id @default(uuid())
+  staffId      String
+  clockInAt    DateTime  @default(now())
+  clockOutAt   DateTime?
+  durationMin  Int? // calculated on clock-out
+  notes        String?
+  recordedById String? // admin user who recorded (null = self-clock)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   staff      CompoundStaff @relation(fields: [staffId], references: [id], onDelete: Cascade)
   recordedBy User?         @relation("attendance_recorded_by", fields: [recordedById], references: [id], onDelete: SetNull)
@@ -1570,11 +1670,11 @@ model File {
 
   pendingRegistrationPhotos      PendingRegistration[] @relation("pending_reg_photo")
   pendingRegistrationNationalIds PendingRegistration[] @relation("pending_reg_national_id")
-  documents              ResidentDocument[]    @relation("file_documents")
-  ownerUnitContracts     OwnerUnitContract[]   @relation("owner_unit_contract_file")
-  ownerInstallments      OwnerInstallment[]    @relation("owner_installment_reference_file")
-  rentRequestContracts   RentRequest[]         @relation("rent_request_contract_file")
-  rentRequestNationalIds RentRequest[]         @relation("rent_request_national_id_file")
+  documents                      ResidentDocument[]    @relation("file_documents")
+  ownerUnitContracts             OwnerUnitContract[]   @relation("owner_unit_contract_file")
+  ownerInstallments              OwnerInstallment[]    @relation("owner_installment_reference_file")
+  rentRequestContracts           RentRequest[]         @relation("rent_request_contract_file")
+  rentRequestNationalIds         RentRequest[]         @relation("rent_request_national_id_file")
 }
 
 model OwnerUnitContract {
@@ -1701,10 +1801,27 @@ model Service {
   formFields      ServiceField[]
   requests        ServiceRequest[]
   totalRequests   Int?             @default(0)
+  microServices   MicroService[]
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 
   @@index([assignedRoleId])
+}
+
+model MicroService {
+  id          String   @id @default(uuid())
+  serviceId   String
+  service     Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  price       Decimal? @db.Decimal(12, 2)
+  isActive    Boolean  @default(true)
+  displayOrder Int     @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([serviceId, name])
+  @@index([serviceId])
 }
 
 model ServiceField {
@@ -1757,6 +1874,8 @@ model PermitType {
   slug         String          @unique
   category     PermitCategory
   description  String?
+  iconName     String?
+  color        String?
   isActive     Boolean         @default(true)
   displayOrder Int             @default(0)
   fields       PermitField[]
@@ -2011,14 +2130,16 @@ model InvoiceCategory {
 }
 
 model ComplaintCategory {
-  id           String   @id @default(uuid())
-  name         String   @unique
-  slaHours     Int
-  description  String?
-  isActive     Boolean  @default(true)
-  displayOrder Int      @default(0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                String   @id @default(uuid())
+  name              String   @unique
+  slaHours          Int
+  description       String?
+  isActive          Boolean  @default(true)
+  displayOrder      Int      @default(0)
+  defaultAssigneeId String?
+  defaultAssignee   User?    @relation("complaint_category_default_assignee", fields: [defaultAssigneeId], references: [id])
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   complaints Complaint[]
 }
@@ -2107,10 +2228,41 @@ model Violation {
   updatedAt        DateTime                 @updatedAt
   invoices         Invoice[]
   actionRequests   ViolationActionRequest[]
+  comments         ViolationComment[]
 
   @@index([categoryId])
   @@index([status, appealStatus])
   @@index([appealDeadline])
+}
+
+model ViolationComment {
+  id          String    @id @default(uuid())
+  violation   Violation @relation(fields: [violationId], references: [id], onDelete: Cascade)
+  violationId String
+  createdBy   User      @relation("violation_comment_author", fields: [createdById], references: [id], onDelete: Cascade)
+  createdById String
+  body        String
+  isInternal  Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([violationId, createdAt])
+  @@index([createdById])
+}
+
+model StatusHistory {
+  id          String   @id @default(uuid())
+  entityType  String // "COMPLAINT" or "VIOLATION"
+  entityId    String
+  fromStatus  String?
+  toStatus    String
+  changedById String
+  changedBy   User     @relation("status_history_user", fields: [changedById], references: [id])
+  note        String?
+  createdAt   DateTime @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([changedById])
 }
 
 model Banner {
@@ -2130,6 +2282,24 @@ model Banner {
   views           Int          @default(0)
   clicks          Int          @default(0)
   createdAt       DateTime     @default(now())
+}
+
+model CommunityUpdate {
+  id              String    @id @default(uuid())
+  caption         String
+  imageFileId     String?
+  authorId        String
+  authorName      String?
+  authorPhotoUrl  String?
+  communityId     String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  author    User       @relation("community_update_author", fields: [authorId], references: [id])
+  community Community? @relation(fields: [communityId], references: [id])
+
+  @@index([communityId])
+  @@index([createdAt])
 }
 
 model SystemSetting {
@@ -2611,17 +2781,17 @@ model NotificationDeviceToken {
 }
 
 model PendingRegistration {
-  id              String  @id @default(uuid())
-  phone           String  @unique
-  email           String?
-  name            String?
-  passwordHash    String?
-  origin          String  @default("community")
-  nationalId        String  // PIC
-  personalPhotoId   String  // File ID (stored in File table)
-  personalPhoto     File    @relation("pending_reg_photo", fields: [personalPhotoId], references: [id])
-  nationalIdFileId  String? // National ID document file ID
-  nationalIdFile    File?   @relation("pending_reg_national_id", fields: [nationalIdFileId], references: [id])
+  id               String  @id @default(uuid())
+  phone            String  @unique
+  email            String?
+  name             String?
+  passwordHash     String?
+  origin           String  @default("community")
+  nationalId       String // PIC
+  personalPhotoId  String // File ID (stored in File table)
+  personalPhoto    File    @relation("pending_reg_photo", fields: [personalPhotoId], references: [id])
+  nationalIdFileId String? // National ID document file ID
+  nationalIdFile   File?   @relation("pending_reg_national_id", fields: [nationalIdFileId], references: [id])
 
   roleIntent String? // OWNER, TENANT, FAMILY
 

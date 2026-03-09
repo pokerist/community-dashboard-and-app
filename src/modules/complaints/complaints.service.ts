@@ -14,6 +14,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { AddCommentDto } from './dto/add-comment.dto';
 import {
   CheckSlaBreachesResponseDto,
+  ComplaintDetailAttachmentDto,
   ComplaintDetailCommentDto,
   ComplaintDetailDto,
   ComplaintDetailInvoiceDto,
@@ -80,6 +81,45 @@ export class ComplaintsService {
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
   ) {}
+
+  private async recordStatusChange(
+    entityId: string,
+    fromStatus: string | null,
+    toStatus: string,
+    changedById: string,
+    note?: string,
+  ): Promise<void> {
+    await this.prisma.statusHistory.create({
+      data: {
+        entityType: 'COMPLAINT',
+        entityId,
+        fromStatus,
+        toStatus,
+        changedById,
+        note: note?.trim() || null,
+      },
+    });
+  }
+
+  async getStatusHistory(complaintId: string) {
+    const complaint = await this.prisma.complaint.findUnique({
+      where: { id: complaintId },
+      select: { id: true },
+    });
+    if (!complaint) {
+      throw new NotFoundException(`Complaint ${complaintId} not found`);
+    }
+
+    return this.prisma.statusHistory.findMany({
+      where: { entityType: 'COMPLAINT', entityId: complaintId },
+      include: {
+        changedBy: {
+          select: { id: true, nameEN: true, nameAR: true, email: true },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+  }
 
   private toIso(value: Date | null): string | null {
     return value ? value.toISOString() : null;
@@ -167,7 +207,23 @@ export class ComplaintsService {
     };
   }
 
-  private toDetailDto(complaint: ComplaintDetailRecord): ComplaintDetailDto {
+  private async fetchAttachments(
+    complaintId: string,
+  ): Promise<ComplaintDetailAttachmentDto[]> {
+    const rows = await this.prisma.attachment.findMany({
+      where: { entity: 'COMPLAINT', entityId: complaintId },
+      include: { file: { select: { id: true, name: true, mimeType: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    return rows.map((r) => ({
+      id: r.file.id,
+      fileName: r.file.name,
+      mimeType: r.file.mimeType,
+      url: `/files/${r.file.id}/stream`,
+    }));
+  }
+
+  private async toDetailDto(complaint: ComplaintDetailRecord): Promise<ComplaintDetailDto> {
     const hoursRemaining = this.toHoursRemaining(complaint);
 
     return {
@@ -200,6 +256,7 @@ export class ComplaintsService {
         .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
         .map((item) => this.toCommentDto(item)),
       invoices: complaint.invoices.map((item) => this.toInvoiceDto(item)),
+      attachments: await this.fetchAttachments(complaint.id),
     };
   }
 
@@ -420,7 +477,7 @@ export class ComplaintsService {
       throw new BadRequestException('Unit not found');
     }
 
-    let category: ComplaintCategory | null = null;
+    let category: (ComplaintCategory & { defaultAssigneeId: string | null }) | null = null;
     if (dto.categoryId) {
       category = await this.prisma.complaintCategory.findUnique({
         where: { id: dto.categoryId },
@@ -439,6 +496,12 @@ export class ComplaintsService {
       : null;
     const complaintNumber = await this.generateComplaintNumber();
 
+    // Auto-assign from category default assignee
+    const assignedToId = category?.defaultAssigneeId ?? null;
+    const initialStatus = assignedToId
+      ? ComplaintStatus.IN_PROGRESS
+      : ComplaintStatus.NEW;
+
     const created = await this.prisma.complaint.create({
       data: {
         complaintNumber,
@@ -450,11 +513,25 @@ export class ComplaintsService {
         categoryLegacy: category?.name ?? null,
         description: dto.description.trim(),
         priority: dto.priority ?? Priority.MEDIUM,
-        status: ComplaintStatus.NEW,
+        status: initialStatus,
         slaDeadline,
+        assignedToId,
       },
       select: { id: true },
     });
+
+    await this.recordStatusChange(created.id, null, initialStatus, reporterId);
+
+    // Store attachments via the polymorphic Attachment table
+    if (dto.attachmentIds && dto.attachmentIds.length > 0) {
+      await this.prisma.attachment.createMany({
+        data: dto.attachmentIds.map((fileId) => ({
+          fileId,
+          entityId: created.id,
+          entity: 'COMPLAINT',
+        })),
+      });
+    }
 
     return this.getComplaintDetail(created.id);
   }
@@ -519,7 +596,7 @@ export class ComplaintsService {
     const [complaint, assignee] = await Promise.all([
       this.prisma.complaint.findUnique({
         where: { id },
-        select: { id: true },
+        select: { id: true, status: true },
       }),
       this.prisma.user.findUnique({
         where: { id: assignedToId },
@@ -537,10 +614,40 @@ export class ComplaintsService {
       throw new BadRequestException('Invalid admin context');
     }
 
+    const shouldMoveToInProgress = complaint.status === ComplaintStatus.NEW;
+
     await this.prisma.complaint.update({
       where: { id },
-      data: { assignedToId },
+      data: {
+        assignedToId,
+        ...(shouldMoveToInProgress ? { status: ComplaintStatus.IN_PROGRESS } : {}),
+      },
     });
+
+    if (shouldMoveToInProgress) {
+      await this.recordStatusChange(
+        id,
+        ComplaintStatus.NEW,
+        ComplaintStatus.IN_PROGRESS,
+        adminId,
+        'Auto-transitioned after assignment',
+      );
+    }
+
+    // Notify the assigned user
+    this.notificationsService
+      .sendNotification({
+        type: NotificationType.ANNOUNCEMENT,
+        title: 'Complaint Assigned to You',
+        messageEn: `You have been assigned complaint #${id.slice(0, 8)}. Please review and take action.`,
+        channels: [Channel.IN_APP, Channel.PUSH],
+        targetAudience: Audience.SPECIFIC_RESIDENCES,
+        audienceMeta: { userIds: [assignedToId] },
+        payload: { route: '#complaints', entityType: 'COMPLAINT', entityId: id },
+      })
+      .catch((err) =>
+        this.logger.error(`Assignment notification failed for complaint ${id}`, err),
+      );
 
     return this.getComplaintDetail(id);
   }
@@ -549,6 +656,7 @@ export class ComplaintsService {
     id: string,
     status: ComplaintStatus,
     resolutionNotes?: string,
+    changedById?: string,
   ): Promise<ComplaintDetailDto> {
     const complaint = await this.prisma.complaint.findUnique({
       where: { id },
@@ -624,6 +732,10 @@ export class ComplaintsService {
       data: updateData,
     });
 
+    if (changedById) {
+      await this.recordStatusChange(id, currentStatus, status, changedById, resolutionNotes);
+    }
+
     // Notify reporter when resolved or closed
     if (
       (status === ComplaintStatus.RESOLVED || status === ComplaintStatus.CLOSED) &&
@@ -693,6 +805,17 @@ export class ComplaintsService {
           isInternal: false,
         },
       });
+
+      await tx.statusHistory.create({
+        data: {
+          entityType: 'COMPLAINT',
+          entityId: id,
+          fromStatus: complaint.status,
+          toStatus: ComplaintStatus.PENDING_RESIDENT,
+          changedById: adminId,
+          note: trimmedMessage,
+        },
+      });
     });
 
     // Notify resident
@@ -722,19 +845,21 @@ export class ComplaintsService {
   ): Promise<ComplaintDetailCommentDto> {
     const complaint = await this.prisma.complaint.findUnique({
       where: { id: complaintId },
-      select: { id: true },
+      select: { id: true, complaintNumber: true, title: true, reporterId: true, assignedToId: true },
     });
 
     if (!complaint) {
       throw new NotFoundException(`Complaint ${complaintId} not found`);
     }
 
+    const isInternal = dto.isInternal ?? false;
+
     const created = await this.prisma.complaintComment.create({
       data: {
         complaintId,
         createdById: authorId,
         body: dto.body.trim(),
-        isInternal: dto.isInternal ?? false,
+        isInternal,
       },
       include: {
         createdBy: {
@@ -742,6 +867,32 @@ export class ComplaintsService {
         },
       },
     });
+
+    // Notify reporter + assignee (skip internal notes for reporter, skip self)
+    if (!isInternal) {
+      const recipientIds = new Set<string>();
+      if (complaint.reporterId && complaint.reporterId !== authorId) {
+        recipientIds.add(complaint.reporterId);
+      }
+      if (complaint.assignedToId && complaint.assignedToId !== authorId) {
+        recipientIds.add(complaint.assignedToId);
+      }
+      if (recipientIds.size > 0) {
+        this.notificationsService
+          .sendNotification({
+            type: NotificationType.ANNOUNCEMENT,
+            title: 'New Comment on Complaint',
+            messageEn: `A new comment was posted on complaint "${complaint.title ?? complaint.complaintNumber}".`,
+            channels: [Channel.IN_APP, Channel.PUSH],
+            targetAudience: Audience.SPECIFIC_RESIDENCES,
+            audienceMeta: { userIds: [...recipientIds] },
+            payload: { route: '#complaints', entityType: 'COMPLAINT', entityId: complaintId },
+          })
+          .catch((err) =>
+            this.logger.error(`Comment notification failed for complaint ${complaintId}`, err),
+          );
+      }
+    }
 
     return this.toCommentDto(created);
   }

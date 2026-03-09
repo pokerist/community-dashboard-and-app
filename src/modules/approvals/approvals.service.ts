@@ -164,17 +164,6 @@ export class ApprovalsService {
       throw new NotFoundException('Unit not found');
     }
 
-    const existingPrimaryForUnit = await tx.residentUnit.findFirst({
-      where: { unitId: params.unitId, isPrimary: true },
-      select: { residentId: true },
-    });
-    if (
-      existingPrimaryForUnit &&
-      existingPrimaryForUnit.residentId !== params.residentId
-    ) {
-      throw new ConflictException('Unit already has a primary owner');
-    }
-
     const hasPrimaryForResident = await tx.residentUnit.findFirst({
       where: { residentId: params.residentId, isPrimary: true },
       select: { id: true },
@@ -188,9 +177,7 @@ export class ApprovalsService {
       },
       select: { id: true, isPrimary: true },
     });
-    const shouldBePrimary =
-      !hasPrimaryForResident ||
-      existingPrimaryForUnit?.residentId === params.residentId;
+    const shouldBePrimary = !hasPrimaryForResident;
 
     if (!residentUnit) {
       await tx.residentUnit.create({

@@ -178,16 +178,7 @@ export class PendingRegistrationsService {
     dto: ApprovePendingRegistrationDto,
     prisma: any,
   ) {
-    if (dto.isPrimary) {
-      const existingPrimary = await prisma.residentUnit.findFirst({
-        where: { unitId: dto.unitId, isPrimary: true },
-      });
-      if (existingPrimary) {
-        throw new BadRequestException(
-          'This unit already has a primary resident',
-        );
-      }
-    }
+    // Allow multiple primary owners per unit
 
     await prisma.residentUnit.create({
       data: {

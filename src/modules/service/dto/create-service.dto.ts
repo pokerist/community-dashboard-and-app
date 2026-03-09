@@ -94,4 +94,36 @@ export class CreateServiceDto {
   @Type(() => CreateServiceFieldDto)
   @IsOptional()
   fields?: CreateServiceFieldDto[];
+
+  @IsArray()
+  @ArrayMaxSize(50)
+  @ValidateNested({ each: true })
+  @Type(() => CreateMicroServiceDto)
+  @IsOptional()
+  microServices?: CreateMicroServiceDto[];
 }
+
+export class CreateMicroServiceDto {
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+
+  @IsString()
+  @IsOptional()
+  description?: string;
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  price?: number;
+
+  @IsBoolean()
+  @IsOptional()
+  isActive?: boolean;
+
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  @Type(() => Number)
+  displayOrder?: number;

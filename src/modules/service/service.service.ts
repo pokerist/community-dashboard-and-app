@@ -59,7 +59,7 @@ export class ServiceService {
     iconTone: string;
     isUrgent: boolean;
     assignedRole: { name: string } | null;
-    _count: { requests: number };
+    _count: { requests: number; microServices?: number };
   }): ServiceListItemDto {
     return {
       id: row.id,
@@ -73,6 +73,7 @@ export class ServiceService {
         : null,
       assignedRoleName: row.assignedRole?.name ?? null,
       totalRequestsCount: row._count.requests,
+      microServicesCount: row._count.microServices ?? 0,
       revenueTotal: this.decimalToNumber(row.revenueTotal),
       iconName: row.iconName,
       iconTone: row.iconTone,
@@ -119,7 +120,7 @@ export class ServiceService {
       where,
       include: {
         assignedRole: { select: { name: true } },
-        _count: { select: { requests: true } },
+        _count: { select: { requests: true, microServices: true } },
       },
       orderBy: [{ displayOrder: 'asc' }, { name: 'asc' }],
     });
@@ -135,6 +136,10 @@ export class ServiceService {
           orderBy: { order: 'asc' },
         },
         assignedRole: { select: { id: true, name: true } },
+        microServices: {
+          where: { isActive: true },
+          orderBy: { displayOrder: 'asc' },
+        },
         requests: {
           select: {
             id: true,
@@ -213,6 +218,14 @@ export class ServiceService {
       iconName: row.iconName,
       iconTone: row.iconTone,
       fields: row.formFields.map((field) => this.mapField(field)),
+      microServices: (row as any).microServices?.map((ms: any) => ({
+        id: ms.id,
+        name: ms.name,
+        description: ms.description,
+        price: ms.price ? this.decimalToNumber(ms.price) : null,
+        isActive: ms.isActive,
+        displayOrder: ms.displayOrder,
+      })) ?? [],
       stats: {
         totalRequests,
         openRequests,
@@ -268,6 +281,19 @@ export class ServiceService {
         });
       }
 
+      if (dto.microServices?.length) {
+        await tx.microService.createMany({
+          data: dto.microServices.map((ms, index) => ({
+            serviceId: created.id,
+            name: ms.name.trim(),
+            description: ms.description?.trim() || null,
+            price: ms.price ?? null,
+            isActive: ms.isActive ?? true,
+            displayOrder: ms.displayOrder ?? index + 1,
+          })),
+        });
+      }
+
       return created;
     });
 
@@ -319,6 +345,23 @@ export class ServiceService {
               placeholder: field.placeholder,
               required: field.required ?? false,
               order: field.order ?? index + 1,
+            })),
+          });
+        }
+      }
+
+      if (dto.microServices) {
+        await tx.microService.deleteMany({ where: { serviceId: id } });
+
+        if (dto.microServices.length > 0) {
+          await tx.microService.createMany({
+            data: dto.microServices.map((ms, index) => ({
+              serviceId: id,
+              name: ms.name.trim(),
+              description: ms.description?.trim() || null,
+              price: ms.price ?? null,
+              isActive: ms.isActive ?? true,
+              displayOrder: ms.displayOrder ?? index + 1,
             })),
           });
         }

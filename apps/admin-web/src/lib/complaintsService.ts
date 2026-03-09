@@ -10,8 +10,24 @@ export type ComplaintCategoryItem = {
   description: string | null;
   isActive: boolean;
   displayOrder: number;
+  defaultAssigneeId: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type StatusHistoryItem = {
+  id: string;
+  fromStatus: string | null;
+  toStatus: string;
+  changedById: string;
+  changedBy: {
+    id: string;
+    nameEN: string | null;
+    nameAR: string | null;
+    email: string | null;
+  };
+  note: string | null;
+  createdAt: string;
 };
 
 export type ComplaintListItem = {
@@ -82,6 +98,14 @@ export type ComplaintDetail = {
   updatedAt: string;
   comments: ComplaintDetailComment[];
   invoices: ComplaintInvoice[];
+  attachments: ComplaintAttachment[];
+};
+
+export type ComplaintAttachment = {
+  id: string;
+  fileName: string | null;
+  mimeType: string | null;
+  url: string | null;
 };
 
 export type ComplaintStats = {
@@ -106,12 +130,14 @@ export type CreateComplaintPayload = {
   title?: string;
   description: string;
   priority?: Priority;
+  attachmentIds?: string[];
 };
 
 export type CreateComplaintCategoryPayload = {
   name: string;
   slaHours: number;
   description?: string;
+  defaultAssigneeId?: string;
 };
 
 export type UpdateComplaintCategoryPayload = Partial<CreateComplaintCategoryPayload>;
@@ -242,14 +268,21 @@ const complaintsService = {
     return response.data;
   },
 
+  async getStatusHistory(id: string): Promise<StatusHistoryItem[]> {
+    const response = await apiClient.get<StatusHistoryItem[]>(`/complaints/${id}/history`);
+    return response.data;
+  },
+
   async checkSlaBreaches(): Promise<{ breachCount: number }> {
     const response = await apiClient.post<{ breachCount: number }>("/complaints/check-sla");
     return response.data;
   },
 
   async listUnits(): Promise<ComplaintUnitOption[]> {
-    const response = await apiClient.get<PagedResponse<{ id: string; unitNumber: string }> | { id: string; unitNumber: string }[]>("/units", {
-      params: { page: 1, limit: 500 },
+    const response = await apiClient.get<
+      PagedResponse<{ id: string; unitNumber: string }> | { id: string; unitNumber: string }[]
+    >("/units", {
+      params: { page: 1, limit: 100 },
     });
     const rows = extractRows(response.data);
     return rows.map((unit) => ({
@@ -270,7 +303,7 @@ const complaintsService = {
       nameAR: string | null;
       email: string | null;
     }>>("/admin/users", {
-      params: { take: 500, skip: 0 },
+      params: { take: 100, skip: 0 },
     });
     const rows = extractRows(response.data);
     return rows.map((user) => ({

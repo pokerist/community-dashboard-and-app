@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, Building, DoorOpen, LayoutGrid, Search, ChevronRight } from "lucide-react";
+import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, Building, DoorOpen, LayoutGrid, Search, ChevronRight, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Input } from "../ui/input";
@@ -8,22 +8,13 @@ import communityService, {
   type ClusterItem,
   type CommunityDetail,
   type CommunityListItem,
-  type EntryRole,
+  type CommunityStructure,
   type GateItem,
   type GateRole,
 } from "../../lib/community-service";
 import { handleApiError } from "../../lib/api-client";
 
 // ─── Constants ────────────────────────────────────────────────
-
-const ENTRY_ROLE_OPTIONS: Array<{ value: EntryRole; label: string }> = [
-  { value: "RESIDENT_OWNER",  label: "Owner"       },
-  { value: "RESIDENT_FAMILY", label: "Family"      },
-  { value: "RESIDENT_TENANT", label: "Tenant"      },
-  { value: "VISITOR",         label: "Visitor"     },
-  { value: "WORKER",          label: "Worker"      },
-  { value: "STAFF",           label: "Staff"       },
-];
 
 const GATE_ROLE_OPTIONS: GateRole[] = ["RESIDENT","VISITOR","WORKER","DELIVERY","STAFF","RIDESHARE"];
 
@@ -40,19 +31,15 @@ const GATE_ROLE_COLORS: Record<GateRole, { bg: string; color: string }> = {
   RIDESHARE: { bg: "#F0FDFA", color: "#0D9488" },
 };
 
-function entryRoleLabel(role: EntryRole) {
-  return ENTRY_ROLE_OPTIONS.find((o) => o.value === role)?.label ?? role;
-}
-
 // ─── Form types ───────────────────────────────────────────────
 
-type CommunityFormState = { name: string; code: string; displayOrder: string; isActive: boolean; allowedEntryRoles: EntryRole[] };
-type ClusterFormState   = { name: string; code: string; displayOrder: string };
-type GateFormState      = { name: string; code: string; etaMinutes: string; allowedRoles: GateRole[] };
+type CommunityFormState = { name: string; isActive: boolean; structureType: CommunityStructure; guidelines: string };
+type ClusterFormState   = { name: string };
+type GateFormState      = { name: string; etaMinutes: string; allowedRoles: GateRole[]; clusterIds: string[] };
 
-const defaultCommunityForm: CommunityFormState = { name: "", code: "", displayOrder: "0", isActive: true, allowedEntryRoles: ["RESIDENT_OWNER","VISITOR","STAFF"] };
-const defaultClusterForm: ClusterFormState     = { name: "", code: "", displayOrder: "0" };
-const defaultGateForm: GateFormState           = { name: "", code: "", etaMinutes: "", allowedRoles: ["VISITOR"] };
+const defaultCommunityForm: CommunityFormState = { name: "", isActive: true, structureType: "CLUSTERS", guidelines: "" };
+const defaultClusterForm: ClusterFormState     = { name: "" };
+const defaultGateForm: GateFormState           = { name: "", etaMinutes: "", allowedRoles: ["VISITOR"], clusterIds: [] };
 
 // ─── Shared small components ──────────────────────────────────
 
@@ -203,7 +190,9 @@ export function CommunitiesManagement() {
   const [isLoadingDetail, setIsLoadingDetail]      = useState(false);
   const [search, setSearch]                        = useState("");
   const [page, setPage]                            = useState(1);
-  const [activeTab, setActiveTab]                  = useState<"clusters" | "gates">("clusters");
+  const [activeTab, setActiveTab]                  = useState<"clusters" | "gates" | "guidelines">("clusters");
+  const [editingGuidelines, setEditingGuidelines]  = useState(false);
+  const [guidelinesText, setGuidelinesText]        = useState("");
 
   const [communityDialogOpen, setCommunityDialogOpen] = useState(false);
   const [editingCommunity, setEditingCommunity]       = useState<CommunityListItem | null>(null);
@@ -254,7 +243,7 @@ export function CommunitiesManagement() {
     const t = search.trim().toLowerCase();
     if (!t) return communities;
     return communities.filter((c) =>
-      c.name.toLowerCase().includes(t) || (c.code ?? "").toLowerCase().includes(t)
+      c.name.toLowerCase().includes(t)
     );
   }, [communities, search]);
 
@@ -266,14 +255,12 @@ export function CommunitiesManagement() {
   const openCreateCommunity = () => { setEditingCommunity(null); setCommunityForm(defaultCommunityForm); setCommunityDialogOpen(true); };
   const openEditCommunity = (c: CommunityListItem) => {
     setEditingCommunity(c);
-    setCommunityForm({ name: c.name, code: c.code ?? "", displayOrder: String(c.displayOrder ?? 0), isActive: c.isActive !== false, allowedEntryRoles: c.allowedEntryRoles?.length ? c.allowedEntryRoles : defaultCommunityForm.allowedEntryRoles });
+    setCommunityForm({ name: c.name, isActive: c.isActive !== false, structureType: c.structureType ?? "CLUSTERS", guidelines: c.guidelines ?? "" });
     setCommunityDialogOpen(true);
   };
-  const toggleEntryRole = (r: EntryRole) => setCommunityForm((p) => ({ ...p, allowedEntryRoles: p.allowedEntryRoles.includes(r) ? p.allowedEntryRoles.filter((x) => x !== r) : [...p.allowedEntryRoles, r] }));
   const saveCommunity = async () => {
     if (!communityForm.name.trim()) { toast.error("Name is required"); return; }
-    if (!communityForm.allowedEntryRoles.length) { toast.error("Select at least one entry role"); return; }
-    const payload = { name: communityForm.name.trim(), code: communityForm.code.trim() || undefined, displayOrder: Number(communityForm.displayOrder) || 0, isActive: communityForm.isActive, allowedEntryRoles: communityForm.allowedEntryRoles };
+    const payload = { name: communityForm.name.trim(), isActive: communityForm.isActive, structureType: communityForm.structureType, guidelines: communityForm.guidelines.trim() || undefined };
     try {
       if (editingCommunity) { await communityService.updateCommunity(editingCommunity.id, payload); toast.success("Community updated"); }
       else { const created = await communityService.createCommunity(payload); setSelectedId(created.id); toast.success("Community created"); }
@@ -289,13 +276,23 @@ export function CommunitiesManagement() {
       await loadCommunities();
     } catch (e) { toast.error("Cannot delete", { description: handleApiError(e) }); }
   };
+  const openEditGuidelines = () => { setGuidelinesText(selectedDetail?.guidelines ?? ""); setEditingGuidelines(true); };
+  const saveGuidelines = async () => {
+    if (!selectedCommunityId) return;
+    try {
+      await communityService.updateCommunity(selectedCommunityId, { guidelines: guidelinesText.trim() || undefined });
+      toast.success("Guidelines saved");
+      setEditingGuidelines(false);
+      await loadDetail(selectedCommunityId);
+    } catch (e) { toast.error("Failed to save guidelines", { description: handleApiError(e) }); }
+  };
 
   // ── Cluster CRUD ─────────────────────────────────────────────
   const openCreateCluster = () => { setEditingCluster(null); setClusterForm(defaultClusterForm); setClusterDialogOpen(true); };
-  const openEditCluster = (cl: ClusterItem) => { setEditingCluster(cl); setClusterForm({ name: cl.name, code: cl.code ?? "", displayOrder: String(cl.displayOrder ?? 0) }); setClusterDialogOpen(true); };
+  const openEditCluster = (cl: ClusterItem) => { setEditingCluster(cl); setClusterForm({ name: cl.name }); setClusterDialogOpen(true); };
   const saveCluster = async () => {
     if (!selectedCommunityId || !clusterForm.name.trim()) { toast.error("Name is required"); return; }
-    const payload = { name: clusterForm.name.trim(), code: clusterForm.code.trim() || undefined, displayOrder: Number(clusterForm.displayOrder) || 0 };
+    const payload = { name: clusterForm.name.trim() };
     try {
       if (editingCluster) { await communityService.updateCluster(editingCluster.id, payload); toast.success("Cluster updated"); }
       else { await communityService.createCluster(selectedCommunityId, payload); toast.success("Cluster created"); }
@@ -323,12 +320,12 @@ export function CommunitiesManagement() {
 
   // ── Gate CRUD ────────────────────────────────────────────────
   const openCreateGate = () => { setEditingGate(null); setGateForm(defaultGateForm); setGateDialogOpen(true); };
-  const openEditGate = (g: GateItem) => { setEditingGate(g); setGateForm({ name: g.name, code: g.code ?? "", etaMinutes: g.etaMinutes ? String(g.etaMinutes) : "", allowedRoles: g.allowedRoles.length ? g.allowedRoles : ["VISITOR"] }); setGateDialogOpen(true); };
+  const openEditGate = (g: GateItem) => { setEditingGate(g); setGateForm({ name: g.name, etaMinutes: g.etaMinutes ? String(g.etaMinutes) : "", allowedRoles: g.allowedRoles.length ? g.allowedRoles : ["VISITOR"], clusterIds: g.clusterIds ?? [] }); setGateDialogOpen(true); };
   const toggleGateRole = (r: GateRole) => setGateForm((p) => ({ ...p, allowedRoles: p.allowedRoles.includes(r) ? p.allowedRoles.filter((x) => x !== r) : [...p.allowedRoles, r] }));
   const saveGate = async () => {
     if (!selectedCommunityId || !gateForm.name.trim()) { toast.error("Name is required"); return; }
     if (!gateForm.allowedRoles.length) { toast.error("Select at least one role"); return; }
-    const payload = { name: gateForm.name.trim(), code: gateForm.code.trim() || undefined, etaMinutes: gateForm.etaMinutes.trim() ? Number(gateForm.etaMinutes) : undefined, allowedRoles: gateForm.allowedRoles };
+    const payload = { name: gateForm.name.trim(), etaMinutes: gateForm.etaMinutes.trim() ? Number(gateForm.etaMinutes) : undefined, allowedRoles: gateForm.allowedRoles, clusterIds: gateForm.clusterIds.length ? gateForm.clusterIds : undefined };
     try {
       if (editingGate) { await communityService.updateGate(editingGate.id, payload); await communityService.updateGateRoles(editingGate.id, gateForm.allowedRoles); toast.success("Gate updated"); }
       else { await communityService.createGate(selectedCommunityId, payload); toast.success("Gate created"); }
@@ -362,7 +359,7 @@ export function CommunitiesManagement() {
             Communities
           </h1>
           <p style={{ marginTop: "4px", fontSize: "13px", color: "#6B7280" }}>
-            Manage projects, entry roles, clusters, and gates from one workspace.
+            Manage projects, phases, guidelines, clusters, and gates from one workspace.
           </p>
         </div>
         <PrimaryBtn label="Add Community" icon={<Plus style={{ width: "13px", height: "13px" }} />} onClick={openCreateCommunity} />
@@ -379,7 +376,7 @@ export function CommunitiesManagement() {
             <div style={{ position: "relative" }}>
               <Search style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", width: "13px", height: "13px", color: "#9CA3AF" }} />
               <input
-                placeholder="Search by name or code…"
+                placeholder="Search by name…"
                 value={search}
                 onChange={(e) => { setSearch(e.target.value); setPage(1); }}
                 style={{ ...inputStyle, paddingLeft: "32px", fontSize: "12.5px", background: "#F9FAFB" }}
@@ -448,11 +445,13 @@ export function CommunitiesManagement() {
                       )}
                     </div>
                     <div style={{ marginTop: "3px", display: "flex", alignItems: "center", gap: "8px" }}>
-                      {c.code && (
-                        <span style={{ fontSize: "10.5px", color: "#9CA3AF", fontFamily: "'DM Mono', monospace" }}>{c.code}</span>
-                      )}
+                      <Chip
+                        label={c.structureType === "PHASES" ? "Phases" : "Clusters"}
+                        bg={c.structureType === "PHASES" ? "#FFF7ED" : "#EFF6FF"}
+                        color={c.structureType === "PHASES" ? "#9A3412" : "#1D4ED8"}
+                      />
                       <span style={{ fontSize: "10.5px", color: "#9CA3AF" }}>
-                        {c._count?.clusters ?? 0} clusters · {c._count?.gates ?? 0} gates
+                        {c._count?.clusters ?? 0} {c.structureType === "PHASES" ? "phases" : "clusters"} · {c._count?.gates ?? 0} gates
                       </span>
                     </div>
                   </div>
@@ -479,31 +478,32 @@ export function CommunitiesManagement() {
           {/* Workspace header */}
           <div style={{ padding: "14px 20px", borderBottom: "1px solid #F3F4F6", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div>
-              <h2 style={{ fontSize: "14px", fontWeight: 700, color: "#111827", letterSpacing: "-0.01em", lineHeight: 1 }}>
-                {selectedCommunity ? selectedCommunity.name : "Workspace"}
-              </h2>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <h2 style={{ fontSize: "14px", fontWeight: 700, color: "#111827", letterSpacing: "-0.01em", lineHeight: 1 }}>
+                  {selectedCommunity ? selectedCommunity.name : "Workspace"}
+                </h2>
+                {selectedCommunity && (
+                  <Chip
+                    label={selectedCommunity.structureType === "PHASES" ? "Uses Phases" : "Uses Clusters"}
+                    bg={selectedCommunity.structureType === "PHASES" ? "#FFF7ED" : "#EFF6FF"}
+                    color={selectedCommunity.structureType === "PHASES" ? "#9A3412" : "#1D4ED8"}
+                  />
+                )}
+              </div>
               <p style={{ marginTop: "3px", fontSize: "11.5px", color: "#9CA3AF" }}>
-                {selectedCommunity ? "Clusters and gates configuration" : "Select a community from the list"}
+                {selectedCommunity
+                  ? `${selectedCommunity.structureType === "PHASES" ? "Phases" : "Clusters"} and gates configuration`
+                  : "Select a community from the list"}
               </p>
             </div>
-
-            {/* Entry roles chips */}
-            {selectedCommunity && (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", justifyContent: "flex-end", maxWidth: "320px" }}>
-                {(selectedCommunity.allowedEntryRoles ?? []).map((r, ri) => (
-                  <Chip key={r} label={entryRoleLabel(r)} bg={`${accentFor(ri)}15`} color={accentFor(ri)} />
-                ))}
-              </div>
-            )}
           </div>
-
           {!selectedCommunityId ? (
             <div style={{ padding: "64px 24px", textAlign: "center" }}>
               <div style={{ width: "48px", height: "48px", borderRadius: "50%", background: "#F3F4F6", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px" }}>
                 <Building style={{ width: "20px", height: "20px", color: "#D1D5DB" }} />
               </div>
               <p style={{ fontSize: "13.5px", fontWeight: 600, color: "#6B7280" }}>No community selected</p>
-              <p style={{ marginTop: "4px", fontSize: "12px", color: "#9CA3AF" }}>Pick one from the list to manage its clusters and gates.</p>
+              <p style={{ marginTop: "4px", fontSize: "12px", color: "#9CA3AF" }}>Pick one from the list to manage its configuration.</p>
             </div>
           ) : isLoadingDetail ? (
             <div style={{ padding: "32px 20px" }}>
@@ -516,11 +516,12 @@ export function CommunitiesManagement() {
               {/* Tabs */}
               <div style={{ display: "flex", alignItems: "center", gap: "0", borderBottom: "1px solid #F3F4F6", padding: "0 20px" }}>
                 {([
-                  { key: "clusters", label: "Clusters", icon: <LayoutGrid style={{ width: "12px", height: "12px" }} />, count: selectedDetail.clusters.length },
-                  { key: "gates",    label: "Gates",    icon: <DoorOpen  style={{ width: "12px", height: "12px" }} />, count: selectedDetail.gates.length },
-                ] as const).map((tab) => {
+                  { key: "clusters" as const, label: selectedCommunity?.structureType === "PHASES" ? "Phases" : "Clusters", icon: <LayoutGrid style={{ width: "12px", height: "12px" }} />, count: selectedDetail.clusters.length },
+                  { key: "gates" as const,    label: "Gates",    icon: <DoorOpen  style={{ width: "12px", height: "12px" }} />, count: selectedDetail.gates.length },
+                  { key: "guidelines" as const, label: "Guidelines", icon: <FileText style={{ width: "12px", height: "12px" }} />, count: undefined },
+                ]).map((tab) => {
                   const isTab = activeTab === tab.key;
-                  const accent = tab.key === "clusters" ? "#2563EB" : "#0D9488";
+                  const accent = tab.key === "clusters" ? "#2563EB" : tab.key === "gates" ? "#0D9488" : "#92400E";
                   return (
                     <button
                       key={tab.key}
@@ -540,9 +541,11 @@ export function CommunitiesManagement() {
                     >
                       <span style={{ color: isTab ? accent : "#9CA3AF" }}>{tab.icon}</span>
                       {tab.label}
-                      <span style={{ fontSize: "10px", fontWeight: 700, padding: "1px 5px", borderRadius: "5px", background: isTab ? `${accent}15` : "#F3F4F6", color: isTab ? accent : "#9CA3AF", fontFamily: "'DM Mono', monospace" }}>
-                        {tab.count}
-                      </span>
+                      {tab.count !== undefined && (
+                        <span style={{ fontSize: "10px", fontWeight: 700, padding: "1px 5px", borderRadius: "5px", background: isTab ? `${accent}15` : "#F3F4F6", color: isTab ? accent : "#9CA3AF", fontFamily: "'DM Mono', monospace" }}>
+                          {tab.count}
+                        </span>
+                      )}
                     </button>
                   );
                 })}
@@ -551,7 +554,7 @@ export function CommunitiesManagement() {
 
                 {/* Add button */}
                 {activeTab === "clusters" && (
-                  <PrimaryBtn label="Add Cluster" icon={<Plus style={{ width: "12px", height: "12px" }} />} onClick={openCreateCluster} />
+                  <PrimaryBtn label={selectedCommunity?.structureType === "PHASES" ? "Add Phase" : "Add Cluster"} icon={<Plus style={{ width: "12px", height: "12px" }} />} onClick={openCreateCluster} />
                 )}
                 {activeTab === "gates" && (
                   <PrimaryBtn label="Add Gate" icon={<Plus style={{ width: "12px", height: "12px" }} />} onClick={openCreateGate} />
@@ -566,7 +569,7 @@ export function CommunitiesManagement() {
                   <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                     {selectedDetail.clusters.length === 0 ? (
                       <div style={{ padding: "32px", textAlign: "center" }}>
-                        <p style={{ fontSize: "13px", color: "#9CA3AF" }}>No clusters yet. Add one above.</p>
+                        <p style={{ fontSize: "13px", color: "#9CA3AF" }}>No {selectedCommunity?.structureType === "PHASES" ? "phases" : "clusters"} yet. Add one above.</p>
                       </div>
                     ) : selectedDetail.clusters.map((cl, i) => (
                       <div key={cl.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "12px 14px", borderRadius: "8px", border: "1px solid #EBEBEB", background: "#FAFAFA" }}>
@@ -579,7 +582,6 @@ export function CommunitiesManagement() {
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <p style={{ fontSize: "13px", fontWeight: 600, color: "#111827", lineHeight: 1.2 }}>{cl.name}</p>
                           <div style={{ marginTop: "3px", display: "flex", gap: "10px" }}>
-                            {cl.code && <span style={{ fontSize: "11px", color: "#9CA3AF", fontFamily: "'DM Mono', monospace" }}>{cl.code}</span>}
                             <span style={{ fontSize: "11px", color: "#9CA3AF" }}>{cl.unitCount} unit{cl.unitCount !== 1 ? "s" : ""}</span>
                           </div>
                         </div>
@@ -614,7 +616,6 @@ export function CommunitiesManagement() {
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                             <p style={{ fontSize: "13px", fontWeight: 600, color: "#111827", lineHeight: 1.2 }}>{g.name}</p>
-                            {g.code && <span style={{ fontSize: "10.5px", color: "#9CA3AF", fontFamily: "'DM Mono', monospace" }}>{g.code}</span>}
                             {g.etaMinutes != null && (
                               <span style={{ fontSize: "10.5px", color: "#9CA3AF" }}>ETA {g.etaMinutes} min</span>
                             )}
@@ -624,6 +625,12 @@ export function CommunitiesManagement() {
                               <Chip key={r} label={r} bg={GATE_ROLE_COLORS[r].bg} color={GATE_ROLE_COLORS[r].color} />
                             ))}
                           </div>
+                          {g.clusterIds && g.clusterIds.length > 0 && selectedDetail && (
+                            <div style={{ marginTop: "5px", fontSize: "10.5px", color: "#6B7280" }}>
+                              <span style={{ fontWeight: 600 }}>Clusters:</span>{" "}
+                              {g.clusterIds.map((cid) => selectedDetail.clusters.find((cl) => cl.id === cid)?.name).filter(Boolean).join(", ") || "—"}
+                            </div>
+                          )}
                         </div>
 
                         {/* Actions */}
@@ -633,6 +640,44 @@ export function CommunitiesManagement() {
                         </div>
                       </div>
                     ))}
+                  </div>
+                )}
+
+                {/* ── Guidelines tab ─────────────────────────────── */}
+                {activeTab === "guidelines" && (
+                  <div>
+                    {editingGuidelines ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                        <textarea
+                          value={guidelinesText}
+                          onChange={(e) => setGuidelinesText(e.target.value)}
+                          placeholder="Enter community guidelines, rules, and regulations..."
+                          rows={12}
+                          style={{ ...inputStyle, resize: "vertical", minHeight: "200px" }}
+                        />
+                        <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+                          <GhostBtn label="Cancel" onClick={() => setEditingGuidelines(false)} />
+                          <PrimaryBtn label="Save Guidelines" onClick={() => void saveGuidelines()} />
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        {selectedDetail.guidelines ? (
+                          <div style={{ padding: "16px", borderRadius: "8px", border: "1px solid #EBEBEB", background: "#FAFAFA" }}>
+                            <div style={{ fontSize: "13px", color: "#374151", lineHeight: 1.7, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                              {selectedDetail.guidelines}
+                            </div>
+                          </div>
+                        ) : (
+                          <div style={{ padding: "32px", textAlign: "center" }}>
+                            <p style={{ fontSize: "13px", color: "#9CA3AF" }}>No guidelines set for this community.</p>
+                          </div>
+                        )}
+                        <div style={{ marginTop: "12px", display: "flex", justifyContent: "flex-end" }}>
+                          <PrimaryBtn label={selectedDetail.guidelines ? "Edit Guidelines" : "Add Guidelines"} icon={<Pencil style={{ width: "12px", height: "12px" }} />} onClick={openEditGuidelines} />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -652,37 +697,40 @@ export function CommunitiesManagement() {
                 {editingCommunity ? "Edit Community" : "Add Community"}
               </DialogTitle>
               <DialogDescription style={{ fontSize: "12px", color: "#9CA3AF", marginTop: "3px" }}>
-                Configure base information and allowed entry roles.
+                Configure base information for this community.
               </DialogDescription>
             </DialogHeader>
           </div>
           <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "16px" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-              <Field label="Name"><input value={communityForm.name} onChange={(e) => setCommunityForm((p) => ({ ...p, name: e.target.value }))} placeholder="Al Karma Gates" style={inputStyle} /></Field>
-              <Field label="Code"><input value={communityForm.code} onChange={(e) => setCommunityForm((p) => ({ ...p, code: e.target.value }))} placeholder="AKG" style={inputStyle} /></Field>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-              <Field label="Display Order"><input type="number" value={communityForm.displayOrder} onChange={(e) => setCommunityForm((p) => ({ ...p, displayOrder: e.target.value }))} style={inputStyle} /></Field>
-              <Field label="Status">
-                <label style={{ display: "flex", alignItems: "center", gap: "8px", padding: "9px 10px", border: "1px solid #E5E7EB", borderRadius: "7px", cursor: "pointer", fontSize: "13px", color: "#374151" }}>
-                  <input type="checkbox" checked={communityForm.isActive} onChange={(e) => setCommunityForm((p) => ({ ...p, isActive: e.target.checked }))} />
-                  Active community
-                </label>
-              </Field>
-            </div>
-            <Field label="Allowed Entry Roles" hint="Select which resident types can be assigned to this community.">
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "6px", marginTop: "2px" }}>
-                {ENTRY_ROLE_OPTIONS.map((opt, oi) => {
-                  const checked = communityForm.allowedEntryRoles.includes(opt.value);
-                  const acc = accentFor(oi);
+            <Field label="Name"><input value={communityForm.name} onChange={(e) => setCommunityForm((p) => ({ ...p, name: e.target.value }))} placeholder="Al Karma Gates" style={inputStyle} /></Field>
+            <Field label="Structure Type" hint="Choose how this community is subdivided.">
+              <div style={{ display: "flex", gap: "8px" }}>
+                {(["CLUSTERS", "PHASES"] as CommunityStructure[]).map((st) => {
+                  const checked = communityForm.structureType === st;
+                  const lbl = st === "CLUSTERS" ? "Clusters" : "Phases";
                   return (
-                    <label key={opt.value} style={{ display: "flex", alignItems: "center", gap: "7px", padding: "8px 10px", border: `1px solid ${checked ? acc + "40" : "#E5E7EB"}`, borderRadius: "7px", cursor: "pointer", background: checked ? `${acc}08` : "#FFFFFF", transition: "all 120ms ease", fontSize: "12.5px", fontWeight: checked ? 600 : 400, color: checked ? "#111827" : "#6B7280" }}>
-                      <input type="checkbox" checked={checked} onChange={() => toggleEntryRole(opt.value)} style={{ accentColor: acc }} />
-                      {opt.label}
+                    <label key={st} style={{ flex: 1, display: "flex", alignItems: "center", gap: "8px", padding: "10px 12px", border: `1px solid ${checked ? "#BFDBFE" : "#E5E7EB"}`, borderRadius: "7px", cursor: "pointer", background: checked ? "#EFF6FF" : "#FFFFFF", transition: "all 120ms ease", fontSize: "13px", fontWeight: checked ? 600 : 400, color: checked ? "#1D4ED8" : "#6B7280" }}>
+                      <input type="radio" name="structureType" checked={checked} onChange={() => setCommunityForm((p) => ({ ...p, structureType: st }))} style={{ accentColor: "#2563EB" }} />
+                      {lbl}
                     </label>
                   );
                 })}
               </div>
+            </Field>
+            <Field label="Guidelines" hint="Community rules and regulations visible to residents.">
+              <textarea
+                value={communityForm.guidelines}
+                onChange={(e) => setCommunityForm((p) => ({ ...p, guidelines: e.target.value }))}
+                placeholder="e.g. No pets in common areas. Quiet hours 10 PM – 7 AM."
+                rows={4}
+                style={{ ...inputStyle, resize: "vertical", minHeight: "80px" }}
+              />
+            </Field>
+            <Field label="Status">
+              <label style={{ display: "flex", alignItems: "center", gap: "8px", padding: "9px 10px", border: "1px solid #E5E7EB", borderRadius: "7px", cursor: "pointer", fontSize: "13px", color: "#374151" }}>
+                <input type="checkbox" checked={communityForm.isActive} onChange={(e) => setCommunityForm((p) => ({ ...p, isActive: e.target.checked }))} />
+                Active community
+              </label>
             </Field>
           </div>
           <div style={{ padding: "14px 24px", borderTop: "1px solid #F3F4F6", display: "flex", justifyContent: "flex-end", gap: "8px" }}>
@@ -697,18 +745,22 @@ export function CommunitiesManagement() {
         <DialogContent style={{ maxWidth: "400px", borderRadius: "10px", border: "1px solid #EBEBEB", padding: 0, overflow: "hidden", fontFamily: "'Work Sans', sans-serif" }}>
           <div style={{ padding: "20px 24px 16px", borderBottom: "1px solid #F3F4F6" }}>
             <DialogHeader>
-              <DialogTitle style={{ fontFamily: "'Work Sans', sans-serif", fontWeight: 700, fontSize: "15px", color: "#111827" }}>{editingCluster ? "Edit Cluster" : "Add Cluster"}</DialogTitle>
-              <DialogDescription style={{ fontSize: "12px", color: "#9CA3AF", marginTop: "3px" }}>Clusters organize units within a community.</DialogDescription>
+              <DialogTitle style={{ fontFamily: "'Work Sans', sans-serif", fontWeight: 700, fontSize: "15px", color: "#111827" }}>
+                {editingCluster
+                  ? `Edit ${selectedCommunity?.structureType === "PHASES" ? "Phase" : "Cluster"}`
+                  : `Add ${selectedCommunity?.structureType === "PHASES" ? "Phase" : "Cluster"}`}
+              </DialogTitle>
+              <DialogDescription style={{ fontSize: "12px", color: "#9CA3AF", marginTop: "3px" }}>
+                {selectedCommunity?.structureType === "PHASES" ? "Phases" : "Clusters"} organize units within a community.
+              </DialogDescription>
             </DialogHeader>
           </div>
           <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "12px" }}>
             <Field label="Name"><input value={clusterForm.name} onChange={(e) => setClusterForm((p) => ({ ...p, name: e.target.value }))} style={inputStyle} /></Field>
-            <Field label="Code"><input value={clusterForm.code} onChange={(e) => setClusterForm((p) => ({ ...p, code: e.target.value }))} style={inputStyle} /></Field>
-            <Field label="Display Order"><input type="number" value={clusterForm.displayOrder} onChange={(e) => setClusterForm((p) => ({ ...p, displayOrder: e.target.value }))} style={inputStyle} /></Field>
           </div>
           <div style={{ padding: "14px 24px", borderTop: "1px solid #F3F4F6", display: "flex", justifyContent: "flex-end", gap: "8px" }}>
             <GhostBtn label="Cancel" onClick={() => setClusterDialogOpen(false)} />
-            <PrimaryBtn label="Save Cluster" onClick={() => void saveCluster()} />
+            <PrimaryBtn label={`Save ${selectedCommunity?.structureType === "PHASES" ? "Phase" : "Cluster"}`} onClick={() => void saveCluster()} />
           </div>
         </DialogContent>
       </Dialog>
@@ -723,10 +775,23 @@ export function CommunitiesManagement() {
             </DialogHeader>
           </div>
           <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "12px" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-              <Field label="Name"><input value={gateForm.name} onChange={(e) => setGateForm((p) => ({ ...p, name: e.target.value }))} style={inputStyle} /></Field>
-              <Field label="Code"><input value={gateForm.code} onChange={(e) => setGateForm((p) => ({ ...p, code: e.target.value }))} style={inputStyle} /></Field>
-            </div>
+            <Field label="Name"><input value={gateForm.name} onChange={(e) => setGateForm((p) => ({ ...p, name: e.target.value }))} style={inputStyle} /></Field>
+            {selectedDetail && selectedDetail.clusters.length > 0 && (
+              <Field label="Clusters" hint="Which clusters does this gate serve?">
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "2px" }}>
+                  {selectedDetail.clusters.map((cl) => {
+                    const checked = gateForm.clusterIds.includes(cl.id);
+                    return (
+                      <label key={cl.id} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 10px", border: `1px solid ${checked ? "#BFDBFE" : "#E5E7EB"}`, borderRadius: "7px", cursor: "pointer", background: checked ? "#EFF6FF" : "#FFFFFF", transition: "all 120ms ease", fontSize: "12.5px", fontWeight: checked ? 600 : 400, color: checked ? "#1D4ED8" : "#6B7280" }}>
+                        <input type="checkbox" checked={checked} onChange={() => setGateForm((p) => ({ ...p, clusterIds: checked ? p.clusterIds.filter((id) => id !== cl.id) : [...p.clusterIds, cl.id] }))} style={{ accentColor: "#2563EB" }} />
+                        {cl.name}
+                        <span style={{ fontSize: "10px", color: "#9CA3AF", marginLeft: "auto" }}>{cl.unitCount} unit{cl.unitCount !== 1 ? "s" : ""}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </Field>
+            )}
             <Field label="ETA (minutes)" hint="Expected queue wait time at this gate.">
               <input type="number" min={1} max={60} value={gateForm.etaMinutes} onChange={(e) => setGateForm((p) => ({ ...p, etaMinutes: e.target.value }))} style={inputStyle} />
             </Field>

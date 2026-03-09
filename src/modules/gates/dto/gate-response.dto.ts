@@ -17,6 +17,7 @@ export class GateResponseDto {
   isVisitorRequestRequired!: boolean;
   unitIds!: string[];
   unitCount!: number;
+  clusterIds!: string[];
   createdAt!: Date;
   updatedAt!: Date;
 }

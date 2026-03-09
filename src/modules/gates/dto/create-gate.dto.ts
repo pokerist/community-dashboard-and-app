@@ -52,4 +52,10 @@ export class CreateGateDto {
   @IsOptional()
   @IsBoolean()
   isVisitorRequestRequired?: boolean;
+
+  @ApiPropertyOptional({ example: ['cluster-uuid-1'], description: 'Cluster IDs this gate serves' })
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  clusterIds?: string[];
 }

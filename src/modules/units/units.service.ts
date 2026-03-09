@@ -11,6 +11,7 @@ import {
   InvoiceStatus,
   Prisma,
   UnitAccessRole,
+  UnitCategory,
   UnitStatus,
   UnitType,
   UserStatusLogSource,
@@ -26,12 +27,20 @@ import { UnitDetailResponse, UnitListItem } from './dto/unit-response.dto';
 import { UpdateUnitGateAccessDto } from './dto/update-unit-gate-access.dto';
 import { UpdateUnitDto } from './dto/update-unit.dto';
 
+const COMMERCIAL_TYPES: UnitType[] = [UnitType.ADMINISTRATIVE, UnitType.COMMERCIAL_UNIT];
+
+function deriveCategory(type: UnitType, explicit?: UnitCategory): UnitCategory {
+  if (explicit) return explicit;
+  return COMMERCIAL_TYPES.includes(type) ? UnitCategory.COMMERCIAL : UnitCategory.RESIDENTIAL;
+}
+
 interface UnitListRecord {
   id: string;
   communityId: string | null;
   clusterId: string | null;
   unitNumber: string;
   block: string | null;
+  category: UnitCategory;
   type: UnitType;
   status: UnitStatus;
   isDelivered: boolean;
@@ -54,75 +63,43 @@ export class UnitsService {
 
   private mapDisplayStatus(unit: {
     status: UnitStatus;
-    isDelivered: boolean;
   }): UnitDisplayStatus {
-    const offPlanStatuses: UnitStatus[] = [
-      UnitStatus.AVAILABLE,
-      UnitStatus.HELD,
-      UnitStatus.UNRELEASED,
-    ];
-    const occupiedStatuses: UnitStatus[] = [
-      UnitStatus.OCCUPIED,
-      UnitStatus.LEASED,
-      UnitStatus.RENTED,
-    ];
-
-    if (
-      !unit.isDelivered &&
-      offPlanStatuses.includes(unit.status)
-    ) {
-      return 'OFF_PLAN';
-    }
-
-    if (!unit.isDelivered && unit.status === UnitStatus.NOT_DELIVERED) {
-      return 'UNDER_CONSTRUCTION';
-    }
-
-    if (unit.isDelivered && unit.status === UnitStatus.DELIVERED) {
-      return 'DELIVERED';
-    }
-
-    if (
-      unit.isDelivered &&
-      occupiedStatuses.includes(unit.status)
-    ) {
-      return 'OCCUPIED';
-    }
-
-    return unit.isDelivered ? 'DELIVERED' : 'UNDER_CONSTRUCTION';
+    return unit.status as string as UnitDisplayStatus;
   }
 
-  private displayStatusWhere(status?: UnitDisplayStatus): Prisma.UnitWhereInput {
-    if (!status) return {};
+  private normalizeUnitStatus(
+    rawStatus?: string,
+    fieldName: 'status' | 'displayStatus' = 'status',
+  ): UnitStatus | undefined {
+    if (!rawStatus) return undefined;
 
-    switch (status) {
-      case 'OFF_PLAN':
-        return {
-          isDelivered: false,
-          status: {
-            in: [UnitStatus.AVAILABLE, UnitStatus.HELD, UnitStatus.UNRELEASED],
-          },
-        };
-      case 'UNDER_CONSTRUCTION':
-        return {
-          isDelivered: false,
-          status: UnitStatus.NOT_DELIVERED,
-        };
-      case 'DELIVERED':
-        return {
-          isDelivered: true,
-          status: UnitStatus.DELIVERED,
-        };
+    switch (rawStatus) {
+      case UnitStatus.OFF_PLAN:
+        return UnitStatus.OFF_PLAN;
+      case UnitStatus.UNDER_CONSTRUCTION:
+      case 'NOT_DELIVERED':
+        return UnitStatus.UNDER_CONSTRUCTION;
+      case UnitStatus.DELIVERED:
+      case 'AVAILABLE':
       case 'OCCUPIED':
-        return {
-          isDelivered: true,
-          status: {
-            in: [UnitStatus.OCCUPIED, UnitStatus.LEASED, UnitStatus.RENTED],
-          },
-        };
+      case 'LEASED':
+      case 'HELD':
+      case 'UNRELEASED':
+      case 'RENTED':
+        return UnitStatus.DELIVERED;
       default:
-        return {};
+        throw new BadRequestException(
+          `${fieldName} must be one of OFF_PLAN, UNDER_CONSTRUCTION, DELIVERED`,
+        );
     }
+  }
+
+  private displayStatusWhere(
+    status?: UnitDisplayStatus | string,
+  ): Prisma.UnitWhereInput {
+    const normalized = this.normalizeUnitStatus(status, 'displayStatus');
+    if (!normalized) return {};
+    return { status: normalized };
   }
 
   private activeFilterWhere(params: {
@@ -149,6 +126,7 @@ export class UnitsService {
       clusterId: record.clusterId,
       unitNumber: record.unitNumber,
       block: record.block,
+      category: record.category,
       type: record.type,
       status: record.status,
       displayStatus: this.mapDisplayStatus(record),
@@ -264,6 +242,7 @@ export class UnitsService {
     const {
       type,
       status,
+      category,
       block,
       communityId,
       clusterId,
@@ -272,10 +251,12 @@ export class UnitsService {
       isActive,
       ...baseQuery
     } = query;
+    const normalizedStatus = this.normalizeUnitStatus(status, 'status');
 
     const where: Prisma.UnitWhereInput = {
       ...(type ? { type } : {}),
-      ...(status ? { status } : {}),
+      ...(normalizedStatus ? { status: normalizedStatus } : {}),
+      ...(category ? { category } : {}),
       ...(block ? { block } : {}),
       ...(communityId ? { communityId } : {}),
       ...(clusterId ? { clusterId } : {}),
@@ -322,10 +303,11 @@ export class UnitsService {
       isActive,
       ...baseQuery
     } = query;
+    const normalizedStatus = this.normalizeUnitStatus(status, 'status');
 
     const where: Prisma.UnitWhereInput = {
       ...(type ? { type } : {}),
-      ...(status ? { status } : {}),
+      ...(normalizedStatus ? { status: normalizedStatus } : {}),
       ...(block ? { block } : {}),
       ...(communityId ? { communityId } : {}),
       ...(clusterId ? { clusterId } : {}),
@@ -382,8 +364,26 @@ export class UnitsService {
                   select: {
                     id: true,
                     nameEN: true,
+                    nameAR: true,
                     email: true,
                     phone: true,
+                    userStatus: true,
+                  },
+                },
+                familyMembers: {
+                  include: {
+                    familyResident: {
+                      include: {
+                        user: {
+                          select: {
+                            id: true,
+                            nameEN: true,
+                            email: true,
+                            phone: true,
+                          },
+                        },
+                      },
+                    },
                   },
                 },
               },
@@ -446,6 +446,7 @@ export class UnitsService {
       clusterId: unit.clusterId,
       unitNumber: unit.unitNumber,
       block: unit.block,
+      category: (unit as any).category ?? deriveCategory(unit.type),
       type: unit.type,
       status: unit.status,
       displayStatus: this.mapDisplayStatus(unit),
@@ -467,14 +468,41 @@ export class UnitsService {
         tenantId: lease.tenantId,
         tenantEmail: lease.tenantEmail,
       })),
-      currentResidents: unit.residents.map((residentUnit) => ({
-        id: residentUnit.resident.id,
-        userId: residentUnit.resident.userId,
-        name: residentUnit.resident.user?.nameEN ?? null,
-        email: residentUnit.resident.user?.email ?? null,
-        phone: residentUnit.resident.user?.phone ?? null,
-        isPrimary: residentUnit.isPrimary,
-      })),
+      currentResidents: await (async () => {
+        const userIds = unit.residents.map((ru) => ru.resident.userId);
+        const unitAccesses = await this.prisma.unitAccess.findMany({
+          where: { unitId: unit.id, userId: { in: userIds }, status: 'ACTIVE' },
+          select: { userId: true, role: true },
+        });
+        const accessRoleMap = new Map<string, string>();
+        for (const access of unitAccesses) {
+          accessRoleMap.set(access.userId, access.role);
+        }
+        return unit.residents.map((ru) => {
+          const user = ru.resident.user;
+          const accessRole = accessRoleMap.get(ru.resident.userId) ?? (ru.isPrimary ? 'OWNER' : 'TENANT');
+          return {
+            id: ru.id,
+            residentId: ru.resident.id,
+            userId: ru.resident.userId,
+            name: user?.nameEN ?? user?.nameAR ?? null,
+            email: user?.email ?? null,
+            phone: user?.phone ?? null,
+            userStatus: user?.userStatus ?? null,
+            isPrimary: ru.isPrimary,
+            role: accessRole,
+            assignedAt: ru.assignedAt,
+            familyMembers: (ru.resident as any).familyMembers?.map((fm: any) => ({
+              id: fm.id,
+              name: fm.familyResident?.user?.nameEN ?? null,
+              email: fm.familyResident?.user?.email ?? null,
+              phone: fm.familyResident?.user?.phone ?? null,
+              relationship: fm.relationship,
+              status: fm.status,
+            })) ?? [],
+          };
+        });
+      })(),
       recentComplaints: unit.complaints.map((complaint) => ({
         id: complaint.id,
         complaintNumber: complaint.complaintNumber,
@@ -503,6 +531,8 @@ export class UnitsService {
       allowedGateIds: dto.allowedGateIds ?? [],
     });
 
+    const category = deriveCategory(dto.type, dto.category);
+
     const created = await this.prisma.unit.create({
       data: {
         communityId: dto.communityId,
@@ -510,8 +540,9 @@ export class UnitsService {
         projectName: community.name,
         block: dto.block,
         unitNumber: dto.unitNumber.trim(),
+        category,
         type: dto.type,
-        status: dto.status ?? UnitStatus.AVAILABLE,
+        status: dto.status ?? UnitStatus.OFF_PLAN,
         isDelivered: dto.isDelivered ?? false,
         floors: dto.floors,
         bedrooms: dto.bedrooms,
@@ -523,6 +554,18 @@ export class UnitsService {
         isActive: true,
       },
     });
+
+    // Auto-create commercial entity for commercial units
+    if (category === UnitCategory.COMMERCIAL) {
+      await this.prisma.commercialEntity.create({
+        data: {
+          name: `${dto.unitNumber.trim()} - ${community.name}`,
+          communityId: dto.communityId,
+          unitId: created.id,
+          isActive: true,
+        },
+      });
+    }
 
     return this.findOne(created.id);
   }
@@ -786,15 +829,6 @@ export class UnitsService {
         throw new BadRequestException('Resident is already assigned to this unit');
       }
 
-      if (role === 'OWNER') {
-        const existingOwner = await tx.residentUnit.findFirst({
-          where: { unitId, isPrimary: true },
-        });
-        if (existingOwner) {
-          throw new BadRequestException('Unit already has an owner assigned');
-        }
-      }
-
       return tx.residentUnit.create({
         data: {
           unitId,
@@ -823,9 +857,85 @@ export class UnitsService {
   }
 
   async getUsers(unitId: string) {
-    return this.prisma.residentUnit.findMany({
+    const residentUnits = await this.prisma.residentUnit.findMany({
       where: { unitId },
-      include: { resident: true },
+      include: {
+        resident: {
+          include: {
+            user: {
+              select: {
+                id: true,
+                nameEN: true,
+                nameAR: true,
+                email: true,
+                phone: true,
+                userStatus: true,
+              },
+            },
+            familyMembers: {
+              include: {
+                familyResident: {
+                  include: {
+                    user: {
+                      select: {
+                        id: true,
+                        nameEN: true,
+                        email: true,
+                        phone: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Fetch unit access roles for all residents in this unit
+    const userIds = residentUnits.map((ru) => ru.resident.userId);
+    const unitAccesses = await this.prisma.unitAccess.findMany({
+      where: {
+        unitId,
+        userId: { in: userIds },
+        status: 'ACTIVE',
+      },
+      select: {
+        userId: true,
+        role: true,
+      },
+    });
+
+    const accessRoleMap = new Map<string, string>();
+    for (const access of unitAccesses) {
+      accessRoleMap.set(access.userId, access.role);
+    }
+
+    return residentUnits.map((ru) => {
+      const user = ru.resident.user;
+      const accessRole = accessRoleMap.get(ru.resident.userId) ?? (ru.isPrimary ? 'OWNER' : 'TENANT');
+
+      return {
+        id: ru.id,
+        residentId: ru.resident.id,
+        userId: ru.resident.userId,
+        name: user?.nameEN ?? user?.nameAR ?? null,
+        email: user?.email ?? null,
+        phone: user?.phone ?? null,
+        userStatus: user?.userStatus ?? null,
+        isPrimary: ru.isPrimary,
+        role: accessRole,
+        assignedAt: ru.assignedAt,
+        familyMembers: ru.resident.familyMembers.map((fm) => ({
+          id: fm.id,
+          name: fm.familyResident?.user?.nameEN ?? null,
+          email: fm.familyResident?.user?.email ?? null,
+          phone: fm.familyResident?.user?.phone ?? null,
+          relationship: fm.relationship,
+          status: fm.status,
+        })),
+      };
     });
   }
 
@@ -892,13 +1002,8 @@ export class UnitsService {
     switch (feature) {
       case 'add_tenant':
       case 'add_family':
-        return unit.status === UnitStatus.DELIVERED;
       case 'manage_delegates':
-        return (
-          unit.status === UnitStatus.DELIVERED ||
-          unit.status === UnitStatus.OCCUPIED ||
-          unit.status === UnitStatus.LEASED
-        );
+        return unit.status === UnitStatus.DELIVERED;
       case 'view_payment_plan':
       case 'view_announcements':
       case 'view_overdue_checks':

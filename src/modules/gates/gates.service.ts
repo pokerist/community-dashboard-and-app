@@ -28,6 +28,9 @@ const gateWithUnitsInclude = {
     where: { deletedAt: null },
     select: { unitId: true },
   },
+  gateClusters: {
+    select: { clusterId: true },
+  },
 } as const;
 
 type GateWithUnitsRow = Prisma.GateGetPayload<{
@@ -118,6 +121,13 @@ export class GatesService {
         etaMinutes: dto.etaMinutes ?? null,
         isActive: true,
         isVisitorRequestRequired: dto.isVisitorRequestRequired ?? false,
+        ...(dto.clusterIds?.length
+          ? {
+              gateClusters: {
+                create: dto.clusterIds.map((clusterId) => ({ clusterId })),
+              },
+            }
+          : {}),
       },
       include: gateWithUnitsInclude,
     });
@@ -166,6 +176,10 @@ export class GatesService {
       await this.assertNoNameDuplicate(current.communityId, dto.name, id);
     }
 
+    if (dto.clusterIds !== undefined) {
+      await this.prisma.gateCluster.deleteMany({ where: { gateId: id } });
+    }
+
     const updated = await this.prisma.gate.update({
       where: { id },
       data: {
@@ -178,6 +192,13 @@ export class GatesService {
         ...(dto.status !== undefined ? { status: dto.status } : {}),
         ...(dto.isVisitorRequestRequired !== undefined
           ? { isVisitorRequestRequired: dto.isVisitorRequestRequired }
+          : {}),
+        ...(dto.clusterIds !== undefined && dto.clusterIds.length > 0
+          ? {
+              gateClusters: {
+                create: dto.clusterIds.map((clusterId) => ({ clusterId })),
+              },
+            }
           : {}),
       },
       include: gateWithUnitsInclude,
@@ -650,6 +671,7 @@ export class GatesService {
       isVisitorRequestRequired: row.isVisitorRequestRequired,
       unitIds,
       unitCount: unitIds.length,
+      clusterIds: row.gateClusters.map((gc) => gc.clusterId),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };

@@ -88,14 +88,8 @@ export class RentRequestsService {
     });
     if (!unit) throw new NotFoundException('Unit not found');
 
-    const rentableStatuses: UnitStatus[] = [
-      UnitStatus.DELIVERED,
-      UnitStatus.OCCUPIED,
-      UnitStatus.LEASED,
-      UnitStatus.RENTED,
-    ];
-    if (!rentableStatuses.includes(unit.status)) {
-      throw new BadRequestException('Unit must be delivered/occupied to submit rent request');
+    if (unit.status !== UnitStatus.DELIVERED) {
+      throw new BadRequestException('Unit must be DELIVERED to submit rent request');
     }
 
     const activeLease = await this.prisma.lease.findFirst({
@@ -315,11 +309,6 @@ export class RentRequestsService {
           canViewFinancials: true,
           canReceiveBilling: false,
         },
-      });
-
-      await tx.unit.update({
-        where: { id: current.unitId },
-        data: { status: UnitStatus.RENTED },
       });
 
       const updated = await tx.rentRequest.update({

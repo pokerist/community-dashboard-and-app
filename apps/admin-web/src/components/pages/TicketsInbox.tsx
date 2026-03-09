@@ -543,15 +543,15 @@ export function TicketsInbox() {
 
       {/* Stat cards */}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:"10px", marginBottom:"16px" }}>
-        <StatCard icon="tickets"          title="Total"      value={String(counts.all)}        />
-        <StatCard icon="active-users"     title="Services"   value={String(counts.services)}   />
-        <StatCard icon="devices"          title="Requests"   value={String(counts.requests)}   />
-        <StatCard icon="complaints-total" title="Complaints" value={String(counts.complaints)} />
-        <StatCard icon="complaints-open"  title="Urgent"     value={String(counts.urgent)}     />
+        <StatCard icon="tickets"          title="Total"      value={String(counts.all)}        onClick={() => { setTab("all"); setTicketPreset("all"); }} />
+        <StatCard icon="active-users"     title="Services"   value={String(counts.services)}   onClick={() => setTab("services")} />
+        <StatCard icon="devices"          title="Requests"   value={String(counts.requests)}   onClick={() => setTab("requests")} />
+        <StatCard icon="complaints-total" title="Complaints" value={String(counts.complaints)} onClick={() => setTab("complaints")} />
+        <StatCard icon="complaints-open"  title="Urgent"     value={String(counts.urgent)}     onClick={() => { setTab("all"); setTicketPreset("pending"); }} />
       </div>
 
       {/* Tab switcher */}
-      <div style={{ display:"flex", gap:"4px", marginBottom:"12px", padding:"4px", borderRadius:"9px", border:"1px solid #EBEBEB", background:"#FAFAFA", width:"fit-content" }}>
+      <div style={{ display:"flex", alignItems:"center", gap:"4px", marginBottom:"12px", padding:"4px", borderRadius:"9px", border:"1px solid #EBEBEB", background:"#FAFAFA" }}>
         {(["all","services","requests","complaints"] as TicketTab[]).map((t) => {
           const isActive = tab===t;
           const label = t==="all"?`All (${counts.all})`:t==="services"?`Services (${counts.services})`:t==="requests"?`Requests (${counts.requests})`:`Complaints (${counts.complaints})`;

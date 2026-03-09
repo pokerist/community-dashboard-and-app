@@ -244,7 +244,7 @@ describe('ViolationsModule (e2e)', () => {
             rows = rows.filter((item) => item.type === where.type);
           }
           if (where.status && typeof where.status === 'object' && 'in' in where.status) {
-            rows = rows.filter((item) => where.status?.in.includes(item.status));
+            rows = rows.filter((item) => (where.status as { in: InvoiceStatus[] }).in.includes(item.status));
           } else if (where.status) {
             rows = rows.filter((item) => item.status === where.status);
           }

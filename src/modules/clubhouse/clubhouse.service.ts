@@ -66,8 +66,6 @@ export class ClubhouseService {
     const unit = await this.prisma.unit.findUnique({ where: { id: unitId } });
     const allowedUnitStatuses: UnitStatus[] = [
       UnitStatus.DELIVERED,
-      UnitStatus.OCCUPIED,
-      UnitStatus.LEASED,
     ];
 
     if (!unit || !allowedUnitStatuses.includes(unit.status)) {

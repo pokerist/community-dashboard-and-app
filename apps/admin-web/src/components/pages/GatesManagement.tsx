@@ -95,9 +95,24 @@ function RoleToggle({ role, active, onClick }: { role: GateAccessRole; active: b
   );
 }
 
-function GateStatCard({ title, value, icon, accent }: { title: string; value: string; icon: React.ReactNode; accent: string }) {
+function GateStatCard({ title, value, icon, accent, onClick, active }: { title: string; value: string; icon: React.ReactNode; accent: string; onClick?: () => void; active?: boolean }) {
+  const [hov, setHov] = useState(false);
   return (
-    <div style={{ flex: '1 1 0', minWidth: 0, padding: '13px 15px', borderRadius: '10px', border: '1px solid #EBEBEB', background: '#FFF', borderTop: `3px solid ${accent}`, boxShadow: '0 1px 3px rgba(0,0,0,0.04)', fontFamily: "'Work Sans', sans-serif" }}>
+    <div
+      onClick={onClick}
+      onMouseEnter={() => { if (onClick && !active) setHov(true); }}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        flex: '1 1 0', minWidth: 0, padding: '13px 15px', borderRadius: '10px',
+        border: active ? `1.5px solid ${accent}` : '1px solid #EBEBEB',
+        background: active ? accent + '0A' : hov ? accent + '06' : '#FFF',
+        borderTop: active ? `3px solid ${accent}` : `3px solid ${accent}`,
+        boxShadow: active ? `0 0 0 2px ${accent}22` : '0 1px 3px rgba(0,0,0,0.04)',
+        fontFamily: "'Work Sans', sans-serif",
+        cursor: onClick ? 'pointer' : undefined,
+        transition: 'all 120ms ease',
+      }}
+    >
       <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '5px' }}>
         <span style={{ color: accent }}>{icon}</span>
         <span style={{ fontSize: '10.5px', fontWeight: 600, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{title}</span>
@@ -163,6 +178,7 @@ export function GatesManagement() {
   const [drawerOpen,          setDrawerOpen]          = useState(false);
   const [editingGate,         setEditingGate]         = useState<GateRow | null>(null);
   const [form,                setForm]                = useState<GateFormState>(INITIAL_FORM);
+  const [activeStatFilter,    setActiveStatFilter]    = useState<string | null>(null);
 
   const resetForm = () => { setEditingGate(null); setForm(INITIAL_FORM); };
   const openCreate = () => { resetForm(); setDrawerOpen(true); };
@@ -287,7 +303,6 @@ export function GatesManagement() {
           </div>
           <div>
             <p style={{ fontSize: '13px', fontWeight: 700, color: '#111827', margin: 0 }}>{r.name}</p>
-            {r.code && <p style={{ fontSize: '10.5px', color: '#9CA3AF', margin: '1px 0 0', fontFamily: "'DM Mono', monospace" }}>{r.code}</p>}
           </div>
         </div>
       ),
@@ -390,30 +405,50 @@ export function GatesManagement() {
           >
             <RefreshCw style={{ width: '13px', height: '13px', animation: isBootstrapping ? 'spin 1s linear infinite' : 'none' }} />
           </button>
-          <button
-            type="button"
-            onClick={openCreate}
-            style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '0 16px', borderRadius: '8px', background: '#111827', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif", boxShadow: '0 2px 6px rgba(0,0,0,0.15)', height: '36px' }}
-          >
-            <Plus style={{ width: '13px', height: '13px' }} /> Add Gate
-          </button>
         </div>
       </div>
 
       {/* ── Stats ──────────────────────────────────────────── */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', overflowX: 'auto' }}>
-        <GateStatCard title="Total Gates"      value={String(stats.totalGates)}      icon={<DoorOpen       style={{ width: '12px', height: '12px' }} />} accent="#2563EB" />
-        <GateStatCard title="Active Gates"     value={String(stats.activeGates)}     icon={<DoorOpen       style={{ width: '12px', height: '12px' }} />} accent="#059669" />
-        <GateStatCard title="Currently Inside" value={String(stats.currentlyInside)} icon={<Users          style={{ width: '12px', height: '12px' }} />} accent="#7C3AED" />
-        <GateStatCard title="Today Entries"    value={String(stats.todayEntries)}    icon={<LogIn          style={{ width: '12px', height: '12px' }} />} accent="#0D9488" />
-        <GateStatCard title="Today Visitors"   value={String(stats.todayVisitors)}   icon={<ArrowRightLeft style={{ width: '12px', height: '12px' }} />} accent="#D97706" />
-        <GateStatCard title="Today Deliveries" value={String(stats.todayDeliveries)} icon={<Truck          style={{ width: '12px', height: '12px' }} />} accent="#BE185D" />
+        <GateStatCard title="Total Gates"      value={String(stats.totalGates)}      icon={<DoorOpen       style={{ width: '12px', height: '12px' }} />} accent="#2563EB"
+          active={activeStatFilter === 'total'}
+          onClick={() => { setActiveStatFilter(activeStatFilter === 'total' ? null : 'total'); setActiveTab('gates'); setLogFilters((p) => ({ ...p, qrType: 'all', status: 'all', page: 1 })); }}
+        />
+        <GateStatCard title="Active Gates"     value={String(stats.activeGates)}     icon={<DoorOpen       style={{ width: '12px', height: '12px' }} />} accent="#059669"
+          active={activeStatFilter === 'active'}
+          onClick={() => { setActiveStatFilter(activeStatFilter === 'active' ? null : 'active'); setActiveTab('gates'); setLogFilters((p) => ({ ...p, qrType: 'all', status: 'all', page: 1 })); }}
+        />
+        <GateStatCard title="Currently Inside" value={String(stats.currentlyInside)} icon={<Users          style={{ width: '12px', height: '12px' }} />} accent="#7C3AED"
+          active={activeStatFilter === 'inside'}
+          onClick={() => { setActiveStatFilter(activeStatFilter === 'inside' ? null : 'inside'); setActiveTab('log'); setLogFilters((p) => ({ ...p, qrType: 'all', status: 'INSIDE', page: 1 })); }}
+        />
+        <GateStatCard title="Today Entries"    value={String(stats.todayEntries)}    icon={<LogIn          style={{ width: '12px', height: '12px' }} />} accent="#0D9488"
+          active={activeStatFilter === 'entries'}
+          onClick={() => { setActiveStatFilter(activeStatFilter === 'entries' ? null : 'entries'); setActiveTab('log'); setLogFilters((p) => ({ ...p, qrType: 'all', status: 'all', page: 1 })); }}
+        />
+        <GateStatCard title="Today Visitors"   value={String(stats.todayVisitors)}   icon={<ArrowRightLeft style={{ width: '12px', height: '12px' }} />} accent="#D97706"
+          active={activeStatFilter === 'visitors'}
+          onClick={() => { setActiveStatFilter(activeStatFilter === 'visitors' ? null : 'visitors'); setActiveTab('log'); setLogFilters((p) => ({ ...p, qrType: 'VISITOR', status: 'all', page: 1 })); }}
+        />
+        <GateStatCard title="Today Deliveries" value={String(stats.todayDeliveries)} icon={<Truck          style={{ width: '12px', height: '12px' }} />} accent="#BE185D"
+          active={activeStatFilter === 'deliveries'}
+          onClick={() => { setActiveStatFilter(activeStatFilter === 'deliveries' ? null : 'deliveries'); setActiveTab('log'); setLogFilters((p) => ({ ...p, qrType: 'DELIVERY', status: 'all', page: 1 })); }}
+        />
       </div>
 
       {/* ── Tab bar ────────────────────────────────────────── */}
-      <div style={{ display: 'flex', gap: '2px', padding: '4px', borderRadius: '10px', background: '#F3F4F6', marginBottom: '16px', overflowX: 'auto' }}>
-        <TabBtn label="Gates"     icon={<DoorOpen     style={{ width: '12px', height: '12px' }} />} active={activeTab === 'gates'} onClick={() => setActiveTab('gates')} />
-        <TabBtn label="Entry Log" icon={<CalendarDays style={{ width: '12px', height: '12px' }} />} active={activeTab === 'log'}   onClick={() => setActiveTab('log')}   />
+      <div style={{ display: 'flex', alignItems: 'center', gap: '2px', padding: '4px', borderRadius: '10px', background: '#F3F4F6', marginBottom: '16px' }}>
+        <TabBtn label="Gates"     icon={<DoorOpen     style={{ width: '12px', height: '12px' }} />} active={activeTab === 'gates'} onClick={() => { setActiveTab('gates'); setActiveStatFilter(null); }} />
+        <TabBtn label="Entry Log" icon={<CalendarDays style={{ width: '12px', height: '12px' }} />} active={activeTab === 'log'}   onClick={() => { setActiveTab('log'); setActiveStatFilter(null); }}   />
+        <div style={{ marginLeft: 'auto', paddingRight: '4px' }}>
+          <button
+            type="button"
+            onClick={openCreate}
+            style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '6px 14px', borderRadius: '7px', background: '#111827', color: '#FFF', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif", boxShadow: '0 1px 4px rgba(0,0,0,0.12)' }}
+          >
+            <Plus style={{ width: '12px', height: '12px' }} /> Add Gate
+          </button>
+        </div>
       </div>
 
       {/* ══ Gates tab ════════════════════════════════════════ */}

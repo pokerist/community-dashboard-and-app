@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, UserPlus, Plus, Trash2, Banknote, CreditCard, Home, User, Fingerprint, Phone, Mail, FileUp, Calendar, StickyNote, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, UserPlus, Plus, Trash2, Banknote, CreditCard, Home, User, Fingerprint, Phone, Mail, FileUp, Calendar, StickyNote, CheckCircle2, Users, ChevronDown, ChevronUp } from "lucide-react";
 import { toast } from "sonner";
 import apiClient from "../../lib/api-client";
 import { errorMessage } from "../../lib/live-data";
@@ -13,8 +13,10 @@ type OwnerInstallmentDraft = {
   dueDate: string; amount: string; referencePageIndex: string; referenceFile: File | null;
 };
 
+type UnitAssignmentRole = "OWNER" | "TENANT" | "FAMILY";
+
 type OwnerUnitDraft = {
-  unitId: string; paymentMode: OwnerPaymentMode; contractSignedAt: string;
+  unitId: string; role: UnitAssignmentRole; paymentMode: OwnerPaymentMode; contractSignedAt: string;
   contractFile: File | null; notes: string; installments: OwnerInstallmentDraft[];
 };
 
@@ -23,10 +25,21 @@ type CreateOwnerForm = {
   nationalId: string; nationalIdPhotoFile: File | null; units: OwnerUnitDraft[];
 };
 
+/** A queued resident ready for submission */
+type QueuedResident = CreateOwnerForm & { _key: number };
+
 function makeInstallment(): OwnerInstallmentDraft { return { dueDate: "", amount: "", referencePageIndex: "", referenceFile: null }; }
-function makeUnit(): OwnerUnitDraft { return { unitId: "", paymentMode: "CASH", contractSignedAt: "", contractFile: null, notes: "", installments: [] }; }
+function makeUnit(): OwnerUnitDraft { return { unitId: "", role: "OWNER", paymentMode: "CASH", contractSignedAt: "", contractFile: null, notes: "", installments: [] }; }
 
 const INIT_FORM: CreateOwnerForm = { nameEN: "", nameAR: "", email: "", phone: "", nationalId: "", nationalIdPhotoFile: null, units: [makeUnit()] };
+
+let _queueKey = 0;
+
+const ROLE_OPTIONS: Array<{ value: UnitAssignmentRole; label: string; desc: string; color: string; bg: string; icon: string }> = [
+  { value: "OWNER", label: "Owner", desc: "Full ownership rights", color: "#1D4ED8", bg: "#EFF6FF", icon: "key" },
+  { value: "TENANT", label: "Tenant", desc: "Active lease holder", color: "#059669", bg: "#ECFDF5", icon: "home" },
+  { value: "FAMILY", label: "Family", desc: "Family member", color: "#D97706", bg: "#FFFBEB", icon: "users" },
+];
 
 // ─── Design tokens ────────────────────────────────────────────
 
@@ -72,6 +85,8 @@ export function ResidentCreatePage({ onBack, onCreated }: ResidentCreatePageProp
   const [loadingUnits, setLoadingUnits] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<CreateOwnerForm>(INIT_FORM);
+  const [queue, setQueue] = useState<QueuedResident[]>([]);
+  const [expandedQueue, setExpandedQueue] = useState(true);
 
   // ── Load available units ──────────────────────────────────
   const loadUnits = useCallback(async () => {
@@ -80,7 +95,9 @@ export function ResidentCreatePage({ onBack, onCreated }: ResidentCreatePageProp
       const collected: any[] = [];
       let page = 1; let totalPages = 1;
       do {
-        const res = await apiClient.get("/units", { params: { page, limit: 100, status: "AVAILABLE" } });
+        const res = await apiClient.get("/units", {
+          params: { page, limit: 100, displayStatus: "DELIVERED" },
+        });
         const raw = Array.isArray(res.data?.data) ? res.data.data : Array.isArray(res.data) ? res.data : [];
         collected.push(...raw);
         totalPages = Number(res.data?.meta?.totalPages || 1);
@@ -105,46 +122,110 @@ export function ResidentCreatePage({ onBack, onCreated }: ResidentCreatePageProp
     setForm((p) => ({ ...p, units: p.units.map((u, i) => i === idx ? updater(u) : u) }));
   }, []);
 
-  // ── Submit ────────────────────────────────────────────────
-  const handleCreate = async () => {
-    if (!form.nameEN.trim())              { toast.error("Resident English name is required"); return; }
-    if (!form.phone.trim())               { toast.error("Phone is required"); return; }
-    if (!form.nationalIdPhotoFile)        { toast.error("National ID image is required"); return; }
-    if (!form.units.length || !form.units[0].unitId) { toast.error("At least one unit assignment is required"); return; }
+  // ── Validate current form (returns true if valid) ────────
+  const validateForm = (): boolean => {
+    if (!form.nameEN.trim())              { toast.error("Resident English name is required"); return false; }
+    if (!form.phone.trim())               { toast.error("Phone is required"); return false; }
+    if (!form.nationalIdPhotoFile)        { toast.error("National ID image is required"); return false; }
+    if (!form.units.length || !form.units[0].unitId) { toast.error("At least one unit assignment is required"); return false; }
+    return true;
+  };
+
+  // ── Add current form to queue ───────────────────────────
+  const addToQueue = () => {
+    if (!validateForm()) return;
+    setQueue((prev) => [...prev, { ...form, _key: ++_queueKey }]);
+    // Keep unit assignments but clear identity fields so the next resident form is pre-filled with the same unit(s)
+    const preservedUnits = form.units.map((u) => ({ ...makeUnit(), unitId: u.unitId, role: u.role }));
+    setForm({ ...INIT_FORM, units: preservedUnits });
+    toast.success(`Added ${form.nameEN.trim()} to queue`);
+  };
+
+  const removeFromQueue = (key: number) => {
+    setQueue((prev) => prev.filter((r) => r._key !== key));
+  };
+
+  // ── Submit a single resident ────────────────────────────
+  const submitOneResident = async (resident: CreateOwnerForm) => {
+    const natIdFileId = await uploadFile("/files/upload/national-id", resident.nationalIdPhotoFile!);
+    const ownerUnits = resident.units.filter((u) => u.role === "OWNER" && u.unitId);
+    const nonOwnerUnits = resident.units.filter((u) => u.role !== "OWNER" && u.unitId);
+
+    const mappedOwnerUnits = [];
+    for (let i = 0; i < ownerUnits.length; i++) {
+      const ud = ownerUnits[i];
+      if (ud.paymentMode === "INSTALLMENT" && !ud.installments.length) throw new Error(`Installments required for owner assignment #${i + 1}`);
+      const contractFileId = ud.contractFile ? await uploadFile("/files/upload/contract", ud.contractFile) : undefined;
+      const installments = [];
+      for (let j = 0; j < ud.installments.length; j++) {
+        const inst = ud.installments[j];
+        if (!inst.dueDate) throw new Error(`Due date required for installment #${j + 1} in assignment #${i + 1}`);
+        const amt = Number(inst.amount);
+        if (!Number.isFinite(amt) || amt <= 0) throw new Error(`Invalid amount for installment #${j + 1}`);
+        const referenceFileId = inst.referenceFile ? await uploadFile("/files/upload/contract", inst.referenceFile) : undefined;
+        installments.push({ dueDate: new Date(inst.dueDate).toISOString(), amount: amt, referenceFileId, referencePageIndex: inst.referencePageIndex ? Number(inst.referencePageIndex) : undefined });
+      }
+      mappedOwnerUnits.push({ unitId: ud.unitId, paymentMode: ud.paymentMode, contractSignedAt: ud.contractSignedAt ? new Date(ud.contractSignedAt).toISOString() : undefined, contractFileId, notes: ud.notes.trim() || undefined, installments });
+    }
+
+    // Always use create-with-unit to create the user (it's the only endpoint that handles full user+resident creation).
+    // For owner units, pass them with payment/contract info. For non-owner-only residents, pass the first unit as a
+    // placeholder — the assign endpoint below will fix the role.
+    const createUnits = mappedOwnerUnits.length > 0
+      ? mappedOwnerUnits
+      : [{ unitId: nonOwnerUnits[0].unitId, paymentMode: "CASH" as const, installments: [] }];
+
+    const res = await apiClient.post("/owners/create-with-unit", {
+      nameEN: resident.nameEN.trim(), nameAR: resident.nameAR.trim() || undefined,
+      email: resident.email.trim() || undefined, phone: resident.phone.trim(),
+      nationalId: resident.nationalId.trim() || undefined, nationalIdPhotoId: natIdFileId,
+      units: createUnits,
+    });
+    const userId: string = res.data?.userId;
+
+    // Assign non-owner units with correct role (TENANT/FAMILY).
+    // The assign endpoint uses upsert, so it also fixes the role for the placeholder unit above.
+    for (const ud of nonOwnerUnits) {
+      await apiClient.post(`/admin/users/residents/${userId}/units/assign`, { unitId: ud.unitId, role: ud.role });
+    }
+  };
+
+  // ── Submit all queued residents ─────────────────────────
+  const handleSubmitAll = async () => {
+    // If form has data, add it to queue first
+    const toSubmit = [...queue];
+    const hasFormData = form.nameEN.trim() || form.phone.trim();
+    if (hasFormData) {
+      if (!validateForm()) return;
+      toSubmit.push({ ...form, _key: ++_queueKey });
+    }
+    if (!toSubmit.length) { toast.error("No residents to create. Fill the form or add residents to the queue."); return; }
 
     setSaving(true);
-    try {
-      const natIdFileId = await uploadFile("/files/upload/national-id", form.nationalIdPhotoFile);
-      const mappedUnits = [];
+    let successCount = 0;
+    const failedResidents: QueuedResident[] = [];
 
-      for (let i = 0; i < form.units.length; i++) {
-        const ud = form.units[i];
-        if (!ud.unitId)                                          throw new Error(`Unit required in assignment #${i + 1}`);
-        if (ud.paymentMode === "INSTALLMENT" && !ud.installments.length) throw new Error(`Installments required for assignment #${i + 1}`);
-
-        const contractFileId = ud.contractFile ? await uploadFile("/files/upload/contract", ud.contractFile) : undefined;
-        const installments = [];
-
-        for (let j = 0; j < ud.installments.length; j++) {
-          const inst = ud.installments[j];
-          if (!inst.dueDate)                          throw new Error(`Due date required for installment #${j + 1} in assignment #${i + 1}`);
-          const amt = Number(inst.amount);
-          if (!Number.isFinite(amt) || amt <= 0)      throw new Error(`Invalid amount for installment #${j + 1}`);
-          const referenceFileId = inst.referenceFile ? await uploadFile("/files/upload/contract", inst.referenceFile) : undefined;
-          installments.push({ dueDate: new Date(inst.dueDate).toISOString(), amount: amt, referenceFileId, referencePageIndex: inst.referencePageIndex ? Number(inst.referencePageIndex) : undefined });
-        }
-
-        mappedUnits.push({ unitId: ud.unitId, paymentMode: ud.paymentMode, contractSignedAt: ud.contractSignedAt ? new Date(ud.contractSignedAt).toISOString() : undefined, contractFileId, notes: ud.notes.trim() || undefined, installments });
+    for (const resident of toSubmit) {
+      try {
+        await submitOneResident(resident);
+        successCount++;
+      } catch (e) {
+        toast.error(`Failed to create ${resident.nameEN}`, { description: errorMessage(e) });
+        failedResidents.push(resident);
       }
+    }
 
-      const res = await apiClient.post("/owners/create-with-unit", { nameEN: form.nameEN.trim(), nameAR: form.nameAR.trim() || undefined, email: form.email.trim() || undefined, phone: form.phone.trim(), nationalId: form.nationalId.trim() || undefined, nationalIdPhotoId: natIdFileId, units: mappedUnits });
+    if (successCount > 0) {
+      toast.success(`${successCount} resident${successCount > 1 ? "s" : ""} created successfully`);
+    }
 
-      toast.success("Resident created", { description: res.data?.userEmail ? "Account, unit plans, and credentials email queued." : "Resident account and payment plans created." });
+    setQueue(failedResidents);
+    if (failedResidents.length === 0) {
       setForm(INIT_FORM);
       onCreated?.();
       onBack();
-    } catch (e) { toast.error("Failed to create resident", { description: errorMessage(e) }); }
-    finally { setSaving(false); }
+    }
+    setSaving(false);
   };
 
   // ─────────────────────────────────────────────────────────
@@ -165,8 +246,8 @@ export function ResidentCreatePage({ onBack, onCreated }: ResidentCreatePageProp
             <span style={{ color: "#D1D5DB", fontSize: "12px" }}>/</span>
             <span style={{ fontSize: "12px", color: "#374151", fontWeight: 600 }}>New Resident</span>
           </div>
-          <h1 style={{ fontSize: "22px", fontWeight: 900, color: "#111827", letterSpacing: "-0.03em", margin: 0 }}>Add Resident</h1>
-          <p style={{ marginTop: "4px", fontSize: "13px", color: "#6B7280" }}>Full onboarding — identity, unit assignments, contracts, payment plans.</p>
+          <h1 style={{ fontSize: "22px", fontWeight: 900, color: "#111827", letterSpacing: "-0.03em", margin: 0 }}>Add Residents</h1>
+          <p style={{ marginTop: "4px", fontSize: "13px", color: "#6B7280" }}>Add one or more residents — fill info, queue them, then submit all at once.</p>
         </div>
         <button type="button" onClick={onBack}
           style={{ display: "flex", alignItems: "center", gap: "6px", padding: "7px 14px", borderRadius: "7px", border: "1px solid #E5E7EB", background: "#FFF", color: "#374151", cursor: "pointer", fontSize: "12.5px", fontWeight: 600, fontFamily: "'Work Sans', sans-serif" }}>
@@ -233,7 +314,8 @@ export function ResidentCreatePage({ onBack, onCreated }: ResidentCreatePageProp
 
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
             {form.units.map((ud, ui) => {
-              const accent = ACCENTS[ui % ACCENTS.length];
+              const roleOpt = ROLE_OPTIONS.find((r) => r.value === ud.role) ?? ROLE_OPTIONS[0];
+              const accent = roleOpt.color;
               return (
                 <div key={ui} style={{ borderRadius: "9px", border: `1px solid ${accent}30`, background: `${accent}04`, overflow: "hidden" }}>
                   {/* Assignment header */}
@@ -243,6 +325,7 @@ export function ResidentCreatePage({ onBack, onCreated }: ResidentCreatePageProp
                         <span style={{ fontSize: "10px", fontWeight: 800, color: "#FFF", fontFamily: "'DM Mono', monospace" }}>{ui + 1}</span>
                       </div>
                       <span style={{ fontSize: "12.5px", fontWeight: 700, color: "#111827" }}>Assignment #{ui + 1}</span>
+                      <span style={{ fontSize: "10px", fontWeight: 700, padding: "2px 7px", borderRadius: "4px", background: roleOpt.bg, color: roleOpt.color, textTransform: "uppercase", letterSpacing: "0.04em" }}>{roleOpt.label}</span>
                     </div>
                     {form.units.length > 1 && (
                       <button type="button" onClick={() => setForm((p) => ({ ...p, units: p.units.filter((_, i) => i !== ui) }))}
@@ -252,55 +335,78 @@ export function ResidentCreatePage({ onBack, onCreated }: ResidentCreatePageProp
                     )}
                   </div>
 
-                  <div style={{ padding: "14px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-                    <Field label="Unit" required>
-                      <select value={ud.unitId} style={selectStyle} onChange={(e) => updateUnit(ui, (p) => ({ ...p, unitId: e.target.value }))}>
-                        <option value="">{loadingUnits ? "Loading units…" : "Select unit"}</option>
-                        {unitOptions.map((u) => <option key={u.id} value={u.id}>{u.label}</option>)}
-                      </select>
-                    </Field>
+                  <div style={{ padding: "14px", display: "flex", flexDirection: "column", gap: "12px" }}>
+                    {/* Unit + Role row */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                      <Field label="Unit" required>
+                        <select value={ud.unitId} style={selectStyle} onChange={(e) => updateUnit(ui, (p) => ({ ...p, unitId: e.target.value }))}>
+                          <option value="">{loadingUnits ? "Loading units…" : "Select unit"}</option>
+                          {unitOptions.map((u) => <option key={u.id} value={u.id}>{u.label}</option>)}
+                        </select>
+                      </Field>
 
-                    {/* Payment mode toggle */}
-                    <Field label="Payment Mode">
-                      <div style={{ display: "flex", gap: "6px" }}>
-                        {(["CASH", "INSTALLMENT"] as OwnerPaymentMode[]).map((mode) => {
-                          const active = ud.paymentMode === mode;
-                          return (
-                            <button key={mode} type="button" onClick={() => updateUnit(ui, (p) => ({ ...p, paymentMode: mode, installments: mode === "INSTALLMENT" && !p.installments.length ? [makeInstallment()] : mode === "CASH" ? [] : p.installments }))}
-                              style={{ flex: 1, padding: "8px", borderRadius: "7px", border: `1px solid ${active ? accent : "#E5E7EB"}`, background: active ? `${accent}12` : "#FAFAFA", color: active ? accent : "#9CA3AF", cursor: "pointer", fontSize: "12px", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: "5px", transition: "all 120ms ease", fontFamily: "'Work Sans', sans-serif" }}>
-                              {mode === "CASH" ? <Banknote style={{ width: "12px", height: "12px" }} /> : <CreditCard style={{ width: "12px", height: "12px" }} />}
-                              {mode === "CASH" ? "Cash" : "Installment"}
-                            </button>
-                          );
-                        })}
+                      <Field label="Role">
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "5px" }}>
+                          {ROLE_OPTIONS.map((r) => {
+                            const isSelected = ud.role === r.value;
+                            return (
+                              <button key={r.value} type="button" onClick={() => updateUnit(ui, (p) => ({ ...p, role: r.value, ...(r.value !== "OWNER" ? { paymentMode: "CASH" as const, installments: [], contractFile: null, contractSignedAt: "", notes: "" } : {}) }))}
+                                style={{ padding: "7px 4px", borderRadius: "7px", border: `1.5px solid ${isSelected ? r.color + "50" : "#E5E7EB"}`, background: isSelected ? r.bg : "#FAFAFA", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: "2px", transition: "all 120ms" }}>
+                                <span style={{ fontSize: "12px", fontWeight: 700, color: isSelected ? r.color : "#374151", fontFamily: "'Work Sans', sans-serif" }}>{r.label}</span>
+                                <span style={{ fontSize: "9px", color: isSelected ? r.color + "CC" : "#9CA3AF", fontFamily: "'Work Sans', sans-serif", textAlign: "center", lineHeight: 1.2 }}>{r.desc}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </Field>
+                    </div>
+
+                    {/* Owner-only fields: payment, contract */}
+                    {ud.role === "OWNER" && (
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                        {/* Payment mode toggle */}
+                        <Field label="Payment Mode">
+                          <div style={{ display: "flex", gap: "6px" }}>
+                            {(["CASH", "INSTALLMENT"] as OwnerPaymentMode[]).map((mode) => {
+                              const active = ud.paymentMode === mode;
+                              return (
+                                <button key={mode} type="button" onClick={() => updateUnit(ui, (p) => ({ ...p, paymentMode: mode, installments: mode === "INSTALLMENT" && !p.installments.length ? [makeInstallment()] : mode === "CASH" ? [] : p.installments }))}
+                                  style={{ flex: 1, padding: "8px", borderRadius: "7px", border: `1px solid ${active ? accent : "#E5E7EB"}`, background: active ? `${accent}12` : "#FAFAFA", color: active ? accent : "#9CA3AF", cursor: "pointer", fontSize: "12px", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: "5px", transition: "all 120ms ease", fontFamily: "'Work Sans', sans-serif" }}>
+                                  {mode === "CASH" ? <Banknote style={{ width: "12px", height: "12px" }} /> : <CreditCard style={{ width: "12px", height: "12px" }} />}
+                                  {mode === "CASH" ? "Cash" : "Installment"}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </Field>
+
+                        <Field label="Contract Signed Date">
+                          <div style={{ position: "relative" }}>
+                            <Calendar style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", width: "12px", height: "12px", color: "#9CA3AF" }} />
+                            <input type="date" value={ud.contractSignedAt} style={{ ...inputStyle, paddingLeft: "30px" }} onChange={(e) => updateUnit(ui, (p) => ({ ...p, contractSignedAt: e.target.value }))} />
+                          </div>
+                        </Field>
+
+                        <Field label="Contract File" hint={ud.contractFile ? `✓ ${ud.contractFile.name}` : "Image or PDF — optional"}>
+                          <label style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 12px", borderRadius: "7px", border: `1px dashed ${ud.contractFile ? "#10B981" : "#D1D5DB"}`, background: ud.contractFile ? "#ECFDF5" : "#FAFAFA", cursor: "pointer", fontSize: "12.5px", color: ud.contractFile ? "#065F46" : "#6B7280", transition: "all 120ms ease" }}>
+                            {ud.contractFile ? <CheckCircle2 style={{ width: "13px", height: "13px" }} /> : <FileUp style={{ width: "13px", height: "13px" }} />}
+                            {ud.contractFile ? ud.contractFile.name : "Upload contract"}
+                            <input type="file" accept="image/*,application/pdf" style={{ display: "none" }} onChange={(e) => updateUnit(ui, (p) => ({ ...p, contractFile: e.target.files?.[0] ?? null }))} />
+                          </label>
+                        </Field>
+
+                        <Field label="Notes">
+                          <div style={{ position: "relative" }}>
+                            <StickyNote style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", width: "12px", height: "12px", color: "#9CA3AF" }} />
+                            <input value={ud.notes} onChange={(e) => updateUnit(ui, (p) => ({ ...p, notes: e.target.value }))} placeholder="Optional payment plan notes…" style={{ ...inputStyle, paddingLeft: "30px" }} />
+                          </div>
+                        </Field>
                       </div>
-                    </Field>
-
-                    <Field label="Contract Signed Date">
-                      <div style={{ position: "relative" }}>
-                        <Calendar style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", width: "12px", height: "12px", color: "#9CA3AF" }} />
-                        <input type="date" value={ud.contractSignedAt} style={{ ...inputStyle, paddingLeft: "30px" }} onChange={(e) => updateUnit(ui, (p) => ({ ...p, contractSignedAt: e.target.value }))} />
-                      </div>
-                    </Field>
-
-                    <Field label="Contract File" hint={ud.contractFile ? `✓ ${ud.contractFile.name}` : "Image or PDF — optional"}>
-                      <label style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 12px", borderRadius: "7px", border: `1px dashed ${ud.contractFile ? "#10B981" : "#D1D5DB"}`, background: ud.contractFile ? "#ECFDF5" : "#FAFAFA", cursor: "pointer", fontSize: "12.5px", color: ud.contractFile ? "#065F46" : "#6B7280", transition: "all 120ms ease" }}>
-                        {ud.contractFile ? <CheckCircle2 style={{ width: "13px", height: "13px" }} /> : <FileUp style={{ width: "13px", height: "13px" }} />}
-                        {ud.contractFile ? ud.contractFile.name : "Upload contract"}
-                        <input type="file" accept="image/*,application/pdf" style={{ display: "none" }} onChange={(e) => updateUnit(ui, (p) => ({ ...p, contractFile: e.target.files?.[0] ?? null }))} />
-                      </label>
-                    </Field>
-
-                    <Field label="Notes" span2>
-                      <div style={{ position: "relative" }}>
-                        <StickyNote style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", width: "12px", height: "12px", color: "#9CA3AF" }} />
-                        <input value={ud.notes} onChange={(e) => updateUnit(ui, (p) => ({ ...p, notes: e.target.value }))} placeholder="Optional payment plan notes…" style={{ ...inputStyle, paddingLeft: "30px" }} />
-                      </div>
-                    </Field>
+                    )}
                   </div>
 
                   {/* ── Installments ──────────────────────────── */}
-                  {ud.paymentMode === "INSTALLMENT" && (
+                  {ud.role === "OWNER" && ud.paymentMode === "INSTALLMENT" && (
                     <div style={{ borderTop: `1px solid ${accent}20`, padding: "12px 14px 14px", background: `${accent}03` }}>
                       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
@@ -349,17 +455,78 @@ export function ResidentCreatePage({ onBack, onCreated }: ResidentCreatePageProp
         </div>
       </div>
 
-      {/* ── Submit bar ─────────────────────────────────────── */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", borderRadius: "10px", border: "1px solid #EBEBEB", background: "#FFF", boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
+      {/* ── Add to Queue + Submit buttons ────────────────── */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", borderRadius: "10px", border: "1px solid #EBEBEB", background: "#FFF", boxShadow: "0 1px 4px rgba(0,0,0,0.05)", marginBottom: queue.length > 0 ? "16px" : "0" }}>
         <p style={{ fontSize: "12px", color: "#9CA3AF", margin: 0 }}>
-          {form.units.length} unit assignment{form.units.length !== 1 ? "s" : ""} · {form.units.reduce((acc, u) => acc + u.installments.length, 0)} installment{form.units.reduce((acc, u) => acc + u.installments.length, 0) !== 1 ? "s" : ""}
+          {form.units.length} unit assignment{form.units.length !== 1 ? "s" : ""} · {queue.length} in queue
         </p>
-        <button type="button" disabled={saving} onClick={() => void handleCreate()}
-          style={{ display: "flex", alignItems: "center", gap: "7px", padding: "9px 20px", borderRadius: "8px", background: saving ? "#9CA3AF" : "#111827", color: "#FFF", border: "none", cursor: saving ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 700, fontFamily: "'Work Sans', sans-serif", boxShadow: "0 2px 6px rgba(0,0,0,0.15)", letterSpacing: "-0.01em", transition: "background 120ms ease" }}>
-          <UserPlus style={{ width: "14px", height: "14px" }} />
-          {saving ? "Creating Resident…" : "Create Resident"}
-        </button>
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button type="button" disabled={saving} onClick={addToQueue}
+            style={{ display: "flex", alignItems: "center", gap: "6px", padding: "9px 16px", borderRadius: "8px", background: "#FFF", color: "#374151", border: "1px solid #E5E7EB", cursor: saving ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 700, fontFamily: "'Work Sans', sans-serif", transition: "all 120ms ease" }}
+            onMouseEnter={(e) => !saving && Object.assign(e.currentTarget.style, { background: "#F9FAFB", borderColor: "#D1D5DB" })}
+            onMouseLeave={(e) => Object.assign(e.currentTarget.style, { background: "#FFF", borderColor: "#E5E7EB" })}>
+            <Plus style={{ width: "13px", height: "13px" }} />
+            Add & Queue Another
+          </button>
+          <button type="button" disabled={saving} onClick={() => void handleSubmitAll()}
+            style={{ display: "flex", alignItems: "center", gap: "7px", padding: "9px 20px", borderRadius: "8px", background: saving ? "#9CA3AF" : "#111827", color: "#FFF", border: "none", cursor: saving ? "not-allowed" : "pointer", fontSize: "13px", fontWeight: 700, fontFamily: "'Work Sans', sans-serif", boxShadow: "0 2px 6px rgba(0,0,0,0.15)", letterSpacing: "-0.01em", transition: "background 120ms ease" }}>
+            <UserPlus style={{ width: "14px", height: "14px" }} />
+            {saving ? "Creating…" : queue.length > 0 ? `Create All (${queue.length + (form.nameEN.trim() ? 1 : 0)})` : "Create Resident"}
+          </button>
+        </div>
       </div>
+
+      {/* ── Queued Residents ──────────────────────────────── */}
+      {queue.length > 0 && (
+        <div style={{ borderRadius: "10px", border: "1px solid #EBEBEB", background: "#FFF", overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
+          <div style={{ height: "3px", background: "linear-gradient(90deg, #059669, #10B981)" }} />
+          <div style={{ padding: "16px 20px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: expandedQueue ? "12px" : "0" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <div style={{ width: "28px", height: "28px", borderRadius: "7px", background: "#ECFDF5", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <Users style={{ width: "13px", height: "13px", color: "#059669" }} />
+                </div>
+                <span style={{ fontSize: "13.5px", fontWeight: 800, color: "#111827", fontFamily: "'Work Sans', sans-serif" }}>Queued Residents</span>
+                <span style={{ fontSize: "10.5px", fontWeight: 700, padding: "1px 6px", borderRadius: "5px", background: "#ECFDF5", color: "#059669", fontFamily: "'DM Mono', monospace" }}>{queue.length}</span>
+              </div>
+              <button type="button" onClick={() => setExpandedQueue((p) => !p)}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "#9CA3AF", padding: "4px" }}>
+                {expandedQueue ? <ChevronUp style={{ width: "14px", height: "14px" }} /> : <ChevronDown style={{ width: "14px", height: "14px" }} />}
+              </button>
+            </div>
+
+            {expandedQueue && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                {queue.map((r, idx) => {
+                  const roleLabel = ROLE_OPTIONS.find((ro) => ro.value === r.units[0]?.role);
+                  const unitLabel = unitOptions.find((u) => u.id === r.units[0]?.unitId)?.label ?? "—";
+                  return (
+                    <div key={r._key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: "8px", border: "1px solid #E5E7EB", background: "#FAFAFA" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                        <div style={{ width: "26px", height: "26px", borderRadius: "50%", background: "#111827", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          <span style={{ fontSize: "10px", fontWeight: 800, color: "#FFF", fontFamily: "'DM Mono', monospace" }}>{idx + 1}</span>
+                        </div>
+                        <div>
+                          <p style={{ margin: 0, fontSize: "13px", fontWeight: 700, color: "#111827", fontFamily: "'Work Sans', sans-serif" }}>{r.nameEN}</p>
+                          <p style={{ margin: 0, fontSize: "11px", color: "#6B7280", fontFamily: "'Work Sans', sans-serif" }}>
+                            {r.phone} · {r.units.length} unit{r.units.length > 1 ? "s" : ""}
+                            {roleLabel && <> · <span style={{ color: roleLabel.color, fontWeight: 600 }}>{roleLabel.label}</span></>}
+                            {" · "}{unitLabel}
+                          </p>
+                        </div>
+                      </div>
+                      <button type="button" onClick={() => removeFromQueue(r._key)} disabled={saving}
+                        style={{ width: "28px", height: "28px", borderRadius: "6px", border: "1px solid #FCA5A5", background: "#FEF2F2", color: "#DC2626", cursor: saving ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        <Trash2 style={{ width: "11px", height: "11px" }} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,12 +1,6 @@
 import apiClient from "./api-client";
 
-export type EntryRole =
-  | "RESIDENT_OWNER"
-  | "RESIDENT_FAMILY"
-  | "RESIDENT_TENANT"
-  | "VISITOR"
-  | "WORKER"
-  | "STAFF";
+export type CommunityStructure = "CLUSTERS" | "PHASES";
 
 export type GateRole =
   | "RESIDENT"
@@ -22,7 +16,8 @@ export interface CommunityListItem {
   code: string | null;
   isActive: boolean;
   displayOrder: number;
-  allowedEntryRoles: EntryRole[];
+  structureType: CommunityStructure;
+  guidelines: string | null;
   _count?: {
     clusters?: number;
     gates?: number;
@@ -56,6 +51,7 @@ export interface GateItem {
   etaMinutes: number | null;
   isActive?: boolean;
   status?: "ACTIVE" | "INACTIVE" | "SUSPENDED";
+  clusterIds?: string[];
 }
 
 export interface CommunityDetail {
@@ -63,7 +59,8 @@ export interface CommunityDetail {
   name: string;
   code: string | null;
   isActive: boolean;
-  allowedEntryRoles: EntryRole[];
+  structureType: CommunityStructure;
+  guidelines: string | null;
   clusters: ClusterItem[];
   gates: GateItem[];
   stats: CommunityStats;
@@ -72,23 +69,20 @@ export interface CommunityDetail {
 
 export interface CreateCommunityPayload {
   name: string;
-  code?: string;
-  displayOrder?: number;
   isActive?: boolean;
-  allowedEntryRoles?: EntryRole[];
+  structureType?: CommunityStructure;
+  guidelines?: string;
 }
 
 export interface CreateClusterPayload {
   name: string;
-  code?: string;
-  displayOrder?: number;
 }
 
 export interface CreateGatePayload {
   name: string;
-  code?: string;
   allowedRoles: GateRole[];
   etaMinutes?: number;
+  clusterIds?: string[];
 }
 
 const communityService = {
@@ -125,14 +119,6 @@ const communityService = {
 
   async getCommunityStats(id: string): Promise<CommunityStats> {
     const response = await apiClient.get<CommunityStats>(`/communities/${id}/stats`);
-    return response.data;
-  },
-
-  async updateEntryRoles(id: string, roles: EntryRole[]) {
-    const response = await apiClient.patch<{ id: string; allowedEntryRoles: EntryRole[] }>(
-      `/communities/${id}/entry-roles`,
-      { roles },
-    );
     return response.data;
   },
 
@@ -210,4 +196,3 @@ const communityService = {
 };
 
 export default communityService;
-

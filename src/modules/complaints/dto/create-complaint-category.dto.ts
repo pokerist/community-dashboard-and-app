@@ -19,4 +19,9 @@ export class CreateComplaintCategoryDto {
   @IsOptional()
   @IsString()
   description?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  defaultAssigneeId?: string;
 }

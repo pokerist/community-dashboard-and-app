@@ -46,11 +46,7 @@ function isSuperAdminRole(roles: string[]): boolean {
 }
 
 function isUnitDelivered(status: UnitStatus): boolean {
-  return (
-    status === UnitStatus.DELIVERED ||
-    status === UnitStatus.OCCUPIED ||
-    status === UnitStatus.LEASED
-  );
+  return status === UnitStatus.DELIVERED;
 }
 
 @Injectable()
@@ -716,17 +712,21 @@ export class ServiceRequestService {
       select: {
         id: true,
         assignedToId: true,
+        status: true,
       },
     });
     if (!request) {
       throw new NotFoundException(`Service Request with ID ${id} not found.`);
     }
 
+    const shouldMoveToInProgress = request.status === ServiceRequestStatus.NEW;
+
     await this.prisma.serviceRequest.update({
       where: { id },
       data: {
         assignedToId: dto.assignedToId,
         assignedAt: request.assignedToId ? undefined : new Date(),
+        ...(shouldMoveToInProgress ? { status: ServiceRequestStatus.IN_PROGRESS } : {}),
       },
     });
 
@@ -1148,4 +1148,3 @@ export class ServiceRequestService {
     return this.getRequestDetail(id);
   }
 }
-

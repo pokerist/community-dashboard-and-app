@@ -16,7 +16,6 @@ import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { Permissions } from '../auth/decorators/permissions.decorator';
 import { CommunitiesService } from './communities.service';
 import { CreateCommunityDto } from './dto/create-community.dto';
-import { UpdateEntryRolesDto } from './dto/update-entry-roles.dto';
 import { UpdateCommunityDto } from './dto/update-community.dto';
 
 @ApiTags('communities')
@@ -54,15 +53,6 @@ export class CommunitiesController {
   @Permissions('unit.update', 'admin.update')
   update(@Param('id') id: string, @Body() dto: UpdateCommunityDto) {
     return this.communitiesService.update(id, dto);
-  }
-
-  @Patch(':id/entry-roles')
-  @Permissions('unit.update', 'admin.update')
-  updateAllowedEntryRoles(
-    @Param('id') id: string,
-    @Body() dto: UpdateEntryRolesDto,
-  ) {
-    return this.communitiesService.updateAllowedEntryRoles(id, dto.roles);
   }
 
   @Delete(':id')

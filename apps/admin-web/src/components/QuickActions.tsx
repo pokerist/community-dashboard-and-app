@@ -1,6 +1,5 @@
 import {
   Bell,
-  ClipboardPlus,
   FileText,
   ShieldAlert,
   UserRoundPlus,
@@ -26,17 +25,6 @@ type ActionItem = {
 };
 
 const actions: ActionItem[] = [
-  {
-    id: "new-complaint",
-    label: "New Complaint",
-    description: "Log a resident complaint",
-    icon: ClipboardPlus,
-    targetSection: "complaints",
-    iconBg: "#EFF6FF",
-    iconColor: "#2563EB",
-    hoverBorder: "#BFDBFE",
-    hoverBg: "#F5F9FF",
-  },
   {
     id: "new-service-request",
     label: "Service Request",

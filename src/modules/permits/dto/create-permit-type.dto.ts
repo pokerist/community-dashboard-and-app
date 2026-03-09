@@ -23,6 +23,14 @@ export class CreatePermitTypeDto {
   @IsString()
   description?: string;
 
+  @IsOptional()
+  @IsString()
+  iconName?: string;
+
+  @IsOptional()
+  @IsString()
+  color?: string;
+
   @IsArray()
   @ArrayMaxSize(50)
   @ValidateNested({ each: true })

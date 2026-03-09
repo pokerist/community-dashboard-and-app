@@ -111,11 +111,43 @@ export type ViolationAppealQueueResponse = {
   totalPages: number;
 };
 
+export type ViolationComment = {
+  id: string;
+  violationId: string;
+  createdById: string;
+  createdBy: {
+    id: string;
+    nameEN: string | null;
+    nameAR: string | null;
+    email: string | null;
+  };
+  body: string;
+  isInternal: boolean;
+  createdAt: string;
+};
+
+export type ViolationStatusHistoryItem = {
+  id: string;
+  fromStatus: string | null;
+  toStatus: string;
+  changedById: string;
+  changedBy: {
+    id: string;
+    nameEN: string | null;
+    nameAR: string | null;
+    email: string | null;
+  };
+  note: string | null;
+  createdAt: string;
+};
+
 export type ViolationStats = {
   total: number;
-  pending: number;
-  paid: number;
+  open: number;
+  underReview: number;
   appealed: number;
+  resolved: number;
+  closed: number;
   cancelled: number;
   pendingAppeals: number;
   totalFinesIssued: number;
@@ -267,6 +299,36 @@ const violationsService = {
       approved,
       reason,
     });
+    return response.data;
+  },
+
+  async updateViolationStatus(
+    id: string,
+    status: ViolationStatus,
+    note?: string,
+  ): Promise<ViolationDetail> {
+    const response = await apiClient.patch<ViolationDetail>(`/violations/${id}/status`, {
+      status,
+      note,
+    });
+    return response.data;
+  },
+
+  async listComments(id: string): Promise<ViolationComment[]> {
+    const response = await apiClient.get<ViolationComment[]>(`/violations/${id}/comments`);
+    return response.data;
+  },
+
+  async addComment(
+    id: string,
+    payload: { body: string; isInternal?: boolean },
+  ): Promise<ViolationComment> {
+    const response = await apiClient.post<ViolationComment>(`/violations/${id}/comments`, payload);
+    return response.data;
+  },
+
+  async getStatusHistory(id: string): Promise<ViolationStatusHistoryItem[]> {
+    const response = await apiClient.get<ViolationStatusHistoryItem[]>(`/violations/${id}/history`);
     return response.data;
   },
 };

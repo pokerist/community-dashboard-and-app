@@ -19,6 +19,7 @@ export class ServiceListItemDto {
   startingPrice!: number | null;
   assignedRoleName!: string | null;
   totalRequestsCount!: number;
+  microServicesCount!: number;
   revenueTotal!: number;
   iconName!: string | null;
   iconTone!: string;
@@ -32,6 +33,15 @@ export class ServiceDetailStatsDto {
   avgResolutionHours!: number;
   slaBreachRate!: number;
   revenueTotal!: number;
+}
+
+export class MicroServiceResponseDto {
+  id!: string;
+  name!: string;
+  description!: string | null;
+  price!: number | null;
+  isActive!: boolean;
+  displayOrder!: number;
 }
 
 export class ServiceDetailResponseDto {
@@ -50,6 +60,7 @@ export class ServiceDetailResponseDto {
   iconName!: string | null;
   iconTone!: string;
   fields!: ServiceFieldResponseDto[];
+  microServices!: MicroServiceResponseDto[];
   stats!: ServiceDetailStatsDto;
   createdAt!: string;
   updatedAt!: string;

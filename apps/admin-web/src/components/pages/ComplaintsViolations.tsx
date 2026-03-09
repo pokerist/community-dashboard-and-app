@@ -4,6 +4,7 @@ import { ComplaintStatus, Priority } from '@prisma/client';
 import { StatusBadge } from '../StatusBadge';
 import { DrawerForm } from '../DrawerForm';
 import { EmptyState } from '../EmptyState';
+import { MediaGrid } from '../MediaGrid';
 import { StatCard } from '../StatCard';
 import { toast } from 'sonner';
 import {
@@ -16,6 +17,7 @@ import complaintsService, {
   type ComplaintInvoice,
   type ComplaintListItem,
   type ComplaintStats,
+  type ComplaintUserOption,
 } from '../../lib/complaintsService';
 
 // ─── Constants ────────────────────────────────────────────────
@@ -100,6 +102,54 @@ function InfoPair({ label, value }: { label: string; value: string }) {
   );
 }
 
+function TicketProgressBar({ steps, currentStep, labels }: {
+  steps: string[];
+  currentStep: string;
+  labels: Record<string, string>;
+}) {
+  const currentIdx = steps.indexOf(currentStep);
+  return (
+    <div style={{ padding: '14px 16px', borderRadius: '10px', border: '1px solid #EBEBEB', background: '#FFF' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0', position: 'relative' }}>
+        {steps.map((step, i) => {
+          const isDone = i < currentIdx;
+          const isCurrent = i === currentIdx;
+          const isLast = i === steps.length - 1;
+          return (
+            <div key={step} style={{ display: 'flex', alignItems: 'center', flex: isLast ? '0 0 auto' : '1 1 0' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', position: 'relative', zIndex: 1 }}>
+                <div style={{
+                  width: '24px', height: '24px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: isDone ? '#10B981' : isCurrent ? '#2563EB' : '#E5E7EB',
+                  color: isDone || isCurrent ? '#FFF' : '#9CA3AF',
+                  fontSize: '10px', fontWeight: 700, fontFamily: "'Work Sans', sans-serif",
+                  transition: 'all 200ms ease',
+                }}>
+                  {isDone ? '\u2713' : i + 1}
+                </div>
+                <span style={{
+                  fontSize: '9px', fontWeight: isCurrent ? 700 : 500,
+                  color: isDone ? '#10B981' : isCurrent ? '#2563EB' : '#9CA3AF',
+                  fontFamily: "'Work Sans', sans-serif", whiteSpace: 'nowrap',
+                }}>
+                  {labels[step] ?? step}
+                </span>
+              </div>
+              {!isLast && (
+                <div style={{
+                  flex: 1, height: '2px', marginBottom: '18px',
+                  background: isDone ? '#10B981' : '#E5E7EB',
+                  transition: 'all 200ms ease',
+                }} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function GhostBtn({ label, icon, onClick, disabled }: {
   label: string; icon?: React.ReactNode; onClick: () => void; disabled?: boolean;
 }) {
@@ -148,17 +198,18 @@ function AmberPillBtn({ label, onClick, disabled }: {
 
 // ─── Category Modal ───────────────────────────────────────────
 
-function CategoryModal({ open, onClose, editing, onSaved }: {
+function CategoryModal({ open, onClose, editing, onSaved, users }: {
   open: boolean; onClose: () => void;
   editing: ComplaintCategoryItem | null;
   onSaved: () => void;
+  users: ComplaintUserOption[];
 }) {
-  const [form, setForm]     = useState({ name: '', slaHours: '24', description: '' });
+  const [form, setForm]     = useState({ name: '', slaHours: '24', description: '', defaultAssigneeId: '' });
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (editing) setForm({ name: editing.name, slaHours: String(editing.slaHours), description: editing.description ?? '' });
-    else          setForm({ name: '', slaHours: '24', description: '' });
+    if (editing) setForm({ name: editing.name, slaHours: String(editing.slaHours), description: editing.description ?? '', defaultAssigneeId: editing.defaultAssigneeId ?? '' });
+    else          setForm({ name: '', slaHours: '24', description: '', defaultAssigneeId: '' });
   }, [editing, open]);
 
   const handleSave = async () => {
@@ -167,10 +218,11 @@ function CategoryModal({ open, onClose, editing, onSaved }: {
     if (!name || !Number.isInteger(hrs) || hrs < 1 || hrs > 720) {
       toast.error('Provide a valid name and SLA hours (1–720)'); return;
     }
+    const payload = { name, slaHours: hrs, description: form.description.trim() || undefined, defaultAssigneeId: form.defaultAssigneeId || undefined };
     setSaving(true);
     try {
-      if (editing) await complaintsService.updateCategory(editing.id, { name, slaHours: hrs, description: form.description.trim() || undefined });
-      else         await complaintsService.createCategory({ name, slaHours: hrs, description: form.description.trim() || undefined });
+      if (editing) await complaintsService.updateCategory(editing.id, payload);
+      else         await complaintsService.createCategory(payload);
       toast.success('Category saved');
       onSaved(); onClose();
     } catch { toast.error('Failed to save category'); }
@@ -242,6 +294,26 @@ function CategoryModal({ open, onClose, editing, onSaved }: {
               style={textareaStyle}
             />
           </div>
+
+          {/* Default Assignee */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+            <label style={{ fontSize: '10.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: "'Work Sans', sans-serif" }}>
+              Default Assignee
+            </label>
+            <select
+              value={form.defaultAssigneeId}
+              onChange={(e) => setForm((p) => ({ ...p, defaultAssigneeId: e.target.value }))}
+              style={selectStyle}
+            >
+              <option value="">— No default assignee —</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>{u.name}</option>
+              ))}
+            </select>
+            <p style={{ fontSize: '10px', color: '#9CA3AF', margin: '0', fontFamily: "'Work Sans', sans-serif" }}>
+              New complaints in this category will be auto-assigned to this person.
+            </p>
+          </div>
         </div>
 
         {/* Footer */}
@@ -263,16 +335,27 @@ function CategoryModal({ open, onClose, editing, onSaved }: {
 
 // ─── Detail Drawer content ────────────────────────────────────
 
-function DetailContent({ detail, categories, onReload }: {
-  detail: ComplaintDetail; categories: ComplaintCategoryItem[]; onReload: () => void;
+function DetailContent({ detail, categories, users, onReload }: {
+  detail: ComplaintDetail; categories: ComplaintCategoryItem[]; users: ComplaintUserOption[]; onReload: () => void;
 }) {
-  const [subTab,           setSubTab]           = useState<'details' | 'comments' | 'invoices'>('details');
+  const [subTab,           setSubTab]           = useState<'details' | 'attachments' | 'comments' | 'invoices'>('details');
   const [commentBody,      setCommentBody]      = useState('');
   const [postingComment,   setPostingComment]   = useState(false);
   const [resolutionNotes,  setResolutionNotes]  = useState('');
   const [showResolveForm,  setShowResolveForm]  = useState(false);
   const [updatingStatus,   setUpdatingStatus]   = useState(false);
   const [assigningCategory, setAssigningCategory] = useState(false);
+  const [assigningUser,    setAssigningUser]    = useState(false);
+
+  const assignUser = async (userId: string) => {
+    setAssigningUser(true);
+    try {
+      await complaintsService.assignComplaint(detail.id, userId);
+      toast.success('Assignee updated');
+      onReload();
+    } catch { toast.error('Failed to assign user'); }
+    finally { setAssigningUser(false); }
+  };
 
   const postComment = async (internal: boolean) => {
     if (!commentBody.trim()) return;
@@ -332,11 +415,19 @@ function DetailContent({ detail, categories, onReload }: {
         </div>
       </div>
 
+      {/* Progress bar */}
+      <TicketProgressBar
+        steps={['NEW', 'IN_PROGRESS', 'PENDING_RESIDENT', 'RESOLVED', 'CLOSED']}
+        currentStep={detail.status}
+        labels={{ NEW: 'New', IN_PROGRESS: 'In Progress', PENDING_RESIDENT: 'Pending Resident', RESOLVED: 'Resolved', CLOSED: 'Closed' }}
+      />
+
       {/* Sub-tabs */}
       <div style={{ display: 'flex', gap: '2px', padding: '3px', borderRadius: '8px', background: '#F3F4F6' }}>
-        <SmallTabBtn label="Details"                           active={subTab === 'details'}  onClick={() => setSubTab('details')} />
-        <SmallTabBtn label={`Comments (${detail.comments.length})`} active={subTab === 'comments'} onClick={() => setSubTab('comments')} />
-        <SmallTabBtn label={`Invoices (${detail.invoices.length})`} active={subTab === 'invoices'} onClick={() => setSubTab('invoices')} />
+        <SmallTabBtn label="Details"                                        active={subTab === 'details'}     onClick={() => setSubTab('details')} />
+        <SmallTabBtn label={`Attachments (${detail.attachments?.length ?? 0})`} active={subTab === 'attachments'} onClick={() => setSubTab('attachments')} />
+        <SmallTabBtn label={`Comments (${detail.comments.length})`}         active={subTab === 'comments'}    onClick={() => setSubTab('comments')} />
+        <SmallTabBtn label={`Invoices (${detail.invoices.length})`}         active={subTab === 'invoices'}    onClick={() => setSubTab('invoices')} />
       </div>
 
       {/* ── Details ── */}
@@ -345,9 +436,42 @@ function DetailContent({ detail, categories, onReload }: {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
             <InfoPair label="Unit"      value={detail.unitNumber ?? '—'} />
             <InfoPair label="Reporter"  value={detail.reporterName} />
-            <InfoPair label="Assignee"  value={detail.assigneeName ?? 'Unassigned'} />
+            {/* Assignee selector */}
+            <div style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #EBEBEB', background: '#FFF' }}>
+              <p style={{ fontSize: '9.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 3px', fontFamily: "'Work Sans', sans-serif" }}>Assignee</p>
+              <select
+                value={detail.assigneeId ?? ''}
+                disabled={assigningUser || detail.status === ComplaintStatus.CLOSED}
+                onChange={(e) => { if (e.target.value) void assignUser(e.target.value); }}
+                style={{ ...selectStyle, padding: '4px 8px', height: '30px', fontSize: '12px', opacity: assigningUser ? 0.5 : 1 }}
+              >
+                <option value="">— Unassigned —</option>
+                {users.map((u) => (
+                  <option key={u.id} value={u.id}>{u.name}</option>
+                ))}
+              </select>
+            </div>
             <InfoPair label="Submitted" value={fmt(detail.createdAt)} />
           </div>
+
+          {/* SLA info */}
+          {detail.slaDeadline && (
+            <div style={{ padding: '10px 14px', borderRadius: '8px', border: `1px solid ${detail.hoursOverdue ? '#FECACA' : detail.hoursRemaining ? '#A7F3D0' : '#EBEBEB'}`, background: detail.hoursOverdue ? '#FEF2F2' : detail.hoursRemaining ? '#ECFDF5' : '#FFF', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <p style={{ fontSize: '9.5px', fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 3px', fontFamily: "'Work Sans', sans-serif" }}>SLA Deadline</p>
+                <p style={{ fontSize: '12.5px', fontWeight: 600, color: '#111827', margin: 0, fontFamily: "'DM Mono', monospace" }}>{fmt(detail.slaDeadline)}</p>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                {detail.hoursOverdue ? (
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#DC2626', fontFamily: "'DM Mono', monospace" }}>{detail.hoursOverdue}h overdue</span>
+                ) : detail.hoursRemaining ? (
+                  <span style={{ fontSize: '13px', fontWeight: 700, color: '#059669', fontFamily: "'DM Mono', monospace" }}>{detail.hoursRemaining}h left</span>
+                ) : (
+                  <span style={{ fontSize: '12px', color: '#9CA3AF' }}>Resolved</span>
+                )}
+              </div>
+            </div>
+          )}
 
           {detail.description && (
             <div style={{ padding: '12px 14px', borderRadius: '9px', border: '1px solid #EBEBEB', background: '#FAFAFA', fontSize: '13px', color: '#374151', lineHeight: 1.6, fontFamily: "'Work Sans', sans-serif" }}>
@@ -417,6 +541,11 @@ function DetailContent({ detail, categories, onReload }: {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── Attachments ── */}
+      {subTab === 'attachments' && (
+        <MediaGrid items={(detail.attachments ?? []).map((a) => ({ id: a.id, fileName: a.fileName, mimeType: a.mimeType, url: a.url }))} emptyTitle="No attachments" emptyDescription="Attachments submitted with this complaint will appear here." />
       )}
 
       {/* ── Comments ── */}
@@ -510,6 +639,7 @@ export function ComplaintsViolations() {
   const [detailOpen,  setDetailOpen]  = useState(false);
   const [detail,      setDetail]      = useState<ComplaintDetail | null>(null);
   const [detailKey,   setDetailKey]   = useState(0);
+  const [users,       setUsers]       = useState<ComplaintUserOption[]>([]);
 
   const [catModalOpen,    setCatModalOpen]    = useState(false);
   const [editingCategory, setEditingCategory] = useState<ComplaintCategoryItem | null>(null);
@@ -518,7 +648,7 @@ export function ComplaintsViolations() {
     setLoading(true);
     try {
       const month = new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
-      const [st, cats, list, resolved] = await Promise.all([
+      const [st, cats, list, resolved, userList] = await Promise.all([
         complaintsService.getComplaintStats(),
         complaintsService.listCategories(true),
         complaintsService.listComplaints({
@@ -530,8 +660,9 @@ export function ComplaintsViolations() {
           slaBreached: slaOnly   || undefined,
         }),
         complaintsService.listComplaints({ page: 1, limit: 1, status: ComplaintStatus.RESOLVED, dateFrom: month }),
+        complaintsService.listAssignableUsers(),
       ]);
-      setStats(st); setCategories(cats);
+      setStats(st); setCategories(cats); setUsers(userList);
       setRows(list.data); setTotal(list.total); setTotalPages(list.totalPages);
       setResolvedMonth(resolved.total);
     } catch { toast.error('Failed to load complaints'); }
@@ -581,7 +712,7 @@ export function ComplaintsViolations() {
       </div>
 
       {/* ── Top-level tabs ─────────────────────────────────── */}
-      <div style={{ display: 'flex', gap: '2px', padding: '4px', borderRadius: '10px', background: '#F3F4F6', marginBottom: '20px', width: 'fit-content' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '2px', padding: '4px', borderRadius: '10px', background: '#F3F4F6', marginBottom: '20px' }}>
         <TabBtn label="Complaints" active={tab === 'complaints'} onClick={() => setTab('complaints')} />
         <TabBtn label="Settings"   active={tab === 'settings'}   onClick={() => setTab('settings')} />
       </div>
@@ -591,9 +722,9 @@ export function ComplaintsViolations() {
         <>
           {/* Stats */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '20px' }}>
-            <StatCard icon="complaints-open"   title="Open Complaints"     value={String(stats?.open ?? 0)}              subtitle="NEW + IN_PROGRESS" />
-            <StatCard icon="complaints-total"  title="SLA Breached"        value={String(stats?.slaBreached ?? 0)}        subtitle="Open complaints only" />
-            <StatCard icon="complaints-closed" title="Resolved This Month" value={String(resolvedMonth)}                  subtitle="Current month" />
+            <StatCard icon="complaints-open"   title="Open Complaints"     value={String(stats?.open ?? 0)}              subtitle="OPEN + IN_PROGRESS" onClick={() => { setStatus('NEW'); setFiltersOpen(true); setPage(1); }} />
+            <StatCard icon="complaints-total"  title="SLA Breached"        value={String(stats?.slaBreached ?? 0)}        subtitle="Open complaints only" onClick={() => { setSlaOnly((p) => !p); setPage(1); }} />
+            <StatCard icon="complaints-closed" title="Resolved This Month" value={String(resolvedMonth)}                  subtitle="Current month" onClick={() => { setStatus('RESOLVED'); setFiltersOpen(true); setPage(1); }} />
             <StatCard icon="revenue"           title="Avg Resolution Time" value={`${stats?.avgResolutionHours ?? 0}h`}   subtitle="Resolved + closed" />
           </div>
 
@@ -636,6 +767,7 @@ export function ComplaintsViolations() {
                   style={{ display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 12px', borderRadius: '6px', border: '1px solid #E5E7EB', background: '#FFF', color: '#374151', fontSize: '11.5px', fontWeight: 700, cursor: 'pointer', fontFamily: "'Work Sans', sans-serif", flexShrink: 0 }}>
                   Check SLA
                 </button>
+
               </div>
 
               {/* Expanded filters */}
@@ -645,6 +777,7 @@ export function ComplaintsViolations() {
                     <option value="ALL">All Statuses</option>
                     <option value="NEW">New</option>
                     <option value="IN_PROGRESS">In Progress</option>
+                    <option value="PENDING_RESIDENT">Pending Resident</option>
                     <option value="RESOLVED">Resolved</option>
                     <option value="CLOSED">Closed</option>
                   </select>
@@ -669,7 +802,6 @@ export function ComplaintsViolations() {
               rows={rows}
               rowKey={(r) => r.id}
               loading={loading}
-              rowStyle={(r: { slaStatus: string; }) => r.slaStatus === 'BREACHED' ? { borderLeft: '3px solid #FCA5A5' } : {}}
               emptyTitle="No complaints found"
               emptyDescription="Try adjusting your search or filters."
             />
@@ -754,11 +886,11 @@ export function ComplaintsViolations() {
         onOpenChange={setDetailOpen}
         title="Complaint Detail"
         description="View status, comments, and linked invoices."
-        widthClassName="w-full sm:max-w-[560px]"
+        width={560}
       >
         {!detail
           ? <EmptyState title="No complaint selected" description="Select a complaint from the list." />
-          : <DetailContent key={detailKey} detail={detail} categories={categories}
+          : <DetailContent key={detailKey} detail={detail} categories={categories} users={users}
               onReload={() => {
                 void complaintsService.getComplaintDetail(detail.id).then((d) => setDetail(d)).catch(() => toast.error('Failed to reload'));
                 void load();
@@ -773,7 +905,9 @@ export function ComplaintsViolations() {
         onClose={() => setCatModalOpen(false)}
         editing={editingCategory}
         onSaved={() => void load()}
+        users={users}
       />
+
     </div>
   );
 }
