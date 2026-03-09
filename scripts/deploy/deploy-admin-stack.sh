@@ -186,6 +186,33 @@ psql_socket_test() {
   return 1
 }
 
+run_prisma_push_with_auto_repair() {
+  local push_cmd="$1"
+  local output_file
+  output_file="$(mktemp)"
+
+  if eval "$push_cmd" >"$output_file" 2>&1; then
+    cat "$output_file"
+    rm -f "$output_file"
+    return 0
+  fi
+
+  cat "$output_file"
+  if grep -q "P1001" "$output_file"; then
+    warn "Prisma could not reach the database (P1001). Re-provisioning local DB URL and retrying once."
+    provision_local_postgres_db "$ROOT_ENV_PROD" true
+    source_env_file "$ROOT_ENV_PROD"
+    configure_local_postgres_trust_auth
+    if eval "$push_cmd"; then
+      rm -f "$output_file"
+      return 0
+    fi
+  fi
+
+  rm -f "$output_file"
+  return 1
+}
+
 http_head_code() {
   local url="$1"
   curl -sS -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || true
@@ -569,9 +596,9 @@ if [[ -n "${PRISMA_SCHEMA_SYNC_MODE:-}" && "${PRISMA_SCHEMA_SYNC_MODE}" != "dbpu
 fi
 note "Bootstrapping Prisma schema directly from schema.prisma"
 if [[ "$PRISMA_DB_FORCE_RESET" == "true" ]]; then
-  npm run prisma:push:reset
+  run_prisma_push_with_auto_repair "npm run prisma:push:reset"
 else
-  npm run prisma:push
+  run_prisma_push_with_auto_repair "npm run prisma:push"
 fi
 
 note "Syncing permission keys from @Permissions decorators"
