@@ -4,11 +4,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-SERVER_IP="${SERVER_IP:-108.61.174.92}"
+SERVER_IP="${SERVER_IP:-}"
 FRONTEND_PORT="${FRONTEND_PORT:-4002}"
 BACKEND_PORT="${BACKEND_PORT:-4003}"
-API_URL="${API_URL:-http://${SERVER_IP}:${BACKEND_PORT}}"
-ADMIN_URL="${ADMIN_URL:-http://${SERVER_IP}:${FRONTEND_PORT}}"
+API_URL="${API_URL:-}"
+ADMIN_URL="${ADMIN_URL:-}"
 
 ROOT_ENV_PROD="${ROOT_DIR}/.env.production"
 ROOT_ENV_PROD_EXAMPLE="${ROOT_DIR}/.env.production.example"
@@ -23,8 +23,9 @@ AUTO_PROVISION_LOCAL_DB="${AUTO_PROVISION_LOCAL_DB:-true}"
 AUTO_LOCAL_DB_TRUST_AUTH="${AUTO_LOCAL_DB_TRUST_AUTH:-true}"
 HEALTH_CHECK_AFTER_DEPLOY="${HEALTH_CHECK_AFTER_DEPLOY:-true}"
 API_HEALTH_PATH="${API_HEALTH_PATH:-/api}"
+HEALTH_CHECK_RETRIES="${HEALTH_CHECK_RETRIES:-8}"
+HEALTH_CHECK_DELAY_SECONDS="${HEALTH_CHECK_DELAY_SECONDS:-2}"
 NODE_MAJOR="${NODE_MAJOR:-20}"
-PRISMA_SCHEMA_SYNC_MODE="${PRISMA_SCHEMA_SYNC_MODE:-dbpush}"
 PRISMA_DB_FORCE_RESET="${PRISMA_DB_FORCE_RESET:-false}"
 RUN_PROFESSIONAL_DEMO_SEED="${RUN_PROFESSIONAL_DEMO_SEED:-true}"
 DEFAULT_DB_HOST="${DEFAULT_DB_HOST:-127.0.0.1}"
@@ -46,6 +47,55 @@ require_cmd() {
 
 have_cmd() {
   command -v "$1" >/dev/null 2>&1
+}
+
+is_ipv4() {
+  local ip="$1"
+  [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]
+}
+
+resolve_server_ip() {
+  if [[ -n "$SERVER_IP" ]]; then
+    return
+  fi
+
+  local candidate=""
+  if have_cmd hostname; then
+    # Prefer first non-loopback IPv4 discovered locally.
+    for ip in $(hostname -I 2>/dev/null || true); do
+      if is_ipv4 "$ip" && [[ "$ip" != 127.* ]]; then
+        candidate="$ip"
+        break
+      fi
+    done
+  fi
+
+  if [[ -z "$candidate" ]] && have_cmd curl; then
+    for endpoint in "https://api.ipify.org" "https://ifconfig.me"; do
+      candidate="$(curl -4 -fsS --max-time 3 "$endpoint" 2>/dev/null || true)"
+      if is_ipv4 "$candidate"; then
+        break
+      fi
+      candidate=""
+    done
+  fi
+
+  if [[ -z "$candidate" ]]; then
+    candidate="127.0.0.1"
+    warn "Could not auto-detect SERVER_IP. Falling back to 127.0.0.1. Override with SERVER_IP=<public-ip>."
+  fi
+
+  SERVER_IP="$candidate"
+}
+
+resolve_public_endpoints() {
+  resolve_server_ip
+  if [[ -z "$API_URL" ]]; then
+    API_URL="http://${SERVER_IP}:${BACKEND_PORT}"
+  fi
+  if [[ -z "$ADMIN_URL" ]]; then
+    ADMIN_URL="http://${SERVER_IP}:${FRONTEND_PORT}"
+  fi
 }
 
 note() {
@@ -139,6 +189,32 @@ psql_socket_test() {
 http_head_code() {
   local url="$1"
   curl -sS -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || true
+}
+
+http_check_with_retries() {
+  local url="$1"
+  local retries="$2"
+  local delay_seconds="$3"
+  local label="$4"
+
+  local attempt=1
+  local code="000"
+  while [[ "$attempt" -le "$retries" ]]; do
+    code="$(http_head_code "$url")"
+    if [[ "$code" =~ ^[23] ]]; then
+      info "${label} check passed (attempt ${attempt}/${retries}, code=${code})"
+      echo "$code"
+      return 0
+    fi
+    warn "${label} check failed (attempt ${attempt}/${retries}, code=${code:-n/a})"
+    if [[ "$attempt" -lt "$retries" ]]; then
+      sleep "$delay_seconds"
+    fi
+    attempt=$((attempt + 1))
+  done
+
+  echo "${code:-000}"
+  return 1
 }
 
 restart_postgres_service() {
@@ -419,6 +495,8 @@ require_cmd node
 require_cmd npm
 require_cmd pm2
 
+resolve_public_endpoints
+
 note "Preparing production env files"
 if [[ ! -f "$ROOT_ENV_PROD" ]]; then
   cp "$ROOT_ENV_PROD_EXAMPLE" "$ROOT_ENV_PROD"
@@ -486,16 +564,14 @@ if ! psql_socket_test; then
   exit 1
 fi
 npm run prisma:generate
-if [[ "$PRISMA_SCHEMA_SYNC_MODE" == "migrate" ]]; then
-  note "Applying Prisma migrations (migrate deploy)"
-  npx prisma migrate deploy
+if [[ -n "${PRISMA_SCHEMA_SYNC_MODE:-}" && "${PRISMA_SCHEMA_SYNC_MODE}" != "dbpush" ]]; then
+  warn "PRISMA_SCHEMA_SYNC_MODE=${PRISMA_SCHEMA_SYNC_MODE} is deprecated here. Fresh deploy bootstrap now always uses prisma db push."
+fi
+note "Bootstrapping Prisma schema directly from schema.prisma"
+if [[ "$PRISMA_DB_FORCE_RESET" == "true" ]]; then
+  npm run prisma:push:reset
 else
-  note "Syncing Prisma schema directly (db push)"
-  if [[ "$PRISMA_DB_FORCE_RESET" == "true" ]]; then
-    npx prisma db push --force-reset --accept-data-loss
-  else
-    npx prisma db push
-  fi
+  npm run prisma:push
 fi
 
 note "Syncing permission keys from @Permissions decorators"
@@ -503,24 +579,29 @@ npm run permissions:sync
 
 npm run build
 
-if [[ "${RUN_DEMO_SEEDS:-false}" == "true" || "${RUN_DASHBOARD_LOAD_SEED:-false}" == "true" ]]; then
+RUN_DEMO_SEEDS_FLAG="${RUN_DEMO_SEEDS:-false}"
+RUN_DASHBOARD_LOAD_SEED_FLAG="${RUN_DASHBOARD_LOAD_SEED:-false}"
+RUN_PROFESSIONAL_DEMO_SEED_FLAG="${RUN_PROFESSIONAL_DEMO_SEED:-true}"
+
+# Baseline seed is required before any downstream demo/load/professional seed scripts.
+if [[ "$RUN_DEMO_SEEDS_FLAG" == "true" || "$RUN_DASHBOARD_LOAD_SEED_FLAG" == "true" || "$RUN_PROFESSIONAL_DEMO_SEED_FLAG" == "true" ]]; then
   note "Running baseline Prisma seed"
   source_env_file "$ROOT_ENV_PROD"
   npx prisma db seed
 fi
 
-if [[ "${RUN_DEMO_SEEDS:-false}" == "true" ]]; then
+if [[ "$RUN_DEMO_SEEDS_FLAG" == "true" ]]; then
   note "Seeding demo personas"
   source_env_file "$ROOT_ENV_PROD"
   npm run seed:mobile-personas
 fi
-if [[ "${RUN_DASHBOARD_LOAD_SEED:-false}" == "true" ]]; then
+if [[ "$RUN_DASHBOARD_LOAD_SEED_FLAG" == "true" ]]; then
   note "Seeding realistic dashboard load data"
   source_env_file "$ROOT_ENV_PROD"
   npm run seed:dashboard-load
 fi
 
-if [[ "${RUN_PROFESSIONAL_DEMO_SEED:-true}" == "true" ]]; then
+if [[ "$RUN_PROFESSIONAL_DEMO_SEED_FLAG" == "true" ]]; then
   note "Seeding professional demo dataset (fresh reset + Egyptian personas)"
   source_env_file "$ROOT_ENV_PROD"
   if [[ "${NODE_ENV:-}" == "production" && "${ALLOW_DEMO_RESET:-false}" != "true" ]]; then
@@ -590,18 +671,30 @@ fi
 
 if [[ "$HEALTH_CHECK_AFTER_DEPLOY" == "true" ]]; then
   note "Running post-deploy health checks"
-  sleep 2
-  BACKEND_LOCAL_CODE="$(http_head_code "http://127.0.0.1:${BACKEND_PORT}${API_HEALTH_PATH}")"
-  ADMIN_LOCAL_CODE="$(http_head_code "http://127.0.0.1:${FRONTEND_PORT}/")"
-  if [[ "$BACKEND_LOCAL_CODE" =~ ^[23] ]] && [[ "$ADMIN_LOCAL_CODE" =~ ^[23] ]]; then
-    info "Local health checks passed (backend=${BACKEND_LOCAL_CODE}, admin=${ADMIN_LOCAL_CODE})"
-  else
-    warn "Local health checks not fully passing (backend=${BACKEND_LOCAL_CODE:-n/a}, admin=${ADMIN_LOCAL_CODE:-n/a})"
-    if have_cmd ss; then
-      info "Listening ports snapshot:"
-      ss -ltnp 2>/dev/null | grep -E ":${BACKEND_PORT}|:${FRONTEND_PORT}" || true
-    fi
-    warn "Inspect PM2 logs if needed: pm2 logs community-backend / pm2 logs community-admin-web"
+  sleep "$HEALTH_CHECK_DELAY_SECONDS"
+  BACKEND_HEALTH_URL="http://127.0.0.1:${BACKEND_PORT}${API_HEALTH_PATH}"
+  ADMIN_HEALTH_URL="http://127.0.0.1:${FRONTEND_PORT}/"
+
+  BACKEND_LOCAL_CODE="$(http_check_with_retries "$BACKEND_HEALTH_URL" "$HEALTH_CHECK_RETRIES" "$HEALTH_CHECK_DELAY_SECONDS" "Backend" || true)"
+  ADMIN_LOCAL_CODE="$(http_check_with_retries "$ADMIN_HEALTH_URL" "$HEALTH_CHECK_RETRIES" "$HEALTH_CHECK_DELAY_SECONDS" "Admin" || true)"
+
+  if [[ ! "$BACKEND_LOCAL_CODE" =~ ^[23] ]]; then
+    echo "ERROR: Backend health check failed after ${HEALTH_CHECK_RETRIES} attempts (code=${BACKEND_LOCAL_CODE:-n/a})." >&2
+    warn "Recent backend logs:"
+    pm2 logs community-backend --lines 120 --nostream || true
+    exit 1
+  fi
+
+  if [[ ! "$ADMIN_LOCAL_CODE" =~ ^[23] ]]; then
+    warn "Admin local health check failed after retries (code=${ADMIN_LOCAL_CODE:-n/a})"
+    warn "Inspect admin logs if needed: pm2 logs community-admin-web --lines 120"
+  fi
+
+  info "Local health checks summary (backend=${BACKEND_LOCAL_CODE}, admin=${ADMIN_LOCAL_CODE})"
+
+  if have_cmd ss; then
+    info "Listening ports snapshot:"
+    ss -ltnp 2>/dev/null | grep -E ":${BACKEND_PORT}|:${FRONTEND_PORT}" || true
   fi
 fi
 

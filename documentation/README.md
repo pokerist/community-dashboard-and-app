@@ -139,9 +139,8 @@ All APIs follow RESTful conventions with consistent response formats:
 
 1. Install dependencies: `npm install`
 2. Set up environment variables in `.env`
-3. Run database migrations: `npx prisma migrate dev`
-4. Generate Prisma client: `npx prisma generate`
-5. Start development server: `npm run start:dev`
+3. Bootstrap a fresh database directly from schema: `npm run db:init:fresh`
+4. Start development server: `npm run start:dev`
 
 ## Development Guidelines
 
